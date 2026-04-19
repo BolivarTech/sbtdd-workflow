@@ -82,3 +82,40 @@ def test_all_seven_subclasses_exist():
     }
     actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
+
+
+def test_non_matching_subclass_not_caught():
+    """Catching a specific subclass must not intercept a sibling subclass."""
+    from errors import DriftError, MAGIGateError
+
+    with pytest.raises(MAGIGateError):
+        try:
+            raise MAGIGateError("strong no-go")
+        except DriftError:
+            pytest.fail("DriftError catch must not intercept MAGIGateError")
+
+
+def test_mro_is_flat_single_inheritance():
+    """All subclasses inherit directly from SBTDDError (no diamond)."""
+    from errors import (
+        DependencyError,
+        DriftError,
+        MAGIGateError,
+        PreconditionError,
+        QuotaExhaustedError,
+        SBTDDError,
+        StateFileError,
+        ValidationError,
+    )
+
+    subclasses = [
+        ValidationError,
+        StateFileError,
+        DriftError,
+        DependencyError,
+        PreconditionError,
+        MAGIGateError,
+        QuotaExhaustedError,
+    ]
+    for cls in subclasses:
+        assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"
