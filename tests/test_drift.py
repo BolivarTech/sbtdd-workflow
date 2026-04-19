@@ -134,6 +134,26 @@ def test_detect_drift_done_phase_returns_none():
     assert report is None
 
 
+def test_detect_drift_done_with_remaining_open_tasks():
+    """state=done but plan still has [ ] is drift (task-advance bug).
+
+    Per MAGI Loop 2 Finding 3: if current_phase=done but the plan still
+    shows open tasks, a subcommand bug failed to advance through all
+    tasks. This must surface as drift (exit 3), not hide.
+    """
+    from drift import DriftReport, _evaluate_drift
+
+    report = _evaluate_drift(
+        current_phase="done",
+        last_commit_prefix="chore",
+        plan_task_state="[ ]",
+    )
+    assert isinstance(report, DriftReport)
+    assert report.state_value == "done"
+    assert report.plan_value == "[ ]"
+    assert "done" in report.reason.lower()
+
+
 def test_evaluate_drift_plan_already_checked():
     """state points to current_task but plan shows [x] -- drift per INV-3."""
     from drift import _evaluate_drift
