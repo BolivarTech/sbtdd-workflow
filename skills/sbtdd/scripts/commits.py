@@ -17,8 +17,9 @@ import re
 
 import subprocess_utils
 from errors import ValidationError
+from models import COMMIT_PREFIX_MAP
 
-_ALLOWED_PREFIXES: frozenset[str] = frozenset({"test", "feat", "fix", "refactor", "chore"})
+_ALLOWED_PREFIXES: frozenset[str] = frozenset(COMMIT_PREFIX_MAP.values())
 
 
 def validate_prefix(prefix: str) -> None:
