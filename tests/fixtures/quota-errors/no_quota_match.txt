@@ -1,0 +1,2 @@
+Error: file not found: /tmp/missing.txt
+Exit code: 1

@@ -46,3 +46,25 @@ class QuotaExhaustion:
     raw_message: str  # Matched substring from stderr.
     reset_time: str | None  # Extracted from session_limit pattern; None otherwise.
     recoverable: bool  # True for all current cases.
+
+
+def detect(stderr: str) -> QuotaExhaustion | None:
+    """Scan stderr for quota exhaustion patterns.
+
+    Args:
+        stderr: Standard error output from an invoked skill/subprocess.
+
+    Returns:
+        QuotaExhaustion if any pattern matches; None otherwise.
+    """
+    for kind, pattern in QUOTA_PATTERNS.items():
+        match = pattern.search(stderr)
+        if match:
+            reset_time = match.group(2) if kind == "session_limit" else None
+            return QuotaExhaustion(
+                kind=kind,
+                raw_message=match.group(0),
+                reset_time=reset_time,
+                recoverable=True,
+            )
+    return None

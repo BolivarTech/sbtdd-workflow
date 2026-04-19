@@ -1,0 +1,2 @@
+Error: Credit balance is too low to process this request.
+Add credits at console.anthropic.com
