@@ -76,6 +76,18 @@ def _evaluate_drift(
     Returns:
         DriftReport if state/git/plan are inconsistent; None otherwise.
     """
+    if current_phase == "done" and plan_task_state == "[ ]":
+        return DriftReport(
+            state_value=current_phase,
+            git_value=last_commit_prefix,
+            plan_value=plan_task_state,
+            reason=(
+                "state is done but plan still has open tasks [ ] -- "
+                "task-advance bug left plan/state inconsistent; plan "
+                "completion requires all tasks marked [x] first "
+                "(sec.S.9.2, MAGI Loop 2 Finding 3)"
+            ),
+        )
     if current_phase != "done" and plan_task_state == "[x]":
         return DriftReport(
             state_value=current_phase,
