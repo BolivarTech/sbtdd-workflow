@@ -59,3 +59,35 @@ def test_kill_tree_windows_calls_taskkill_before_proc_kill(monkeypatch):
     taskkill_idx = next(i for i, c in enumerate(call_order) if "taskkill" in c)
     kill_idx = call_order.index("proc.kill")
     assert taskkill_idx < kill_idx, f"call order wrong: {call_order}"
+
+
+def test_kill_tree_posix_sends_sigterm_then_sigkill(monkeypatch):
+    from subprocess_utils import kill_tree
+    import subprocess as sp
+
+    signals_sent: list[str] = []
+
+    class FakeProc:
+        pid = 54321
+        _waits = 0
+
+        def send_signal(self, sig):
+            import signal
+
+            signals_sent.append("SIGTERM" if sig == signal.SIGTERM else str(sig))
+
+        def kill(self):
+            signals_sent.append("SIGKILL")
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            self._waits += 1
+            if self._waits == 1:
+                raise sp.TimeoutExpired(cmd="x", timeout=timeout)
+            return 0
+
+    monkeypatch.setattr("subprocess_utils.sys.platform", "linux")
+    kill_tree(FakeProc())
+    assert signals_sent == ["SIGTERM", "SIGKILL"]
