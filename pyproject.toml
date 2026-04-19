@@ -10,6 +10,8 @@ authors = [{name = "Julian Bolivar"}]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pyyaml>=6.0",
+    "types-pyyaml>=6.0",
     "ruff>=0.3",
     "mypy>=1.5",
 ]
@@ -23,6 +25,7 @@ packages = []
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["skills/sbtdd/scripts"]
 
 [tool.ruff]
 line-length = 100
