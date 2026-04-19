@@ -11,7 +11,11 @@ forbidden by design - hiding drift hides protocol bugs.
 
 from __future__ import annotations
 
+import json
+import re
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
@@ -63,6 +67,17 @@ def _evaluate_drift(
     Returns:
         DriftReport if state/git/plan are inconsistent; None otherwise.
     """
+    if current_phase != "done" and plan_task_state == "[x]":
+        return DriftReport(
+            state_value=current_phase,
+            git_value=last_commit_prefix,
+            plan_value=plan_task_state,
+            reason=(
+                f"state points to an active task (phase={current_phase}) "
+                f"but plan already shows [x] -- task completed without "
+                f"state advance (INV-3)"
+            ),
+        )
     if current_phase == "done":
         return None  # terminal phase -- all close commits are expected behind it
 
@@ -93,3 +108,65 @@ def _close_prefix_owner(prefix: str) -> str:
         if prefix in prefixes:
             return phase
     return "unknown"
+
+
+def detect_drift(
+    state_file_path: Path,
+    plan_path: Path,
+    repo_root: Path,
+) -> DriftReport | None:
+    """Read state, git HEAD, and plan; evaluate drift.
+
+    Matches the signature in spec-behavior.md sec.4.2 Escenario 4. Reads
+    the three canonical sources then delegates to the pure `_evaluate_drift`.
+
+    Args:
+        state_file_path: Path to `.claude/session-state.json`.
+        plan_path: Path to `planning/claude-plan-tdd.md`.
+        repo_root: Git repository root (for `git log -1 --format=%s`).
+
+    Returns:
+        DriftReport if state/git/plan are inconsistent; None otherwise.
+    """
+    data = json.loads(state_file_path.read_text(encoding="utf-8"))
+    current_phase = data["current_phase"]
+    current_task_id = data.get("current_task_id")
+
+    # Parse last commit prefix from git log HEAD
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%s"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    subject = result.stdout.strip()
+    match = re.match(r"^([a-z]+):", subject)
+    last_commit_prefix = match.group(1) if match else ""
+
+    # Parse plan checkbox for the active task
+    plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+    plan_task_state = (
+        _extract_task_checkbox(plan_text, current_task_id) if current_task_id else "[ ]"
+    )
+
+    return _evaluate_drift(current_phase, last_commit_prefix, plan_task_state)
+
+
+def _extract_task_checkbox(plan_text: str, task_id: str) -> str:
+    """Extract the checkbox state of the task matching `### Task <id>:`."""
+    task_header = re.compile(rf"^### Task {re.escape(task_id)}:", re.MULTILINE)
+    match = task_header.search(plan_text)
+    if not match:
+        return "[ ]"
+    # Find the next `- [x]` or `- [ ]` in the task block (simplest heuristic:
+    # return [x] only if ALL checkboxes in the task section are [x]).
+    section_end = task_header.search(plan_text, match.end())
+    end_pos = section_end.start() if section_end else len(plan_text)
+    section = plan_text[match.end() : end_pos]
+    if "- [ ]" in section:
+        return "[ ]"
+    if "- [x]" in section:
+        return "[x]"
+    return "[ ]"
