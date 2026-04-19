@@ -42,3 +42,7 @@ class MAGIGateError(SBTDDError):
 
 class QuotaExhaustedError(SBTDDError):
     """Anthropic API quota exhausted (rate limit / session / credit) — exit 11."""
+
+
+class CommitError(SBTDDError):
+    """Git commit subprocess failure (non-zero exit, timeout) — exit 1."""

@@ -14,9 +14,10 @@ All plugin commits go through this module so validation is centralized:
 from __future__ import annotations
 
 import re
+import subprocess
 
 import subprocess_utils
-from errors import ValidationError
+from errors import CommitError, ValidationError
 from models import COMMIT_PREFIX_MAP
 
 # Derived from models.COMMIT_PREFIX_MAP - single source of truth for sec.M.5
@@ -120,17 +121,22 @@ def create(prefix: str, message: str, cwd: str | None = None) -> str:
 
     Raises:
         ValidationError: If prefix invalid, or message contains forbidden
-        patterns (Co-Authored-By, Claude/AI refs).
-        RuntimeError: If git commit returns non-zero.
+            patterns (Co-Authored-By, Claude/AI refs).
+        CommitError: If the git subprocess times out or returns non-zero.
+            All subprocess failures are wrapped so dispatchers catching
+            ``SBTDDError`` handle them uniformly (MAGI Loop 2 Finding 5).
     """
     validate_prefix(prefix)
     validate_message(message)
     full_message = f"{prefix}: {message}"
-    result = subprocess_utils.run_with_timeout(
-        ["git", "commit", "-m", full_message],
-        timeout=30,
-        cwd=cwd,
-    )
+    try:
+        result = subprocess_utils.run_with_timeout(
+            ["git", "commit", "-m", full_message],
+            timeout=30,
+            cwd=cwd,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CommitError(f"git commit timed out after {exc.timeout}s") from exc
     if result.returncode != 0:
-        raise RuntimeError(f"git commit failed (returncode={result.returncode}): {result.stderr}")
+        raise CommitError(f"git commit failed (returncode={result.returncode}): {result.stderr}")
     return result.stdout

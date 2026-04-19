@@ -68,7 +68,7 @@ def test_quota_exhausted_error_derives_from_sbtdd():
     assert issubclass(QuotaExhaustedError, SBTDDError)
 
 
-def test_all_seven_subclasses_exist():
+def test_all_eight_subclasses_exist():
     import errors
 
     expected = {
@@ -79,9 +79,18 @@ def test_all_seven_subclasses_exist():
         "PreconditionError",
         "MAGIGateError",
         "QuotaExhaustedError",
+        "CommitError",
     }
     actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
+
+
+def test_commit_error_derives_from_sbtdd():
+    from errors import CommitError, SBTDDError
+
+    assert issubclass(CommitError, SBTDDError)
+    with pytest.raises(SBTDDError):
+        raise CommitError("git commit failed")
 
 
 def test_non_matching_subclass_not_caught():
@@ -98,6 +107,7 @@ def test_non_matching_subclass_not_caught():
 def test_mro_is_flat_single_inheritance():
     """All subclasses inherit directly from SBTDDError (no diamond)."""
     from errors import (
+        CommitError,
         DependencyError,
         DriftError,
         MAGIGateError,
@@ -116,6 +126,7 @@ def test_mro_is_flat_single_inheritance():
         PreconditionError,
         MAGIGateError,
         QuotaExhaustedError,
+        CommitError,
     ]
     for cls in subclasses:
         assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"
