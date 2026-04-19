@@ -121,3 +121,21 @@ def test_create_rejects_before_git_call(monkeypatch):
     monkeypatch.setattr("commits.subprocess_utils.run_with_timeout", fake_run)
     with pytest.raises(ValidationError):
         create(prefix="wip", message="fine message", cwd=".")
+
+
+def test_create_full_input_validation_chain(monkeypatch):
+    """Validates the chain: prefix -> message -> git (short-circuits on first fail)."""
+    from commits import create
+    from errors import ValidationError
+
+    def fake_run(cmd, **kwargs):
+        raise AssertionError("git should not run - validation must short-circuit")
+
+    monkeypatch.setattr("commits.subprocess_utils.run_with_timeout", fake_run)
+
+    # Bad prefix:
+    with pytest.raises(ValidationError, match="prefix"):
+        create(prefix="invalid", message="ok message", cwd=".")
+    # Bad message (valid prefix):
+    with pytest.raises(ValidationError, match="forbidden pattern"):
+        create(prefix="feat", message="add Claude integration", cwd=".")
