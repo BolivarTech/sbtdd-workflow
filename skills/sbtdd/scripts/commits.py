@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+import subprocess_utils
 from errors import ValidationError
 
 _ALLOWED_PREFIXES: frozenset[str] = frozenset({"test", "feat", "fix", "refactor", "chore"})
@@ -98,3 +99,32 @@ def validate_message(message: str) -> None:
                 f"commit message must be English - detected Spanish word "
                 f"'{match.group(0)}' (INV-6). Rewrite in English."
             )
+
+
+def create(prefix: str, message: str, cwd: str | None = None) -> str:
+    """Validate and create a git commit with `{prefix}: {message}`.
+
+    Args:
+        prefix: TDD-phase prefix (test/feat/fix/refactor/chore).
+        message: Commit message body (will be prefixed with `{prefix}: `).
+        cwd: Working directory for the git command.
+
+    Returns:
+        Output from `git commit` (stdout).
+
+    Raises:
+        ValidationError: If prefix invalid, or message contains forbidden
+        patterns (Co-Authored-By, Claude/AI refs).
+        RuntimeError: If git commit returns non-zero.
+    """
+    validate_prefix(prefix)
+    validate_message(message)
+    full_message = f"{prefix}: {message}"
+    result = subprocess_utils.run_with_timeout(
+        ["git", "commit", "-m", full_message],
+        timeout=30,
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git commit failed (returncode={result.returncode}): {result.stderr}")
+    return result.stdout

@@ -86,3 +86,38 @@ def test_validate_message_accepts_technical_english_with_numbers():
     from commits import validate_message
 
     validate_message("fix: off-by-one in loop bound (issue #42)")  # no raise
+
+
+def test_create_invokes_git_commit(monkeypatch, tmp_path):
+    from commits import create
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class R:
+            returncode = 0
+            stdout = "[main abc1234] test: foo"
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr("commits.subprocess_utils.run_with_timeout", fake_run)
+    create(prefix="test", message="add parser edge case", cwd=str(tmp_path))
+    # At least one call should be `git commit -m "test: add parser edge case"`.
+    commit_calls = [c for c in calls if "commit" in c]
+    assert len(commit_calls) == 1
+    assert commit_calls[0][-1] == "test: add parser edge case"
+
+
+def test_create_rejects_before_git_call(monkeypatch):
+    from commits import create
+    from errors import ValidationError
+
+    def fake_run(cmd, **kwargs):
+        raise AssertionError("git should not be invoked on invalid input")
+
+    monkeypatch.setattr("commits.subprocess_utils.run_with_timeout", fake_run)
+    with pytest.raises(ValidationError):
+        create(prefix="wip", message="fine message", cwd=".")
