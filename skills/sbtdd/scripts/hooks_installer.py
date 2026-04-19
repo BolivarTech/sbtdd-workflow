@@ -46,13 +46,20 @@ def merge(
 
     Preserves all user hooks; appends plugin hooks alongside them. Write
     pattern: write to tmp file in same directory, then os.replace —
-    atomic on POSIX and Windows.
+    atomic on POSIX and Windows. If ``os.replace`` raises ``OSError``
+    (cross-device rename, permission denied, etc.), the tmp file is
+    unlinked before re-raising so no stray ``*.tmp.<pid>`` file leaks
+    onto disk (mirrors ``state_file.save``; MAGI Loop 2 Finding 6).
 
     Args:
         existing_path: Path to existing settings.json (may not exist).
         plugin_hooks: Plugin hook fragment to merge in. Expected shape:
             {"hooks": {"<event>": [hook_entry, ...], ...}}
         target_path: Where to write the merged result.
+
+    Raises:
+        OSError: If the atomic replace fails. No partial file and no
+            tmp left behind.
     """
     existing = read_existing(existing_path)
     existing_hooks = existing.setdefault("hooks", {})
