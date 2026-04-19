@@ -62,7 +62,6 @@ _SPANISH_DENYLIST: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bagreg(ar|amos|ue|ando|ado)\b", re.IGNORECASE),
     re.compile(r"\b(parseador|agente)\b", re.IGNORECASE),  # Spanish-unique tokens
     re.compile(r"\b(nueva|nuevos|nuevas|ambos|ambas)\b", re.IGNORECASE),
-    re.compile(r"\bdel\b", re.IGNORECASE),  # Spanish-only contraction
 )
 
 # Non-ASCII letter range (excludes ASCII punctuation, digits, whitespace).
