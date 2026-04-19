@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import signal
 import subprocess
+import sys
 
 
 def run_with_timeout(
@@ -44,3 +46,36 @@ def run_with_timeout(
         cwd=cwd,
         check=False,
     )
+
+
+def kill_tree(proc: subprocess.Popen[str]) -> None:
+    """Terminate process and all children cross-platform.
+
+    Windows: taskkill /F /T /PID <pid> BEFORE proc.kill() (MAGI R3-1 —
+    parent must still be alive for taskkill to enumerate its descendants).
+    POSIX: SIGTERM + 3-second wait + SIGKILL fallback.
+
+    Args:
+        proc: Running Popen instance.
+    """
+    if proc.poll() is not None:
+        return  # Already exited.
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                shell=False,
+                capture_output=True,
+                timeout=5,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass  # Fall through to proc.kill as belt-and-suspenders.
+        proc.kill()
+        proc.wait(timeout=5)
+    else:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)

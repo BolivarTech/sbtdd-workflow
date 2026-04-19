@@ -23,3 +23,39 @@ def test_run_with_timeout_rejects_shell_true():
     # shell parameter is not exposed — the helper enforces shell=False.
     result = run_with_timeout([sys.executable, "-c", "import sys; sys.exit(3)"], timeout=5)
     assert result.returncode == 3
+
+
+def test_kill_tree_windows_calls_taskkill_before_proc_kill(monkeypatch):
+    """Verifies MAGI R3-1 order: taskkill /F /T /PID BEFORE proc.kill()."""
+    from subprocess_utils import kill_tree
+
+    call_order: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        call_order.append(f"subprocess.run:{cmd[0]}")
+
+        class R:
+            returncode = 0
+
+        return R()
+
+    class FakeProc:
+        pid = 12345
+
+        def kill(self):
+            call_order.append("proc.kill")
+
+        def poll(self):
+            return None  # still running
+
+        def wait(self, timeout=None):
+            call_order.append(f"proc.wait:{timeout}")
+            return 0
+
+    monkeypatch.setattr("subprocess_utils.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess_utils.sys.platform", "win32")
+    kill_tree(FakeProc())
+    # taskkill MUST appear before proc.kill
+    taskkill_idx = next(i for i, c in enumerate(call_order) if "taskkill" in c)
+    kill_idx = call_order.index("proc.kill")
+    assert taskkill_idx < kill_idx, f"call order wrong: {call_order}"
