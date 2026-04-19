@@ -12,7 +12,10 @@ typed QuotaExhaustion result; the dispatcher raises QuotaExhaustedError
 and exits with code 11.
 
 Patterns are brittle (Anthropic can change the text). Centralizing them
-here makes updates a one-file change.
+here makes updates a one-file change. The ``session_limit`` pattern
+captures ``reset_time`` until end-of-line or a 2+ whitespace gap so
+multi-word values (``3:45pm tomorrow``, ``10:00 AM (UTC)``) are
+preserved (MAGI Loop 2 Finding 9).
 """
 
 from __future__ import annotations
