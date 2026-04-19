@@ -139,3 +139,19 @@ def test_create_full_input_validation_chain(monkeypatch):
     # Bad message (valid prefix):
     with pytest.raises(ValidationError, match="forbidden pattern"):
         create(prefix="feat", message="add Claude integration", cwd=".")
+
+
+def test_license_files_exist():
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    assert (root / "LICENSE").exists(), "MIT LICENSE file missing (sec.S.12.2)"
+    assert (root / "LICENSE-APACHE").exists(), "Apache LICENSE file missing"
+
+
+def test_license_dual_in_pyproject():
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    content = (root / "pyproject.toml").read_text()
+    assert 'license = "MIT OR Apache-2.0"' in content
