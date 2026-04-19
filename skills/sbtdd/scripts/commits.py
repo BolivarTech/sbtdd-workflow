@@ -19,6 +19,9 @@ import subprocess_utils
 from errors import ValidationError
 from models import COMMIT_PREFIX_MAP
 
+# Derived from models.COMMIT_PREFIX_MAP - single source of truth for sec.M.5
+# commit prefixes. Adding or removing a prefix here is forbidden; update
+# COMMIT_PREFIX_MAP in models.py instead (DRY, avoids drift between modules).
 _ALLOWED_PREFIXES: frozenset[str] = frozenset(COMMIT_PREFIX_MAP.values())
 
 
