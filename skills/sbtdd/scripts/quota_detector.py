@@ -18,6 +18,7 @@ here makes updates a one-file change.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
@@ -35,3 +36,13 @@ _QUOTA_PATTERNS_MUTABLE: dict[str, re.Pattern[str]] = {
 
 #: Read-only registry of quota exhaustion regex patterns.
 QUOTA_PATTERNS: Mapping[str, re.Pattern[str]] = MappingProxyType(_QUOTA_PATTERNS_MUTABLE)
+
+
+@dataclass(frozen=True)
+class QuotaExhaustion:
+    """Parsed result of a quota-exhaustion match on stderr."""
+
+    kind: str  # Key of QUOTA_PATTERNS that matched.
+    raw_message: str  # Matched substring from stderr.
+    reset_time: str | None  # Extracted from session_limit pattern; None otherwise.
+    recoverable: bool  # True for all current cases.
