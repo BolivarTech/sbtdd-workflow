@@ -11,6 +11,9 @@ subclass maps to a specific exit code per sec.S.11.1 taxonomy.
 
 from __future__ import annotations
 
+from types import MappingProxyType
+from typing import Mapping
+
 
 class SBTDDError(Exception):
     """Base exception for all plugin errors. Subclasses map to exit codes."""
@@ -46,3 +49,21 @@ class QuotaExhaustedError(SBTDDError):
 
 class CommitError(SBTDDError):
     """Git commit subprocess failure (non-zero exit, timeout) — exit 1."""
+
+
+_EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
+    ValidationError: 1,
+    StateFileError: 1,
+    CommitError: 1,
+    DependencyError: 2,
+    PreconditionError: 2,
+    DriftError: 3,
+    MAGIGateError: 8,
+    QuotaExhaustedError: 11,
+}
+
+#: Read-only exception-class -> exit-code registry (sec.S.11.1 canonical
+#: taxonomy). Dispatchers at ``run_sbtdd.py`` read this mapping when
+#: converting uncaught ``SBTDDError`` subclasses to process exit codes.
+#: Keep aligned with the taxonomy in CLAUDE.md "Key Design Decisions".
+EXIT_CODES: Mapping[type[SBTDDError], int] = MappingProxyType(_EXIT_CODES_MUTABLE)
