@@ -58,6 +58,15 @@ def _evaluate_drift(
       phase AFTER `current_phase` in the ordering (Scenario 4 canonical:
       phase=green + HEAD=refactor:).
 
+    Note on `chore:` commits: `chore` is NOT a close-prefix of any TDD
+    phase - it is emitted ONLY by task-close bookkeeping (sec.M.5 row
+    4). A `chore:` at HEAD with `state=red` + `plan=[ ]` therefore
+    describes the consistent post-task-close state where the NEW task's
+    red phase has started fresh (state advanced via close-task, no
+    subsequent fix has landed yet). See
+    `test_detect_drift_consistent_returns_none` for this canonical
+    consistent case.
+
     Args:
         current_phase: "red" | "green" | "refactor" | "done" from state.
         last_commit_prefix: prefix of HEAD commit, without colon
