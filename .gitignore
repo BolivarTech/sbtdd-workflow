@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+
+# SBTDD local files (never tracked, per CLAUDE.local.md §1 tracking policy)
+CLAUDE.local.md
+CLAUDE.md
+.claude/
+
+# Session ephemera (MAGI review packets, remember notes)
+.magi_review_input/
+.remember/
