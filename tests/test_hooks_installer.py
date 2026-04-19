@@ -54,3 +54,22 @@ def test_merge_preserves_user_hooks_and_adds_plugin(tmp_path):
     assert "tdd-guard" in commands
     # SessionStart (plugin-only) should exist.
     assert "SessionStart" in result["hooks"]
+
+
+def test_merge_is_idempotent(tmp_path):
+    """Running merge twice with same inputs produces byte-identical output."""
+    from hooks_installer import merge
+
+    plugin_hooks = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "Write", "hooks": [{"type": "command", "command": "tdd-guard"}]}
+            ]
+        }
+    }
+    target = tmp_path / "settings.json"
+    merge(existing_path=target, plugin_hooks=plugin_hooks, target_path=target)
+    first = target.read_bytes()
+    merge(existing_path=target, plugin_hooks=plugin_hooks, target_path=target)
+    second = target.read_bytes()
+    assert first == second
