@@ -18,3 +18,15 @@ class SBTDDError(Exception):
 
 class ValidationError(SBTDDError):
     """Schema or input validation failed (exit 1, USER_ERROR)."""
+
+
+class StateFileError(SBTDDError):
+    """session-state.json corrupt (JSON invalid / schema invalid) — exit 1."""
+
+
+class DriftError(SBTDDError):
+    """State vs git HEAD vs plan mismatch detected by drift.detect_drift — exit 3."""
+
+
+class DependencyError(SBTDDError):
+    """Required dependency missing or non-operational — exit 2."""
