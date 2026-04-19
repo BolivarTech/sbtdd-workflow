@@ -27,8 +27,13 @@ _QUOTA_PATTERNS_MUTABLE: dict[str, re.Pattern[str]] = {
     # Per MAGI Checkpoint 2 iter 1 (caspar): accept alternative separators
     # (middle-dot U+00B7, ASCII hyphen, en-dash, em-dash, colon) because
     # Anthropic may tweak copy. Also allow surrounding whitespace.
+    # Per MAGI Loop 2 Finding 9: capture reset_time until end-of-line or
+    # a 2+ whitespace gap, so multi-word values like "3:45pm tomorrow"
+    # or "10:00 AM (UTC)" are preserved. Trailing single-whitespace no
+    # longer truncates the capture.
     "session_limit": re.compile(
-        r"You've hit your (session|weekly|Opus) limit\s*[·\-–—:]\s*resets (.+?)(?:\s|$)"
+        r"You've hit your (session|weekly|Opus) limit\s*[·\-–—:]\s*resets (.+?)(?:\s{2,}|\s*$)",
+        re.MULTILINE,
     ),
     "credit_exhausted": re.compile(r"Credit balance is too low"),
     "server_throttle": re.compile(r"Server is temporarily limiting requests"),
