@@ -9,6 +9,11 @@ All plugin commits go through this module so validation is centralized:
 - English-only messages (Code Standards Git section).
 - No Co-Authored-By lines (INV-7).
 - No Claude/AI references (INV-7).
+
+Exception policy: every failure -- validation, subprocess timeout, or
+non-zero git exit -- surfaces as a subclass of ``SBTDDError``. The
+dispatcher at ``run_sbtdd.py`` maps ``SBTDDError`` subclasses to the
+canonical sec.S.11.1 exit codes (MAGI Loop 2 Finding 5).
 """
 
 from __future__ import annotations
