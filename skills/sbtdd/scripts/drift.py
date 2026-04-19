@@ -50,13 +50,18 @@ def _evaluate_drift(
 ) -> DriftReport | None:
     """Pure drift detector -- no I/O, testable in isolation.
 
-    Flags two kinds of drift per sec.S.9.2:
+    Flags four kinds of drift per sec.S.9.2:
     - **Close-without-advance:** HEAD commit is the close-prefix of
       `current_phase` but state file still points to that phase
       (close ran, state didn't update).
     - **Phase-ordering inversion:** HEAD commit is the close-prefix of a
       phase AFTER `current_phase` in the ordering (Scenario 4 canonical:
       phase=green + HEAD=refactor:).
+    - **Plan-advance-without-state:** state points to an active task
+      (phase != done) but plan already shows [x] (INV-3 violation).
+    - **Plan-done-with-open-tasks:** state=done but plan still has [ ]
+      (task-advance bug left plan/state inconsistent; MAGI Loop 2
+      Finding 3).
 
     Note on `chore:` commits: `chore` is NOT a close-prefix of any TDD
     phase - it is emitted ONLY by task-close bookkeeping (sec.M.5 row
