@@ -44,16 +44,19 @@ _FORBIDDEN_MESSAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
 # in English technical commit messages. Non-exhaustive but covers Scenario
 # 10 canonical case + high-frequency patterns that slip through.
 #
-# Tras MAGI Checkpoint 2 iter 2 (caspar): removidas palabras con alto riesgo
-# de falso-positivo en ingles:
-#   - `la`, `el`, `los`, `las`, `una`, `un` (demasiado comunes en siglas
-#     inglesas como "LA" time zone, "el" en nombres propios).
-#   - `para` solo (false positive en commit messages que mencionen
-#     "parallel", "parametric", etc. via partial matches aun con \b -
-#     mejor usar verbos Spanish-exclusive).
-#   - `funcion` sin tilde (false positive en "function" partial; mejor
-#     confiar en `parseador`/`agente` que son tokens uniquely-Spanish).
-# Trade-off: menos recall de espanol, mejor precision para english-clean.
+# Post MAGI Checkpoint 2 iter 2 (caspar): removed high-false-positive tokens:
+#   - `la`, `el`, `los`, `las`, `una`, `un` (too common in English acronyms
+#     like "LA" time zone, "el" in proper nouns).
+#   - `para` alone (false positive on messages mentioning "parallel",
+#     "parametric", etc.).
+#   - `funcion` without tilde (false positive on "function" partial).
+#
+# Post MAGI Loop 2 Finding 1: removed `\bdel\b` - `del` is a valid English
+# token (Python builtin, DOS/Windows `del` command, abbreviation of
+# "delete" in technical prose). Falsely rejected commits like
+# "fix: del obsolete cache entries". Retaining tokens that are truly
+# unique to Spanish (parseador, agente, arreglar, implementar, etc.).
+# Trade-off: lower Spanish recall, higher English-clean precision.
 _SPANISH_DENYLIST: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bimplement(ar|acion|a|amos|e|en)\b", re.IGNORECASE),
     re.compile(r"\barregl(ar|a|amos|e|en|ado)\b", re.IGNORECASE),
