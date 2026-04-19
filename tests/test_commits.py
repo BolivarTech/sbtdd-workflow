@@ -136,6 +136,46 @@ def test_create_rejects_before_git_call(monkeypatch):
         create(prefix="wip", message="fine message", cwd=".")
 
 
+def test_create_wraps_subprocess_timeout_as_sbtdd_error(monkeypatch):
+    """subprocess.TimeoutExpired from git commit must surface as SBTDDError.
+
+    Per MAGI Loop 2 Finding 5: dispatchers that catch SBTDDError must
+    also catch subprocess timeouts from git invocations; otherwise the
+    exit-code taxonomy leaks TimeoutExpired uncaught.
+    """
+    import subprocess
+
+    from commits import create
+    from errors import SBTDDError
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+
+    monkeypatch.setattr("commits.subprocess_utils.run_with_timeout", fake_run)
+    with pytest.raises(SBTDDError) as exc_info:
+        create(prefix="feat", message="a valid message", cwd=".")
+    assert "timeout" in str(exc_info.value).lower() or "timed out" in str(exc_info.value).lower()
+
+
+def test_create_wraps_git_non_zero_as_sbtdd_error(monkeypatch):
+    """git commit returning non-zero must surface as SBTDDError, not RuntimeError."""
+    from commits import create
+    from errors import SBTDDError
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "fatal: bad commit"
+
+        return R()
+
+    monkeypatch.setattr("commits.subprocess_utils.run_with_timeout", fake_run)
+    with pytest.raises(SBTDDError) as exc_info:
+        create(prefix="feat", message="a valid message", cwd=".")
+    assert "git commit failed" in str(exc_info.value)
+
+
 def test_create_full_input_validation_chain(monkeypatch):
     """Validates the chain: prefix -> message -> git (short-circuits on first fail)."""
     from commits import create
