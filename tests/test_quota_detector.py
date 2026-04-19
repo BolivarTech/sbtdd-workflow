@@ -105,3 +105,16 @@ def test_detect_no_match_returns_none():
 
     stderr = (FIXTURES_DIR / "no_quota_match.txt").read_text()
     assert detect(stderr) is None
+
+
+def test_detect_empty_stderr_returns_none():
+    from quota_detector import detect
+
+    assert detect("") is None
+
+
+def test_detect_unrelated_429_text_does_not_match():
+    """'429' alone is not a quota signal — requires 'Request rejected (429)'."""
+    from quota_detector import detect
+
+    assert detect("HTTP 429 found in docs") is None
