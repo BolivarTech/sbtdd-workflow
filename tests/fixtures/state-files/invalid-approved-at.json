@@ -1,0 +1,10 @@
+{
+  "plan_path": "p",
+  "current_task_id": "1",
+  "current_task_title": "t",
+  "current_phase": "red",
+  "phase_started_at_commit": "abc1234",
+  "last_verification_at": null,
+  "last_verification_result": null,
+  "plan_approved_at": "not-a-timestamp"
+}

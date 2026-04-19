@@ -1,0 +1,10 @@
+{
+  "plan_path": "planning/claude-plan-tdd.md",
+  "current_task_id": "3",
+  "current_task_title": "Extract validation",
+  "current_phase": "green",
+  "phase_started_at_commit": "a3f2d1c",
+  "last_verification_at": "2026-04-19T10:00:00Z",
+  "last_verification_result": "passed",
+  "plan_approved_at": "2026-04-18T10:00:00Z"
+}

@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import pytest
 from dataclasses import FrozenInstanceError
+from pathlib import Path
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "state-files"
 
 
 def test_session_state_is_frozen_dataclass():
@@ -87,3 +90,70 @@ def test_validate_accepts_valid_data():
         "plan_approved_at": "2026-04-18T10:00:00Z",
     }
     validate_schema(data)  # no raise
+
+
+def test_load_valid_state_file():
+    from state_file import load, SessionState
+
+    state = load(FIXTURES_DIR / "valid.json")
+    assert isinstance(state, SessionState)
+    assert state.current_phase == "green"
+
+
+def test_load_rejects_invalid_phase():
+    from state_file import load
+    from errors import StateFileError
+
+    with pytest.raises(StateFileError):
+        load(FIXTURES_DIR / "invalid-phase.json")
+
+
+def test_load_rejects_malformed_json():
+    from state_file import load
+    from errors import StateFileError
+
+    with pytest.raises(StateFileError) as exc_info:
+        load(FIXTURES_DIR / "malformed.json")
+    assert "JSON" in str(exc_info.value) or "decode" in str(exc_info.value).lower()
+
+
+def test_load_rejects_non_iso8601_plan_approved_at():
+    from state_file import load
+    from errors import StateFileError
+
+    with pytest.raises(StateFileError) as exc_info:
+        load(FIXTURES_DIR / "invalid-approved-at.json")
+    assert "plan_approved_at" in str(exc_info.value)
+
+
+def test_load_wraps_typeerror_as_state_file_error(tmp_path):
+    """Wrong field type (int instead of str) must raise StateFileError, not TypeError."""
+    from state_file import load
+    from errors import StateFileError
+    import json as _json
+
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        _json.dumps(
+            {
+                "plan_path": 42,  # wrong type, should be string
+                "current_task_id": "1",
+                "current_task_title": "t",
+                "current_phase": "red",
+                "phase_started_at_commit": "abc1234",
+                "last_verification_at": None,
+                "last_verification_result": None,
+                "plan_approved_at": None,
+            }
+        )
+    )
+    # validate_schema passes (doesn't check plan_path type) → constructor may fail.
+    # load() must wrap any TypeError as StateFileError.
+    try:
+        load(bad)
+    except StateFileError:
+        return
+    except TypeError:
+        pytest.fail(
+            "load must wrap TypeError as StateFileError (MAGI Checkpoint 2 iter 1 caspar fix)"
+        )
