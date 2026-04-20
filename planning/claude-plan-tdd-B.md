@@ -287,7 +287,7 @@ blocks iter-3 approval.
 - Create: `skills/sbtdd/scripts/dependency_check.py`
 - Create: `tests/test_dependency_check.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check.py
@@ -320,12 +320,12 @@ def test_check_status_values_restricted():
     assert VALID_STATUSES == ("OK", "MISSING", "BROKEN")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'dependency_check'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/dependency_check.py`:
 
@@ -360,12 +360,12 @@ class DependencyCheck:
     remediation: str | None
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check.py
@@ -380,7 +380,7 @@ git commit -m "test: add DependencyCheck frozen dataclass with status enum"
 - Modify: `skills/sbtdd/scripts/dependency_check.py`
 - Modify: `tests/test_dependency_check.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check.py (append)
@@ -449,12 +449,12 @@ def test_format_report_empty_when_all_ok():
     assert rep.format_report() == ""
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: FAIL con `ImportError: cannot import name 'DependencyReport'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/dependency_check.py`:
 
@@ -502,12 +502,12 @@ class DependencyReport:
         return "\n".join(lines)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: PASS — 9 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check.py
@@ -522,7 +522,7 @@ git commit -m "test: add DependencyReport aggregator with failed/ok/format_repor
 - Modify: `skills/sbtdd/scripts/dependency_check.py`
 - Modify: `tests/test_dependency_check.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check.py (append)
@@ -575,12 +575,12 @@ def test_check_tdd_guard_data_dir_writable(tmp_path):
     assert (tmp_path / ".claude" / "tdd-guard" / "data").exists()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: FAIL con `ImportError: cannot import name 'check_python'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/dependency_check.py`. The five `import`
 lines below MUST be lifted to the top-of-file import group next to
@@ -711,12 +711,12 @@ def check_tdd_guard_data_dir(project_root: Path) -> DependencyCheck:
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: PASS — 14 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check.py
@@ -731,7 +731,7 @@ git commit -m "test: add python/git/tdd-guard individual dependency checks"
 - Modify: `skills/sbtdd/scripts/dependency_check.py`
 - Modify: `tests/test_dependency_check.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check.py (append)
@@ -782,12 +782,12 @@ def test_check_magi_ok_with_skill_and_script(tmp_path):
     assert chk.status == "OK"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: FAIL con `ImportError: cannot import name 'check_superpowers'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/dependency_check.py`:
 
@@ -872,12 +872,12 @@ def check_magi(plugins_root: Path) -> DependencyCheck:
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: PASS — 19 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check.py
@@ -900,7 +900,7 @@ dependencies.
 - Modify: `skills/sbtdd/scripts/dependency_check.py`
 - Modify: `tests/test_dependency_check.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check.py (append)
@@ -954,12 +954,12 @@ def test_check_claude_cli_broken_on_nonzero_returncode(monkeypatch):
     assert chk.status == "BROKEN"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: FAIL con `ImportError: cannot import name 'check_claude_cli'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/dependency_check.py` (imports already at top
 from Task 3 — `shutil`, `subprocess`, `subprocess_utils` are reused):
@@ -1009,12 +1009,12 @@ def check_claude_cli() -> DependencyCheck:
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: PASS — 22 tests (19 after Task 4 + 3 new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check.py
@@ -1029,7 +1029,7 @@ git commit -m "test: add claude CLI dependency check for cross-plugin dispatcher
 - Modify: `skills/sbtdd/scripts/dependency_check.py`
 - Modify: `tests/test_dependency_check.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check.py (append)
@@ -1097,12 +1097,12 @@ def test_check_stack_toolchain_rejects_unknown_stack():
         check_stack_toolchain("haskell")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: FAIL con `ImportError: cannot import name 'check_working_tree'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/dependency_check.py`. The `from errors import
 ValidationError` line MUST be lifted to the top-of-file import group (next
@@ -1212,12 +1212,12 @@ def check_working_tree(project_root: Path) -> DependencyCheck:
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: PASS — 27 tests (24 after Task 5 impl + 3 from Task 4a claude CLI).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check.py
@@ -1232,7 +1232,7 @@ git commit -m "test: add stack toolchain and working tree dependency checks"
 - Modify: `skills/sbtdd/scripts/dependency_check.py`
 - Modify: `tests/test_dependency_check.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check.py (append)
@@ -1318,12 +1318,12 @@ def test_check_environment_never_raises_on_failing_checks(tmp_path, monkeypatch)
     assert rep.ok() is False
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: FAIL con `ImportError: cannot import name 'check_environment'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/dependency_check.py`:
 
@@ -1371,12 +1371,12 @@ def check_environment(
     return DependencyReport(checks=tuple(checks))
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_dependency_check.py -v`
 Expected: PASS — 30 tests (27 after Task 5 + 3 check_environment-specific).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check.py
@@ -1391,7 +1391,7 @@ git commit -m "test: add check_environment aggregator for all preflight items"
 - Create: `skills/sbtdd/scripts/run_sbtdd.py`
 - Create: `tests/test_run_sbtdd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_run_sbtdd.py
@@ -1519,12 +1519,12 @@ def test_all_default_handlers_raise_not_implemented_validation_error():
         handler([])
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_run_sbtdd.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'run_sbtdd'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/run_sbtdd.py`:
 
@@ -1631,12 +1631,12 @@ if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_run_sbtdd.py -v`
 Expected: PASS — 12 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/run_sbtdd.py tests/test_run_sbtdd.py
@@ -1653,7 +1653,7 @@ git commit -m "test: add run_sbtdd dispatcher scaffold with EXIT_CODES mapping"
 - Create: `skills/sbtdd/scripts/superpowers_dispatch.py`
 - Create: `tests/test_superpowers_dispatch.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_superpowers_dispatch.py
@@ -1747,12 +1747,12 @@ def test_invoke_skill_wraps_timeout_as_validation_error(monkeypatch):
         invoke_skill("writing-plans")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_superpowers_dispatch.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'superpowers_dispatch'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/superpowers_dispatch.py`:
 
@@ -1867,12 +1867,12 @@ def invoke_skill(
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_superpowers_dispatch.py -v`
 Expected: PASS — 5 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/superpowers_dispatch.py tests/test_superpowers_dispatch.py
@@ -1887,7 +1887,7 @@ git commit -m "test: add superpowers invoke_skill core with quota detection"
 - Modify: `skills/sbtdd/scripts/superpowers_dispatch.py`
 - Modify: `tests/test_superpowers_dispatch.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_superpowers_dispatch.py (append)
@@ -1961,12 +1961,12 @@ def test_typed_wrappers_forward_args_and_timeout(monkeypatch):
     assert captured["timeout"] == 900
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_superpowers_dispatch.py -v`
 Expected: FAIL con `ImportError: cannot import name 'brainstorming'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/superpowers_dispatch.py` (the `import sys as
 _sys` line must be lifted into the top-of-file import block per the "Import
@@ -2060,7 +2060,7 @@ def test_wrapper_monkeypatch_propagates_through_module_attr(monkeypatch):
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_superpowers_dispatch.py tests/test_superpowers_dispatch_integration.py -v`
 Expected: PASS — 8 tests in `test_superpowers_dispatch.py` (5 from Task 8 + 2
@@ -2068,7 +2068,7 @@ original Task 9 + 1 monkeypatch regression guard) + 1 integration test
 (SKIPPED when `claude` is absent, PASSED when present) from the new
 `test_superpowers_dispatch_integration.py`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/superpowers_dispatch.py tests/test_superpowers_dispatch.py tests/test_superpowers_dispatch_integration.py
@@ -2147,7 +2147,7 @@ git add tests/test_superpowers_dispatch_integration.py
 - Create: `tests/fixtures/magi-outputs/go_with_caveats_degraded.json`
 - Create: `tests/fixtures/magi-outputs/unknown_verdict.json`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_magi_dispatch.py
@@ -2376,12 +2376,12 @@ Create fixtures:
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'magi_dispatch'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/magi_dispatch.py`:
 
@@ -2539,7 +2539,7 @@ def parse_verdict(raw_output: str) -> MAGIVerdict:
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: PASS — 18 tests (12 original + 6 strict-normalisation edge cases
@@ -2569,7 +2569,7 @@ added per MAGI Checkpoint 2 iter 1 WARNING — caspar).
 > artifact — when assembling the final `.py` file move it to the module
 > header.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/magi_dispatch.py tests/test_magi_dispatch.py tests/fixtures/magi-outputs/
@@ -2584,7 +2584,7 @@ git commit -m "test: add MAGIVerdict dataclass and parse_verdict with six-label 
 - Modify: `skills/sbtdd/scripts/magi_dispatch.py`
 - Modify: `tests/test_magi_dispatch.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_magi_dispatch.py (append)
@@ -2657,12 +2657,12 @@ def test_invoke_magi_non_quota_nonzero_raises_magi_gate_error(monkeypatch):
         invoke_magi(context_paths=["spec.md"])
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: FAIL con `ImportError: cannot import name 'invoke_magi'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/magi_dispatch.py`:
 
@@ -2724,12 +2724,12 @@ def invoke_magi(
     return parse_verdict(result.stdout)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: PASS — 16 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/magi_dispatch.py tests/test_magi_dispatch.py
@@ -2744,7 +2744,7 @@ git commit -m "test: add invoke_magi with quota detection and MAGIGateError mapp
 - Modify: `skills/sbtdd/scripts/magi_dispatch.py`
 - Modify: `tests/test_magi_dispatch.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_magi_dispatch.py (append)
@@ -2815,12 +2815,12 @@ def test_verdict_passes_gate_rejects_lowercase_threshold():
         verdict_passes_gate(v, threshold="go_with_caveats")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: FAIL con `ImportError: cannot import name 'verdict_passes_gate'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/magi_dispatch.py`. The `from models import
 verdict_meets_threshold` line MUST be lifted to the top-of-file import
@@ -2876,13 +2876,13 @@ def verdict_passes_gate(verdict: MAGIVerdict, threshold: str) -> bool:
     return verdict_meets_threshold(verdict.verdict, threshold)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: PASS — 31 tests (18 after Task 10 + 4 Task 11 + 9 Task 12:
 8 original in iter 1 plan + 1 new lowercase-threshold edge case).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/magi_dispatch.py tests/test_magi_dispatch.py
@@ -2897,7 +2897,7 @@ git commit -m "test: add verdict_passes_gate and STRONG_NO_GO helper for INV-28"
 - Modify: `skills/sbtdd/scripts/magi_dispatch.py`
 - Modify: `tests/test_magi_dispatch.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_magi_dispatch.py (append)
@@ -2938,12 +2938,12 @@ def test_write_verdict_artifact_preserves_degraded_flag(tmp_path):
     assert data["degraded"] is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: FAIL con `ImportError: cannot import name 'write_verdict_artifact'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/magi_dispatch.py`. The `import os` and
 `from pathlib import Path` lines MUST be lifted to the top-of-file import
@@ -2995,12 +2995,12 @@ def write_verdict_artifact(
         raise
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_magi_dispatch.py -v`
 Expected: PASS — 34 tests (31 after Task 12 + 3 new for write_verdict_artifact).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/magi_dispatch.py tests/test_magi_dispatch.py
@@ -3017,7 +3017,7 @@ git commit -m "test: add write_verdict_artifact for .claude/magi-verdict.json"
 - Create: `skills/sbtdd/scripts/reporters/tdd_guard_schema.py`
 - Create: `tests/test_reporters_schema.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_reporters_schema.py
@@ -3105,12 +3105,12 @@ def test_test_json_omits_errors_key_when_empty():
     assert "errors" not in data["testModules"][0]["tests"][0]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_reporters_schema.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'reporters.tdd_guard_schema'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/reporters/tdd_guard_schema.py`:
 
@@ -3228,12 +3228,12 @@ class TestJSON:
         return {"testModules": modules, "reason": self.reason}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_reporters_schema.py -v`
 Expected: PASS — 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/reporters/tdd_guard_schema.py tests/test_reporters_schema.py
@@ -3248,7 +3248,7 @@ git commit -m "test: add TDD-Guard test.json dataclasses and to_dict serialiser"
 - Modify: `skills/sbtdd/scripts/reporters/tdd_guard_schema.py`
 - Modify: `tests/test_reporters_schema.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_reporters_schema.py (append)
@@ -3307,12 +3307,12 @@ def test_write_test_json_overwrites_existing(tmp_path):
     assert data["reason"] == "passed"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_reporters_schema.py -v`
 Expected: FAIL con `ImportError: cannot import name 'write_test_json'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/reporters/tdd_guard_schema.py`:
 
@@ -3343,12 +3343,12 @@ def write_test_json(doc: TestJSON, target: Path) -> None:
         raise
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_reporters_schema.py -v`
 Expected: PASS — 10 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/reporters/tdd_guard_schema.py tests/test_reporters_schema.py
@@ -3363,7 +3363,7 @@ git commit -m "test: add write_test_json atomic writer with tmp cleanup on error
 - Create: `skills/sbtdd/scripts/reporters/rust_reporter.py`
 - Create: `tests/test_reporters_rust.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_reporters_rust.py
@@ -3615,12 +3615,12 @@ def test_run_pipeline_nextest_wait_timeout_also_kills_both_procs(monkeypatch):
     assert procs[1] in killed, "reporter must also be killed defensively"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_reporters_rust.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'reporters.rust_reporter'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/reporters/rust_reporter.py`:
 
@@ -3770,7 +3770,7 @@ if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_reporters_rust.py -v`
 Expected: PASS — 7 tests (3 original + 2 timeout-and-kill-tree tests added
@@ -3779,7 +3779,7 @@ per MAGI Checkpoint 2 iter 1 WARNING triple-flagged by melchior/caspar/balthasar
 exposed (Fix 8 / melchior) and `nextest_wait_timeout_also_kills_both_procs`
 (Fix 4 / caspar)).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/reporters/rust_reporter.py tests/test_reporters_rust.py
@@ -3799,7 +3799,7 @@ git commit -m "test: add rust_reporter nextest to tdd-guard-rust pipeline"
 - Create: `tests/fixtures/ctest-junit/missing_classname.xml` (MAGI ckpt2 iter 1 WARNING — melchior)
 - Create: `tests/fixtures/ctest-junit/classname_and_suite_empty.xml` (defensive pathological input)
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_reporters_ctest.py
@@ -3967,12 +3967,12 @@ both classname and suite name missing):
 </testsuites>
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_reporters_ctest.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'reporters.ctest_reporter'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/reporters/ctest_reporter.py`:
 
@@ -4146,13 +4146,13 @@ if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_reporters_ctest.py -v`
 Expected: PASS — 8 tests (6 original + 2 new classname-fallback coverage
 added per MAGI Checkpoint 2 iter 1 WARNING — melchior).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/reporters/ctest_reporter.py tests/test_reporters_ctest.py tests/fixtures/ctest-junit/
@@ -4178,7 +4178,7 @@ sec.M.5 covers test additions on already-green code). The Step 1 test for
 discriminating red test); it catches a silent contract change if the
 return code semantics ever drift from "0 on success".
 
-- [ ] **Step 1: Write failing-or-locking test (coverage extension)**
+- [x] **Step 1: Write failing-or-locking test (coverage extension)**
 
 ```python
 # tests/test_reporters_ctest.py (append)
@@ -4243,7 +4243,7 @@ Create fixture `tests/fixtures/ctest-junit/with_skipped.xml`:
 </testsuites>
 ```
 
-- [ ] **Step 2: Run tests — coverage additions over existing ctest_reporter**
+- [x] **Step 2: Run tests — coverage additions over existing ctest_reporter**
 
 Run: `python -m pytest tests/test_reporters_ctest.py -v`
 Expected: PASS — 11 tests (8 after Task 17 classname-fallback additions +
@@ -4253,14 +4253,14 @@ coverage per sec.M.5 row 1 (test: prefix for test additions regardless of
 first-run pass/fail). Classified as coverage-extension per the rationale
 at the top of this task.
 
-- [ ] **Step 3: (no new impl needed — see classification note)**
+- [x] **Step 3: (no new impl needed — see classification note)**
 
-- [ ] **Step 4: Verify all tests pass**
+- [x] **Step 4: Verify all tests pass**
 
 Run: `python -m pytest tests/test_reporters_ctest.py -v`
 Expected: PASS — 11 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_reporters_ctest.py tests/fixtures/ctest-junit/with_skipped.xml
@@ -4277,7 +4277,7 @@ git commit -m "test: add skipped and multi-suite coverage for ctest_reporter"
 - Create: `templates/settings.json.template`
 - Create: `tests/test_templates_files.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates_files.py
@@ -4327,12 +4327,12 @@ def test_settings_json_template_user_prompt_has_tdd_guard():
     assert ups[0]["hooks"][0]["command"] == "tdd-guard"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: FAIL con `FileNotFoundError` or `AssertionError: file does not exist`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `templates/settings.json.template`:
 
@@ -4360,12 +4360,12 @@ Create `templates/settings.json.template`:
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: PASS — 6 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/settings.json.template tests/test_templates_files.py
@@ -4380,7 +4380,7 @@ git commit -m "test: add settings.json.template with 3 TDD-Guard hooks"
 - Create: `templates/plugin.local.md.template`
 - Modify: `tests/test_templates_files.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates_files.py (append)
@@ -4438,12 +4438,12 @@ def test_plugin_local_template_has_all_required_keys():
         assert key in raw, f"plugin.local.md.template missing key {key}"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: FAIL — template file missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `templates/plugin.local.md.template`:
 
@@ -4480,12 +4480,12 @@ init regenerates this block at setup time; see `sbtdd-workflow-plugin-spec.md`
 sec.S.4.2 for the stack-specific variants.
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: PASS — 9 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/plugin.local.md.template tests/test_templates_files.py
@@ -4500,7 +4500,7 @@ git commit -m "test: add plugin.local.md.template with default YAML frontmatter"
 - Create: `templates/CLAUDE.local.md.template`
 - Modify: `tests/test_templates_files.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates_files.py (append)
@@ -4544,12 +4544,12 @@ def test_claude_local_template_references_verification_section():
     assert "0.1" in raw or "verification" in raw.lower()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: FAIL — template missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `templates/CLAUDE.local.md.template`:
 
@@ -4639,12 +4639,12 @@ plugin commits autonomously for the four authorised categories. Outside
 that window, commits require explicit user permission.
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: PASS — 14 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/CLAUDE.local.md.template tests/test_templates_files.py
@@ -4659,7 +4659,7 @@ git commit -m "test: add CLAUDE.local.md.template with Author/ErrorType/stack pl
 - Create: `templates/spec-behavior-base.md.template`
 - Modify: `tests/test_templates_files.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates_files.py (append)
@@ -4688,12 +4688,12 @@ def test_spec_behavior_base_template_has_sbtdd_sections():
         assert section in raw, f"section '{section}' missing from spec template"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: FAIL — template missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `templates/spec-behavior-base.md.template`:
 
@@ -4763,12 +4763,12 @@ NF1. <REPLACE: performance / reliability / portability goal>
 - <REPLACE: measurable criterion 2>
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: PASS — 18 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/spec-behavior-base.md.template tests/test_templates_files.py
@@ -4783,7 +4783,7 @@ git commit -m "test: add spec-behavior-base template with REPLACE placeholders"
 - Create: `templates/conftest.py.template`
 - Modify: `tests/test_templates_files.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates_files.py (append)
@@ -4828,12 +4828,12 @@ def test_conftest_template_has_author_header():
     assert "# Date:" in raw
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: FAIL — template missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `templates/conftest.py.template`:
 
@@ -4924,12 +4924,12 @@ isolation policy" section earlier in this plan). The comment replaces the
 dropped `tests/test_monkeypatch_isolation.py` meta-test. Both changes land
 together so the policy statement is visible in the same atomic unit.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: PASS — 24 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/conftest.py.template conftest.py tests/test_templates_files.py
@@ -4944,7 +4944,7 @@ git commit -m "test: add conftest.py.template with SBTDD block delimiters"
 - Create: `templates/gitignore.fragment`
 - Modify: `tests/test_templates_files.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates_files.py (append)
@@ -4974,12 +4974,12 @@ def test_gitignore_fragment_has_header_comment():
     assert "SBTDD" in raw or "sbtdd" in raw
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_templates_files.py -v`
 Expected: FAIL — fragment missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `templates/gitignore.fragment`:
 
@@ -4992,7 +4992,7 @@ sbtdd/spec-behavior.md
 # --- end SBTDD-workflow ---
 ```
 
-- [ ] **Step 4: Run full `make verify`**
+- [x] **Step 4: Run full `make verify`**
 
 Run:
 
@@ -5010,7 +5010,7 @@ Fix 4/8, +1 for test_superpowers_dispatch_integration.py Fix 6; net vs the
 dropped meta-test file) = ~147 tests across ~18 test files (test_monkeypatch_isolation.py
 dropped; test_superpowers_dispatch_integration.py added).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/gitignore.fragment tests/test_templates_files.py
