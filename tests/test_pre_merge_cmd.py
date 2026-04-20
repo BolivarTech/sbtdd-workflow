@@ -392,13 +392,22 @@ def test_pre_merge_loop2_strong_no_go_aborts_immediately(
     assert calls["magi"] == 1
 
 
-def test_pre_merge_loop2_go_with_caveats_exits_on_low_risk_conditions(
+def test_pre_merge_loop2_go_with_caveats_blocks_gate_on_accepted_conditions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Low-risk conditions (doc/naming) exit Loop 2 after one iter without re-invoke."""
+    """Accepted condition (low-risk or structural) now BLOCKS the gate.
+
+    MAGI Loop 2 iter-3 redesign: ``_loop2`` no longer orchestrates a
+    mini-cycle (the caller has nothing to stage, which produced three
+    empty commits in iter 1/2). Instead it writes the accepted conditions
+    to ``.claude/magi-conditions.md`` and raises :class:`MAGIGateError`
+    (exit 8). The user applies the conditions via ``close-phase`` and
+    re-runs ``pre-merge``.
+    """
     import magi_dispatch
     import pre_merge_cmd
     import superpowers_dispatch
+    from errors import MAGIGateError
 
     _seed_loop2_env(tmp_path)
     _patch_no_drift(monkeypatch)
@@ -423,59 +432,11 @@ def test_pre_merge_loop2_go_with_caveats_exits_on_low_risk_conditions(
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
-    # Keep commit_create side-effect-free for this test.
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", lambda *a, **kw: "stub")
 
-    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
-    assert rc == 0
+    with pytest.raises(MAGIGateError):
+        pre_merge_cmd.main(["--project-root", str(tmp_path)])
     assert calls["magi"] == 1
-
-
-def test_pre_merge_loop2_go_with_caveats_reinvokes_on_structural(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Structural conditions force re-invoke of MAGI (>= 2 iterations)."""
-    import magi_dispatch
-    import pre_merge_cmd
-    import superpowers_dispatch
-
-    _seed_loop2_env(tmp_path)
-    _patch_no_drift(monkeypatch)
-    _patch_loop1_clean(monkeypatch)
-
-    sequence = iter(
-        [
-            _make_verdict(
-                "GO_WITH_CAVEATS",
-                degraded=False,
-                conditions=("change function signature to accept contract",),
-            ),
-            _make_verdict("GO", degraded=False),
-        ]
-    )
-
-    calls = {"magi": 0}
-
-    def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
-    ) -> object:
-        calls["magi"] += 1
-        return next(sequence)
-
-    def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
-    ) -> object:
-        return _make_skill_result(
-            stdout="## Accepted\n- change function signature to accept contract\n"
-        )
-
-    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
-    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", lambda *a, **kw: "stub")
-
-    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
-    assert rc == 0
-    assert calls["magi"] == 2
+    assert (tmp_path / ".claude" / "magi-conditions.md").exists()
 
 
 def test_pre_merge_loop2_aborts_after_max_iterations(
@@ -561,33 +522,36 @@ def test_pre_merge_loop2_rejects_unknown_threshold_override_with_validation_erro
         pre_merge_cmd.main(["--project-root", str(tmp_path), "--magi-threshold", "BANANA"])
 
 
-def test_pre_merge_loop2_accepted_condition_emits_test_fix_refactor_mini_cycle(
+def test_pre_merge_loop2_accepted_condition_emits_no_commits_and_writes_conditions_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Finding 1: accepted condition produces three commits in order test/fix/refactor."""
+    """MAGI Loop 2 iter-3 redesign: accepted condition writes file, emits no commits.
+
+    Replaces the pre-iter-3 contract that ``_loop2`` orchestrated a
+    3-commit mini-cycle. ``_loop2`` cannot synthesize code edits (the
+    fix diff lives in the caller), so the iter-1/2 design produced
+    three empty commits. The redesign hands the accepted conditions to
+    the user via ``.claude/magi-conditions.md`` and blocks the gate
+    (exit 8). The user then applies the conditions via ``close-phase``
+    (which has real TDD cycle support) and re-runs ``pre-merge``.
+    """
     import magi_dispatch
     import pre_merge_cmd
     import superpowers_dispatch
+    from errors import MAGIGateError
 
     _seed_loop2_env(tmp_path)
     _patch_no_drift(monkeypatch)
     _patch_loop1_clean(monkeypatch)
 
-    sequence = iter(
-        [
-            _make_verdict(
-                "GO_WITH_CAVEATS",
-                degraded=False,
-                conditions=("refactor public API signature",),
-            ),
-            _make_verdict("GO", degraded=False),
-        ]
-    )
-
     def fake_invoke(
         context_paths: list[str], timeout: int = 1800, cwd: str | None = None
     ) -> object:
-        return next(sequence)
+        return _make_verdict(
+            "GO_WITH_CAVEATS",
+            degraded=False,
+            conditions=("refactor public API signature",),
+        )
 
     def fake_receiving(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
@@ -604,10 +568,13 @@ def test_pre_merge_loop2_accepted_condition_emits_test_fix_refactor_mini_cycle(
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
     monkeypatch.setattr(pre_merge_cmd, "commit_create", fake_commit_create)
 
-    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
-    assert rc == 0
-    prefixes = [p for p, _ in invocations]
-    assert prefixes[:3] == ["test", "fix", "refactor"]
+    with pytest.raises(MAGIGateError):
+        pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    # No empty mini-cycle commits from _loop2 any more.
+    assert invocations == []
+    # Conditions file exists and contains the accepted condition.
+    conditions_text = (tmp_path / ".claude" / "magi-conditions.md").read_text(encoding="utf-8")
+    assert "refactor public API signature" in conditions_text
 
 
 def test_pre_merge_loop2_rejected_condition_feeds_into_next_iteration(
@@ -810,79 +777,165 @@ def test_conditions_low_risk_classifies_structural_test_as_structural() -> None:
 
 
 # ---------------------------------------------------------------------------
-# MAGI Loop 2 iter 1 Finding 1: _apply_condition_via_mini_cycle requires
-# caller-provided staging callbacks so the three commits wrap actual diffs.
+# MAGI Loop 2 iter 3 redesign: ``_loop2`` writes accepted conditions to
+# ``.claude/magi-conditions.md`` and raises :class:`MAGIGateError` instead
+# of orchestrating a mini-cycle it cannot populate with real diffs.
 # ---------------------------------------------------------------------------
 
 
-def test_apply_condition_via_mini_cycle_invokes_stage_callbacks_in_order(
-    monkeypatch: pytest.MonkeyPatch,
+def test_loop2_writes_conditions_file_and_exits_8_when_accepted_conditions_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Finding 1 (red): helper must call stage_test -> stage_fix -> stage_refactor.
+    """Accepted conditions -> ``.claude/magi-conditions.md`` + MAGIGateError."""
+    import magi_dispatch
+    import pre_merge_cmd
+    import superpowers_dispatch
+    from errors import EXIT_CODES, MAGIGateError
 
-    The pre-Finding-1 signature accepted no staging callbacks and emitted
-    three empty commits. The fixed contract requires the caller to pass
-    three ``Callable[[], None]`` kwargs; the helper must invoke each one
-    immediately before its matching ``commit_create`` call.
-    """
+    _seed_loop2_env(tmp_path)
+    _patch_no_drift(monkeypatch)
+    _patch_loop1_clean(monkeypatch)
+
+    def fake_invoke(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        return _make_verdict(
+            "GO_WITH_CAVEATS",
+            degraded=False,
+            conditions=("tighten error message for timeout branch",),
+        )
+
+    def fake_receiving(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        return _make_skill_result(
+            stdout="## Accepted\n- tighten error message for timeout branch\n"
+        )
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
+    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
+
+    with pytest.raises(MAGIGateError):
+        pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    conditions_path = tmp_path / ".claude" / "magi-conditions.md"
+    assert conditions_path.exists()
+    body = conditions_path.read_text(encoding="utf-8")
+    assert "tighten error message for timeout branch" in body
+    assert EXIT_CODES[MAGIGateError] == 8
+
+
+def test_loop2_returns_0_when_verdict_strong_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STRONG_GO with no conditions: return normally, no conditions file."""
+    import magi_dispatch
     import pre_merge_cmd
 
-    calls: list[str] = []
+    _seed_loop2_env(tmp_path)
+    _patch_no_drift(monkeypatch)
+    _patch_loop1_clean(monkeypatch)
 
-    def stage_test() -> None:
-        calls.append("stage_test")
+    def fake_invoke(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        return _make_verdict("STRONG_GO", degraded=False)
 
-    def stage_fix() -> None:
-        calls.append("stage_fix")
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
 
-    def stage_refactor() -> None:
-        calls.append("stage_refactor")
+    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert not (tmp_path / ".claude" / "magi-conditions.md").exists()
 
-    def fake_commit_create(prefix: str, message: str, cwd: str | None = None) -> str:
-        calls.append(f"commit:{prefix}")
-        return "sha-" + prefix
 
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", fake_commit_create)
+def test_loop2_returns_0_when_no_conditions_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All MAGI conditions rejected by /receiving-code-review -> exit 0.
 
-    result = pre_merge_cmd._apply_condition_via_mini_cycle(
-        condition="structural refactor",
-        root=Path("."),
-        iteration=1,
-        idx=1,
-        stage_test=stage_test,
-        stage_fix=stage_fix,
-        stage_refactor=stage_refactor,
+    Rejected conditions still feed the ``magi-feedback.md`` loop (sterile-
+    loop breaker). The gate exits cleanly when the residual verdict is
+    above threshold and no accepted conditions remain.
+    """
+    import magi_dispatch
+    import pre_merge_cmd
+    import superpowers_dispatch
+
+    _seed_loop2_env(tmp_path)
+    _patch_no_drift(monkeypatch)
+    _patch_loop1_clean(monkeypatch)
+
+    sequence = iter(
+        [
+            _make_verdict(
+                "GO_WITH_CAVEATS",
+                degraded=False,
+                conditions=("unjustified ask",),
+            ),
+            _make_verdict("GO", degraded=False),
+        ]
     )
 
-    assert calls == [
-        "stage_test",
-        "commit:test",
-        "stage_fix",
-        "commit:fix",
-        "stage_refactor",
-        "commit:refactor",
-    ]
-    assert result == ("sha-test", "sha-fix", "sha-refactor")
+    def fake_invoke(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        return next(sequence)
 
-
-def test_apply_condition_via_mini_cycle_raises_when_callbacks_missing() -> None:
-    """Finding 1 (red): missing callbacks must raise NotImplementedError.
-
-    Default ``stage_*=None`` forces callers to think about what is being
-    staged rather than silently emitting empty commits.
-    """
-    import pre_merge_cmd
-
-    with pytest.raises(NotImplementedError):
-        pre_merge_cmd._apply_condition_via_mini_cycle(
-            condition="cond",
-            root=Path("."),
-            iteration=1,
-            idx=1,
-            stage_test=None,
-            stage_fix=None,
-            stage_refactor=None,
+    def fake_receiving(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        return _make_skill_result(
+            stdout="## Rejected\n- unjustified ask (rationale: out of scope)\n"
         )
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
+    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
+
+    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert not (tmp_path / ".claude" / "magi-conditions.md").exists()
+
+
+def test_loop2_still_writes_magi_feedback_md_for_rejected_conditions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rejected conditions still feed ``magi-feedback.md`` (sterile-loop breaker preserved)."""
+    import magi_dispatch
+    import pre_merge_cmd
+    import superpowers_dispatch
+
+    _seed_loop2_env(tmp_path)
+    _patch_no_drift(monkeypatch)
+    _patch_loop1_clean(monkeypatch)
+
+    sequence = iter(
+        [
+            _make_verdict(
+                "GO_WITH_CAVEATS",
+                degraded=False,
+                conditions=("bogus condition",),
+            ),
+            _make_verdict("GO", degraded=False),
+        ]
+    )
+
+    def fake_invoke(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        return next(sequence)
+
+    def fake_receiving(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        return _make_skill_result(
+            stdout="## Rejected\n- bogus condition (rationale: not applicable)\n"
+        )
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
+    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
+
+    pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    feedback = (tmp_path / ".claude" / "magi-feedback.md").read_text(encoding="utf-8")
+    assert "bogus condition" in feedback
 
 
 # ---------------------------------------------------------------------------
