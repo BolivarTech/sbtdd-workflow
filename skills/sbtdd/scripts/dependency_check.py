@@ -262,3 +262,44 @@ def check_magi(plugins_root: Path) -> DependencyCheck:
         detail=f"found at {skill_md.parent}",
         remediation=None,
     )
+
+
+def check_claude_cli() -> DependencyCheck:
+    """Verify the ``claude`` CLI is in PATH (required by superpowers/magi dispatchers).
+
+    Both :mod:`superpowers_dispatch` and :mod:`magi_dispatch` shell out via
+    ``claude -p``; without the binary the workflow cannot invoke sub-skills.
+    Surfaced during pre-flight so ``init`` fails fast before any file is
+    created (sec.S.1.3 companion check; MAGI Checkpoint 2 iter 2 caspar fix).
+    """
+    if shutil.which("claude") is None:
+        return DependencyCheck(
+            name="claude CLI",
+            status="MISSING",
+            detail="Binary 'claude' not found in PATH.",
+            remediation="Install Claude Code from https://claude.com/claude-code",
+        )
+    try:
+        result = subprocess_utils.run_with_timeout(["claude", "--version"], timeout=5)
+    except subprocess.TimeoutExpired:
+        return DependencyCheck(
+            name="claude CLI",
+            status="BROKEN",
+            detail="claude --version timed out after 5s",
+            remediation="Reinstall Claude Code",
+        )
+    if result.returncode != 0:
+        return DependencyCheck(
+            name="claude CLI",
+            status="BROKEN",
+            detail=f"claude --version returncode={result.returncode}",
+            remediation="Reinstall Claude Code",
+        )
+    combined = (result.stdout or result.stderr).strip()
+    detail = combined.splitlines()[0] if combined else "claude present"
+    return DependencyCheck(
+        name="claude CLI",
+        status="OK",
+        detail=detail,
+        remediation=None,
+    )

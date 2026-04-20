@@ -221,3 +221,56 @@ def test_check_magi_ok_with_skill_and_script(tmp_path):
     (base / "scripts" / "run_magi.py").write_text("# run", encoding="utf-8")
     chk = check_magi(plugins_root=tmp_path)
     assert chk.status == "OK"
+
+
+def test_check_claude_cli_missing_when_not_in_path(monkeypatch):
+    from dependency_check import check_claude_cli
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    chk = check_claude_cli()
+    assert chk.status == "MISSING"
+    assert chk.name == "claude CLI"
+    assert chk.remediation is not None
+
+
+def test_check_claude_cli_ok_when_present(monkeypatch):
+    from dependency_check import check_claude_cli
+
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: "/usr/bin/claude" if name == "claude" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+        stdout = "claude-code 1.0.30\n"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    chk = check_claude_cli()
+    assert chk.status == "OK"
+    assert "claude-code" in chk.detail or "1.0" in chk.detail
+
+
+def test_check_claude_cli_broken_on_nonzero_returncode(monkeypatch):
+    from dependency_check import check_claude_cli
+
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: "/usr/bin/claude" if name == "claude" else None,
+    )
+
+    class FakeProc:
+        returncode = 2
+        stdout = ""
+        stderr = "error"
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    chk = check_claude_cli()
+    assert chk.status == "BROKEN"
