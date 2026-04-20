@@ -274,3 +274,71 @@ def test_check_claude_cli_broken_on_nonzero_returncode(monkeypatch):
     )
     chk = check_claude_cli()
     assert chk.status == "BROKEN"
+
+
+def test_check_working_tree_ok_with_git_dir(tmp_path):
+    from dependency_check import check_working_tree
+
+    (tmp_path / ".git").mkdir()
+    chk = check_working_tree(project_root=tmp_path)
+    assert chk.status == "OK"
+
+
+def test_check_working_tree_missing_without_git(tmp_path):
+    from dependency_check import check_working_tree
+
+    chk = check_working_tree(project_root=tmp_path)
+    assert chk.status == "MISSING"
+    assert "git init" in (chk.remediation or "")
+
+
+def test_check_stack_toolchain_python_ok(monkeypatch):
+    from dependency_check import check_stack_toolchain
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    class FakeProc:
+        returncode = 0
+        stdout = "version 1.0.0"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    checks = check_stack_toolchain("python")
+    assert all(c.status == "OK" for c in checks), [c.name for c in checks if c.status != "OK"]
+    names = {c.name for c in checks}
+    assert names == {"python (pytest)", "python (ruff)", "python (mypy)"}
+
+
+def test_check_stack_toolchain_rust_missing_tdd_guard_rust(monkeypatch):
+    from dependency_check import check_stack_toolchain
+
+    def fake_which(name: str) -> str | None:
+        return None if name == "tdd-guard-rust" else f"/usr/bin/{name}"
+
+    monkeypatch.setattr("shutil.which", fake_which)
+
+    class FakeProc:
+        returncode = 0
+        stdout = "v1"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    checks = check_stack_toolchain("rust")
+    # tdd-guard-rust missing -> BROKEN (blocks reporter); other cargo tools OK.
+    broken = [c for c in checks if c.status == "MISSING"]
+    assert len(broken) == 1
+    assert "tdd-guard-rust" in broken[0].name
+
+
+def test_check_stack_toolchain_rejects_unknown_stack():
+    from dependency_check import check_stack_toolchain
+    from errors import ValidationError
+
+    with pytest.raises(ValidationError):
+        check_stack_toolchain("haskell")

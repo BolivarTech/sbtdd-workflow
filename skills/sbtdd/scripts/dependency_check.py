@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import subprocess_utils
+from errors import ValidationError
 
 #: Allowed values for DependencyCheck.status (sec.S.5.1.1 reporte formato).
 VALID_STATUSES: tuple[str, ...] = ("OK", "MISSING", "BROKEN")
@@ -302,4 +303,98 @@ def check_claude_cli() -> DependencyCheck:
         status="OK",
         detail=detail,
         remediation=None,
+    )
+
+
+#: Per-stack toolchain binaries (sec.S.1.3 item 6). Keyed by stack; values are
+#: (binary_name, display_name) tuples. The reporter entry for Rust is separate
+#: because it is mandatory and has a distinct remediation URL.
+_STACK_TOOLCHAINS: dict[str, tuple[tuple[str, str], ...]] = {
+    "rust": (
+        ("cargo", "rust (cargo)"),
+        ("cargo-nextest", "rust (cargo-nextest)"),
+        ("cargo-audit", "rust (cargo-audit)"),
+        ("cargo-clippy", "rust (cargo-clippy)"),
+        ("cargo-fmt", "rust (cargo-fmt)"),
+        ("tdd-guard-rust", "rust (tdd-guard-rust)"),
+    ),
+    "python": (
+        ("pytest", "python (pytest)"),
+        ("ruff", "python (ruff)"),
+        ("mypy", "python (mypy)"),
+    ),
+    "cpp": (
+        ("cmake", "cpp (cmake)"),
+        ("ctest", "cpp (ctest)"),
+    ),
+}
+
+
+def _check_binary(binary: str, display: str) -> DependencyCheck:
+    """Check that ``binary`` is in PATH and ``{binary} --version`` exits 0."""
+    if shutil.which(binary) is None:
+        return DependencyCheck(
+            name=display,
+            status="MISSING",
+            detail=f"{binary} not found in PATH.",
+            remediation=f"Install {binary} for your OS",
+        )
+    try:
+        result = subprocess_utils.run_with_timeout([binary, "--version"], timeout=5)
+    except subprocess.TimeoutExpired:
+        return DependencyCheck(
+            name=display,
+            status="BROKEN",
+            detail=f"{binary} --version timed out",
+            remediation=f"Reinstall {binary}",
+        )
+    if result.returncode != 0:
+        return DependencyCheck(
+            name=display,
+            status="BROKEN",
+            detail=f"{binary} --version returncode={result.returncode}",
+            remediation=f"Reinstall {binary}",
+        )
+    combined = (result.stdout or result.stderr).strip()
+    detail = combined.splitlines()[0] if combined else f"{binary} present"
+    return DependencyCheck(
+        name=display,
+        status="OK",
+        detail=detail,
+        remediation=None,
+    )
+
+
+def check_stack_toolchain(stack: str) -> tuple[DependencyCheck, ...]:
+    """Run all toolchain checks for the chosen stack (sec.S.1.3 item 6).
+
+    Args:
+        stack: One of ``rust``, ``python``, ``cpp``.
+
+    Returns:
+        Tuple of ``DependencyCheck`` for each required binary. The caller
+        aggregates them into the overall :class:`DependencyReport`.
+
+    Raises:
+        ValidationError: If ``stack`` is not one of the three supported values.
+    """
+    if stack not in _STACK_TOOLCHAINS:
+        raise ValidationError(f"stack='{stack}' not in {sorted(_STACK_TOOLCHAINS)}")
+    return tuple(_check_binary(b, d) for b, d in _STACK_TOOLCHAINS[stack])
+
+
+def check_working_tree(project_root: Path) -> DependencyCheck:
+    """Verify .git/ exists (sec.S.1.3 item 7). init does NOT run ``git init``."""
+    if (project_root / ".git").exists():
+        return DependencyCheck(
+            name="git working tree",
+            status="OK",
+            detail=f".git/ present at {project_root}",
+            remediation=None,
+        )
+    return DependencyCheck(
+        name="git working tree",
+        status="MISSING",
+        detail=f".git/ not found at {project_root}",
+        remediation="Run 'git init' in the project directory before re-running /sbtdd init",
     )
