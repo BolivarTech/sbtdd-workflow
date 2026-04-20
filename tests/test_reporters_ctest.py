@@ -111,3 +111,52 @@ def test_parse_junit_handles_all_missing_attributes():
     for t in all_tests:
         assert t.name
         assert not t.name.startswith(".")
+
+
+def test_parse_junit_skipped_recorded_as_skipped_state():
+    """Red/lock test: <skipped> child must produce state='skipped'.
+
+    If ctest_reporter._state_for() ever regressed to returning 'passed' for
+    <skipped>, this assertion would fail. This is the discriminating coverage
+    for the skipped-state branch.
+    """
+    from reporters.ctest_reporter import parse_junit
+
+    doc = parse_junit(FIXTURES / "with_skipped.xml")
+    all_tests = {t.name: t for m in doc.test_modules for t in m.tests}
+    assert all_tests["Slow.Ignored"].state == "skipped"
+    # A skipped-only run with no failures is still "passed" by TDD-Guard semantics.
+    assert doc.reason == "passed"
+
+
+def test_parse_junit_multiple_suites_preserve_boundaries():
+    """Red/lock test: each <testsuite> becomes its own TestModule.
+
+    Locks the one-suite-per-module mapping. A regression that flattened all
+    testcases into a single module would fail this assertion.
+    """
+    from reporters.ctest_reporter import parse_junit
+
+    doc = parse_junit(FIXTURES / "with_skipped.xml")
+    module_ids = [m.module_id for m in doc.test_modules]
+    # The fixture has two <testsuite>s.
+    assert len(module_ids) == 2
+    assert len(set(module_ids)) == 2
+
+
+def test_run_returns_zero_on_success_contract_lock(tmp_path):
+    """Contract-lock: run() returns exit-code 0 on successful write.
+
+    Deliberately tautological vs current implementation -- guards against a
+    silent contract change (e.g. returning the internal parser's 'reason'
+    string instead of 0). Per Plan B "Deferred from MAGI Checkpoint 2",
+    rewording to a more discriminating assertion is deferred to Milestone C
+    when verification_commands wiring gives us a richer signal.
+    """
+    from reporters.ctest_reporter import run
+
+    dst = tmp_path / "test.json"
+    assert run(FIXTURES / "all_passed.xml", dst) == 0
+    # Locking also: the destination file must exist and parse as JSON.
+    assert dst.exists()
+    json.loads(dst.read_text(encoding="utf-8"))  # raises if malformed
