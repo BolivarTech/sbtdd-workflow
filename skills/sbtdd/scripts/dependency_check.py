@@ -17,6 +17,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
 
 import subprocess_utils
 from errors import ValidationError
@@ -330,8 +332,30 @@ _STACK_TOOLCHAINS: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 
+#: Rust toolchain entries that must be validated via the ``cargo`` subcommand
+#: driver rather than the shim binary. ``cargo-clippy`` / ``cargo-fmt`` are
+#: shims: their presence on PATH does not guarantee the underlying component
+#: is installed. Running ``cargo clippy --version`` / ``cargo fmt --version``
+#: exercises the real dispatch path and catches cases like
+#: ``error: 'clippy' is not installed for the toolchain`` that would
+#: otherwise pass the naive ``shutil.which`` check (MAGI Loop 2 Milestone B
+#: iter 1 Finding 4, caspar).
+_CARGO_SUBCOMMAND_SHIMS: Mapping[str, str] = MappingProxyType(
+    {
+        "cargo-clippy": "clippy",
+        "cargo-fmt": "fmt",
+    }
+)
+
+
 def _check_binary(binary: str, display: str) -> DependencyCheck:
-    """Check that ``binary`` is in PATH and ``{binary} --version`` exits 0."""
+    """Check that ``binary`` is in PATH and ``{binary} --version`` exits 0.
+
+    For ``cargo-clippy`` / ``cargo-fmt`` the invocation is promoted to the
+    real cargo subcommand form (``cargo clippy --version`` /
+    ``cargo fmt --version``) so the component-not-installed case is caught
+    -- see :data:`_CARGO_SUBCOMMAND_SHIMS`.
+    """
     if shutil.which(binary) is None:
         return DependencyCheck(
             name=display,
@@ -339,20 +363,30 @@ def _check_binary(binary: str, display: str) -> DependencyCheck:
             detail=f"{binary} not found in PATH.",
             remediation=f"Install {binary} for your OS",
         )
+    subcommand = _CARGO_SUBCOMMAND_SHIMS.get(binary)
+    if subcommand is not None:
+        cmd = ["cargo", subcommand, "--version"]
+        label = f"cargo {subcommand}"
+    else:
+        cmd = [binary, "--version"]
+        label = binary
     try:
-        result = subprocess_utils.run_with_timeout([binary, "--version"], timeout=5)
+        result = subprocess_utils.run_with_timeout(cmd, timeout=5)
     except subprocess.TimeoutExpired:
         return DependencyCheck(
             name=display,
             status="BROKEN",
-            detail=f"{binary} --version timed out",
+            detail=f"{label} --version timed out",
             remediation=f"Reinstall {binary}",
         )
     if result.returncode != 0:
         return DependencyCheck(
             name=display,
             status="BROKEN",
-            detail=f"{binary} --version returncode={result.returncode}",
+            detail=(
+                f"{label} --version returncode={result.returncode}: "
+                f"{(result.stderr or '').strip().splitlines()[0] if result.stderr else ''}"
+            ).strip(),
             remediation=f"Reinstall {binary}",
         )
     combined = (result.stdout or result.stderr).strip()
