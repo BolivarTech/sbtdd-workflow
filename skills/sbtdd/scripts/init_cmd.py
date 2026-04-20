@@ -25,9 +25,11 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from dependency_check import check_environment
 from errors import DependencyError, PreconditionError, ValidationError
+from hooks_installer import merge as merge_hooks
 from templates import expand
 
 # Root of the plugin distribution (repo root when running from source).
@@ -136,6 +138,80 @@ def _phase3a_generate(ns: argparse.Namespace, staging: Path, dest_root: Path) ->
     (staging / ".claude" / "plugin.local.md").write_text(expand(tpl_p, ctx), encoding="utf-8")
 
 
+def _settings_payload() -> dict[str, Any]:
+    """Return the three-hook TDD-Guard payload merged into settings.json."""
+    return {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Write|Edit|MultiEdit|TodoWrite",
+                    "hooks": [{"type": "command", "command": "tdd-guard"}],
+                }
+            ],
+            "SessionStart": [
+                {
+                    "matcher": "startup|resume|clear",
+                    "hooks": [{"type": "command", "command": "tdd-guard"}],
+                }
+            ],
+            "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "tdd-guard"}]}],
+        }
+    }
+
+
+def _install_conftest_staged(staging: Path, dest_root: Path, mode: str) -> None:
+    """Write the Python TDD-Guard conftest into staging per --conftest-mode."""
+    target = staging / "conftest.py"
+    existing_target = dest_root / "conftest.py"
+    tpl = (_TEMPLATES_DIR / "conftest.py.template").read_text(encoding="utf-8")
+    if mode == "replace" and existing_target.exists():
+        target.write_text(tpl, encoding="utf-8")
+        return
+    if mode == "merge" and existing_target.exists():
+        existing = existing_target.read_text(encoding="utf-8")
+        start = "# --- SBTDD TDD-Guard reporter START ---"
+        end = "# --- SBTDD TDD-Guard reporter END ---"
+        if start in existing and end in existing:
+            pre, rest = existing.split(start, 1)
+            _, post = rest.split(end, 1)
+            target.write_text(pre + tpl + post, encoding="utf-8")
+            return
+        target.write_text(existing.rstrip("\n") + "\n\n" + tpl, encoding="utf-8")
+        return
+    target.write_text(tpl, encoding="utf-8")
+
+
+def _phase3b_install(ns: argparse.Namespace, staging: Path, dest_root: Path) -> None:
+    """Write settings.json, spec-base, planning/.gitkeep, .gitignore, conftest to STAGING.
+
+    Existing user content in dest_root is READ to preserve overrides but
+    OUTPUT lands in staging only. Phase 5 relocation is what makes these
+    changes visible in dest_root.
+    """
+    staged_settings = staging / ".claude" / "settings.json"
+    existing_settings = dest_root / ".claude" / "settings.json"
+    merge_hooks(existing_settings, _settings_payload(), staged_settings)
+
+    staged_spec_base = staging / "sbtdd" / "spec-behavior-base.md"
+    if not (dest_root / "sbtdd" / "spec-behavior-base.md").exists():
+        tpl = (_TEMPLATES_DIR / "spec-behavior-base.md.template").read_text(encoding="utf-8")
+        staged_spec_base.write_text(tpl, encoding="utf-8")
+
+    staged_gitkeep = staging / "planning" / ".gitkeep"
+    staged_gitkeep.write_text("", encoding="utf-8")
+
+    staged_gi = staging / ".gitignore"
+    frag = (_TEMPLATES_DIR / "gitignore.fragment").read_text(encoding="utf-8")
+    existing_gi = dest_root / ".gitignore"
+    existing = existing_gi.read_text(encoding="utf-8") if existing_gi.exists() else ""
+    new_lines = [line for line in frag.splitlines() if line and line not in existing]
+    merged = existing.rstrip("\n") + "\n" + "\n".join(new_lines) + "\n" if new_lines else existing
+    staged_gi.write_text(merged, encoding="utf-8")
+
+    if ns.stack == "python" and ns.conftest_mode != "skip":
+        _install_conftest_staged(staging, dest_root, ns.conftest_mode)
+
+
 def _phase4_smoke_test(staging: Path) -> None:
     """Validate the STAGED tree before Phase 5 relocation (filled in Task 15).
 
@@ -189,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     staging = _make_staging_dir()
     try:
         _phase3a_generate(ns, staging, ns.project_root)
+        _phase3b_install(ns, staging, ns.project_root)
         _phase4_smoke_test(staging)
         _phase5_relocate(staging, ns.project_root)
     except Exception:

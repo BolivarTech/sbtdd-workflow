@@ -226,3 +226,131 @@ def test_init_phase3a_writes_only_to_tempdir_not_dest_root(
     # After the abort, dest_root remains bare.
     assert not (dest / "CLAUDE.local.md").exists()
     assert not (dest / ".claude" / "plugin.local.md").exists()
+
+
+def _run_init(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dest: Path,
+    *,
+    stack: str = "python",
+    extra_args: tuple[str, ...] = (),
+) -> None:
+    import init_cmd
+
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+    args = [
+        "--stack",
+        stack,
+        "--author",
+        "Julian Tester",
+        "--project-root",
+        str(dest),
+        "--plugins-root",
+        str(tmp_path / "plugins"),
+    ]
+    args.extend(extra_args)
+    init_cmd.main(args)
+
+
+def test_init_merges_settings_json_preserving_user_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    dest = _setup_dest_root(tmp_path)
+    (dest / ".claude").mkdir()
+    existing = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "Write", "hooks": [{"type": "command", "command": "eslint"}]}
+            ]
+        }
+    }
+    (dest / ".claude" / "settings.json").write_text(json.dumps(existing), encoding="utf-8")
+
+    _run_init(tmp_path, monkeypatch, dest)
+
+    merged = json.loads((dest / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    hooks_list = merged["hooks"]["PreToolUse"]
+    commands = [entry["hooks"][0]["command"] for entry in hooks_list]
+    assert "eslint" in commands
+    assert "tdd-guard" in commands
+
+
+def test_init_creates_spec_behavior_base_md_skeleton(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skeleton MUST NOT contain INV-27 uppercase pending markers."""
+    import re
+
+    dest = _setup_dest_root(tmp_path)
+    _run_init(tmp_path, monkeypatch, dest)
+    text = (dest / "sbtdd" / "spec-behavior-base.md").read_text(encoding="utf-8")
+    # INV-27 forbids TODO/TODOS/TBD uppercase word tokens in the generated skeleton.
+    assert not re.search(r"\b(TODO|TODOS|TBD)\b", text)
+
+
+def test_init_appends_gitignore_fragment_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dest = _setup_dest_root(tmp_path)
+    _run_init(tmp_path, monkeypatch, dest, extra_args=("--force",))
+    _run_init(tmp_path, monkeypatch, dest, extra_args=("--force",))
+    text = (dest / ".gitignore").read_text(encoding="utf-8")
+    assert text.count(".claude/") == 1
+    assert text.count("CLAUDE.local.md") == 1
+
+
+def test_init_creates_planning_gitkeep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    dest = _setup_dest_root(tmp_path)
+    _run_init(tmp_path, monkeypatch, dest)
+    assert (dest / "planning" / ".gitkeep").exists()
+
+
+def test_init_python_stack_writes_conftest_py(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dest = _setup_dest_root(tmp_path)
+    _run_init(tmp_path, monkeypatch, dest, extra_args=("--conftest-mode", "merge"))
+    text = (dest / "conftest.py").read_text(encoding="utf-8")
+    assert "# --- SBTDD TDD-Guard reporter START ---" in text
+
+
+def test_init_phase3b_writes_only_to_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Before Phase 4 runs, dest_root has no Phase 3b artifacts."""
+    import init_cmd
+    from errors import PreconditionError
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+
+    def fake_smoke(staging: Path) -> None:
+        assert (staging / ".claude" / "settings.json").exists()
+        assert (staging / "sbtdd" / "spec-behavior-base.md").exists()
+        assert (staging / "planning" / ".gitkeep").exists()
+        assert (staging / "conftest.py").exists()
+        assert not (dest / ".claude" / "settings.json").exists()
+        assert not (dest / "sbtdd" / "spec-behavior-base.md").exists()
+        assert not (dest / "planning" / ".gitkeep").exists()
+        assert not (dest / "conftest.py").exists()
+        raise PreconditionError("stop-before-phase-5")
+
+    monkeypatch.setattr(init_cmd, "_phase4_smoke_test", fake_smoke)
+    with pytest.raises(PreconditionError):
+        init_cmd.main(
+            [
+                "--stack",
+                "python",
+                "--author",
+                "Julian Tester",
+                "--project-root",
+                str(dest),
+                "--plugins-root",
+                str(tmp_path / "plugins"),
+            ]
+        )
+    assert not (dest / ".claude" / "settings.json").exists()
+    assert not (dest / "conftest.py").exists()
