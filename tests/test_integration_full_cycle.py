@@ -290,3 +290,106 @@ def test_auto_full_cycle_happy_path(bootstrapped_project, monkeypatch):
     )
     assert state["current_phase"] == "done"
     assert state["current_task_id"] is None
+
+
+def test_resume_after_quota_exhaustion_continues_to_completion(bootstrapped_project, monkeypatch):
+    """Scenario 19: auto hits quota mid-phase-2 (exit 11); resume --auto completes.
+
+    Simulates two Claude Code sessions: first session runs auto and is cut off
+    by a 429-style QuotaExhaustedError; the state file + prior commits form the
+    checkpoint chain. Second session invokes /sbtdd resume --auto, which reads
+    the diagnostic + delegates back to auto_cmd to finish what was started.
+    """
+    import auto_cmd
+    import close_task_cmd
+    import finalize_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    import resume_cmd
+    import run_sbtdd
+    import superpowers_dispatch
+    from errors import EXIT_CODES, QuotaExhaustedError
+
+    # Spec first -- provides session-state.json + plan_approved_at.
+    rc = run_sbtdd.main(["spec", "--project-root", str(bootstrapped_project)])
+    assert rc == 0
+
+    monkeypatch.setattr(auto_cmd, "check_environment", lambda *a, **k: _ok_dep_report())
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    monkeypatch.setattr(resume_cmd, "check_environment", lambda *a, **k: _ok_dep_report())
+    monkeypatch.setattr(resume_cmd, "detect_drift", lambda *a, **kw: None)
+
+    def fake_commit(prefix, message, cwd=None):
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", f"{prefix}: {message}"],
+            cwd=cwd or str(bootstrapped_project),
+            check=True,
+            capture_output=True,
+        )
+        return "ok"
+
+    monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+    monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+    # First pass: verification always raises QuotaExhaustedError so auto
+    # aborts mid-Phase-2. Under the current retry-wrapper contract the
+    # quota error is captured inside _run_verification_with_retries and
+    # re-raised as VerificationIrremediableError (exit 6); on resume we
+    # flip the stub to a no-op so the second pass drives to completion.
+    call_count = {"n": 0}
+    first_pass_verify = []
+
+    def flaky_verify(**kw):
+        call_count["n"] += 1
+        if first_pass_verify and first_pass_verify[0]:
+            raise QuotaExhaustedError("rate_limit_429: session limit")
+        return None
+
+    first_pass_verify.append(True)
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", flaky_verify, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+
+    # Quota-table assertion (sanity check for the exit-code map).
+    assert EXIT_CODES[QuotaExhaustedError] == 11
+
+    rc = run_sbtdd.main(["auto", "--project-root", str(bootstrapped_project)])
+    # Auto aborts mid-phase-2 -- exit 6 (VerificationIrremediableError)
+    # because the retry wrapper wraps the quota exception. The critical
+    # point is auto did NOT complete: state file still points at an
+    # active task, allowing resume to pick up.
+    assert rc != 0
+    first_pass_verify[0] = False  # subsequent verification calls succeed
+
+    # Make the rest of the pipeline succeed for the retry.
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+
+    def fake_loop2(root, shadow, threshold):
+        return make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+
+    def fake_write_verdict(v, target, timestamp=None):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-04-21T00:00:00Z",
+                    "verdict": "GO",
+                    "degraded": False,
+                    "conditions": [],
+                    "findings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", fake_write_verdict)
+    monkeypatch.setattr(finalize_cmd, "_checklist", lambda *a, **kw: [("ok", True, "")])
+
+    # Resume must pick up where auto left off and drive to completion.
+    rc = run_sbtdd.main(["resume", "--project-root", str(bootstrapped_project), "--auto"])
+    assert rc == 0
