@@ -27,6 +27,16 @@ Design invariants enforced here:
 
 Dry-run short-circuits BEFORE any subprocess work (Finding 4) so a
 preview works even when git / tdd-guard / plugins are unavailable.
+
+INV-24 (conservative defaults) does NOT apply inside ``auto`` itself --
+auto commits atomically at every phase boundary, so no uncommitted work
+is ever left behind mid-run. The CONTINUE-by-default contract for
+uncommitted work lives in :mod:`resume_cmd` (see
+``resume_cmd._resolve_uncommitted``) and engages only when the user
+re-enters via ``/sbtdd resume`` after an externally-caused interruption
+(crash, quota, Ctrl+C). This cross-reference exists to forestall the
+common reader question "where is INV-24 enforced in auto?" -- the answer
+is "in resume; auto never needs it".
 """
 
 from __future__ import annotations

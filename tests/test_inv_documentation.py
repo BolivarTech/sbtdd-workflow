@@ -45,11 +45,7 @@ def test_resume_resolve_uncommitted_docstring_mentions_inv24() -> None:
 def test_pre_merge_loop2_docstring_mentions_inv29() -> None:
     doc = pre_merge_cmd._loop2.__doc__ or ""
     assert "INV-29" in doc
-    assert (
-        "feedback" in doc.lower()
-        or "rejection" in doc.lower()
-        or "rejected" in doc.lower()
-    )
+    assert "feedback" in doc.lower() or "rejection" in doc.lower() or "rejected" in doc.lower()
 
 
 def test_init_cmd_mkdir_tracked_documents_toctou() -> None:
