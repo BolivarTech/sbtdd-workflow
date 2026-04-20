@@ -315,3 +315,81 @@ def test_close_phase_green_without_variant_raises_validation_error(
 
     with pytest.raises(ValidationError):
         close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
+
+
+def test_close_phase_refactor_cascades_to_close_task(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    import close_phase_cmd
+    import close_task_cmd
+
+    _seed_state(tmp_path, current_phase="refactor")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    cascade_calls: list[list[str] | None] = []
+
+    def fake_close_task_main(argv=None):  # type: ignore[no-untyped-def]
+        cascade_calls.append(argv)
+        return 0
+
+    monkeypatch.setattr(close_task_cmd, "main", fake_close_task_main)
+
+    rc = close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "refa"])
+    assert rc == 0
+    assert len(cascade_calls) == 1
+    argv = cascade_calls[0]
+    assert argv is not None
+    assert "--project-root" in argv
+    assert str(tmp_path) in argv
+
+
+def test_close_phase_refactor_creates_refactor_commit_before_cascade(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Verify the refactor commit is recorded BEFORE close_task_cmd.main runs."""
+    import close_phase_cmd
+    import close_task_cmd
+
+    _seed_state(tmp_path, current_phase="refactor")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    order: list[str] = []
+    original_fake_commit = None  # placeholder
+
+    def track_commit(prefix, message, cwd=None):  # type: ignore[no-untyped-def]
+        order.append(f"commit:{prefix}")
+        return ""
+
+    monkeypatch.setattr("close_phase_cmd.commit_create", track_commit)
+
+    def track_cascade(argv=None):  # type: ignore[no-untyped-def]
+        order.append("cascade")
+        return 0
+
+    monkeypatch.setattr(close_task_cmd, "main", track_cascade)
+
+    close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "pulir"])
+    # refactor commit must happen first, cascade afterwards.
+    assert order == ["commit:refactor", "cascade"]
+    assert original_fake_commit is None  # placeholder use avoids unused-var lint
+
+
+def test_close_phase_refactor_returns_cascade_rc_on_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:  # type: ignore[no-untyped-def]
+    """If close_task_cmd.main returns non-zero, propagate that rc + warn on stderr."""
+    import close_phase_cmd
+    import close_task_cmd
+
+    _seed_state(tmp_path, current_phase="refactor")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    monkeypatch.setattr(close_task_cmd, "main", lambda argv=None: 7)
+
+    rc = close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
+    assert rc == 7
+    err = capsys.readouterr().err
+    assert "close-task cascade failed" in err

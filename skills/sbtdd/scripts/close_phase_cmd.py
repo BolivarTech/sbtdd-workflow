@@ -11,9 +11,11 @@ update. Refactor close cascades to close-task (sec.S.5.3 paso 3c-d).
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import close_task_cmd
 import subprocess_utils
 import superpowers_dispatch
 from commits import create as commit_create
@@ -132,6 +134,15 @@ def main(argv: list[str] | None = None) -> int:
         plan_approved_at=state.plan_approved_at,
     )
     save_state(new_state, root / ".claude" / "session-state.json")
+    if state.current_phase == "refactor":
+        rc = close_task_cmd.main(["--project-root", str(root)])
+        if rc != 0:
+            sys.stderr.write(
+                f"close-task cascade failed with rc={rc}; "
+                "refactor commit created but task bookkeeping incomplete. "
+                "Re-invoke /sbtdd close-task to recover.\n"
+            )
+            return rc
     return 0
 
 
