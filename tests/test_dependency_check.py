@@ -28,3 +28,90 @@ def test_check_status_values_restricted():
     from dependency_check import VALID_STATUSES
 
     assert VALID_STATUSES == ("OK", "MISSING", "BROKEN")
+
+
+def test_dependency_report_aggregates_checks():
+    from dependency_check import DependencyCheck, DependencyReport
+
+    rep = DependencyReport(
+        checks=(
+            DependencyCheck("python", "OK", "3.12.0", None),
+            DependencyCheck(
+                "tdd-guard", "MISSING", "not in PATH", "npm install -g @nizos/tdd-guard"
+            ),
+        )
+    )
+    assert len(rep.checks) == 2
+
+
+def test_dependency_report_failed_returns_only_non_ok():
+    from dependency_check import DependencyCheck, DependencyReport
+
+    rep = DependencyReport(
+        checks=(
+            DependencyCheck("python", "OK", "3.12.0", None),
+            DependencyCheck("git", "MISSING", "not found", "install git"),
+            DependencyCheck("magi", "BROKEN", "wrong version", "update"),
+        )
+    )
+    failed = rep.failed()
+    assert len(failed) == 2
+    assert {c.name for c in failed} == {"git", "magi"}
+
+
+def test_dependency_report_ok_returns_true_when_all_ok():
+    from dependency_check import DependencyCheck, DependencyReport
+
+    rep = DependencyReport(
+        checks=(
+            DependencyCheck("python", "OK", "3.12", None),
+            DependencyCheck("git", "OK", "2.43", None),
+        )
+    )
+    assert rep.ok() is True
+
+
+def test_dependency_report_ok_returns_false_when_any_non_ok():
+    from dependency_check import DependencyCheck, DependencyReport
+
+    rep = DependencyReport(
+        checks=(
+            DependencyCheck("python", "OK", "3.12", None),
+            DependencyCheck("git", "MISSING", "", "install git"),
+        )
+    )
+    assert rep.ok() is False
+
+
+def test_format_report_includes_all_failures_and_count():
+    from dependency_check import DependencyCheck, DependencyReport
+
+    rep = DependencyReport(
+        checks=(
+            DependencyCheck(
+                "tdd-guard",
+                "MISSING",
+                "Binary not found in PATH.",
+                "npm install -g @nizos/tdd-guard",
+            ),
+            DependencyCheck(
+                "magi",
+                "MISSING",
+                "Plugin not discoverable under ~/.claude/plugins/.",
+                "/plugin marketplace add BolivarTech/magi",
+            ),
+        )
+    )
+    out = rep.format_report()
+    assert "tdd-guard" in out
+    assert "magi" in out
+    assert "[MISSING]" in out
+    assert "2 issues found" in out
+    assert "No files were created" in out
+
+
+def test_format_report_empty_when_all_ok():
+    from dependency_check import DependencyCheck, DependencyReport
+
+    rep = DependencyReport(checks=(DependencyCheck("python", "OK", "3.12", None),))
+    assert rep.format_report() == ""
