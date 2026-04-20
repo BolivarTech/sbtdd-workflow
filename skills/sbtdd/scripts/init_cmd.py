@@ -21,13 +21,15 @@ sec.S.5.1 all-or-nothing.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from dependency_check import check_environment
+from config import load_plugin_local as load_plugin_local
+from dependency_check import DependencyReport, check_environment
 from errors import DependencyError, PreconditionError, ValidationError
 from hooks_installer import merge as merge_hooks
 from templates import expand
@@ -213,11 +215,31 @@ def _phase3b_install(ns: argparse.Namespace, staging: Path, dest_root: Path) -> 
 
 
 def _phase4_smoke_test(staging: Path) -> None:
-    """Validate the STAGED tree before Phase 5 relocation (filled in Task 15).
+    """Validate the STAGED tree before Phase 5 relocation.
 
     Runs exclusively against staging -- dest_root is untouched if this raises.
-    Task 13 stub is a no-op; Task 15 adds the actual validations.
+    Two checks:
+
+    1. ``.claude/settings.json`` parses as JSON and contains the three
+       required hook events (PreToolUse, UserPromptSubmit, SessionStart).
+    2. ``.claude/plugin.local.md`` is consumed by :func:`config.load_plugin_local`
+       without raising.
+
+    Raises:
+        PreconditionError: settings.json malformed or missing hooks.
+        ValidationError: plugin.local.md frontmatter invalid (propagated from
+            ``load_plugin_local``).
     """
+    settings = staging / ".claude" / "settings.json"
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise PreconditionError(f"smoke test: settings.json not parseable: {exc}") from exc
+    for event in ("PreToolUse", "UserPromptSubmit", "SessionStart"):
+        if event not in data.get("hooks", {}):
+            raise PreconditionError(f"smoke test: hook '{event}' missing")
+    plugin_local = staging / ".claude" / "plugin.local.md"
+    load_plugin_local(plugin_local)
 
 
 def _phase5_relocate(staging: Path, dest_root: Path) -> list[Path]:
@@ -239,6 +261,27 @@ def _cleanup_staging(staging: Path) -> None:
         shutil.rmtree(staging, ignore_errors=True)
     except OSError:
         pass
+
+
+def _phase5_report(
+    ns: argparse.Namespace,
+    created: list[Path],
+    report: DependencyReport,
+) -> None:
+    """Write the human-readable Phase 5 summary to stdout."""
+    del ns  # present for future extension; unused today.
+    lines: list[str] = [""]
+    for chk in report.checks:
+        lines.append(f"[{chk.status.lower()}] {chk.name} - {chk.detail}")
+    lines.append("")
+    lines.append("Created:")
+    for p in created:
+        lines.append(f"  {p}")
+    lines.append("")
+    lines.append("Next steps:")
+    lines.append("  1. Edit sbtdd/spec-behavior-base.md with the feature requirements.")
+    lines.append("  2. Run /sbtdd spec to generate the TDD plan.")
+    sys.stdout.write("\n".join(lines) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -267,11 +310,12 @@ def main(argv: list[str] | None = None) -> int:
         _phase3a_generate(ns, staging, ns.project_root)
         _phase3b_install(ns, staging, ns.project_root)
         _phase4_smoke_test(staging)
-        _phase5_relocate(staging, ns.project_root)
+        created = _phase5_relocate(staging, ns.project_root)
     except Exception:
         _cleanup_staging(staging)
         raise
     _cleanup_staging(staging)
+    _phase5_report(ns, created, report)
     return 0
 
 

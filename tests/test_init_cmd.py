@@ -354,3 +354,156 @@ def test_init_phase3b_writes_only_to_staging(
         )
     assert not (dest / ".claude" / "settings.json").exists()
     assert not (dest / "conftest.py").exists()
+
+
+def test_init_smoke_test_rejects_invalid_settings_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Corrupt settings.json in staging aborts Phase 4 and rolls back."""
+    import init_cmd
+    from errors import PreconditionError
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+
+    original_phase3b = init_cmd._phase3b_install
+
+    def corrupt_phase3b(ns, staging: Path, dest_root: Path) -> None:
+        original_phase3b(ns, staging, dest_root)
+        (staging / ".claude" / "settings.json").write_text("{not valid json", encoding="utf-8")
+
+    monkeypatch.setattr(init_cmd, "_phase3b_install", corrupt_phase3b)
+    with pytest.raises(PreconditionError):
+        init_cmd.main(
+            [
+                "--stack",
+                "python",
+                "--author",
+                "Julian Tester",
+                "--project-root",
+                str(dest),
+                "--plugins-root",
+                str(tmp_path / "plugins"),
+            ]
+        )
+    # Rollback contract: dest_root has nothing.
+    assert not (dest / ".claude" / "settings.json").exists()
+    assert not (dest / "CLAUDE.local.md").exists()
+
+
+def test_init_smoke_test_validates_plugin_local_md(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 4 runs ``load_plugin_local`` against the staged file."""
+    import init_cmd
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+
+    seen_paths: list[Path] = []
+
+    original = init_cmd.load_plugin_local
+
+    def tracker(path: Path | str):  # type: ignore[no-untyped-def]
+        seen_paths.append(Path(path))
+        return original(path)
+
+    monkeypatch.setattr(init_cmd, "load_plugin_local", tracker)
+    init_cmd.main(
+        [
+            "--stack",
+            "python",
+            "--author",
+            "Julian Tester",
+            "--project-root",
+            str(dest),
+            "--plugins-root",
+            str(tmp_path / "plugins"),
+        ]
+    )
+    # Called against staged plugin.local.md (not dest_root path).
+    assert any("sbtdd-init-" in str(p) for p in seen_paths)
+
+
+def test_init_phase5_reports_all_ok_components(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import init_cmd
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+    init_cmd.main(
+        [
+            "--stack",
+            "python",
+            "--author",
+            "Julian Tester",
+            "--project-root",
+            str(dest),
+            "--plugins-root",
+            str(tmp_path / "plugins"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "[ok]" in out
+    assert "Created:" in out
+
+
+def test_init_exit_0_on_full_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import init_cmd
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+    rc = init_cmd.main(
+        [
+            "--stack",
+            "python",
+            "--author",
+            "Julian Tester",
+            "--project-root",
+            str(dest),
+            "--plugins-root",
+            str(tmp_path / "plugins"),
+        ]
+    )
+    assert rc == 0
+
+
+def test_init_rollback_on_smoke_test_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 4 failure leaves dest_root byte-identical to its pre-invocation state."""
+    import init_cmd
+    from errors import PreconditionError
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+
+    staging_captured: dict[str, Path] = {}
+
+    def forced_failure(staging: Path) -> None:
+        staging_captured["path"] = staging
+        raise PreconditionError("smoke test forced failure")
+
+    monkeypatch.setattr(init_cmd, "_phase4_smoke_test", forced_failure)
+    with pytest.raises(PreconditionError):
+        init_cmd.main(
+            [
+                "--stack",
+                "python",
+                "--author",
+                "Julian Tester",
+                "--project-root",
+                str(dest),
+                "--plugins-root",
+                str(tmp_path / "plugins"),
+            ]
+        )
+    assert not (dest / "CLAUDE.local.md").exists()
+    assert not (dest / ".claude" / "settings.json").exists()
+    assert not (dest / "sbtdd" / "spec-behavior-base.md").exists()
+    # Staging must have been cleaned up.
+    assert "path" in staging_captured
+    assert not staging_captured["path"].exists()
