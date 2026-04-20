@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,12 @@ import quota_detector
 import subprocess_utils
 from errors import MAGIGateError, QuotaExhaustedError, ValidationError
 from models import VERDICT_RANK, verdict_meets_threshold
+
+# ISO 8601 strict with timezone -- MUST match the regex in state_file.py to
+# keep the timestamp contract uniform across artifacts (MAGI Loop 2 Milestone
+# B iter 1 Finding 2, melchior). Timezone suffix (Z | +HH:MM | -HH:MM) is
+# mandatory; naive datetimes are rejected.
+_ISO_8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 
 
 @dataclass(frozen=True)
@@ -250,7 +257,7 @@ def verdict_passes_gate(verdict: MAGIVerdict, threshold: str) -> bool:
 def write_verdict_artifact(
     verdict: MAGIVerdict,
     target: Path,
-    timestamp: str,
+    timestamp: str | None = None,
 ) -> None:
     """Write ``.claude/magi-verdict.json`` atomically (sec.S.5.6 postcondicion).
 
@@ -261,16 +268,32 @@ def write_verdict_artifact(
     Args:
         verdict: Parsed MAGI verdict.
         target: Destination file path. Parent directories are created.
-        timestamp: ISO 8601 string with ``Z`` suffix (caller supplies;
-            state_file._validate_iso8601 conventions apply).
+        timestamp: ISO 8601 string with timezone suffix (``Z`` or
+            ``+HH:MM`` / ``-HH:MM``). When ``None`` (default) the current
+            UTC instant is stamped in the project's canonical form
+            (``datetime.now(timezone.utc).isoformat()`` with ``+00:00``
+            rewritten to ``Z``). Same contract as
+            ``state_file._validate_iso8601`` -- naive strings are rejected.
 
     Raises:
+        ValidationError: If ``timestamp`` is a non-None value that does not
+            match the ISO 8601 with-timezone contract (MAGI Loop 2
+            Milestone B iter 1 Finding 2). No partial file is left on
+            disk.
         OSError: If the atomic replace fails. No partial file, no
             ``*.tmp.<pid>`` leak.
     """
+    if timestamp is None:
+        stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    else:
+        if not isinstance(timestamp, str) or not _ISO_8601_RE.match(timestamp):
+            raise ValidationError(
+                f"timestamp must be ISO 8601 with timezone (Z or +/-HH:MM), got {timestamp!r}"
+            )
+        stamp = timestamp
     target.parent.mkdir(parents=True, exist_ok=True)
     data = {
-        "timestamp": timestamp,
+        "timestamp": stamp,
         "verdict": verdict.verdict,
         "degraded": verdict.degraded,
         "conditions": list(verdict.conditions),
