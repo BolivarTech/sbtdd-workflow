@@ -59,3 +59,10 @@ def test_dispatcher_routes_pre_merge_to_pre_merge_cmd():
     import run_sbtdd
 
     assert run_sbtdd.SUBCOMMAND_DISPATCH["pre-merge"] is pre_merge_cmd.main
+
+
+def test_dispatcher_routes_finalize_to_finalize_cmd():
+    import finalize_cmd
+    import run_sbtdd
+
+    assert run_sbtdd.SUBCOMMAND_DISPATCH["finalize"] is finalize_cmd.main
