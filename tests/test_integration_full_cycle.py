@@ -202,3 +202,91 @@ def test_spec_then_three_close_phase_end_to_end(bootstrapped_project, monkeypatc
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["current_phase"] == "done"
     assert state["current_task_id"] is None
+
+
+def _ok_dep_report():
+    from dependency_check import DependencyCheck, DependencyReport
+
+    return DependencyReport(
+        checks=(DependencyCheck(name="stub", status="OK", detail="", remediation=""),)
+    )
+
+
+def test_auto_full_cycle_happy_path(bootstrapped_project, monkeypatch):
+    """Scenario 18: single auto invocation completes plan + pre-merge + checklist.
+
+    Exercises run_sbtdd.main("auto") through the 5-phase flow. Heavy stubs
+    are unavoidable for an integration test (real auto talks to git, tdd-guard,
+    external plugins), but the dispatcher wiring (Tasks 37-46) is still the
+    subject under test.
+    """
+    import auto_cmd
+    import close_task_cmd
+    import finalize_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    import run_sbtdd
+
+    # Run spec first so plan_approved_at + state file exist.
+    rc = run_sbtdd.main(["spec", "--project-root", str(bootstrapped_project)])
+    assert rc == 0
+
+    # Stub the parts that require a real toolchain.
+    monkeypatch.setattr(auto_cmd, "check_environment", lambda *a, **k: _ok_dep_report())
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+
+    # commit_create fakes that actually create a real git commit (so HEAD advances).
+    def fake_commit(prefix, message, cwd=None):
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", f"{prefix}: {message}"],
+            cwd=cwd or str(bootstrapped_project),
+            check=True,
+            capture_output=True,
+        )
+        return "ok"
+
+    monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+    monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+    # Short-circuit the pre-merge internals -- they are exercised by their own
+    # unit tests; here we only need a GO verdict to flow through.
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+
+    def fake_loop2(root, shadow, threshold):
+        return make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+
+    def fake_write_verdict(v, target, timestamp=None):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-04-21T00:00:00Z",
+                    "verdict": getattr(v, "verdict", "GO"),
+                    "degraded": getattr(v, "degraded", False),
+                    "conditions": [],
+                    "findings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", fake_write_verdict)
+
+    # Avoid running the real sec.M.0.1 verification inside finalize's checklist.
+    monkeypatch.setattr(finalize_cmd, "_checklist", lambda *a, **kw: [("ok", True, "")])
+
+    rc = run_sbtdd.main(["auto", "--project-root", str(bootstrapped_project)])
+    assert rc == 0
+    assert (bootstrapped_project / ".claude" / "auto-run.json").exists()
+    assert (bootstrapped_project / ".claude" / "magi-verdict.json").exists()
+    verdict = json.loads(
+        (bootstrapped_project / ".claude" / "magi-verdict.json").read_text(encoding="utf-8")
+    )
+    assert verdict["degraded"] is False
+    state = json.loads(
+        (bootstrapped_project / ".claude" / "session-state.json").read_text(encoding="utf-8")
+    )
+    assert state["current_phase"] == "done"
+    assert state["current_task_id"] is None
