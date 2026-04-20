@@ -22,7 +22,9 @@ then sees :class:`errors.QuotaExhaustedError` and exits 11.
 from __future__ import annotations
 
 import subprocess
+import sys as _sys
 from dataclasses import dataclass
+from typing import Callable
 
 import quota_detector
 import subprocess_utils
@@ -102,3 +104,51 @@ def invoke_skill(
         stdout=result.stdout,
         stderr=result.stderr,
     )
+
+
+# NOTE: wrappers must call invoke_skill via module attribute (not closure capture)
+# so tests can monkeypatch "superpowers_dispatch.invoke_skill" at runtime.
+# Fix for MAGI Checkpoint 2 iter 1 CRITICAL 1 (melchior): closure binding
+# made monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake) a no-op.
+# The wrapper resolves ``invoke_skill`` by reaching into the module's own
+# namespace at call time (``sys.modules[__name__].invoke_skill``), which IS
+# what ``monkeypatch.setattr`` replaces.
+
+
+def _make_wrapper(
+    skill_name: str,
+) -> Callable[..., SkillResult]:
+    """Return a typed wrapper function bound to ``skill_name``.
+
+    Resolves ``invoke_skill`` at call time via the module's own attribute
+    table so ``monkeypatch.setattr('superpowers_dispatch.invoke_skill', ...)``
+    takes effect in tests.
+    """
+
+    def _wrapper(
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+    ) -> SkillResult:
+        module = _sys.modules[__name__]
+        fn = module.invoke_skill  # late-bound: tests can replace via monkeypatch
+        result: SkillResult = fn(skill_name, args=args, timeout=timeout, cwd=cwd)
+        return result
+
+    _wrapper.__name__ = skill_name.replace("-", "_")
+    _wrapper.__doc__ = f"Invoke the /{skill_name} superpowers skill."
+    return _wrapper
+
+
+brainstorming = _make_wrapper("brainstorming")
+writing_plans = _make_wrapper("writing-plans")
+test_driven_development = _make_wrapper("test-driven-development")
+verification_before_completion = _make_wrapper("verification-before-completion")
+requesting_code_review = _make_wrapper("requesting-code-review")
+receiving_code_review = _make_wrapper("receiving-code-review")
+executing_plans = _make_wrapper("executing-plans")
+subagent_driven_development = _make_wrapper("subagent-driven-development")
+dispatching_parallel_agents = _make_wrapper("dispatching-parallel-agents")
+systematic_debugging = _make_wrapper("systematic-debugging")
+using_git_worktrees = _make_wrapper("using-git-worktrees")
+finishing_a_development_branch = _make_wrapper("finishing-a-development-branch")

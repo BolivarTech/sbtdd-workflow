@@ -95,3 +95,90 @@ def test_invoke_skill_wraps_timeout_as_validation_error(monkeypatch):
     monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
     with pytest.raises(ValidationError, match="timed out"):
         invoke_skill("writing-plans")
+
+
+def test_typed_wrappers_cover_all_twelve_skills(monkeypatch):
+    """One typed wrapper per superpowers skill; each calls invoke_skill."""
+    from superpowers_dispatch import (
+        SkillResult,
+        brainstorming,
+        dispatching_parallel_agents,
+        executing_plans,
+        finishing_a_development_branch,
+        receiving_code_review,
+        requesting_code_review,
+        subagent_driven_development,
+        systematic_debugging,
+        test_driven_development,
+        using_git_worktrees,
+        verification_before_completion,
+        writing_plans,
+    )
+
+    calls: list[str] = []
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        calls.append(skill)
+        return SkillResult(skill=skill, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    brainstorming(["spec.md"])
+    writing_plans(["behavior.md"])
+    test_driven_development()
+    verification_before_completion()
+    requesting_code_review()
+    receiving_code_review()
+    executing_plans(["plan.md"])
+    subagent_driven_development()
+    dispatching_parallel_agents()
+    systematic_debugging()
+    using_git_worktrees()
+    finishing_a_development_branch()
+    assert calls == [
+        "brainstorming",
+        "writing-plans",
+        "test-driven-development",
+        "verification-before-completion",
+        "requesting-code-review",
+        "receiving-code-review",
+        "executing-plans",
+        "subagent-driven-development",
+        "dispatching-parallel-agents",
+        "systematic-debugging",
+        "using-git-worktrees",
+        "finishing-a-development-branch",
+    ]
+
+
+def test_typed_wrappers_forward_args_and_timeout(monkeypatch):
+    from superpowers_dispatch import SkillResult, brainstorming
+
+    captured: dict = {}
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        captured["skill"] = skill
+        captured["args"] = args
+        captured["timeout"] = timeout
+        return SkillResult(skill=skill, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    brainstorming(args=["x", "y"], timeout=900)
+    assert captured["skill"] == "brainstorming"
+    assert captured["args"] == ["x", "y"]
+    assert captured["timeout"] == 900
+
+
+def test_wrapper_monkeypatch_propagates_through_module_attr(monkeypatch):
+    """Regression guard for the closure-rebind bug (MAGI ckpt2 CRITICAL 1)."""
+    from superpowers_dispatch import SkillResult, brainstorming
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        return SkillResult(skill=skill, returncode=0, stdout="patched", stderr="")
+
+    # Must patch via the module attribute, which the wrapper resolves at call time.
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    result = brainstorming()
+    assert result.stdout == "patched", (
+        "wrapper closure captured invoke_skill; monkeypatch must replace "
+        "module attribute and be picked up via sys.modules[__name__].invoke_skill"
+    )
