@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -306,33 +307,51 @@ def _phase5_relocate(staging: Path, dest_root: Path) -> list[Path]:
     return created
 
 
-def _mkdir_tracked(directory: Path, dest_root: Path, created_dirs: list[Path]) -> None:
-    """Create ``directory`` and record every ancestor freshly made under dest_root.
+def _collect_created_dirs(directory: Path, dest_root: Path) -> list[Path]:
+    """Return the ancestors of ``directory`` missing under ``dest_root``.
 
-    Acts like ``directory.mkdir(parents=True, exist_ok=True)`` but also
-    appends to ``created_dirs`` every directory from ``directory`` up
-    toward (but not including) ``dest_root`` that did NOT exist prior
-    to the call. The ordering preserves descendants-AFTER-ancestors
-    so the rollback handler can walk the list in reverse and call
-    ``os.rmdir`` leaf-to-root without violating the "only empty dirs
-    can be removed" contract.
+    Pure helper (no side effects): walks from ``directory`` up toward
+    ``dest_root`` and returns, in top-down order (ancestors first), every
+    directory that does NOT yet exist. Returned list is suitable for
+    feeding into a ``mkdir()`` loop (create parents before descendants)
+    AND into ``reversed()`` for rollback (remove descendants before
+    parents). The list excludes ``dest_root`` itself and stops walking
+    at the first existing directory or at the filesystem root (as a
+    safety backstop when ``directory`` is not a descendant of
+    ``dest_root`` -- a programmer-error case).
+
+    Args:
+        directory: The deepest directory to prepare.
+        dest_root: Walk terminator; never returned in the list.
+
+    Returns:
+        Ancestors-first list of missing directories under ``dest_root``.
     """
-    # Walk from ``directory`` up to ``dest_root`` collecting missing ancestors.
-    # Stop at ``dest_root`` OR at the filesystem root (where ``cursor.parent``
-    # returns ``cursor``); the latter only triggers if ``directory`` is not
-    # under ``dest_root`` (programmer error) -- we fall back to no tracking
-    # rather than looping forever.
     pending: list[Path] = []
     cursor = directory
     while cursor != dest_root:
         if cursor.parent == cursor:
-            return  # reached FS root without hitting dest_root; bail safely
+            # Reached FS root without hitting dest_root (programmer error);
+            # bail safely with whatever we collected so far.
+            return list(reversed(pending))
         if cursor.exists():
             break
         pending.append(cursor)
         cursor = cursor.parent
-    # Parents-first so inner dirs can be mkdir()d after their parent exists.
-    for path in reversed(pending):
+    return list(reversed(pending))
+
+
+def _mkdir_tracked(directory: Path, dest_root: Path, created_dirs: list[Path]) -> None:
+    """Create ``directory`` recording ancestors freshly made under dest_root.
+
+    Acts like ``directory.mkdir(parents=True, exist_ok=True)`` but also
+    appends to ``created_dirs`` every ancestor this call actually
+    created. Ordering: parents-first (descendants after their parents),
+    so the rollback handler can walk ``created_dirs`` in reverse and
+    call ``os.rmdir`` leaf-to-root without violating the "only empty
+    dirs can be removed" contract enforced by ``os.rmdir``.
+    """
+    for path in _collect_created_dirs(directory, dest_root):
         path.mkdir(exist_ok=False)
         created_dirs.append(path)
 
@@ -340,21 +359,24 @@ def _mkdir_tracked(directory: Path, dest_root: Path, created_dirs: list[Path]) -
 def _rollback_partial_copy(copied: list[Path], created_dirs: list[Path]) -> None:
     """Remove every file + empty subdir created during a failed relocate.
 
-    Helper for :func:`_phase5_relocate`: the rollback MUST NOT raise --
+    Helper for :func:`_phase5_relocate`. The rollback MUST NOT raise --
     doing so would mask the original copy failure (which carries the
     useful diagnostic like "disk full" or "permission denied"). Unlink
     failures (e.g. another process has the file open on Windows) are
     swallowed because the caller will observe them on the next
     ``/sbtdd init`` retry via the Phase 1 dependency check.
 
-    Directory removal uses ``os.rmdir`` (strict: fails if non-empty)
-    and walks ``created_dirs`` in reverse so leaves are removed before
-    their parents. This guarantees we only remove directories the copy
-    itself created; any dir the user may have populated concurrently
-    would trigger ``OSError`` on ``rmdir`` which we swallow.
+    Invariant (the thing this helper guarantees and tests assert):
+    after ``_phase5_relocate`` raises, ``dest_root`` is byte-identical
+    to its pre-invocation state EXCEPT for possible leftover files that
+    a concurrent external process grabbed during the copy (racy Windows
+    handle holds, antivirus, etc.). Nothing the plugin itself created
+    survives: every copied file is unlinked, every ancestor the plugin
+    materialised via ``_mkdir_tracked`` is removed leaf-to-root.
+    Directory removal uses ``os.rmdir`` (strict: fails if non-empty);
+    this deliberately acts as a safety check so we can only delete
+    dirs the copy itself produced.
     """
-    import os as _os
-
     for path in copied:
         try:
             path.unlink(missing_ok=True)
@@ -362,7 +384,7 @@ def _rollback_partial_copy(copied: list[Path], created_dirs: list[Path]) -> None
             pass
     for directory in reversed(created_dirs):
         try:
-            _os.rmdir(directory)
+            os.rmdir(directory)
         except OSError:
             pass
 
