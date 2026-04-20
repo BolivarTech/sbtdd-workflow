@@ -469,14 +469,18 @@ def _check_binary(binary: str, display: str) -> DependencyCheck:
     combined = (result.stdout or result.stderr).strip()
     expected_re = _RUST_VERSION_REGEXES.get(binary)
     if expected_re is not None and not expected_re.match(combined):
+        first_line = combined.splitlines()[0] if combined else "(empty)"
         return DependencyCheck(
             name=display,
             status="BROKEN",
             detail=(
                 f"{label} --version emitted unexpected format (parse failed): "
-                f"{combined.splitlines()[0] if combined else '(empty)'}"
+                f"{first_line}. Expected pattern: {expected_re.pattern!r}."
             ),
-            remediation=f"Reinstall {binary} (its `--version` output looks malformed)",
+            remediation=(
+                f"Reinstall {binary} so `--version` prints the canonical "
+                f"`<shim-name> <major>.<minor>.<patch>` prefix."
+            ),
         )
     detail = combined.splitlines()[0] if combined else f"{binary} present"
     return DependencyCheck(
