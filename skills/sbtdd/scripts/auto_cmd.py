@@ -607,6 +607,15 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
     and all callers live inside this repo, the stricter signature is
     safe. Task 17 grep-checks for regressions.
 
+    Atomicity contract (MAGI Loop 2 D iter 1 Caspar): the on-disk file
+    is always either the fully-formed previous audit or the fully-formed
+    new audit -- never a truncated half-write. A process killed between
+    the tmp-write and the ``os.replace`` call leaves the previous
+    ``auto-run.json`` intact, preserving the "last-persisted audit =
+    truth" invariant that ``resume_cmd`` relies on. The pattern mirrors
+    :func:`state_file.save` to keep the two state-on-disk writers
+    consistent.
+
     Args:
         path: Absolute path to ``auto-run.json`` (parent is created).
         payload: :class:`AutoRunAudit` instance, validated before write.
@@ -614,6 +623,8 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
     Raises:
         TypeError: ``payload`` is not an :class:`AutoRunAudit` instance.
         ValidationError: ``payload.validate_schema`` failed.
+        OSError: ``os.replace`` failed; tmp file cleaned up before
+            re-raising so nothing leaks.
     """
     if not isinstance(payload, AutoRunAudit):
         raise TypeError(
