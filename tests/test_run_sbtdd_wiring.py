@@ -45,3 +45,10 @@ def test_dispatcher_routes_init_to_init_cmd():
     import run_sbtdd
 
     assert run_sbtdd.SUBCOMMAND_DISPATCH["init"] is init_cmd.main
+
+
+def test_dispatcher_routes_spec_to_spec_cmd():
+    import run_sbtdd
+    import spec_cmd
+
+    assert run_sbtdd.SUBCOMMAND_DISPATCH["spec"] is spec_cmd.main
