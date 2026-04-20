@@ -217,6 +217,58 @@ def test_gitignore_fragment_has_header_comment():
     assert "SBTDD" in raw or "sbtdd" in raw
 
 
+def test_all_templates_expand_cleanly_from_snake_case_context():
+    """Every template expands to zero residual ``{...}`` tokens from PluginConfig-shaped context.
+
+    MAGI Loop 2 Milestone B iter 1 Finding 3 (caspar, WARNING): the
+    placeholder convention is snake_case matching PluginConfig field
+    names. Any PascalCase placeholder (eg. ``{Author}``, ``{ErrorType}``)
+    would survive expansion when Milestone C ``init_cmd`` builds the
+    context from ``dataclasses.asdict(config)`` and silently leave
+    literal tokens in the generated project files. This test locks the
+    convention: a canonical snake_case context must yield zero residual
+    ``{identifier}`` tokens in every template under ``templates/``.
+    """
+    import re
+
+    from templates import expand
+
+    context = {
+        # PluginConfig fields (snake_case).
+        "stack": "python",
+        "author": "Test Author",
+        "error_type": "TestErr",
+        "verification_commands": "pytest / ruff / mypy",
+        # Tolerate additional fields that future templates may reference.
+        "plan_path": "planning/claude-plan-tdd.md",
+        "plan_org_path": "planning/claude-plan-tdd-org.md",
+        "spec_base_path": "sbtdd/spec-behavior-base.md",
+        "spec_path": "sbtdd/spec-behavior.md",
+        "state_file_path": ".claude/session-state.json",
+        "magi_threshold": "GO_WITH_CAVEATS",
+        "magi_max_iterations": "3",
+        "auto_magi_max_iterations": "5",
+        "auto_verification_retries": "3",
+        "tdd_guard_enabled": "true",
+        "worktree_policy": "opt-in",
+    }
+    # Regex that matches ``{identifier}`` tokens -- the templates use simple
+    # single-brace placeholders, not double-brace or shell syntax.
+    residual_re = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}")
+    # Only template files that go through expand() at runtime are relevant.
+    # settings.json.template is literal JSON (no placeholders); gitignore.fragment
+    # is literal; conftest.py.template is literal Python. spec-behavior-base uses
+    # <REPLACE: ...> markers, not brace placeholders.
+    for name in ("CLAUDE.local.md.template", "plugin.local.md.template"):
+        raw = (TEMPLATES_DIR / name).read_text(encoding="utf-8")
+        out = expand(raw, context)
+        residuals = residual_re.findall(out)
+        assert not residuals, (
+            f"{name}: residual placeholders {residuals} after snake_case expansion; "
+            f"placeholders must match PluginConfig field names (snake_case)"
+        )
+
+
 def test_plugin_local_template_has_all_required_keys():
     raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
     required = [
