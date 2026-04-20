@@ -63,8 +63,19 @@ def _print_usage() -> None:
 
 
 def _exit_code_for(exc: SBTDDError) -> int:
-    """Look up ``type(exc)`` in :data:`EXIT_CODES`; fall back to 1 when unknown."""
-    return EXIT_CODES.get(type(exc), 1)
+    """Walk ``type(exc).__mro__`` and return the first registered exit code.
+
+    Direct ``type(exc)`` lookup misses SBTDDError subclasses that are not
+    themselves registered (eg. future ``GitCommitError(CommitError)`` or
+    ``DerivedDriftError(DriftError)``), silently falling back to exit 1
+    and erasing the ancestor's semantics. Walking the MRO returns the
+    closest registered ancestor instead, preserving the taxonomy as the
+    hierarchy grows (MAGI Loop 2 Milestone B iter 1, Finding 1).
+    """
+    for cls in type(exc).__mro__:
+        if cls in EXIT_CODES:
+            return EXIT_CODES[cls]
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
