@@ -125,3 +125,104 @@ def test_init_aborts_when_stack_missing_non_interactive(
                 str(tmp_path / "plugins"),
             ]
         )
+
+
+def _setup_dest_root(tmp_path: Path) -> Path:
+    """Create a dest_root directory inside tmp_path."""
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    return dest
+
+
+def test_init_creates_claude_local_md_with_author_and_stack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy-path Phase 3a + downstream phases: CLAUDE.local.md lands in dest_root."""
+    import init_cmd
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+    rc = init_cmd.main(
+        [
+            "--stack",
+            "python",
+            "--author",
+            "Julian Tester",
+            "--project-root",
+            str(dest),
+            "--plugins-root",
+            str(tmp_path / "plugins"),
+        ]
+    )
+    assert rc == 0
+    text = (dest / "CLAUDE.local.md").read_text(encoding="utf-8")
+    assert "Julian Tester" in text
+    assert "python" in text
+    assert "pytest" in text
+
+
+def test_init_creates_plugin_local_md_with_valid_yaml_frontmatter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import init_cmd
+    from config import load_plugin_local
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+    init_cmd.main(
+        [
+            "--stack",
+            "python",
+            "--author",
+            "Julian Tester",
+            "--project-root",
+            str(dest),
+            "--plugins-root",
+            str(tmp_path / "plugins"),
+        ]
+    )
+    cfg = load_plugin_local(dest / ".claude" / "plugin.local.md")
+    assert cfg.stack == "python"
+    assert cfg.author == "Julian Tester"
+
+
+def test_init_phase3a_writes_only_to_tempdir_not_dest_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At the instant Phase 4 runs, dest_root is still untouched."""
+    import init_cmd
+    from errors import PreconditionError
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+
+    observed: dict[str, bool] = {"ran": False}
+
+    def fake_smoke(staging: Path) -> None:
+        # At this point Phase 3a (+ 3b) have written to staging,
+        # and dest_root must still be bare.
+        assert (staging / "CLAUDE.local.md").exists()
+        assert (staging / ".claude" / "plugin.local.md").exists()
+        assert not (dest / "CLAUDE.local.md").exists()
+        assert not (dest / ".claude" / "plugin.local.md").exists()
+        observed["ran"] = True
+        raise PreconditionError("stop-before-phase-5")
+
+    monkeypatch.setattr(init_cmd, "_phase4_smoke_test", fake_smoke)
+    with pytest.raises(PreconditionError):
+        init_cmd.main(
+            [
+                "--stack",
+                "python",
+                "--author",
+                "Julian Tester",
+                "--project-root",
+                str(dest),
+                "--plugins-root",
+                str(tmp_path / "plugins"),
+            ]
+        )
+    assert observed["ran"] is True
+    # After the abort, dest_root remains bare.
+    assert not (dest / "CLAUDE.local.md").exists()
+    assert not (dest / ".claude" / "plugin.local.md").exists()
