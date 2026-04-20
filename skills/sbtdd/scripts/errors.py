@@ -54,6 +54,10 @@ class CommitError(SBTDDError):
     """Git commit subprocess failure (non-zero exit, timeout) — exit 1."""
 
 
+class Loop1DivergentError(SBTDDError):
+    """Loop 1 (/requesting-code-review) did not converge in 10 iterations (exit 7)."""
+
+
 _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     ValidationError: 1,
     StateFileError: 1,
@@ -61,6 +65,7 @@ _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     DependencyError: 2,
     PreconditionError: 2,
     DriftError: 3,
+    Loop1DivergentError: 7,
     MAGIGateError: 8,
     QuotaExhaustedError: 11,
 }

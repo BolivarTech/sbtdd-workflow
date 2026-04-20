@@ -68,7 +68,7 @@ def test_quota_exhausted_error_derives_from_sbtdd():
     assert issubclass(QuotaExhaustedError, SBTDDError)
 
 
-def test_all_eight_subclasses_exist():
+def test_all_nine_subclasses_exist():
     import errors
 
     expected = {
@@ -80,9 +80,24 @@ def test_all_eight_subclasses_exist():
         "MAGIGateError",
         "QuotaExhaustedError",
         "CommitError",
+        "Loop1DivergentError",
     }
     actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
+
+
+def test_loop1_divergent_error_derives_from_sbtdd():
+    from errors import Loop1DivergentError, SBTDDError
+
+    assert issubclass(Loop1DivergentError, SBTDDError)
+    with pytest.raises(SBTDDError):
+        raise Loop1DivergentError("did not converge")
+
+
+def test_loop1_divergent_error_exit_code_is_7():
+    from errors import EXIT_CODES, Loop1DivergentError
+
+    assert EXIT_CODES[Loop1DivergentError] == 7
 
 
 def test_commit_error_derives_from_sbtdd():
@@ -116,6 +131,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         CommitError,
         DependencyError,
         DriftError,
+        Loop1DivergentError,
         MAGIGateError,
         PreconditionError,
         QuotaExhaustedError,
@@ -132,6 +148,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         MAGIGateError,
         QuotaExhaustedError,
         CommitError,
+        Loop1DivergentError,
     }
     assert set(EXIT_CODES.keys()) == expected_classes
 
@@ -175,6 +192,7 @@ def test_mro_is_flat_single_inheritance():
         CommitError,
         DependencyError,
         DriftError,
+        Loop1DivergentError,
         MAGIGateError,
         PreconditionError,
         QuotaExhaustedError,
@@ -192,6 +210,7 @@ def test_mro_is_flat_single_inheritance():
         MAGIGateError,
         QuotaExhaustedError,
         CommitError,
+        Loop1DivergentError,
     ]
     for cls in subclasses:
         assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"

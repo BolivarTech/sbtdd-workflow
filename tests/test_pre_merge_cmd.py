@@ -113,3 +113,148 @@ def test_pre_merge_aborts_on_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     )
     with pytest.raises(DriftError):
         pre_merge_cmd.main(["--project-root", str(tmp_path)])
+
+
+def _seed_plugin_local(tmp_path: Path) -> None:
+    """Copy the valid-python plugin.local.md fixture into tmp_path/.claude."""
+    import shutil
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    fixture = Path(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md"
+    shutil.copy(fixture, tmp_path / ".claude" / "plugin.local.md")
+
+
+def _make_skill_result(stdout: str = "", returncode: int = 0) -> object:
+    """Return a minimal SkillResult-like object for dispatcher monkeypatching."""
+    from superpowers_dispatch import SkillResult
+
+    return SkillResult(skill="stub", returncode=returncode, stdout=stdout, stderr="")
+
+
+def test_pre_merge_loop1_exits_on_clean_to_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Loop 1 returns immediately when first call already clean-to-go."""
+    import pre_merge_cmd
+    import superpowers_dispatch
+
+    _setup_git_repo(tmp_path)
+    _seed_state(tmp_path, current_phase="done")
+    _seed_plan_all_done(tmp_path)
+    _seed_plugin_local(tmp_path)
+
+    calls = {"req": 0, "rcv": 0}
+
+    def fake_requesting(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        calls["req"] += 1
+        return _make_skill_result(stdout="Review: clean-to-go")
+
+    def fake_receiving(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        calls["rcv"] += 1
+        return _make_skill_result(stdout="")
+
+    monkeypatch.setattr(superpowers_dispatch, "requesting_code_review", fake_requesting)
+    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
+    # Bypass drift: at state=done with current_task_id=None, the shipped
+    # heuristic defaults to "[ ]" which triggers the done+open-tasks drift
+    # rule -- unrelated to Loop 1 semantics under test.
+    monkeypatch.setattr(pre_merge_cmd, "detect_drift", lambda *a, **kw: None)
+    # Loop 2 stub: bypass for Loop-1-only test; pre_merge_cmd may still call
+    # _loop2 depending on Task order. Patch _loop2 to a no-op here.
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", lambda root, cfg, override: None, raising=False)
+    # Guard against unexpected MAGI verdict artifact write.
+    import magi_dispatch
+
+    monkeypatch.setattr(
+        magi_dispatch,
+        "write_verdict_artifact",
+        lambda *a, **kw: None,
+    )
+
+    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert calls["req"] == 1
+    assert calls["rcv"] == 0
+
+
+def test_pre_merge_loop1_applies_fixes_until_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Loop 1 calls receiving-code-review between iterations until clean-to-go."""
+    import pre_merge_cmd
+    import superpowers_dispatch
+
+    _setup_git_repo(tmp_path)
+    _seed_state(tmp_path, current_phase="done")
+    _seed_plan_all_done(tmp_path)
+    _seed_plugin_local(tmp_path)
+
+    sequence = iter(
+        [
+            _make_skill_result(stdout="[WARNING] style issue"),
+            _make_skill_result(stdout="Review: clean-to-go"),
+        ]
+    )
+
+    calls = {"req": 0, "rcv": 0}
+
+    def fake_requesting(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        calls["req"] += 1
+        return next(sequence)
+
+    def fake_receiving(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        calls["rcv"] += 1
+        return _make_skill_result(stdout="")
+
+    monkeypatch.setattr(superpowers_dispatch, "requesting_code_review", fake_requesting)
+    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
+    monkeypatch.setattr(pre_merge_cmd, "detect_drift", lambda *a, **kw: None)
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", lambda root, cfg, override: None, raising=False)
+    import magi_dispatch
+
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **kw: None)
+
+    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert calls["req"] == 2
+    assert calls["rcv"] == 1
+
+
+def test_pre_merge_loop1_aborts_after_10_iterations_exit_7(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Always [WARNING] -> Loop1DivergentError; dispatcher maps to exit 7."""
+    import pre_merge_cmd
+    import superpowers_dispatch
+    from errors import EXIT_CODES, Loop1DivergentError
+
+    _setup_git_repo(tmp_path)
+    _seed_state(tmp_path, current_phase="done")
+    _seed_plan_all_done(tmp_path)
+    _seed_plugin_local(tmp_path)
+
+    def fake_requesting(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        return _make_skill_result(stdout="[WARNING] still unresolved")
+
+    def fake_receiving(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        return _make_skill_result(stdout="")
+
+    monkeypatch.setattr(superpowers_dispatch, "requesting_code_review", fake_requesting)
+    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
+    monkeypatch.setattr(pre_merge_cmd, "detect_drift", lambda *a, **kw: None)
+
+    with pytest.raises(Loop1DivergentError):
+        pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    assert EXIT_CODES[Loop1DivergentError] == 7
