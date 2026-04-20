@@ -33,6 +33,20 @@ from state_file import load as load_state
 #: callers cannot silently emit empty commits (MAGI Loop 2 iter 1 Finding 1).
 StageCallback = Callable[[], None]
 
+
+def _noop_stage() -> None:
+    """Named no-op staging callback used by :func:`_loop2`.
+
+    ``_loop2`` is the non-diff-producing caller of
+    :func:`_apply_condition_via_mini_cycle` -- the actual code edits come
+    from the upstream orchestrator which has already staged the files
+    before reaching loop2. The helper still rejects ``None`` (Finding 1)
+    so we hand it a named, documented no-op rather than an anonymous
+    ``lambda: None`` which obscures intent and defeats mypy hover info.
+    """
+    return None
+
+
 #: Safety valve for Loop 1 (sec.S.5.6, INV-11). Exceeding aborts with exit 7.
 _LOOP1_MAX: int = 10
 
@@ -376,24 +390,17 @@ def _loop2(
                     f"{len(verdict.conditions)} MAGI conditions; cannot proceed"
                 )
             for idx, cond in enumerate(accepted, start=1):
-                # ``_loop2`` itself does not produce the fix diff: the actual
-                # code modifications happen upstream (interactive pre-merge
-                # presents a UI prompt; auto mode dispatches the
-                # subagent-driven-development orchestrator before calling in).
-                # By the time we reach this point the caller has already
-                # staged the files for each phase, so we pass explicit no-op
-                # lambdas to the helper -- the helper still requires them to
-                # be non-None (Finding 1) which forces conscious callers, but
-                # the staging is a tree-inspection invariant rather than a
-                # side-effect of this function.
+                # ``_loop2`` does not produce the fix diff itself -- see
+                # :func:`_noop_stage` for why we hand named no-ops to the
+                # helper even though the Finding 1 contract forbids None.
                 _apply_condition_via_mini_cycle(
                     cond,
                     root,
                     iteration,
                     idx,
-                    stage_test=lambda: None,
-                    stage_fix=lambda: None,
-                    stage_refactor=lambda: None,
+                    stage_test=_noop_stage,
+                    stage_fix=_noop_stage,
+                    stage_refactor=_noop_stage,
                 )
             rejections.extend(f"iter {iteration} rejected: {c}" for c in rejected)
         if magi_dispatch.verdict_passes_gate(verdict, threshold):
