@@ -70,6 +70,13 @@ _LOW_RISK_KEYWORDS: tuple[str, ...] = (
 #: committed). See :func:`_write_magi_feedback_file` for the rationale.
 _MAGI_FEEDBACK_FILENAME: str = "magi-feedback.md"
 
+#: Filename where accepted MAGI conditions are surfaced to the user at the
+#: end of a blocked Loop 2 iteration. MAGI Loop 2 iter-3 redesign: the
+#: gate no longer orchestrates a mini-cycle it cannot populate (the fix
+#: diff must be authored by a human or subagent via ``close-phase``).
+#: Lives inside ``.claude/`` (gitignored, never committed).
+_MAGI_CONDITIONS_FILENAME: str = "magi-conditions.md"
+
 
 def _build_parser() -> argparse.ArgumentParser:
     """Return the argparse parser for ``sbtdd pre-merge``."""
@@ -320,6 +327,57 @@ def _apply_condition_via_mini_cycle(
     return test_sha, fix_sha, refactor_sha
 
 
+def _write_magi_conditions_file(
+    conditions: list[str], root: Path, verdict: magi_dispatch.MAGIVerdict, iteration: int
+) -> Path:
+    """Persist accepted MAGI conditions to ``.claude/magi-conditions.md``.
+
+    MAGI Loop 2 iter-3 redesign: ``_loop2`` no longer invokes a
+    mini-cycle for accepted conditions because it cannot synthesize the
+    code edits (they must come from human/subagent judgment via
+    ``close-phase``). Instead, the gate writes the accepted conditions to
+    this file, prints user-visible instructions, and raises
+    :class:`MAGIGateError` (exit 8). The user reads the file, applies
+    the fixes via ``close-phase`` (which has real TDD cycle support), and
+    re-runs ``pre-merge``. The feedback-for-rejections mechanism
+    (:func:`_write_magi_feedback_file`) is preserved for sterile-loop
+    breaking.
+
+    Args:
+        conditions: Accepted conditions (one markdown bullet per entry).
+        root: Project root directory (file lands in ``root/.claude/``).
+        verdict: The MAGI verdict whose conditions triggered this write
+            (captured in the file header for the audit trail).
+        iteration: 1-indexed MAGI iteration number (for the header).
+
+    Returns:
+        Absolute path to the written file.
+    """
+    path = root / ".claude" / _MAGI_CONDITIONS_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "# MAGI Loop 2 -- accepted conditions pending\n\n"
+    body += (
+        f"MAGI iteration {iteration} returned verdict `{verdict.verdict}` with "
+        "the following conditions accepted by `/receiving-code-review`. They are "
+        "BLOCKING the pre-merge gate until applied.\n\n"
+    )
+    body += "## Instructions\n\n"
+    body += (
+        "1. For each condition below, apply the fix through the normal TDD "
+        "cycle by running `sbtdd close-phase` for Red, Green, and Refactor.\n"
+        "2. Once every condition is materialised as commits on the branch, "
+        "re-run `sbtdd pre-merge` to re-evaluate the gate.\n"
+        "3. Rejected conditions (if any) are tracked separately in "
+        "`.claude/magi-feedback.md` so the next MAGI invocation receives "
+        "their rationale as context.\n\n"
+    )
+    body += "## Accepted conditions\n\n"
+    for cond in conditions:
+        body += f"- {cond}\n"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
 def _write_magi_feedback_file(root: Path, rejections: list[str]) -> Path:
     """Persist rejection history to ``.claude/magi-feedback.md`` for next iter.
 
@@ -363,11 +421,25 @@ def _loop2(
 ) -> magi_dispatch.MAGIVerdict:
     """Run Loop 2 -- ``/magi:magi`` with INV-28 + INV-29 (sec.S.5.6).
 
-    Delegates ``/receiving-code-review`` gating to
-    :func:`_parse_receiving_review`, applies accepted conditions via
-    :func:`_apply_condition_via_mini_cycle`, feeds rejections to the next
-    iteration via :func:`_write_magi_feedback_file`. Short-circuits on
-    STRONG_NO_GO (INV-28 exception). Caps iterations at
+    MAGI Loop 2 iter-3 redesign: the gate no longer orchestrates a
+    three-commit mini-cycle for accepted conditions. ``_loop2`` cannot
+    synthesize code edits -- the fix diff must come from human or
+    subagent judgment via :mod:`close_phase_cmd` (which has real TDD
+    cycle support). When ``/receiving-code-review`` accepts one or more
+    MAGI conditions, ``_loop2``:
+
+    1. Writes the accepted conditions to ``.claude/magi-conditions.md``
+       via :func:`_write_magi_conditions_file` (with user-visible
+       instructions on how to materialise the fixes).
+    2. Raises :class:`MAGIGateError` (exit 8).
+
+    The user then applies each accepted condition via ``sbtdd
+    close-phase`` and re-runs ``sbtdd pre-merge``. The next run
+    re-evaluates the gate against the updated diff. Rejected conditions
+    still feed :func:`_write_magi_feedback_file` so subsequent MAGI
+    invocations receive the rationale as context (sterile-loop breaker
+    preserved). STRONG_NO_GO short-circuits the loop immediately
+    (INV-28 exception). Iterations are capped at
     ``cfg.magi_max_iterations``.
 
     Args:
@@ -379,14 +451,16 @@ def _loop2(
             never lower it.
 
     Returns:
-        The last :class:`magi_dispatch.MAGIVerdict` that cleared the gate.
+        The last :class:`magi_dispatch.MAGIVerdict` that cleared the gate
+        WITH zero accepted conditions pending.
 
     Raises:
-        MAGIGateError: STRONG_NO_GO at any iteration, OR iterations
-            exhausted without reaching ``threshold`` full.
+        MAGIGateError: STRONG_NO_GO at any iteration, accepted
+            conditions pending (exit 8 -- conditions file written), or
+            iterations exhausted without reaching ``threshold`` full.
         ValidationError: Unknown threshold override, or
-            ``/receiving-code-review`` produced no decisions for non-empty
-            MAGI conditions.
+            ``/receiving-code-review`` produced no decisions for
+            non-empty MAGI conditions.
     """
     threshold = threshold_override or cfg.magi_threshold
     if _safe_threshold_rank(threshold) < _safe_threshold_rank(cfg.magi_threshold):
@@ -413,25 +487,21 @@ def _loop2(
                     f"/receiving-code-review produced no decisions for "
                     f"{len(verdict.conditions)} MAGI conditions; cannot proceed"
                 )
-            for idx, cond in enumerate(accepted, start=1):
-                # ``_loop2`` does not produce the fix diff itself -- see
-                # :func:`_noop_stage` for why we hand named no-ops to the
-                # helper even though the Finding 1 contract forbids None.
-                _apply_condition_via_mini_cycle(
-                    cond,
-                    root,
-                    iteration,
-                    idx,
-                    stage_test=_noop_stage,
-                    stage_fix=_noop_stage,
-                    stage_refactor=_noop_stage,
-                )
             rejections.extend(f"iter {iteration} rejected: {c}" for c in rejected)
+            if accepted:
+                # iter-3 redesign: surface to the user via conditions
+                # file instead of emitting empty mini-cycle commits.
+                conditions_path = _write_magi_conditions_file(accepted, root, verdict, iteration)
+                raise MAGIGateError(
+                    f"MAGI iter {iteration} produced {len(accepted)} accepted "
+                    f"condition(s); apply them via `sbtdd close-phase` and "
+                    f"re-run `sbtdd pre-merge`. See {conditions_path}."
+                )
+            # All conditions rejected: feedback is written next iter;
+            # re-invoke MAGI to see if the rationale drops or escalates
+            # the verdict (sterile-loop breaker).
+            continue
         if magi_dispatch.verdict_passes_gate(verdict, threshold):
-            if verdict.verdict == "GO_WITH_CAVEATS" and not _conditions_low_risk(
-                verdict.conditions
-            ):
-                continue  # structural condition -- re-invoke to confirm
             return verdict
     raise MAGIGateError(
         f"MAGI did not converge to full {threshold}+ after {cfg.magi_max_iterations} iterations"
