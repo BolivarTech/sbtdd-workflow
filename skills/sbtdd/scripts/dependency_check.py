@@ -12,6 +12,7 @@ never short-circuits. Caller (init, status) decides abort vs report-only.
 
 from __future__ import annotations
 
+import re as _re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,9 @@ from typing import Mapping
 
 import subprocess_utils
 from errors import ValidationError
+
+#: Regex extracting ``major.minor[.patch]`` from ``python --version`` output.
+_PYTHON_VERSION_RE: _re.Pattern[str] = _re.compile(r"^Python\s+(\d+)\.(\d+)(?:\.(\d+))?")
 
 #: Allowed values for DependencyCheck.status (sec.S.5.1.1 reporte formato).
 VALID_STATUSES: tuple[str, ...] = ("OK", "MISSING", "BROKEN")
@@ -95,6 +99,59 @@ def check_python() -> DependencyCheck:
         status="BROKEN",
         detail=f"Python {v.major}.{v.minor}.{v.micro} < 3.9 required",
         remediation="Install Python 3.9+ from python.org",
+    )
+
+
+def _check_python_binary() -> DependencyCheck:
+    """Verify ``python --version`` parses to >= 3.9 (INV-19 hardening).
+
+    Complements :func:`check_python` which asserts
+    ``sys.version_info >= (3, 9)``. This check runs the ``python``
+    binary found on PATH and parses its reported version; it catches
+    the case where the plugin process runs under a 3.9+ interpreter
+    but the ``python`` on PATH (used to spawn subshells / reporter
+    pipelines) is stale.
+    """
+    binary = shutil.which("python")
+    if binary is None:
+        return DependencyCheck(
+            name="python binary",
+            status="MISSING",
+            detail="`python` not found on PATH",
+            remediation="Install Python 3.9+ and ensure `python` is on PATH",
+        )
+    try:
+        result = subprocess_utils.run_with_timeout(["python", "--version"], timeout=5)
+    except subprocess.TimeoutExpired:
+        return DependencyCheck(
+            name="python binary",
+            status="BROKEN",
+            detail="`python --version` timed out",
+            remediation="Reinstall Python 3.9+",
+        )
+    output = (result.stdout + result.stderr).strip()
+    m = _PYTHON_VERSION_RE.match(output)
+    if not m:
+        return DependencyCheck(
+            name="python binary",
+            status="BROKEN",
+            detail=f"Cannot parse python --version output: {output!r}",
+            remediation="Reinstall Python 3.9+",
+        )
+    major, minor = int(m.group(1)), int(m.group(2))
+    version_str = f"{major}.{minor}" + (f".{m.group(3)}" if m.group(3) else "")
+    if (major, minor) < (3, 9):
+        return DependencyCheck(
+            name="python binary",
+            status="BROKEN",
+            detail=f"python binary reports {version_str}, < 3.9 required",
+            remediation="Install Python 3.9+ and ensure `python` is on PATH",
+        )
+    return DependencyCheck(
+        name="python binary",
+        status="OK",
+        detail=f"python {version_str}",
+        remediation=None,
     )
 
 
@@ -463,6 +520,7 @@ def check_environment(
     """
     checks: list[DependencyCheck] = []
     checks.append(check_python())
+    checks.append(_check_python_binary())  # Floor-enforcement hardening
     checks.append(check_git())
     checks.append(check_tdd_guard_binary())
     checks.append(check_tdd_guard_data_dir(project_root))

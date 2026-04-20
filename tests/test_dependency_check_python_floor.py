@@ -69,6 +69,7 @@ def test_check_python_binary_handles_missing_binary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import shutil
+
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     result = dependency_check._check_python_binary()
     assert result.status == "MISSING"
