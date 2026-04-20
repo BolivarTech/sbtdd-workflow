@@ -149,6 +149,48 @@ def test_spec_behavior_base_template_has_sbtdd_sections():
         assert section in raw, f"section '{section}' missing from spec template"
 
 
+def test_conftest_template_exists():
+    assert (TEMPLATES_DIR / "conftest.py.template").exists()
+
+
+def test_conftest_template_has_sbtdd_markers():
+    raw = (TEMPLATES_DIR / "conftest.py.template").read_text(encoding="utf-8")
+    assert "# --- SBTDD TDD-Guard reporter START ---" in raw
+    assert "# --- SBTDD TDD-Guard reporter END ---" in raw
+
+
+def test_conftest_template_has_required_pytest_hooks():
+    raw = (TEMPLATES_DIR / "conftest.py.template").read_text(encoding="utf-8")
+    for hook in (
+        "pytest_sessionstart",
+        "pytest_sessionfinish",
+        "pytest_runtest_makereport",
+    ):
+        assert hook in raw
+
+
+def test_conftest_template_writes_to_expected_test_json_path():
+    raw = (TEMPLATES_DIR / "conftest.py.template").read_text(encoding="utf-8")
+    assert ".claude/tdd-guard/data/test.json" in raw or (
+        ".claude" in raw and "tdd-guard" in raw and "test.json" in raw
+    )
+
+
+def test_conftest_template_is_valid_python(tmp_path):
+    import ast
+
+    raw = (TEMPLATES_DIR / "conftest.py.template").read_text(encoding="utf-8")
+    # Must parse cleanly as Python — no placeholders that break syntax.
+    ast.parse(raw)
+
+
+def test_conftest_template_has_author_header():
+    raw = (TEMPLATES_DIR / "conftest.py.template").read_text(encoding="utf-8")
+    assert "# Author:" in raw
+    assert "# Version:" in raw
+    assert "# Date:" in raw
+
+
 def test_plugin_local_template_has_all_required_keys():
     raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
     required = [

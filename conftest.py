@@ -1,6 +1,17 @@
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-19
+
+# Test isolation policy (MAGI Checkpoint 2 iter 2, caspar WARNING):
+# tests MUST use ``monkeypatch.setattr(...)`` / ``monkeypatch.setitem(...)``
+# to replace module attributes or dict items for the duration of a test.
+# Direct assignment (``superpowers_dispatch.invoke_skill = fake``) is
+# FORBIDDEN outside fixtures that explicitly yield-and-restore: it bypasses
+# pytest's auto-restore and can make later tests in the same session behave
+# non-deterministically depending on collection order. Every Task Step-1
+# code block in Milestones B/C/D already conforms — reviewers reject diffs
+# that break this rule.
+
 """Pytest plugin for tdd-guard integration.
 
 Captures test results and writes them to .claude/tdd-guard/data/test.json

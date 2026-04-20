@@ -1,0 +1,77 @@
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-19
+"""Pytest reporter for TDD-Guard (installed by /sbtdd init --stack python)."""
+
+# --- SBTDD TDD-Guard reporter START ---
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+_PROJECT_ROOT = Path(__file__).parent
+_DATA_DIR = _PROJECT_ROOT / ".claude" / "tdd-guard" / "data"
+_TEST_RESULTS_FILE = _DATA_DIR / "test.json"
+
+
+def pytest_sessionstart(session):
+    """Ensure the tdd-guard data directory exists before tests run."""
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Write test results to tdd-guard's expected JSON format."""
+    modules = {}
+    for item in session.items:
+        module_id = item.nodeid.split("::")[0]
+        report = getattr(item, "_tdd_guard_report", None)
+        state = "skipped"
+        errors = []
+        if report is not None:
+            if report.passed:
+                state = "passed"
+            elif report.failed:
+                state = "failed"
+                if report.longrepr:
+                    errors.append({
+                        "message": str(report.longrepr).split("\n")[-1],
+                        "stack": str(report.longrepr),
+                    })
+            elif report.skipped:
+                state = "skipped"
+        entry = {
+            "name": item.name,
+            "fullName": item.nodeid,
+            "state": state,
+        }
+        if errors:
+            entry["errors"] = errors
+        modules.setdefault(module_id, []).append(entry)
+
+    reason = "passed"
+    if exitstatus == pytest.ExitCode.INTERRUPTED:
+        reason = "interrupted"
+    elif exitstatus != pytest.ExitCode.OK:
+        reason = "failed"
+
+    result = {
+        "testModules": [
+            {"moduleId": mid, "tests": tests}
+            for mid, tests in modules.items()
+        ],
+        "reason": reason,
+    }
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _TEST_RESULTS_FILE.write_text(json.dumps(result, indent=2), encoding="utf-8")
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Capture the call-phase report for each test."""
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "call":
+        item._tdd_guard_report = report
+
+# --- SBTDD TDD-Guard reporter END ---
