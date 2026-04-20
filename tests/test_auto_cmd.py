@@ -522,3 +522,144 @@ def test_auto_phase2_inner_loop_entry_phase_respects_state(
 
     # Starting phase=green -> skips red; only green and refactor run for task 1.
     assert phases_seen == ["green", "refactor"]
+
+
+# ---------------------------------------------------------------------------
+# Task 29 -- Phase 3 pre-merge with elevated MAGI budget.
+# ---------------------------------------------------------------------------
+
+
+def _make_verdict(
+    verdict: str = "GO",
+    degraded: bool = False,
+    conditions: tuple[str, ...] = (),
+    findings: tuple[dict[str, object], ...] = (),
+) -> object:
+    """Return a MAGIVerdict matching the magi_dispatch dataclass contract."""
+    from magi_dispatch import MAGIVerdict
+
+    return MAGIVerdict(
+        verdict=verdict,
+        degraded=degraded,
+        conditions=conditions,
+        findings=findings,
+        raw_output=f'{{"verdict": "{verdict}"}}',
+    )
+
+
+def test_auto_phase3_invokes_loop1_and_loop2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stubs return clean + GO full; both loops run."""
+    import auto_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    from config import load_plugin_local
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    calls = {"loop1": 0, "loop2": 0}
+
+    def fake_loop1(root: Path) -> None:
+        calls["loop1"] += 1
+
+    def fake_loop2(root: Path, shadow_cfg: object, threshold: str | None) -> object:
+        calls["loop2"] += 1
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", fake_loop1)
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **k: None)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    verdict = auto_cmd._phase3_pre_merge(ns, cfg)
+    assert calls["loop1"] == 1
+    assert calls["loop2"] == 1
+    assert verdict is not None
+
+
+def test_auto_phase3_uses_auto_magi_max_iterations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cfg.auto_magi_max_iterations=5 passed through to Loop 2 as shadow cfg."""
+    import auto_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    from config import load_plugin_local
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+    # Sanity: fixture has magi=3, auto=5.
+    assert cfg.magi_max_iterations == 3
+    assert cfg.auto_magi_max_iterations == 5
+
+    captured: dict[str, object] = {}
+
+    def fake_loop2(root: Path, shadow_cfg: object, threshold: str | None) -> object:
+        captured["max_iter"] = getattr(shadow_cfg, "magi_max_iterations", None)
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **k: None)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    auto_cmd._phase3_pre_merge(ns, cfg)
+    assert captured["max_iter"] == 5
+
+
+def test_auto_phase3_respects_flag_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--magi-max-iterations=2 overrides the config default."""
+    import auto_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    from config import load_plugin_local
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    captured: dict[str, object] = {}
+
+    def fake_loop2(root: Path, shadow_cfg: object, threshold: str | None) -> object:
+        captured["max_iter"] = getattr(shadow_cfg, "magi_max_iterations", None)
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **k: None)
+
+    ns = auto_cmd._build_parser().parse_args(
+        ["--project-root", str(tmp_path), "--magi-max-iterations", "2"]
+    )
+    auto_cmd._phase3_pre_merge(ns, cfg)
+    assert captured["max_iter"] == 2
+
+
+def test_auto_phase3_aborts_on_strong_no_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STRONG_NO_GO iter 1 -> MAGIGateError propagates from Loop 2."""
+    import auto_cmd
+    import pre_merge_cmd
+    from config import load_plugin_local
+    from errors import MAGIGateError
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    def fake_loop2(root: Path, shadow_cfg: object, threshold: str | None) -> object:
+        raise MAGIGateError("STRONG_NO_GO at iter 1")
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    with pytest.raises(MAGIGateError):
+        auto_cmd._phase3_pre_merge(ns, cfg)

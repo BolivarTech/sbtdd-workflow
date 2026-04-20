@@ -272,6 +272,69 @@ def _phase2_task_loop(
     return current
 
 
+class _ShadowCfg:
+    """Minimal PluginConfig stand-in with ``magi_max_iterations`` overridden.
+
+    Built so :func:`pre_merge_cmd._loop2` can consume the same attribute
+    surface as a real :class:`config.PluginConfig` but with the elevated
+    ``auto_magi_max_iterations`` budget (INV / sec.S.5.8) substituted for
+    the interactive default. Carrying ``__dict__`` copies preserves every
+    other configuration field (threshold, plan_path, etc.) unchanged.
+    """
+
+    def __init__(self, base: PluginConfig, overrides: dict[str, object]) -> None:
+        self.__dict__.update(base.__dict__)
+        self.__dict__.update(overrides)
+
+
+def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
+    """Run Phase 3 -- pre-merge Loop 1 + Loop 2 with elevated MAGI budget.
+
+    Delegates to :mod:`pre_merge_cmd` helpers so the consensus logic and
+    verdict parsing stay single-sourced. The only difference vs
+    interactive ``/sbtdd pre-merge`` is the ``magi_max_iterations`` cap
+    which Auto elevates to ``cfg.auto_magi_max_iterations`` (default 5)
+    -- compensates for lack of human supervision on ambiguous caveats.
+
+    ``--magi-max-iterations`` on the CLI overrides both caps; no
+    validation is imposed here because the dispatcher already validates
+    the integer form.
+
+    Args:
+        ns: Parsed argparse namespace.
+        cfg: Plugin configuration.
+
+    Returns:
+        The :class:`magi_dispatch.MAGIVerdict` that cleared the gate --
+        later phases read it to decide whether to invoke finalize
+        semantics.
+
+    Raises:
+        Loop1DivergentError: Loop 1 non-convergence (exit 7).
+        MAGIGateError: STRONG_NO_GO or exhausted MAGI iterations (exit 8).
+    """
+    import magi_dispatch
+    import pre_merge_cmd
+
+    root: Path = ns.project_root
+    pre_merge_cmd._loop1(root)
+    max_iter = (
+        ns.magi_max_iterations
+        if ns.magi_max_iterations is not None
+        else cfg.auto_magi_max_iterations
+    )
+    threshold = ns.magi_threshold or cfg.magi_threshold
+    shadow = _ShadowCfg(cfg, {"magi_max_iterations": max_iter})
+    # mypy: _loop2 consumes the ``magi_max_iterations`` / ``magi_threshold`` /
+    # ``plan_path`` attributes via duck typing; the _ShadowCfg wrapper carries
+    # exactly those (plus every other PluginConfig field copied by
+    # ``__dict__.update``). Casting keeps the call site readable without
+    # forcing PluginConfig to grow a Protocol or a dataclasses.replace path.
+    verdict = pre_merge_cmd._loop2(root, shadow, threshold)  # type: ignore[arg-type]
+    magi_dispatch.write_verdict_artifact(verdict, root / ".claude" / "magi-verdict.json")
+    return verdict
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd auto (shoot-and-forget full-cycle)."""
     parser = _build_parser()
@@ -286,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
     state, cfg = _phase1_preflight(ns)
     if state.current_phase != "done":
         state = _phase2_task_loop(ns, state, cfg)
+    _phase3_pre_merge(ns, cfg)
     return 0
 
 
