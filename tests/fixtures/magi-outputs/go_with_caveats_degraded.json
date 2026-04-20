@@ -1,0 +1,8 @@
+{
+  "verdict": "GO WITH CAVEATS",
+  "degraded": true,
+  "conditions": ["add doctest to edge case"],
+  "findings": [
+    {"severity": "INFO", "message": "consider caching"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "verdict": "STRONG_NO_GO",
+  "degraded": false,
+  "conditions": [],
+  "findings": [
+    {"severity": "CRITICAL", "message": "architecture regression"}
+  ]
+}
