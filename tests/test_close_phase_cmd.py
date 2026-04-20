@@ -320,6 +320,17 @@ def test_close_phase_green_without_variant_raises_validation_error(
 def test_close_phase_refactor_cascades_to_close_task(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # type: ignore[no-untyped-def]
+    """Refactor-close cascades by invoking ``close_task_cmd.mark_and_advance``.
+
+    MAGI Loop 2 iter 1 Finding 6: the pre-fix implementation invoked
+    ``close_task_cmd.main(["--project-root", ...])``. Main runs its own
+    ``_preflight`` which re-evaluates drift (state=refactor + HEAD
+    ``refactor:`` was interpreted as drift), raising before the advance
+    could run. The fix switches to the public ``mark_and_advance`` API
+    which skips the precondition drift check and performs the state
+    advance directly. The test enforces this by making
+    ``close_task_cmd.main`` explode if invoked.
+    """
     import close_phase_cmd
     import close_task_cmd
 
@@ -327,27 +338,42 @@ def test_close_phase_refactor_cascades_to_close_task(
     captured: dict[str, object] = {}
     _install_happy_path_patches(monkeypatch, captured)
 
-    cascade_calls: list[list[str] | None] = []
+    advance_calls: list[object] = []
 
-    def fake_close_task_main(argv=None):  # type: ignore[no-untyped-def]
-        cascade_calls.append(argv)
-        return 0
+    def fake_mark_and_advance(state, root):  # type: ignore[no-untyped-def]
+        advance_calls.append((state.current_phase, str(root)))
+        return state
 
-    monkeypatch.setattr(close_task_cmd, "main", fake_close_task_main)
+    def fail_if_main_called(argv=None):  # type: ignore[no-untyped-def]
+        raise AssertionError(
+            "close_task_cmd.main must NOT be called as cascade target "
+            "post-Finding-6; use mark_and_advance directly"
+        )
+
+    monkeypatch.setattr(close_task_cmd, "mark_and_advance", fake_mark_and_advance)
+    monkeypatch.setattr(close_task_cmd, "main", fail_if_main_called)
 
     rc = close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "refa"])
     assert rc == 0
-    assert len(cascade_calls) == 1
-    argv = cascade_calls[0]
-    assert argv is not None
-    assert "--project-root" in argv
-    assert str(tmp_path) in argv
+    assert len(advance_calls) == 1
+    phase_arg, root_arg = advance_calls[0]  # type: ignore[misc]
+    # Refactor close passes the post-refactor SessionState (phase is
+    # still 'refactor' at the call site; mark_and_advance itself flips
+    # it to 'red'/'done' internally).
+    assert phase_arg == "refactor"
+    assert root_arg == str(tmp_path)
 
 
 def test_close_phase_refactor_creates_refactor_commit_before_cascade(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # type: ignore[no-untyped-def]
-    """Verify the refactor commit is recorded BEFORE close_task_cmd.main runs."""
+    """Refactor commit recorded BEFORE ``close_task_cmd.mark_and_advance`` runs.
+
+    Post-Finding-6: cascade target is ``mark_and_advance`` (the public
+    API), not ``close_task_cmd.main``. Ordering invariant unchanged;
+    main() explodes if invoked so the test also asserts the new call
+    path.
+    """
     import close_phase_cmd
     import close_task_cmd
 
@@ -356,7 +382,6 @@ def test_close_phase_refactor_creates_refactor_commit_before_cascade(
     _install_happy_path_patches(monkeypatch, captured)
 
     order: list[str] = []
-    original_fake_commit = None  # placeholder
 
     def track_commit(prefix, message, cwd=None):  # type: ignore[no-untyped-def]
         order.append(f"commit:{prefix}")
@@ -364,35 +389,46 @@ def test_close_phase_refactor_creates_refactor_commit_before_cascade(
 
     monkeypatch.setattr("close_phase_cmd.commit_create", track_commit)
 
-    def track_cascade(argv=None):  # type: ignore[no-untyped-def]
+    def track_cascade(state, root):  # type: ignore[no-untyped-def]
         order.append("cascade")
-        return 0
+        return state
 
-    monkeypatch.setattr(close_task_cmd, "main", track_cascade)
+    def fail_if_main_called(argv=None):  # type: ignore[no-untyped-def]
+        raise AssertionError("cascade must reach mark_and_advance, not main()")
+
+    monkeypatch.setattr(close_task_cmd, "mark_and_advance", track_cascade)
+    monkeypatch.setattr(close_task_cmd, "main", fail_if_main_called)
 
     close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "pulir"])
     # refactor commit must happen first, cascade afterwards.
     assert order == ["commit:refactor", "cascade"]
-    assert original_fake_commit is None  # placeholder use avoids unused-var lint
 
 
-def test_close_phase_refactor_returns_cascade_rc_on_failure(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_close_phase_refactor_propagates_cascade_exception(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # type: ignore[no-untyped-def]
-    """If close_task_cmd.main returns non-zero, propagate that rc + warn on stderr."""
+    """Post-Finding-6: ``mark_and_advance`` exceptions propagate unchanged.
+
+    With the direct public-API cascade, an error during the state
+    advance raises naturally (no rc return-code shim); the dispatcher
+    maps the exception to the sec.S.11.1 exit code. The refactor
+    commit remains landed because it happened before the cascade.
+    """
     import close_phase_cmd
     import close_task_cmd
+    from errors import PreconditionError
 
     _seed_state(tmp_path, current_phase="refactor")
     captured: dict[str, object] = {}
     _install_happy_path_patches(monkeypatch, captured)
 
-    monkeypatch.setattr(close_task_cmd, "main", lambda argv=None: 7)
+    def broken_advance(state, root):  # type: ignore[no-untyped-def]
+        raise PreconditionError("simulated advance failure")
 
-    rc = close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
-    assert rc == 7
-    err = capsys.readouterr().err
-    assert "close-task cascade failed" in err
+    monkeypatch.setattr(close_task_cmd, "mark_and_advance", broken_advance)
+
+    with pytest.raises(PreconditionError, match="simulated advance failure"):
+        close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
 
 
 def test_close_phase_verification_receives_project_root_as_cwd(
