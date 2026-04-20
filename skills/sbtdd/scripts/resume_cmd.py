@@ -150,12 +150,17 @@ def _decide_delegation(
       drives next close-phase themselves).
     - ``current_phase`` in TDD phases + tree dirty ->
       ``uncommitted-resolution`` (decision deferred to Phase 4).
-    - ``current_phase == 'done'`` + tree clean + no verdict ->
-      ``pre_merge_cmd`` (next natural step).
-    - ``current_phase == 'done'`` + tree clean + verdict present ->
-      ``finalize_cmd``.
     - ``current_phase == 'done'`` + tree dirty ->
       ``uncommitted-resolution``.
+    - ``current_phase == 'done'`` + tree clean + verdict present ->
+      ``finalize_cmd``.
+    - ``current_phase == 'done'`` + tree clean + no verdict +
+      ``auto-run.json`` present -> ``auto_cmd`` (MAGI Loop 2 iter 1
+      Finding 9: interrupted auto whose task loop completed; resume
+      auto so the elevated MAGI budget and audit trail are honoured).
+    - ``current_phase == 'done'`` + tree clean + no verdict +
+      no ``auto-run.json`` -> ``pre_merge_cmd`` (manual task loop
+      finished; run Loop 1 + Loop 2 interactively).
 
     Args:
         state: :class:`state_file.SessionState` (duck-typed to the
