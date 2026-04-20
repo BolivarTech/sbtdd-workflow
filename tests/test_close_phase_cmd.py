@@ -146,3 +146,172 @@ def test_close_phase_does_not_commit_when_verification_fails(
     with pytest.raises(ValidationError):
         close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "x"])
     assert called["commit"] is False
+
+
+def _install_happy_path_patches(
+    monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
+) -> None:
+    """Patch drift + verification + git rev-parse + commits.create."""
+    from types import SimpleNamespace
+
+    captured.setdefault("commit_calls", [])
+    captured.setdefault("new_sha", "abc9999")
+
+    monkeypatch.setattr("close_phase_cmd.detect_drift", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "close_phase_cmd.superpowers_dispatch.verification_before_completion",
+        lambda *a, **k: None,
+    )
+
+    def fake_run(cmd, timeout=0, cwd=None):  # type: ignore[no-untyped-def]
+        if "rev-parse" in cmd:
+            return SimpleNamespace(returncode=0, stdout=str(captured["new_sha"]) + "\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("close_phase_cmd.subprocess_utils.run_with_timeout", fake_run)
+
+    def fake_commit(prefix, message, cwd=None):  # type: ignore[no-untyped-def]
+        calls = captured["commit_calls"]
+        assert isinstance(calls, list)
+        calls.append((prefix, message))
+        return ""
+
+    monkeypatch.setattr("close_phase_cmd.commit_create", fake_commit)
+
+
+def test_close_phase_red_emits_test_prefix_commit(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="red")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    rc = close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "add parser"])
+    assert rc == 0
+    calls = captured["commit_calls"]
+    assert isinstance(calls, list)
+    assert calls == [("test", "add parser")]
+
+
+def test_close_phase_green_feat_emits_feat(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="green")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    close_phase_cmd.main(
+        [
+            "--project-root",
+            str(tmp_path),
+            "--message",
+            "impl parser",
+            "--variant",
+            "feat",
+        ]
+    )
+    calls = captured["commit_calls"]
+    assert isinstance(calls, list)
+    assert calls == [("feat", "impl parser")]
+
+
+def test_close_phase_green_fix_emits_fix(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="green")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    close_phase_cmd.main(
+        [
+            "--project-root",
+            str(tmp_path),
+            "--message",
+            "patch parser",
+            "--variant",
+            "fix",
+        ]
+    )
+    calls = captured["commit_calls"]
+    assert isinstance(calls, list)
+    assert calls == [("fix", "patch parser")]
+
+
+def test_close_phase_advances_state_red_to_green(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    import json as _json
+
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="red")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
+    state = _json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
+    assert state["current_phase"] == "green"
+
+
+def test_close_phase_advances_state_green_to_refactor(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    import json as _json
+
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="green")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m", "--variant", "feat"])
+    state = _json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
+    assert state["current_phase"] == "refactor"
+
+
+def test_close_phase_updates_phase_started_at_commit_to_new_sha(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    import json as _json
+
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="red")
+    captured: dict[str, object] = {"new_sha": "beefcaf"}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
+    state = _json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
+    assert state["phase_started_at_commit"] == "beefcaf"
+
+
+def test_close_phase_updates_last_verification_fields(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    import json as _json
+
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="red")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
+    state = _json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
+    assert state["last_verification_at"] is not None
+    assert state["last_verification_at"].endswith("Z")
+    assert state["last_verification_result"] == "passed"
+
+
+def test_close_phase_green_without_variant_raises_validation_error(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    import close_phase_cmd
+    from errors import ValidationError
+
+    _seed_state(tmp_path, current_phase="green")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    with pytest.raises(ValidationError):
+        close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
