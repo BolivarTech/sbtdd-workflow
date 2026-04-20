@@ -190,3 +190,78 @@ def test_resume_detects_runtime_artifacts(
     assert "magi-verdict.json" in out
     assert "present" in out
     assert "auto-run.json" in out
+
+
+# ---------------------------------------------------------------------------
+# Task 34 -- Phase 1 dependency + drift re-check.
+# ---------------------------------------------------------------------------
+
+
+def _ok_report() -> object:
+    from dependency_check import DependencyCheck, DependencyReport
+
+    return DependencyReport(
+        checks=(DependencyCheck(name="stub", status="OK", detail="ok", remediation=None),)
+    )
+
+
+def _broken_report() -> object:
+    from dependency_check import DependencyCheck, DependencyReport
+
+    return DependencyReport(
+        checks=(
+            DependencyCheck(name="stub", status="MISSING", detail="nope", remediation="install"),
+        )
+    )
+
+
+def test_resume_reruns_dependency_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """resume invokes check_environment during re-check phase."""
+    import resume_cmd
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _seed_state(tmp_path)
+
+    calls = {"n": 0}
+
+    def fake_check(stack: str, root: object, plugins_root: object) -> object:
+        calls["n"] += 1
+        return _ok_report()
+
+    monkeypatch.setattr(resume_cmd, "check_environment", fake_check)
+    monkeypatch.setattr(resume_cmd, "detect_drift", lambda *a, **kw: None)
+    resume_cmd._recheck_environment(tmp_path)
+    assert calls["n"] == 1
+
+
+def test_resume_aborts_on_failed_preflight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Failed pre-flight -> DependencyError."""
+    import resume_cmd
+    from errors import DependencyError
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _seed_state(tmp_path)
+    monkeypatch.setattr(resume_cmd, "check_environment", lambda *a, **k: _broken_report())
+    with pytest.raises(DependencyError):
+        resume_cmd._recheck_environment(tmp_path)
+
+
+def test_resume_aborts_on_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drift detection at resume entry -> DriftError."""
+    import resume_cmd
+    from drift import DriftReport
+    from errors import DriftError
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _seed_state(tmp_path)
+    monkeypatch.setattr(resume_cmd, "check_environment", lambda *a, **k: _ok_report())
+    monkeypatch.setattr(
+        resume_cmd,
+        "detect_drift",
+        lambda *a, **kw: DriftReport("green", "refactor", "[ ]", "synthetic"),
+    )
+    with pytest.raises(DriftError):
+        resume_cmd._recheck_environment(tmp_path)

@@ -36,7 +36,10 @@ from pathlib import Path
 from typing import Any
 
 import subprocess_utils
-from errors import PreconditionError
+from config import load_plugin_local
+from dependency_check import check_environment
+from drift import detect_drift
+from errors import DependencyError, DriftError, PreconditionError
 from state_file import load as load_state
 
 
@@ -104,6 +107,34 @@ def _report_diagnostic(root: Path) -> dict[str, Any]:
     return {"state": state, "head_sha": sha, "tree_dirty": dirty, "runtime": runtime}
 
 
+def _recheck_environment(root: Path) -> None:
+    """Re-run pre-flight + drift detection before delegating.
+
+    Guards against ``resume`` blindly re-delegating to ``auto`` /
+    ``pre-merge`` / ``finalize`` when the environment is itself broken.
+    Aggregates failures the same way as ``init`` -- no short-circuit.
+
+    Args:
+        root: Project root directory.
+
+    Raises:
+        DependencyError: Pre-flight reported non-OK.
+        DriftError: State vs git vs plan inconsistency detected.
+    """
+    cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
+    report = check_environment(cfg.stack, root, Path.home() / ".claude" / "plugins")
+    if not report.ok():
+        sys.stderr.write(report.format_report() + "\n")
+        raise DependencyError(f"{len(report.failed())} pre-flight checks failed")
+    state = load_state(root / ".claude" / "session-state.json")
+    plan_path = root / state.plan_path
+    dr = detect_drift(root / ".claude" / "session-state.json", plan_path, root)
+    if dr is not None:
+        raise DriftError(
+            f"drift at resume: state={dr.state_value}, HEAD={dr.git_value}:, plan={dr.plan_value}"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd resume (diagnostic + delegation wrapper)."""
     parser = _build_parser()
@@ -122,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     _report_diagnostic(root)
+    _recheck_environment(root)
     return 0
 
 
