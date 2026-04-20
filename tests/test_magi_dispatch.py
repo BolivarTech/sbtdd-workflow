@@ -388,3 +388,46 @@ def test_verdict_passes_gate_rejects_lowercase_threshold():
     v = MAGIVerdict("GO", False, (), (), "")
     with pytest.raises(ValidationError):
         verdict_passes_gate(v, threshold="go_with_caveats")
+
+
+def test_write_verdict_artifact_creates_parent_directories(tmp_path):
+    from magi_dispatch import MAGIVerdict, write_verdict_artifact
+
+    v = MAGIVerdict(
+        "GO_WITH_CAVEATS",
+        False,
+        conditions=("fix edge case",),
+        findings=(),
+        raw_output='{"verdict":"GO_WITH_CAVEATS"}',
+    )
+    target = tmp_path / ".claude" / "magi-verdict.json"
+    write_verdict_artifact(v, target, timestamp="2026-04-19T10:00:00Z")
+    assert target.exists()
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["verdict"] == "GO_WITH_CAVEATS"
+    assert data["degraded"] is False
+    assert data["conditions"] == ["fix edge case"]
+    assert data["timestamp"] == "2026-04-19T10:00:00Z"
+
+
+def test_write_verdict_artifact_is_atomic(tmp_path):
+    """write fails -> no partial file, no tmp leak."""
+    from magi_dispatch import MAGIVerdict, write_verdict_artifact
+
+    v = MAGIVerdict("GO", False, (), (), "")
+    target = tmp_path / "subdir" / "verdict.json"
+    # Parent doesn't exist; function MUST create it.
+    write_verdict_artifact(v, target, timestamp="2026-04-19T10:00:00Z")
+    assert target.exists()
+    # No stray tmp files.
+    assert list(target.parent.glob("*.tmp.*")) == []
+
+
+def test_write_verdict_artifact_preserves_degraded_flag(tmp_path):
+    from magi_dispatch import MAGIVerdict, write_verdict_artifact
+
+    v = MAGIVerdict("GO", True, (), (), "")
+    target = tmp_path / "verdict.json"
+    write_verdict_artifact(v, target, timestamp="2026-04-19T10:00:00Z")
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["degraded"] is True

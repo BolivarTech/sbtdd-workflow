@@ -31,9 +31,11 @@ expected to be a JSON document with the fields ``verdict``, ``degraded``,
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import quota_detector
@@ -243,3 +245,41 @@ def verdict_passes_gate(verdict: MAGIVerdict, threshold: str) -> bool:
     if verdict.degraded:
         return False
     return verdict_meets_threshold(verdict.verdict, threshold)
+
+
+def write_verdict_artifact(
+    verdict: MAGIVerdict,
+    target: Path,
+    timestamp: str,
+) -> None:
+    """Write ``.claude/magi-verdict.json`` atomically (sec.S.5.6 postcondicion).
+
+    The file is consumed by ``finalize`` (sec.M.7) to reject degraded
+    verdicts as gate-blocking. Field layout matches the spec contract:
+    ``timestamp``, ``verdict``, ``degraded``, ``conditions``, ``findings``.
+
+    Args:
+        verdict: Parsed MAGI verdict.
+        target: Destination file path. Parent directories are created.
+        timestamp: ISO 8601 string with ``Z`` suffix (caller supplies;
+            state_file._validate_iso8601 conventions apply).
+
+    Raises:
+        OSError: If the atomic replace fails. No partial file, no
+            ``*.tmp.<pid>`` leak.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "timestamp": timestamp,
+        "verdict": verdict.verdict,
+        "degraded": verdict.degraded,
+        "conditions": list(verdict.conditions),
+        "findings": [dict(f) for f in verdict.findings],
+    }
+    tmp = target.with_suffix(target.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    try:
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
