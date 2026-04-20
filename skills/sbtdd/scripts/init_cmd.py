@@ -254,19 +254,28 @@ def _phase5_relocate(staging: Path, dest_root: Path) -> list[Path]:
     and is unreliable on Windows when ``dest_root`` already exists --
     so we implement "best effort atomicity with rollback": on any
     per-file copy failure (disk full, permission denied on the N-th
-    file, etc.), the helper removes every file it already copied, then
-    re-raises the original exception. A subsequent ``/sbtdd init``
-    invocation therefore sees a clean ``dest_root`` and can retry
-    cleanly. Fix for MAGI Loop 2 iter 1 Finding 3.
+    file, etc.), the helper removes every file it already copied plus
+    every subdirectory it freshly created to host them, then re-raises
+    the original exception. A subsequent ``/sbtdd init`` invocation
+    therefore sees a clean ``dest_root`` and can retry cleanly. Fix for
+    MAGI Loop 2 iter 1 Finding 3 (file rollback) + iter 2 W_iter2_1
+    (empty-directory rollback).
 
     Rollback guarantees:
       - Every path in the returned ``created`` list up to the failure
         point is removed via ``Path.unlink(missing_ok=True)``.
-      - Directories created by ``parent.mkdir(parents=True)`` are NOT
-        removed (they may have pre-existed; safer to leave).
+      - Every directory in the tracked ``created_dirs`` list -- the
+        subdirectories the copy itself materialised via
+        ``parent.mkdir(parents=True)`` -- is removed leaf-to-root via
+        ``os.rmdir``. Directories that pre-existed are NOT touched
+        (they are not tracked). ``os.rmdir`` is deliberately strict
+        (fails if the directory is non-empty) so the rollback can
+        only delete what the copy itself created.
       - Rollback errors (e.g. unlink fails because a concurrent process
-        grabbed the file) are swallowed; the original copy failure is
-        what the caller cares about and is re-raised unchanged.
+        grabbed the file, or rmdir fails because the user dropped a
+        file into a tracked dir during the copy) are swallowed; the
+        original copy failure is what the caller cares about and is
+        re-raised unchanged.
 
     Args:
         staging: Root of the prepared tree (typically a tempdir).
@@ -283,32 +292,77 @@ def _phase5_relocate(staging: Path, dest_root: Path) -> list[Path]:
     """
     staged_files = [p for p in staging.rglob("*") if p.is_file()]
     created: list[Path] = []
+    created_dirs: list[Path] = []
     try:
         for src in staged_files:
             rel = src.relative_to(staging)
             target = dest_root / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _mkdir_tracked(target.parent, dest_root, created_dirs)
             shutil.copy2(src, target)
             created.append(target)
     except Exception:
-        _rollback_partial_copy(created)
+        _rollback_partial_copy(created, created_dirs)
         raise
     return created
 
 
-def _rollback_partial_copy(copied: list[Path]) -> None:
-    """Remove every file in ``copied`` best-effort, swallowing OSError.
+def _mkdir_tracked(directory: Path, dest_root: Path, created_dirs: list[Path]) -> None:
+    """Create ``directory`` and record every ancestor freshly made under dest_root.
+
+    Acts like ``directory.mkdir(parents=True, exist_ok=True)`` but also
+    appends to ``created_dirs`` every directory from ``directory`` up
+    toward (but not including) ``dest_root`` that did NOT exist prior
+    to the call. The ordering preserves descendants-AFTER-ancestors
+    so the rollback handler can walk the list in reverse and call
+    ``os.rmdir`` leaf-to-root without violating the "only empty dirs
+    can be removed" contract.
+    """
+    # Walk from ``directory`` up to ``dest_root`` collecting missing ancestors.
+    # Stop at ``dest_root`` OR at the filesystem root (where ``cursor.parent``
+    # returns ``cursor``); the latter only triggers if ``directory`` is not
+    # under ``dest_root`` (programmer error) -- we fall back to no tracking
+    # rather than looping forever.
+    pending: list[Path] = []
+    cursor = directory
+    while cursor != dest_root:
+        if cursor.parent == cursor:
+            return  # reached FS root without hitting dest_root; bail safely
+        if cursor.exists():
+            break
+        pending.append(cursor)
+        cursor = cursor.parent
+    # Parents-first so inner dirs can be mkdir()d after their parent exists.
+    for path in reversed(pending):
+        path.mkdir(exist_ok=False)
+        created_dirs.append(path)
+
+
+def _rollback_partial_copy(copied: list[Path], created_dirs: list[Path]) -> None:
+    """Remove every file + empty subdir created during a failed relocate.
 
     Helper for :func:`_phase5_relocate`: the rollback MUST NOT raise --
     doing so would mask the original copy failure (which carries the
     useful diagnostic like "disk full" or "permission denied"). Unlink
     failures (e.g. another process has the file open on Windows) are
-    logged as absent because the caller will observe them on the next
+    swallowed because the caller will observe them on the next
     ``/sbtdd init`` retry via the Phase 1 dependency check.
+
+    Directory removal uses ``os.rmdir`` (strict: fails if non-empty)
+    and walks ``created_dirs`` in reverse so leaves are removed before
+    their parents. This guarantees we only remove directories the copy
+    itself created; any dir the user may have populated concurrently
+    would trigger ``OSError`` on ``rmdir`` which we swallow.
     """
+    import os as _os
+
     for path in copied:
         try:
             path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    for directory in reversed(created_dirs):
+        try:
+            _os.rmdir(directory)
         except OSError:
             pass
 
