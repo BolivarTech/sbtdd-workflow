@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -478,6 +479,15 @@ def _loop2(
                 # iter-3 redesign: surface to the user via conditions
                 # file instead of emitting empty mini-cycle commits.
                 conditions_path = _write_magi_conditions_file(accepted, root, verdict, iteration)
+                # Plan D Task 12: user-facing stderr summary so exit 8
+                # is self-explanatory without having to read the
+                # exception message or the conditions file first.
+                sys.stderr.write(
+                    f"pre-merge exit 8: accepted={len(accepted)}, "
+                    f"rejected={len(rejected)}. Applied conditions not yet "
+                    f"in diff. See {conditions_path} and run `sbtdd close-phase` "
+                    f"for each, then re-run `sbtdd pre-merge`.\n"
+                )
                 raise MAGIGateError(
                     f"MAGI iter {iteration} produced {len(accepted)} accepted "
                     f"condition(s); apply them via `sbtdd close-phase` and "

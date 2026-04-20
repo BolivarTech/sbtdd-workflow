@@ -10,7 +10,9 @@ from typing import Any
 
 import pytest
 
+import magi_dispatch
 import pre_merge_cmd
+import superpowers_dispatch
 from errors import MAGIGateError
 
 
@@ -45,15 +47,13 @@ def test_loop2_writes_conditions_and_emits_stderr_summary(
 
     # magi returns verdict with conditions; receiving-review accepts 2, rejects 0.
     monkeypatch.setattr(
-        pre_merge_cmd.magi_dispatch,
+        magi_dispatch,
         "invoke_magi",
         lambda context_paths, cwd: _FakeVerdict(),
     )
+    monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", lambda v: False)
     monkeypatch.setattr(
-        pre_merge_cmd.magi_dispatch, "verdict_is_strong_no_go", lambda v: False
-    )
-    monkeypatch.setattr(
-        pre_merge_cmd.superpowers_dispatch,
+        superpowers_dispatch,
         "receiving_code_review",
         lambda args, cwd: {"accepted": list(_FakeVerdict.conditions), "rejected": []},
     )
