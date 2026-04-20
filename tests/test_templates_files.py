@@ -41,3 +41,59 @@ def test_settings_json_template_user_prompt_has_tdd_guard():
     data = json.loads((TEMPLATES_DIR / "settings.json.template").read_text(encoding="utf-8"))
     ups = data["hooks"]["UserPromptSubmit"]
     assert ups[0]["hooks"][0]["command"] == "tdd-guard"
+
+
+def test_plugin_local_template_exists():
+    assert (TEMPLATES_DIR / "plugin.local.md.template").exists()
+
+
+def test_plugin_local_template_loads_as_plugin_config():
+    """After placeholder expansion, the file must parse via config.load_plugin_local."""
+    from config import load_plugin_local
+    from templates import expand
+
+    raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
+    context = {
+        "stack": "python",
+        "author": "Test Author",
+        "error_type": "null",
+    }
+    expanded = expand(raw, context)
+    import tempfile
+    from pathlib import Path as _P
+
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as fp:
+        fp.write(expanded)
+        tmp = _P(fp.name)
+    try:
+        cfg = load_plugin_local(tmp)
+        assert cfg.stack == "python"
+        assert cfg.author == "Test Author"
+        assert cfg.magi_threshold == "GO_WITH_CAVEATS"
+        assert cfg.magi_max_iterations == 3
+        assert cfg.auto_magi_max_iterations >= cfg.magi_max_iterations
+    finally:
+        tmp.unlink()
+
+
+def test_plugin_local_template_has_all_required_keys():
+    raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
+    required = [
+        "stack:",
+        "author:",
+        "error_type:",
+        "verification_commands:",
+        "plan_path:",
+        "plan_org_path:",
+        "spec_base_path:",
+        "spec_path:",
+        "state_file_path:",
+        "magi_threshold:",
+        "magi_max_iterations:",
+        "auto_magi_max_iterations:",
+        "auto_verification_retries:",
+        "tdd_guard_enabled:",
+        "worktree_policy:",
+    ]
+    for key in required:
+        assert key in raw, f"plugin.local.md.template missing key {key}"
