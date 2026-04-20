@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -346,3 +347,163 @@ def test_resume_dry_run_prints_plan_without_delegating(
     assert rc == 0
     assert "would delegate" in out.lower() or "dry" in out.lower()
     assert invoked["finalize"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 36 -- Phase 4 uncommitted-work resolution with CONTINUE default.
+# ---------------------------------------------------------------------------
+
+
+def _make_ns(**overrides: object) -> "argparse.Namespace":
+    """Return a simple namespace mimicking argparse output for Phase 4 tests."""
+    ns = argparse.Namespace(
+        project_root=Path.cwd(),
+        auto=False,
+        discard_uncommitted=False,
+        dry_run=False,
+    )
+    for k, v in overrides.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def test_resume_auto_continues_when_dirty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--auto + tree dirty: does NOT run git reset; prints CONTINUE."""
+    import resume_cmd
+
+    _setup_git_repo(tmp_path)
+    (tmp_path / "stray.txt").write_text("dirty", encoding="utf-8")
+
+    subprocess_calls: list[list[str]] = []
+
+    def spy_run(cmd: list[str], **kw: object) -> object:
+        subprocess_calls.append(cmd)
+        import subprocess as _sp
+
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("resume_cmd.subprocess_utils.run_with_timeout", spy_run)
+
+    ns = _make_ns(project_root=tmp_path, auto=True)
+    action = resume_cmd._resolve_uncommitted(ns, tmp_path)
+    out = capsys.readouterr().out
+    assert action == "CONTINUE"
+    # No destructive git calls should have been issued.
+    assert not any("checkout" in " ".join(c) for c in subprocess_calls)
+    assert not any("clean" in " ".join(c) for c in subprocess_calls)
+    assert "CONTINUE" in out
+
+
+def test_resume_discard_uncommitted_runs_git_checkout_and_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--discard-uncommitted: subprocess calls include checkout + clean."""
+    import resume_cmd
+
+    _setup_git_repo(tmp_path)
+    (tmp_path / "stray.txt").write_text("dirty", encoding="utf-8")
+
+    subprocess_calls: list[list[str]] = []
+
+    def spy_run(cmd: list[str], **kw: object) -> object:
+        subprocess_calls.append(cmd)
+        import subprocess as _sp
+
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("resume_cmd.subprocess_utils.run_with_timeout", spy_run)
+
+    ns = _make_ns(project_root=tmp_path, discard_uncommitted=True)
+    action = resume_cmd._resolve_uncommitted(ns, tmp_path)
+    assert action == "RESET"
+    flat = [" ".join(c) for c in subprocess_calls]
+    assert any("checkout HEAD -- ." in c for c in flat)
+    assert any("clean -fd" in c for c in flat)
+
+
+def test_resume_discard_preserves_gitignored_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Files in .gitignore are preserved after --discard-uncommitted.
+
+    git clean -fd respects .gitignore by default (no -x). This test
+    verifies the helper calls clean without -x so ignored files stay.
+    """
+    import resume_cmd
+
+    _setup_git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".venv/\n", encoding="utf-8")
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "sentinel").write_text("preserved", encoding="utf-8")
+
+    subprocess_calls: list[list[str]] = []
+
+    def spy_run(cmd: list[str], **kw: object) -> object:
+        subprocess_calls.append(cmd)
+        import subprocess as _sp
+
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("resume_cmd.subprocess_utils.run_with_timeout", spy_run)
+
+    ns = _make_ns(project_root=tmp_path, discard_uncommitted=True)
+    resume_cmd._resolve_uncommitted(ns, tmp_path)
+    # The clean command must NOT carry -x (which would remove ignored files).
+    for c in subprocess_calls:
+        if c[0] == "git" and len(c) >= 2 and c[1] == "clean":
+            assert "-x" not in c
+
+
+def test_resume_interactive_R_choice_triggers_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interactive 'R' response triggers checkout + clean."""
+    import resume_cmd
+
+    _setup_git_repo(tmp_path)
+    (tmp_path / "stray.txt").write_text("dirty", encoding="utf-8")
+
+    subprocess_calls: list[list[str]] = []
+
+    def spy_run(cmd: list[str], **kw: object) -> object:
+        subprocess_calls.append(cmd)
+        import subprocess as _sp
+
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("resume_cmd.subprocess_utils.run_with_timeout", spy_run)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "R")
+
+    ns = _make_ns(project_root=tmp_path)
+    action = resume_cmd._resolve_uncommitted(ns, tmp_path)
+    assert action == "RESET"
+    flat = [" ".join(c) for c in subprocess_calls]
+    assert any("checkout HEAD -- ." in c for c in flat)
+
+
+def test_resume_abort_choice_A_exits_130(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Interactive 'A' response returns ABORT -> main maps to rc=130."""
+    import json as _json
+
+    import resume_cmd
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    # Dirty tree on a TDD phase -> triggers uncommitted-resolution.
+    (tmp_path / "stray.txt").write_text("dirty", encoding="utf-8")
+    _seed_state(tmp_path, current_phase="green", current_task_id="1")
+    # Add plan so drift check does not complain about missing file.
+    planning = tmp_path / "planning"
+    planning.mkdir(exist_ok=True)
+    (planning / "claude-plan-tdd.md").write_text("### Task 1: x\n- [ ] step\n", encoding="utf-8")
+
+    monkeypatch.setattr(resume_cmd, "check_environment", lambda *a, **k: _ok_report())
+    monkeypatch.setattr(resume_cmd, "detect_drift", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "A")
+    # magi-verdict absent, auto-run absent irrelevant for this branch.
+    _json.dumps({})  # silence unused import
+
+    rc = resume_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 130

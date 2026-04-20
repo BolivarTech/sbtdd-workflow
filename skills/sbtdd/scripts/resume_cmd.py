@@ -209,6 +209,62 @@ def _delegate(module_name: str, root: Path, extra: list[str]) -> int:
     return rc
 
 
+def _resolve_uncommitted(ns: argparse.Namespace, root: Path) -> str:
+    """Resolve uncommitted working-tree changes per INV-24.
+
+    Default behavior is CONCRETELY CONSERVATIVE (INV-24): keep user work
+    untouched. The only paths that actually call ``git checkout HEAD -- .``
+    / ``git clean -fd`` are:
+
+    - ``--discard-uncommitted`` flag set (explicit programmatic escape).
+    - Interactive ``R`` response (explicit human confirmation).
+
+    ``--auto`` + dirty tree prints CONTINUE and returns; never destroys
+    work silently. If no flag is set and the process is non-interactive
+    (e.g. CI), ``input()`` will raise or return empty -- the empty-default
+    branch returns CONTINUE.
+
+    ``git clean -fd`` is deliberately used WITHOUT ``-x`` so files in
+    ``.gitignore`` (``.venv/``, build artifacts, caches) survive the
+    reset. The contract is: "discard uncommitted changes", not "nuke
+    everything that isn't in git".
+
+    Args:
+        ns: Parsed argparse namespace.
+        root: Project root directory.
+
+    Returns:
+        One of ``"CONTINUE"``, ``"RESET"``, ``"ABORT"``.
+    """
+    if ns.discard_uncommitted:
+        subprocess_utils.run_with_timeout(
+            ["git", "checkout", "HEAD", "--", "."], timeout=30, cwd=str(root)
+        )
+        subprocess_utils.run_with_timeout(["git", "clean", "-fd"], timeout=30, cwd=str(root))
+        sys.stdout.write("Uncommitted work discarded.\n")
+        return "RESET"
+    if ns.auto:
+        sys.stdout.write("CONTINUE (preserving uncommitted work). Next close-phase will decide.\n")
+        return "CONTINUE"
+    sys.stdout.write("\nUncommitted work detected. Options:\n")
+    sys.stdout.write("  [C] Continue - keep uncommitted and resume.\n")
+    sys.stdout.write("  [R] Reset    - discard and resume from HEAD.\n")
+    sys.stdout.write("  [A] Abort    - exit without changes.\n")
+    try:
+        choice = (input("Choice [C/R/A]: ") or "C").strip().upper()
+    except EOFError:
+        choice = "C"
+    if choice == "R":
+        subprocess_utils.run_with_timeout(
+            ["git", "checkout", "HEAD", "--", "."], timeout=30, cwd=str(root)
+        )
+        subprocess_utils.run_with_timeout(["git", "clean", "-fd"], timeout=30, cwd=str(root))
+        return "RESET"
+    if choice == "A":
+        return "ABORT"
+    return "CONTINUE"
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd resume (diagnostic + delegation wrapper)."""
     parser = _build_parser()
@@ -238,9 +294,18 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(f"Would delegate to: {module_name} with args {extra}\n")
         return 0
     if module_name == "uncommitted-resolution":
-        # Task 36 will wire real behavior; for now signal unhandled path
-        # as rc=1 so callers see the decision is pending implementation.
-        return 1
+        action = _resolve_uncommitted(ns, root)
+        if action == "ABORT":
+            return 130
+        # After resolving, re-diagnose and re-decide (tree may now be
+        # clean + a fresh decision applies).
+        new_report = _report_diagnostic(root)
+        module_name, extra = _decide_delegation(
+            new_report["state"], new_report["tree_dirty"], new_report["runtime"]
+        )
+        if module_name is None or module_name == "uncommitted-resolution":
+            return 0
+        return _delegate(module_name, root, extra)
     return _delegate(module_name, root, extra)
 
 
