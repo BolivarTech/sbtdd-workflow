@@ -1041,9 +1041,10 @@ def test_auto_pre_merge_conditions_pending_propagates_exit_8(
     assert data.get("status") == "magi_gate_blocked", (
         f"auto-run.json must record status='magi_gate_blocked', got: {data}"
     )
-    assert "conditions pending" in str(data.get("error", "")).lower() or "accepted condition" in str(
-        data.get("error", "")
-    ).lower(), f"auto-run.json error must reference the conditions pending reason: {data}"
+    assert (
+        "conditions pending" in str(data.get("error", "")).lower()
+        or "accepted condition" in str(data.get("error", "")).lower()
+    ), f"auto-run.json error must reference the conditions pending reason: {data}"
 
 
 def test_auto_dry_run_prints_plan_without_side_effects(

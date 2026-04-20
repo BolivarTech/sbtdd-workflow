@@ -48,6 +48,7 @@ from errors import (
     ChecklistError,
     DependencyError,
     DriftError,
+    MAGIGateError,
     PreconditionError,
     QuotaExhaustedError,
     VerificationIrremediableError,
@@ -445,7 +446,28 @@ def main(argv: list[str] | None = None) -> int:
     auto_run.write_text(json.dumps({"auto_started_at": started}, indent=2), encoding="utf-8")
     if state.current_phase != "done":
         state = _phase2_task_loop(ns, state, cfg)
-    verdict = _phase3_pre_merge(ns, cfg)
+    try:
+        verdict = _phase3_pre_merge(ns, cfg)
+    except MAGIGateError as exc:
+        # Finding 2 (Caspar): record the gate-block status in the audit
+        # trail BEFORE re-raising so operators can post-hoc distinguish
+        # "conditions pending" (exit 8 with actionable fix) from
+        # STRONG_NO_GO (exit 8 requiring replan). Both map to exit 8 via
+        # EXIT_CODES[MAGIGateError]; the status / error fields in
+        # auto-run.json are the only signal that survives the exception.
+        auto_run.write_text(
+            json.dumps(
+                {
+                    "auto_started_at": started,
+                    "auto_finished_at": _now_iso(),
+                    "status": "magi_gate_blocked",
+                    "error": str(exc),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        raise
     _phase4_checklist(ns.project_root, state, cfg)
     _phase5_report(ns.project_root, started, verdict)
     return 0
