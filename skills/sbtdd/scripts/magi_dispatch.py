@@ -39,7 +39,7 @@ from typing import Any
 import quota_detector
 import subprocess_utils
 from errors import MAGIGateError, QuotaExhaustedError, ValidationError
-from models import VERDICT_RANK
+from models import VERDICT_RANK, verdict_meets_threshold
 
 
 @dataclass(frozen=True)
@@ -202,3 +202,44 @@ def invoke_magi(
             f"/magi:magi failed (returncode={result.returncode}): {result.stderr.strip()}"
         )
     return parse_verdict(result.stdout)
+
+
+def verdict_is_strong_no_go(verdict: MAGIVerdict) -> bool:
+    """Return True for STRONG_NO_GO (full or degraded) -- INV-28 exception.
+
+    Loop 2 short-circuits on STRONG_NO_GO regardless of degraded flag because
+    2 agents voting NO_GO is already decisive evidence (sec.S.5.6.b).
+    """
+    return verdict.verdict == "STRONG_NO_GO"
+
+
+def verdict_passes_gate(verdict: MAGIVerdict, threshold: str) -> bool:
+    """Evaluate whether ``verdict`` clears the Loop 2 gate (INV-28 applied).
+
+    A verdict passes only when BOTH conditions hold:
+
+    1. ``verdict.verdict`` is ``>= threshold`` in :data:`models.VERDICT_RANK`.
+    2. ``verdict.degraded`` is ``False`` (INV-28: degraded verdicts never
+       count as gate-pass, regardless of label).
+
+    Args:
+        verdict: Parsed MAGI output.
+        threshold: Minimum label from ``plugin.local.md`` (``magi_threshold``).
+
+    Returns:
+        True iff the verdict should terminate Loop 2 with success.
+
+    Raises:
+        ValidationError: If ``threshold`` is not in
+            :data:`models.VERDICT_RANK`. (MAGI Checkpoint 2 iter 1 WARNING --
+            melchior: the wrapper converts the underlying ``KeyError`` from
+            :func:`models.verdict_meets_threshold` into the project-canonical
+            ``ValidationError`` so callers see a single typed error.)
+    """
+    if threshold not in VERDICT_RANK:
+        raise ValidationError(
+            f"unknown MAGI threshold '{threshold}'; expected one of {sorted(VERDICT_RANK)}"
+        )
+    if verdict.degraded:
+        return False
+    return verdict_meets_threshold(verdict.verdict, threshold)

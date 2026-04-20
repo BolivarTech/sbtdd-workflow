@@ -314,3 +314,77 @@ def test_invoke_magi_non_quota_nonzero_raises_magi_gate_error(monkeypatch):
     )
     with pytest.raises(MAGIGateError, match="returncode=3"):
         invoke_magi(context_paths=["spec.md"])
+
+
+def test_verdict_passes_gate_strong_go_full_passes():
+    from magi_dispatch import MAGIVerdict, verdict_passes_gate
+
+    v = MAGIVerdict("STRONG_GO", False, (), (), "")
+    assert verdict_passes_gate(v, threshold="GO_WITH_CAVEATS") is True
+
+
+def test_verdict_passes_gate_go_full_passes():
+    from magi_dispatch import MAGIVerdict, verdict_passes_gate
+
+    v = MAGIVerdict("GO", False, (), (), "")
+    assert verdict_passes_gate(v, threshold="GO_WITH_CAVEATS") is True
+
+
+def test_verdict_passes_gate_below_threshold_fails():
+    from magi_dispatch import MAGIVerdict, verdict_passes_gate
+
+    v = MAGIVerdict("HOLD", False, (), (), "")
+    assert verdict_passes_gate(v, threshold="GO_WITH_CAVEATS") is False
+
+
+def test_verdict_passes_gate_degraded_always_fails_even_strong_go():
+    """INV-28: degraded verdicts NEVER count as gate-pass (except STRONG_NO_GO abort)."""
+    from magi_dispatch import MAGIVerdict, verdict_passes_gate
+
+    v = MAGIVerdict("STRONG_GO", True, (), (), "")
+    assert verdict_passes_gate(v, threshold="GO_WITH_CAVEATS") is False
+
+
+def test_verdict_is_strong_no_go_returns_true_for_strong_no_go():
+    from magi_dispatch import MAGIVerdict, verdict_is_strong_no_go
+
+    assert verdict_is_strong_no_go(MAGIVerdict("STRONG_NO_GO", False, (), (), "")) is True
+
+
+def test_verdict_is_strong_no_go_true_even_when_degraded():
+    """INV-28 exception: STRONG_NO_GO degraded still aborts."""
+    from magi_dispatch import MAGIVerdict, verdict_is_strong_no_go
+
+    assert verdict_is_strong_no_go(MAGIVerdict("STRONG_NO_GO", True, (), (), "")) is True
+
+
+def test_verdict_is_strong_no_go_false_for_other_verdicts():
+    from magi_dispatch import MAGIVerdict, verdict_is_strong_no_go
+
+    for label in ("HOLD", "HOLD_TIE", "GO_WITH_CAVEATS", "GO", "STRONG_GO"):
+        assert verdict_is_strong_no_go(MAGIVerdict(label, False, (), (), "")) is False
+
+
+def test_verdict_passes_gate_rejects_unknown_threshold():
+    """Unknown threshold raises ValidationError (MAGI ckpt2 iter 1 WARNING -- melchior).
+
+    Per Milestone A ``errors.py``, schema violations (including unrecognised
+    threshold labels) are ``ValidationError``. The previous ``(ValidationError,
+    KeyError)`` tuple was ambiguous; the contract is now strict.
+    """
+    from errors import ValidationError
+    from magi_dispatch import MAGIVerdict, verdict_passes_gate
+
+    v = MAGIVerdict("GO", False, (), (), "")
+    with pytest.raises(ValidationError, match="threshold"):
+        verdict_passes_gate(v, threshold="MAYBE")
+
+
+def test_verdict_passes_gate_rejects_lowercase_threshold():
+    """Threshold must be uppercase enum member; lowercase rejected."""
+    from errors import ValidationError
+    from magi_dispatch import MAGIVerdict, verdict_passes_gate
+
+    v = MAGIVerdict("GO", False, (), (), "")
+    with pytest.raises(ValidationError):
+        verdict_passes_gate(v, threshold="go_with_caveats")
