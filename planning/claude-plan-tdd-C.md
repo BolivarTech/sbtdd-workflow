@@ -157,7 +157,7 @@ Task 52 edita `run_sbtdd.py` una sola vez, import-by-import, bajo el marker `# M
 
 Estos fixtures alimentan tests de varios subcomandos (status, close-phase, close-task, pre-merge, finalize, auto, resume). Se crean una sola vez al inicio del milestone.
 
-- [ ] **Step 1: Create plan fixtures**
+- [x] **Step 1: Create plan fixtures**
 
 Create `tests/fixtures/plans/one-task-red.md`:
 
@@ -166,9 +166,9 @@ Create `tests/fixtures/plans/one-task-red.md`:
 
 ### Task 1: Add parser for empty input
 
-- [ ] Step 1: Write failing test
-- [ ] Step 2: Implementation
-- [ ] Step 3: Verify
+- [x] Step 1: Write failing test
+- [x] Step 2: Implementation
+- [x] Step 3: Verify
 ```
 
 Create `tests/fixtures/plans/three-tasks-mixed.md`:
@@ -183,13 +183,13 @@ Create `tests/fixtures/plans/three-tasks-mixed.md`:
 
 ### Task 2: Second task (in-progress)
 
-- [ ] Step 1: test
-- [ ] Step 2: impl
+- [x] Step 1: test
+- [x] Step 2: impl
 
 ### Task 3: Third task (pending)
 
-- [ ] Step 1: test
-- [ ] Step 2: impl
+- [x] Step 1: test
+- [x] Step 2: impl
 ```
 
 Create `tests/fixtures/plans/all-done.md`:
@@ -206,7 +206,7 @@ Create `tests/fixtures/plans/all-done.md`:
 - [x] Step 1
 ```
 
-- [ ] **Step 2: Create MAGI verdict fixtures**
+- [x] **Step 2: Create MAGI verdict fixtures**
 
 Create `tests/fixtures/magi-verdicts/go-full.json`:
 
@@ -244,7 +244,7 @@ Create `tests/fixtures/magi-verdicts/go-degraded.json`:
 }
 ```
 
-- [ ] **Step 3: Verify fixture load round-trip**
+- [x] **Step 3: Verify fixture load round-trip**
 
 Run:
 
@@ -255,7 +255,7 @@ python -c "t=open('tests/fixtures/plans/three-tasks-mixed.md').read(); assert '#
 
 Expected: `OK` printed twice.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/fixtures/plans/ tests/fixtures/magi-verdicts/
@@ -274,7 +274,7 @@ Foundation for Phase 2-4 subcomandos. Order: `status_cmd` (read-only) -> `close_
 - Create: `skills/sbtdd/scripts/status_cmd.py`
 - Create: `tests/test_status_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_status_cmd.py
@@ -293,12 +293,12 @@ def test_status_cmd_run_is_main_alias():
     assert callable(status_cmd.main) and callable(status_cmd.run)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_status_cmd.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'status_cmd'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/status_cmd.py`:
 
@@ -336,9 +336,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 2 tests.
+- [x] **Step 4: Run test to verify it passes** — 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/status_cmd.py tests/test_status_cmd.py
@@ -351,7 +351,7 @@ git commit -m "test: scaffold status_cmd module with argparse skeleton"
 
 **Files:** Modify `status_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Add tests using a `repo_with_state` fixture that runs `git init` + seed empty commit, writes `.claude/session-state.json` (payload with current_task_id="2", current_task_title="Second task (in-progress)", current_phase="red", phase_started_at_commit=<seed_sha>, last_verification_at=None, last_verification_result=None, plan_approved_at="2026-04-19T10:00:00Z"), and copies `tests/fixtures/plans/three-tasks-mixed.md` to `planning/claude-plan-tdd.md`:
 
@@ -359,9 +359,9 @@ Add tests using a `repo_with_state` fixture that runs `git init` + seed empty co
 - `test_status_prints_last_verification_null_when_unset`: same setup; stdout contains `null` for last_verif_at and last_verif_result.
 - `test_status_missing_state_file_prints_manual_mode`: empty tmp git repo, no state; rc=0 and stdout contains `no active` or `manual mode`.
 
-- [ ] **Step 2: Run test to verify it fails** — scaffold returns 0 without printing.
+- [x] **Step 2: Run test to verify it fails** — scaffold returns 0 without printing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Replace `main` in `status_cmd.py`. All imports at top of file:
 
@@ -441,9 +441,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 5 tests.
+- [x] **Step 4: Run test to verify it passes** — 5 tests.
 
-- [ ] **Step 5: Commit** — `feat: status_cmd reads state file, HEAD commit, and plan counts`.
+- [x] **Step 5: Commit** — `feat: status_cmd reads state file, HEAD commit, and plan counts`.
 
 ---
 
@@ -451,15 +451,15 @@ run = main
 
 **Files:** Modify `status_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Add:
 - `test_status_reports_drift_and_exits_3`: from `repo_with_state`, commit `refactor: dummy` (state=red + HEAD=refactor: triggers phase-ordering inversion). rc=3, stdout contains `Drift` and `detected`.
 - `test_status_drift_report_includes_three_values`: same setup; stdout contains `red` and `refactor`.
 
-- [ ] **Step 2: Run test to verify it fails** — `detect_drift` not called.
+- [x] **Step 2: Run test to verify it fails** — `detect_drift` not called.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Add to top-of-file imports: `from drift import detect_drift`.
 
@@ -478,9 +478,9 @@ else:
 # Append drift_line to the report. Return 3 if drift_report else 0.
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 7 tests.
+- [x] **Step 4: Run test to verify it passes** — 7 tests.
 
-- [ ] **Step 5: Commit** — `feat: status_cmd detects drift and exits 3 on divergence`.
+- [x] **Step 5: Commit** — `feat: status_cmd detects drift and exits 3 on divergence`.
 
 ---
 
@@ -490,7 +490,7 @@ else:
 - Create: `skills/sbtdd/scripts/close_task_cmd.py`
 - Create: `tests/test_close_task_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -509,9 +509,9 @@ def test_close_task_cmd_help_exits_zero():
     assert ei.value.code == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create with header + docstring referencing sec.S.5.4. argparse with `--project-root`. `main` returns 0. `run = main`.
 
@@ -541,9 +541,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 2 tests.
+- [x] **Step 4: Run test to verify it passes** — 2 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold close_task_cmd module with argparse skeleton`.
+- [x] **Step 5: Commit** — `test: scaffold close_task_cmd module with argparse skeleton`.
 
 ---
 
@@ -551,15 +551,15 @@ run = main
 
 **Files:** Modify `close_task_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_close_task_aborts_when_state_missing`: no state file -> `PreconditionError`.
 - `test_close_task_aborts_when_phase_not_refactor`: state has `current_phase=green` -> `PreconditionError` mentioning "refactor" and current phase.
 - `test_close_task_aborts_on_drift`: monkeypatch `drift.detect_drift` to return a `DriftReport` -> `DriftError`.
 
-- [ ] **Step 2: Run test to verify it fails** — scaffold returns 0.
+- [x] **Step 2: Run test to verify it fails** — scaffold returns 0.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 from drift import detect_drift
@@ -594,9 +594,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 5 tests.
+- [x] **Step 4: Run test to verify it passes** — 5 tests.
 
-- [ ] **Step 5: Commit** — `test: close_task_cmd enforces precondition phase=refactor and drift check`.
+- [x] **Step 5: Commit** — `test: close_task_cmd enforces precondition phase=refactor and drift check`.
 
 ---
 
@@ -606,7 +606,7 @@ def main(argv: list[str] | None = None) -> int:
 
 Implements sec.S.5.4 pasos 1-3.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Each test uses a tmp git repo fixture with seeded commit + state file with `current_phase=refactor`:
 
@@ -617,9 +617,9 @@ Each test uses a tmp git repo fixture with seeded commit + state file with `curr
 - `test_close_task_closes_plan_when_no_next_task`: plan with task 2 open, no task 3. After close-task: `current_task_id=None`, `current_task_title=None`, `current_phase="done"`.
 - `test_close_task_updates_phase_started_at_commit_to_chore_sha`: after close-task, `phase_started_at_commit` == short SHA of the chore commit.
 
-- [ ] **Step 2: Run test to verify it fails** — mutation and commit not implemented.
+- [x] **Step 2: Run test to verify it fails** — mutation and commit not implemented.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Top-of-file imports: `import os`, `from datetime import datetime, timezone`, `import subprocess_utils`, `from commits import create as commit_create`, `from state_file import SessionState, save as save_state`, `import _plan_ops` (see Task 6a — shared plan-edit helpers).
 
@@ -690,11 +690,11 @@ Rationale for the split into `_plan_ops`: `close_task_cmd`, `spec_cmd._first_ope
 
 Rationale for `mark_and_advance` as a public helper: iter-2 Finding W1 noted that `auto_cmd._close_task_inline` (Task 28) duplicated the entire close-task sequence. Extracting it as a public function on `close_task_cmd` (no leading underscore) lets Task 28 delegate without violating the underscore-private contract. This is the minimal-surgery option per iter-2 fix guidance.
 
-- [ ] **Step 4: Run test to verify it passes** — 11 tests.
+- [x] **Step 4: Run test to verify it passes** — 11 tests.
 
 Add one extra test `test_mark_and_advance_is_public_api` asserting `hasattr(close_task_cmd, "mark_and_advance")` and that calling it directly on a seeded state produces the same 1-commit + advanced state result as calling `main`.
 
-- [ ] **Step 5: Commit** — `feat: close_task_cmd flips checkbox, commits chore, advances state`.
+- [x] **Step 5: Commit** — `feat: close_task_cmd flips checkbox, commits chore, advances state`.
 
 ---
 
@@ -706,7 +706,7 @@ Add one extra test `test_mark_and_advance_is_public_api` asserting `hasattr(clos
 
 Rationale (addresses Finding 6 Balthasar + iter-2 Finding W1 follow-through): plan parsing and `[ ]` flipping are needed by `close_task_cmd`, `spec_cmd._first_open_task`, and `auto_cmd` Phase 2's refactor cascade. Keeping them inside `close_task_cmd` with underscore-prefixed names (`_flip_task_checkboxes`, `_next_task`) would force other cmd modules to reach into private symbols — a coupling smell. `_plan_ops.py` exposes them as public module-level functions (no leading underscore on the identifiers themselves; the underscore-prefix-filename convention signals "internal to plugin but shared across cmd modules"). Tasks 6 and 18 consume the public API. Task 28 (auto) no longer needs to import `_plan_ops` directly — per iter-2 W1 it delegates to `close_task_cmd.mark_and_advance`, which itself consumes `_plan_ops`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -780,9 +780,9 @@ def test_first_open_task_raises_when_none_open():
         _plan_ops.first_open_task(plan)
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -853,9 +853,9 @@ def first_open_task(plan_text: str) -> tuple[str, str]:
     raise PreconditionError("plan has no open [ ] tasks")
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 8 tests.
+- [x] **Step 4: Run test to verify it passes** — 8 tests.
 
-- [ ] **Step 5: Commit** — `feat: extract shared plan-edit helpers into _plan_ops module`.
+- [x] **Step 5: Commit** — `feat: extract shared plan-edit helpers into _plan_ops module`.
 
 ---
 
@@ -865,7 +865,7 @@ def first_open_task(plan_text: str) -> tuple[str, str]:
 - Create: `skills/sbtdd/scripts/close_phase_cmd.py`
 - Create: `tests/test_close_phase_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -882,9 +882,9 @@ def test_close_phase_cmd_parses_help():
         close_phase_cmd.main(["--help"])
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -920,9 +920,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 2 tests.
+- [x] **Step 4: Run test to verify it passes** — 2 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold close_phase_cmd module with argparse skeleton`.
+- [x] **Step 5: Commit** — `test: scaffold close_phase_cmd module with argparse skeleton`.
 
 ---
 
@@ -930,7 +930,7 @@ run = main
 
 **Files:** Modify `close_phase_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_close_phase_aborts_on_drift`: monkeypatched `drift.detect_drift` returns a report -> `DriftError`.
 - `test_close_phase_aborts_on_state_missing`: -> `PreconditionError`.
@@ -938,9 +938,9 @@ run = main
 - `test_close_phase_aborts_when_verification_fails`: monkeypatch `superpowers_dispatch.verification_before_completion` to raise `ValidationError` -> error propagates, no commit.
 - `test_close_phase_does_not_commit_when_verification_fails`: after failing verification, `git log` HEAD unchanged.
 
-- [ ] **Step 2: Run test to verify it fails** — scaffold returns 0.
+- [x] **Step 2: Run test to verify it fails** — scaffold returns 0.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Top-of-file imports:
 
@@ -982,9 +982,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 7 tests.
+- [x] **Step 4: Run test to verify it passes** — 7 tests.
 
-- [ ] **Step 5: Commit** — `feat: close_phase_cmd enforces drift + verification gate`.
+- [x] **Step 5: Commit** — `feat: close_phase_cmd enforces drift + verification gate`.
 
 ---
 
@@ -992,7 +992,7 @@ def main(argv: list[str] | None = None) -> int:
 
 **Files:** Modify `close_phase_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_close_phase_red_emits_test_prefix_commit`: state `current_phase=red`, `--message "add parser"`; HEAD prefix `test:`.
 - `test_close_phase_green_feat_emits_feat`: state=green + `--variant feat`; HEAD `feat:`.
@@ -1003,9 +1003,9 @@ def main(argv: list[str] | None = None) -> int:
 - `test_close_phase_updates_last_verification_fields`: `last_verification_at` is ISO 8601 Z, `last_verification_result="passed"`.
 - `test_close_phase_green_without_variant_raises_validation_error`.
 
-- [ ] **Step 2: Run test to verify it fails** — commit + state update not wired.
+- [x] **Step 2: Run test to verify it fails** — commit + state update not wired.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 from commits import create as commit_create
@@ -1077,9 +1077,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 15 tests.
+- [x] **Step 4: Run test to verify it passes** — 15 tests.
 
-- [ ] **Step 5: Commit** — `feat: close_phase_cmd creates atomic commit and advances state for red/green`.
+- [x] **Step 5: Commit** — `feat: close_phase_cmd creates atomic commit and advances state for red/green`.
 
 ---
 
@@ -1087,15 +1087,15 @@ def main(argv: list[str] | None = None) -> int:
 
 **Files:** Modify `close_phase_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_close_phase_refactor_cascades_to_close_task`: monkeypatch `close_task_cmd.main` to record args; close-phase in refactor calls it with `--project-root` matching root.
 - `test_close_phase_refactor_creates_refactor_commit_before_cascade`: inspect `git log -2` after close-phase: newest is `chore:`, second is `refactor:` (close-task's commit on top of close-phase's).
 - `test_close_phase_refactor_integration_flips_checkbox_and_advances`: 3-task plan, task 2 in refactor; after close-phase: plan task 2 [x], state advances to task 3 red, TWO commits added in the expected order.
 
-- [ ] **Step 2: Run test to verify it fails** — cascade not wired.
+- [x] **Step 2: Run test to verify it fails** — cascade not wired.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 After `save_state(new_state, ...)` in `main`:
 
@@ -1114,9 +1114,9 @@ if state.current_phase == "refactor":
 return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 18 tests.
+- [x] **Step 4: Run test to verify it passes** — 18 tests.
 
-- [ ] **Step 5: Commit** — `feat: close_phase_cmd cascades refactor close to close_task`.
+- [x] **Step 5: Commit** — `feat: close_phase_cmd cascades refactor close to close_task`.
 
 ---
 
@@ -1128,7 +1128,7 @@ return 0
 - Create: `skills/sbtdd/scripts/init_cmd.py`
 - Create: `tests/test_init_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -1152,9 +1152,9 @@ def test_init_rejects_invalid_stack():
         init_cmd.main(["--stack", "not-a-real-stack"])
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -1193,9 +1193,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 3 tests.
+- [x] **Step 4: Run test to verify it passes** — 3 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold init_cmd module with argparse + stack validation`.
+- [x] **Step 5: Commit** — `test: scaffold init_cmd module with argparse + stack validation`.
 
 ---
 
@@ -1203,15 +1203,15 @@ run = main
 
 **Files:** Modify `init_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_init_aborts_when_preflight_fails`: monkeypatch `check_environment` to return a report with a BROKEN check; `DependencyError` raised.
 - `test_init_does_not_create_files_on_preflight_failure`: after call with failing preflight, tmp_path contains no `CLAUDE.local.md`, no `plugin.local.md`.
 - `test_init_aborts_when_stack_missing_non_interactive`: no --stack, stdin not tty (monkeypatch); `ValidationError`.
 
-- [ ] **Step 2: Run test to verify it fails** — scaffold returns 0.
+- [x] **Step 2: Run test to verify it fails** — scaffold returns 0.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import sys
@@ -1252,9 +1252,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 6 tests.
+- [x] **Step 4: Run test to verify it passes** — 6 tests.
 
-- [ ] **Step 5: Commit** — `feat: init_cmd runs pre-flight dependency check and resolves args`.
+- [x] **Step 5: Commit** — `feat: init_cmd runs pre-flight dependency check and resolves args`.
 
 ---
 
@@ -1264,15 +1264,15 @@ def main(argv: list[str] | None = None) -> int:
 
 **Atomicity contract (addresses Finding 2 Melchior):** every file created during Phase 3a AND Phase 3b lands FIRST in a tempdir built from `tempfile.mkdtemp(prefix="sbtdd-init-")`. The dest_root is NOT touched until Phase 4 smoke test (which runs against the tempdir) passes. Phase 5 performs a single atomic relocation from tempdir to dest_root. If Phase 4 fails, the tempdir is cleaned up and dest_root remains byte-identical to its pre-invocation state — satisfying sec.S.5.1 all-or-nothing.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_init_creates_claude_local_md_with_author_and_stack`: monkeypatched all-OK preflight; after init, `CLAUDE.local.md` contains author and stack-specific verification commands.
 - `test_init_creates_plugin_local_md_with_valid_yaml_frontmatter`: `config.load_plugin_local` returns `PluginConfig` without raising.
 - `test_init_phase3a_writes_only_to_tempdir_not_dest_root`: stub Phase 4 smoke test to assert tempdir has both files and dest_root has NEITHER at that point.
 
-- [ ] **Step 2: Run test to verify it fails** — files not created.
+- [x] **Step 2: Run test to verify it fails** — files not created.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import os
@@ -1343,9 +1343,9 @@ def _phase3a_generate(ns: argparse.Namespace, staging: Path, dest_root: Path) ->
 
 Wire into `main` after pre-flight; staging is created at the start of Phase 3a and consumed by Phase 3b + Phase 4. On any exception, the staging dir is cleaned up by `main` via `_cleanup_staging` (Task 15).
 
-- [ ] **Step 4: Run test to verify it passes** — 9 tests.
+- [x] **Step 4: Run test to verify it passes** — 9 tests.
 
-- [ ] **Step 5: Commit** — `feat: init_cmd phase 3a stages CLAUDE.local.md and plugin.local.md in tempdir`.
+- [x] **Step 5: Commit** — `feat: init_cmd phase 3a stages CLAUDE.local.md and plugin.local.md in tempdir`.
 
 ---
 
@@ -1355,7 +1355,7 @@ Wire into `main` after pre-flight; staging is created at the start of Phase 3a a
 
 All writes in this phase go to the STAGING dir from Task 13 — dest_root stays untouched until Phase 5 relocation. The `.gitignore` and `conftest.py` merge steps still READ pre-existing content from dest_root (so user overrides are preserved), but the resulting merged file is WRITTEN into the staging tree, not to dest_root directly.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_init_merges_settings_json_preserving_user_hooks`: pre-create `.claude/settings.json` with user hook in dest_root; after full init, both user and plugin hooks present.
 - `test_init_creates_spec_behavior_base_md_skeleton`: `sbtdd/spec-behavior-base.md` exists, contains no uppercase pending markers forbidden by INV-27 (the three tokens enumerated in INV-27 — see `spec_cmd._INV27_RE` in Task 16).
@@ -1364,9 +1364,9 @@ All writes in this phase go to the STAGING dir from Task 13 — dest_root stays 
 - `test_init_python_stack_writes_conftest_py`: --stack python --conftest-mode=merge writes `conftest.py` in project root with `# --- SBTDD TDD-Guard reporter START ---` marker.
 - `test_init_phase3b_writes_only_to_staging`: before Phase 4 runs, assert dest_root still has no `.claude/settings.json`, no `sbtdd/spec-behavior-base.md`, no `planning/.gitkeep`, and no `conftest.py` (unless user had one pre-existing). All new files are in staging.
 
-- [ ] **Step 2: Run test to verify it fails** — Phase 3b absent.
+- [x] **Step 2: Run test to verify it fails** — Phase 3b absent.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import json
@@ -1439,9 +1439,9 @@ def _install_conftest_staged(staging: Path, dest_root: Path, mode: str) -> None:
 
 Call `_phase3b_install` from `main` after `_phase3a_generate`, same staging dir.
 
-- [ ] **Step 4: Run test to verify it passes** — 15 tests.
+- [x] **Step 4: Run test to verify it passes** — 15 tests.
 
-- [ ] **Step 5: Commit** — `feat: init_cmd phase 3b stages hooks, spec-base, planning, gitignore fragment`.
+- [x] **Step 5: Commit** — `feat: init_cmd phase 3b stages hooks, spec-base, planning, gitignore fragment`.
 
 ---
 
@@ -1451,7 +1451,7 @@ Call `_phase3b_install` from `main` after `_phase3a_generate`, same staging dir.
 
 Phase 4 smoke-tests the STAGING tree. If it fails, the staging dir is wiped and dest_root is byte-identical to its pre-invocation state. Phase 5 first copies the staged tree into dest_root (under the same layout) and then reports. Relocation uses `shutil.copytree` with `dirs_exist_ok=True` so pre-existing user files (e.g., project source) stay put; only files the plugin staged are written.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_init_smoke_test_rejects_invalid_settings_json`: monkeypatch `hooks_installer.merge` to write corrupt JSON into staging; smoke test fails -> staging wiped + dest_root has no plugin files.
 - `test_init_smoke_test_validates_plugin_local_md`: verify `load_plugin_local` call against the STAGED plugin.local.md succeeds.
@@ -1459,9 +1459,9 @@ Phase 4 smoke-tests the STAGING tree. If it fails, the staging dir is wiped and 
 - `test_init_exit_0_on_full_success`: happy path, rc=0.
 - `test_init_rollback_on_smoke_test_failure`: monkeypatch `_phase4_smoke_test` to raise; after call, dest_root has no `CLAUDE.local.md`, no `.claude/settings.json`, no `sbtdd/spec-behavior-base.md`. Staging dir removed from filesystem. Covers Finding 2 rollback contract.
 
-- [ ] **Step 2: Run test to verify it fails** — Phase 4/5 absent.
+- [x] **Step 2: Run test to verify it fails** — Phase 4/5 absent.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import shutil
@@ -1542,9 +1542,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 19 tests.
+- [x] **Step 4: Run test to verify it passes** — 19 tests.
 
-- [ ] **Step 5: Commit** — `feat: init_cmd phases 4-5 stage-smoke-relocate pattern with strict rollback`.
+- [x] **Step 5: Commit** — `feat: init_cmd phases 4-5 stage-smoke-relocate pattern with strict rollback`.
 
 ---
 
@@ -1554,7 +1554,7 @@ def main(argv: list[str] | None = None) -> int:
 - Create: `skills/sbtdd/scripts/spec_cmd.py`
 - Create: `tests/test_spec_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -1592,9 +1592,9 @@ def test_spec_accepts_lowercase_todos_spanish_prose(tmp_path):
         assert "TODO" not in str(e) and "pending" not in str(e).lower()
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -1651,9 +1651,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 3 tests.
+- [x] **Step 4: Run test to verify it passes** — 3 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold spec_cmd with INV-27 placeholder rejection`.
+- [x] **Step 5: Commit** — `test: scaffold spec_cmd with INV-27 placeholder rejection`.
 
 ---
 
@@ -1661,15 +1661,15 @@ run = main
 
 **Files:** Modify `spec_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_spec_invokes_brainstorming_with_spec_base_path`: monkeypatch `superpowers_dispatch.brainstorming` to track args; expect invoked with `@path/to/spec-behavior-base.md`.
 - `test_spec_invokes_writing_plans_after_spec_generated`: spec stub creates `spec-behavior.md`; expect `writing_plans` invoked with that path and creates `claude-plan-tdd-org.md`.
 - `test_spec_aborts_when_brainstorming_fails`: stub raises ValidationError -> propagates.
 
-- [ ] **Step 2: Run test to verify it fails** — flow not wired.
+- [x] **Step 2: Run test to verify it fails** — flow not wired.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import superpowers_dispatch
@@ -1693,9 +1693,9 @@ def _run_spec_flow(root: Path) -> None:
 
 Call from `main` after validation.
 
-- [ ] **Step 4: Run test to verify it passes** — 6 tests.
+- [x] **Step 4: Run test to verify it passes** — 6 tests.
 
-- [ ] **Step 5: Commit** — `feat: spec_cmd invokes brainstorming and writing-plans in sequence`.
+- [x] **Step 5: Commit** — `feat: spec_cmd invokes brainstorming and writing-plans in sequence`.
 
 ---
 
@@ -1703,7 +1703,7 @@ Call from `main` after validation.
 
 **Files:** Modify `spec_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_spec_magi_loop_accepts_full_go_on_first_iter`: stubbed magi returns GO full; exit after 1 iteration.
 - `test_spec_magi_loop_rejects_degraded_and_retries`: iter 1 GO degraded, iter 2 GO full; 2 iterations (INV-28).
@@ -1737,9 +1737,9 @@ assert call_order == ["save", "commit:chore"]
 Deterministic across Windows/Linux/macOS, no race.
 - `test_spec_does_not_commit_artifacts_when_magi_rejects`: if MAGI does not converge (`MAGIGateError` raised), assert no `chore:` commit is produced — artifacts remain uncommitted for the user to inspect.
 
-- [ ] **Step 2: Run test to verify it fails** — MAGI loop + state creation missing.
+- [x] **Step 2: Run test to verify it fails** — MAGI loop + state creation missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import magi_dispatch
@@ -1847,9 +1847,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 11 tests.
+- [x] **Step 4: Run test to verify it passes** — 11 tests.
 
-- [ ] **Step 5: Commit** — `feat: spec_cmd runs MAGI Checkpoint 2 loop and creates state file on approval`.
+- [x] **Step 5: Commit** — `feat: spec_cmd runs MAGI Checkpoint 2 loop and creates state file on approval`.
 
 ---
 
@@ -1861,7 +1861,7 @@ def main(argv: list[str] | None = None) -> int:
 - Create: `skills/sbtdd/scripts/pre_merge_cmd.py`
 - Create: `tests/test_pre_merge_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -1893,9 +1893,9 @@ def test_pre_merge_aborts_on_drift(tmp_path, monkeypatch):
         pre_merge_cmd.main(["--project-root", str(tmp_path)])
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -1949,9 +1949,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 3 tests.
+- [x] **Step 4: Run test to verify it passes** — 3 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold pre_merge_cmd with preconditions and drift check`.
+- [x] **Step 5: Commit** — `test: scaffold pre_merge_cmd with preconditions and drift check`.
 
 ---
 
@@ -1959,7 +1959,7 @@ run = main
 
 **Files:** Modify `pre_merge_cmd.py` + `errors.py` + tests.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 In `tests/test_errors.py` (append):
 - `test_loop1_divergent_error_exit_code_is_7`: `EXIT_CODES[Loop1DivergentError] == 7`.
@@ -1969,9 +1969,9 @@ In `tests/test_pre_merge_cmd.py`:
 - `test_pre_merge_loop1_applies_fixes_until_clean`: sequence `[WARNING]` -> `clean-to-go`; loop runs 2 iterations, `receiving_code_review` called once between.
 - `test_pre_merge_loop1_aborts_after_10_iterations_exit_7`: always `[WARNING]` -> raises `Loop1DivergentError` after 10 iterations; dispatcher maps to exit 7.
 
-- [ ] **Step 2: Run test to verify it fails** — Loop 1 and exception class missing.
+- [x] **Step 2: Run test to verify it fails** — Loop 1 and exception class missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Edit `skills/sbtdd/scripts/errors.py`:
 
@@ -2009,9 +2009,9 @@ def _loop1(root: Path) -> None:
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 5 tests (2 error tests + 3 pre-merge tests).
+- [x] **Step 4: Run test to verify it passes** — 5 tests (2 error tests + 3 pre-merge tests).
 
-- [ ] **Step 5: Commit** — `feat: pre_merge_cmd Loop 1 requesting-code-review with Loop1DivergentError exit 7`.
+- [x] **Step 5: Commit** — `feat: pre_merge_cmd Loop 1 requesting-code-review with Loop1DivergentError exit 7`.
 
 ---
 
@@ -2019,7 +2019,7 @@ def _loop1(root: Path) -> None:
 
 **Files:** Modify `pre_merge_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_pre_merge_loop2_exits_on_full_go`: Loop 1 stubbed clean, magi GO full; exit after 1 iter; `magi-verdict.json` written with `degraded: false`.
 - `test_pre_merge_loop2_retries_on_degraded`: iter 1 GO degraded, iter 2 GO full; 2 iterations (INV-28).
@@ -2032,9 +2032,9 @@ def _loop1(root: Path) -> None:
 - `test_pre_merge_loop2_accepted_condition_emits_test_fix_refactor_mini_cycle`: MAGI iter 1 returns `GO_WITH_CAVEATS` full with 1 structural condition; `/receiving-code-review` stub ACCEPTS it. Assert three commits land in order: prefix `test:` (reproducing test), prefix `fix:` (implementation), prefix `refactor:` (polish). Each commit created via `commits.create`. Covers Finding 1.
 - `test_pre_merge_loop2_rejected_condition_feeds_into_next_iteration`: MAGI iter 1 `GO_WITH_CAVEATS` with 1 condition; `/receiving-code-review` REJECTS it; no mini-cycle commits land; iter 2 invocation carries rejection as context; iter 2 returns `GO` full -> exit. Covers Finding 1 rejected-path contract.
 
-- [ ] **Step 2: Run test to verify it fails** — Loop 2 not implemented.
+- [x] **Step 2: Run test to verify it fails** — Loop 2 not implemented.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import magi_dispatch
@@ -2268,9 +2268,9 @@ Add to the test list in Step 1:
 - `test_loop2_does_not_write_feedback_file_when_no_rejections` (defense-in-depth): single iter GO full no conditions; `.claude/magi-feedback.md` MUST NOT exist.
 - `test_conditions_low_risk_classifies_structural_test_as_structural` (addresses W8): condition `"add structural test for timeout path"` returns False (not low-risk). Paired: condition `"fix docstring naming"` returns True. Without this test, the "test" keyword false-positive survives.
 
-- [ ] **Step 4: Run test to verify it passes** — 20 tests (14 original + 6 new from W3/W6/W8).
+- [x] **Step 4: Run test to verify it passes** — 20 tests (14 original + 6 new from W3/W6/W8).
 
-- [ ] **Step 5: Commit** — `feat: pre_merge_cmd Loop 2 MAGI with INV-28 degraded and INV-29 receiving-code-review mini-cycle`.
+- [x] **Step 5: Commit** — `feat: pre_merge_cmd Loop 2 MAGI with INV-28 degraded and INV-29 receiving-code-review mini-cycle`.
 
 ---
 
@@ -2280,15 +2280,15 @@ Add to the test list in Step 1:
 - Create: `skills/sbtdd/scripts/finalize_cmd.py`
 - Create: `tests/test_finalize_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_finalize_cmd_module_importable`.
 - `test_finalize_aborts_when_magi_verdict_missing`: state current_phase=done, no magi-verdict.json -> `PreconditionError`.
 - `test_finalize_aborts_when_state_not_done`: state current_phase=red -> `PreconditionError`.
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -2338,9 +2338,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 3 tests.
+- [x] **Step 4: Run test to verify it passes** — 3 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold finalize_cmd with state and magi-verdict preconditions`.
+- [x] **Step 5: Commit** — `test: scaffold finalize_cmd with state and magi-verdict preconditions`.
 
 ---
 
@@ -2348,14 +2348,14 @@ run = main
 
 **Files:** Modify `finalize_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_finalize_aborts_when_verdict_predates_plan_approved_at`: state.plan_approved_at=2026-04-20, verdict timestamp=2026-04-10 -> `PreconditionError`.
 - `test_finalize_accepts_verdict_after_plan_approved_at`: verdict timestamp later than plan_approved_at; passes this check.
 
-- [ ] **Step 2: Run test to verify it fails** — staleness check missing.
+- [x] **Step 2: Run test to verify it fails** — staleness check missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 def _verdict_is_stale(state, magi_verdict_path: Path) -> bool:
@@ -2376,9 +2376,9 @@ if _verdict_is_stale(state, magi_verdict):
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 5 tests.
+- [x] **Step 4: Run test to verify it passes** — 5 tests.
 
-- [ ] **Step 5: Commit** — `feat: finalize_cmd rejects stale magi-verdict from previous feature`.
+- [x] **Step 5: Commit** — `feat: finalize_cmd rejects stale magi-verdict from previous feature`.
 
 ---
 
@@ -2386,7 +2386,7 @@ if _verdict_is_stale(state, magi_verdict):
 
 **Files:** Modify `finalize_cmd.py` + `errors.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 In `tests/test_errors.py`:
 - `test_checklist_error_exit_code_is_9`: `EXIT_CODES[ChecklistError] == 9`.
@@ -2398,9 +2398,9 @@ In `tests/test_finalize_cmd.py`:
 - `test_finalize_aborts_on_dirty_working_tree`: uncommitted changes -> `ChecklistError`.
 - `test_finalize_aborts_on_plan_with_open_tasks`: plan has `- [ ]` -> `ChecklistError`.
 
-- [ ] **Step 2: Run test to verify it fails** — class + logic missing.
+- [x] **Step 2: Run test to verify it fails** — class + logic missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Edit `errors.py`:
 
@@ -2477,9 +2477,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 11 tests.
+- [x] **Step 4: Run test to verify it passes** — 11 tests.
 
-- [ ] **Step 5: Commit** — `feat: finalize_cmd validates 9-item checklist with ChecklistError exit 9`.
+- [x] **Step 5: Commit** — `feat: finalize_cmd validates 9-item checklist with ChecklistError exit 9`.
 
 ---
 
@@ -2487,14 +2487,14 @@ def main(argv: list[str] | None = None) -> int:
 
 **Files:** Modify `finalize_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_finalize_invokes_finishing_skill_on_success`: happy path; monkeypatched `finishing_a_development_branch` recorded called once.
 - `test_finalize_does_not_invoke_finishing_on_checklist_failure`: dirty tree; skill NOT called.
 
-- [ ] **Step 2: Run test to verify it fails** — skill not invoked.
+- [x] **Step 2: Run test to verify it fails** — skill not invoked.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 At the end of `main`, after `failures` empty:
 
@@ -2503,9 +2503,9 @@ superpowers_dispatch.finishing_a_development_branch(cwd=str(root))
 return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 13 tests.
+- [x] **Step 4: Run test to verify it passes** — 13 tests.
 
-- [ ] **Step 5: Commit** — `feat: finalize_cmd invokes finishing-a-development-branch on checklist pass`.
+- [x] **Step 5: Commit** — `feat: finalize_cmd invokes finishing-a-development-branch on checklist pass`.
 
 ---
 
@@ -2517,7 +2517,7 @@ return 0
 - Create: `skills/sbtdd/scripts/auto_cmd.py`
 - Create: `tests/test_auto_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 def test_auto_cmd_module_importable():
@@ -2552,9 +2552,9 @@ def test_auto_parses_magi_max_iterations_flag():
     assert ns.magi_max_iterations == 7
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -2613,9 +2613,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 3 tests.
+- [x] **Step 4: Run test to verify it passes** — 3 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold auto_cmd module with argparse and dry-run early short-circuit`.
+- [x] **Step 5: Commit** — `test: scaffold auto_cmd module with argparse and dry-run early short-circuit`.
 
 ---
 
@@ -2623,16 +2623,16 @@ run = main
 
 **Files:** Modify `auto_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_auto_runs_preflight_check`: monkeypatched `check_environment` recorded called once.
 - `test_auto_aborts_when_preflight_fails`: preflight non-OK -> `DependencyError`.
 - `test_auto_aborts_when_state_missing`: -> `PreconditionError`.
 - `test_auto_aborts_when_plan_not_approved`: state.plan_approved_at=None -> `PreconditionError`.
 
-- [ ] **Step 2: Run test to verify it fails** — Phase 1 missing.
+- [x] **Step 2: Run test to verify it fails** — Phase 1 missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 from dependency_check import check_environment
@@ -2662,9 +2662,9 @@ def _phase1_preflight(ns):
 
 Call from `main` AFTER the dry-run short-circuit from Task 26 (so `--dry-run` remains zero-subprocess per Finding 4) but BEFORE any Phase 2+ work. The order is: (1) parse_args, (2) if dry_run then preview + exit 0, (3) `_phase1_preflight(ns)`, (4) subsequent phases.
 
-- [ ] **Step 4: Run test to verify it passes** — 7 tests.
+- [x] **Step 4: Run test to verify it passes** — 7 tests.
 
-- [ ] **Step 5: Commit** — `feat: auto_cmd phase 1 pre-flight and state validation`.
+- [x] **Step 5: Commit** — `feat: auto_cmd phase 1 pre-flight and state validation`.
 
 ---
 
@@ -2672,7 +2672,7 @@ Call from `main` AFTER the dry-run short-circuit from Task 26 (so `--dry-run` re
 
 **Files:** Modify `auto_cmd.py` + `errors.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 In `tests/test_errors.py`:
 - `test_verification_irremediable_error_exit_code_is_6`: `EXIT_CODES[VerificationIrremediableError] == 6`.
@@ -2685,9 +2685,9 @@ In `tests/test_auto_cmd.py`:
 - `test_auto_phase2_aborts_on_drift`: monkeypatched `detect_drift` returns report -> `DriftError`.
 - `test_auto_phase2_inner_loop_entry_phase_respects_state`: state.current_phase=green; auto starts at green, skipping red.
 
-- [ ] **Step 2: Run test to verify it fails** — class + logic missing.
+- [x] **Step 2: Run test to verify it fails** — class + logic missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Edit `errors.py`:
 
@@ -2781,9 +2781,9 @@ def _phase2_task_loop(ns, state: SessionState, cfg) -> SessionState:
 
 Rationale (iter-2 Finding W1): previous draft had `auto_cmd._close_task_inline` duplicating the full close-task sequence from `close_task_cmd.main`. Task 6 now exposes `close_task_cmd.mark_and_advance` as a public helper (no underscore), so auto's refactor cascade imports `close_task_cmd` and delegates. Single source of truth for the close-task bookkeeping; any change in the contract (e.g., extra state field, commit message tweak) propagates to both subcomandos automatically.
 
-- [ ] **Step 4: Run test to verify it passes** — 14 tests.
+- [x] **Step 4: Run test to verify it passes** — 14 tests.
 
-- [ ] **Step 5: Commit** — `feat: auto_cmd phase 2 task loop with VerificationIrremediableError exit 6`.
+- [x] **Step 5: Commit** — `feat: auto_cmd phase 2 task loop with VerificationIrremediableError exit 6`.
 
 ---
 
@@ -2791,16 +2791,16 @@ Rationale (iter-2 Finding W1): previous draft had `auto_cmd._close_task_inline` 
 
 **Files:** Modify `auto_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_auto_phase3_invokes_loop1_and_loop2`: stubs return clean + GO full; both loops run.
 - `test_auto_phase3_uses_auto_magi_max_iterations`: cfg.magi_max_iterations=3, auto_magi_max_iterations=5; stub magi HOLD 4 times + GO full -> 5th iter exits.
 - `test_auto_phase3_respects_flag_override`: `--magi-max-iterations=2`; 2 HOLD -> `MAGIGateError`.
 - `test_auto_phase3_aborts_on_strong_no_go`: STRONG_NO_GO iter 1 -> `MAGIGateError` immediately.
 
-- [ ] **Step 2: Run test to verify it fails** — Phase 3 missing.
+- [x] **Step 2: Run test to verify it fails** — Phase 3 missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 def _phase3_pre_merge(ns, cfg):
@@ -2822,9 +2822,9 @@ def _phase3_pre_merge(ns, cfg):
     return verdict
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 18 tests.
+- [x] **Step 4: Run test to verify it passes** — 18 tests.
 
-- [ ] **Step 5: Commit** — `feat: auto_cmd phase 3 pre-merge with elevated MAGI budget`.
+- [x] **Step 5: Commit** — `feat: auto_cmd phase 3 pre-merge with elevated MAGI budget`.
 
 ---
 
@@ -2832,15 +2832,15 @@ def _phase3_pre_merge(ns, cfg):
 
 **Files:** Modify `auto_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_auto_phase4_runs_checklist_but_does_not_invoke_finishing`: successful run; `finishing_a_development_branch` NOT invoked (INV-25).
 - `test_auto_phase4_aborts_on_degraded_verdict_exit_9`: magi-verdict.json has degraded=true -> `ChecklistError` (reuses finalize checklist logic).
 - `test_auto_phase5_writes_auto_run_json`: `.claude/auto-run.json` contains `auto_started_at` + `auto_finished_at` ISO timestamps + `verdict`.
 
-- [ ] **Step 2: Run test to verify it fails** — Phase 4/5 missing.
+- [x] **Step 2: Run test to verify it fails** — Phase 4/5 missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 import json
@@ -2879,9 +2879,9 @@ def _phase5_report(root: Path, started: str, verdict) -> None:
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 21 tests.
+- [x] **Step 4: Run test to verify it passes** — 21 tests.
 
-- [ ] **Step 5: Commit** — `feat: auto_cmd phase 4 checklist and phase 5 report with auto-run.json trail`.
+- [x] **Step 5: Commit** — `feat: auto_cmd phase 4 checklist and phase 5 report with auto-run.json trail`.
 
 ---
 
@@ -2889,16 +2889,16 @@ def _phase5_report(root: Path, started: str, verdict) -> None:
 
 **Files:** Modify `auto_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_auto_happy_path_end_to_end`: single-task plan; after auto: 3 commits + 1 chore + state done + auto-run.json + magi-verdict.json.
 - `test_auto_quota_exhaustion_propagates_exit_11`: monkeypatch verification to raise `QuotaExhaustedError`; dispatcher maps to 11.
 - `test_auto_dry_run_prints_plan_without_side_effects`: --dry-run creates no auto-run.json.
 - `test_auto_never_toggles_tdd_guard` (INV-23 enforcement, Finding 9 + iter-2 W5): seed dest_root with a pre-existing `.claude/settings.json` containing the three TDD-Guard hooks (`PreToolUse`, `SessionStart`, `UserPromptSubmit`). Capture `hashlib.sha256(settings.read_bytes()).hexdigest()` BEFORE invoking `auto_cmd.main`. Spy on `Path.write_text` + `Path.open("w"|"wb"|"a")` via a factory that **filters by `self.name == "settings.json"`** — so recording ignores legitimate writes to `session-state.json`, `auto-run.json`, `magi-verdict.json`, etc. in the same `.claude/` dir (iter-2 W5: the previous "any write to that path" spy was too broad, causing false positives). Run `auto_cmd.main` end-to-end on a synthetic plan with stubbed skills + magi. Assert: (a) the filtered spy recorded ZERO writes targeting `settings.json`, (b) POST-run `hashlib.sha256(settings.read_bytes()).hexdigest()` == PRE-run hash (byte-identity — catches any write path the spy may have missed), (c) no `tdd-guard on`/`tdd-guard off` prompt is emitted to stdout. Both (a) and (b) must hold — the hash is the authoritative check; the spy is diagnostic. Docstring states the test enforces INV-23 (TDD-Guard inviolable in auto mode) per CLAUDE.local.md §3 and sec.S.10 INV-23.
 
-- [ ] **Step 2: Run test to verify it fails** — wiring incomplete.
+- [x] **Step 2: Run test to verify it fails** — wiring incomplete.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 def main(argv: list[str] | None = None) -> int:
@@ -2923,9 +2923,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 24 tests.
+- [x] **Step 4: Run test to verify it passes** — 24 tests.
 
-- [ ] **Step 5: Commit** — `feat: auto_cmd end-to-end wiring phase 1-5 with quota propagation`.
+- [x] **Step 5: Commit** — `feat: auto_cmd end-to-end wiring phase 1-5 with quota propagation`.
 
 ---
 
@@ -2935,7 +2935,7 @@ def main(argv: list[str] | None = None) -> int:
 - Create: `skills/sbtdd/scripts/resume_cmd.py`
 - Create: `tests/test_resume_cmd.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -2966,9 +2966,9 @@ def test_resume_aborts_when_plugin_local_md_missing(tmp_path):
         resume_cmd.main(["--project-root", str(tmp_path)])
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -3015,9 +3015,9 @@ def main(argv: list[str] | None = None) -> int:
 run = main
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 3 tests.
+- [x] **Step 4: Run test to verify it passes** — 3 tests.
 
-- [ ] **Step 5: Commit** — `test: scaffold resume_cmd with plugin.local.md and state preconditions`.
+- [x] **Step 5: Commit** — `test: scaffold resume_cmd with plugin.local.md and state preconditions`.
 
 ---
 
@@ -3025,16 +3025,16 @@ run = main
 
 **Files:** Modify `resume_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_resume_prints_state_file_fields`: state with current_task_id=3, phase=green; diagnostic stdout contains all 7 fields.
 - `test_resume_prints_head_commit_info`: output contains HEAD short SHA + subject.
 - `test_resume_prints_working_tree_status`: DIRTY if uncommitted, else clean.
 - `test_resume_detects_runtime_artifacts`: presence of magi-verdict.json and auto-run.json reflected in report.
 
-- [ ] **Step 2: Run test to verify it fails** — diagnostic missing.
+- [x] **Step 2: Run test to verify it fails** — diagnostic missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 from state_file import load as load_state
@@ -3077,9 +3077,9 @@ def _report_diagnostic(root: Path) -> dict:
 
 Call from `main` after `state_path` existence check.
 
-- [ ] **Step 4: Run test to verify it passes** — 7 tests.
+- [x] **Step 4: Run test to verify it passes** — 7 tests.
 
-- [ ] **Step 5: Commit** — `feat: resume_cmd phase 1 diagnostic reports state, git, tree, artifacts`.
+- [x] **Step 5: Commit** — `feat: resume_cmd phase 1 diagnostic reports state, git, tree, artifacts`.
 
 ---
 
@@ -3087,15 +3087,15 @@ Call from `main` after `state_path` existence check.
 
 **Files:** Modify `resume_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_resume_reruns_dependency_check`: monkeypatched `check_environment` called.
 - `test_resume_aborts_on_failed_preflight`: -> `DependencyError`.
 - `test_resume_aborts_on_drift`: monkeypatched drift returns report -> `DriftError`.
 
-- [ ] **Step 2: Run test to verify it fails** — re-check missing.
+- [x] **Step 2: Run test to verify it fails** — re-check missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 from drift import detect_drift
@@ -3122,9 +3122,9 @@ def _recheck_environment(root: Path) -> None:
 
 Call from `main` after diagnostic report.
 
-- [ ] **Step 4: Run test to verify it passes** — 10 tests.
+- [x] **Step 4: Run test to verify it passes** — 10 tests.
 
-- [ ] **Step 5: Commit** — `feat: resume_cmd reruns dependency check and drift check at entry`.
+- [x] **Step 5: Commit** — `feat: resume_cmd reruns dependency check and drift check at entry`.
 
 ---
 
@@ -3132,16 +3132,16 @@ Call from `main` after diagnostic report.
 
 **Files:** Modify `resume_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_resume_delegates_to_auto_when_phase_red_and_auto_run_present`: state=red + auto-run.json present; delegates to `auto_cmd.main(["--project-root", root])`.
 - `test_resume_delegates_to_pre_merge_when_done_no_verdict`: state=done, no magi-verdict.json, tree clean -> `pre_merge_cmd.main`.
 - `test_resume_delegates_to_finalize_when_done_and_verdict_present`: state=done, verdict present, tree clean -> `finalize_cmd.main`.
 - `test_resume_dry_run_prints_plan_without_delegating`: --dry-run prints "would delegate to ..." and does NOT invoke the target module.
 
-- [ ] **Step 2: Run test to verify it fails** — delegation missing.
+- [x] **Step 2: Run test to verify it fails** — delegation missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 def _decide_delegation(state, tree_dirty, runtime) -> tuple[str | None, list[str]]:
@@ -3186,9 +3186,9 @@ if module_name == "uncommitted-resolution":
 return _delegate(module_name, root, extra)
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 14 tests.
+- [x] **Step 4: Run test to verify it passes** — 14 tests.
 
-- [ ] **Step 5: Commit** — `feat: resume_cmd phase 3 delegation decision tree`.
+- [x] **Step 5: Commit** — `feat: resume_cmd phase 3 delegation decision tree`.
 
 ---
 
@@ -3196,7 +3196,7 @@ return _delegate(module_name, root, extra)
 
 **Files:** Modify `resume_cmd.py` + test.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 - `test_resume_auto_continues_when_dirty`: --auto + tree dirty; does NOT run git reset; prints CONTINUE.
 - `test_resume_discard_uncommitted_runs_git_checkout_and_clean`: --discard-uncommitted + dirty; subprocess calls include `git checkout HEAD -- .` and `git clean -fd`.
@@ -3204,9 +3204,9 @@ return _delegate(module_name, root, extra)
 - `test_resume_interactive_R_choice_triggers_reset`: monkeypatch `input` to return "R"; invokes checkout/clean.
 - `test_resume_abort_choice_A_exits_130`: input "A" -> rc=130.
 
-- [ ] **Step 2: Run test to verify it fails** — Phase 4 missing.
+- [x] **Step 2: Run test to verify it fails** — Phase 4 missing.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 def _resolve_uncommitted(ns, root: Path) -> str:
@@ -3256,9 +3256,9 @@ if module_name == "uncommitted-resolution":
     return _delegate(module_name, root, extra)
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 19 tests.
+- [x] **Step 4: Run test to verify it passes** — 19 tests.
 
-- [ ] **Step 5: Commit** — `feat: resume_cmd phase 4 uncommitted-work resolution with CONTINUE default`.
+- [x] **Step 5: Commit** — `feat: resume_cmd phase 4 uncommitted-work resolution with CONTINUE default`.
 
 ---
 
@@ -3272,7 +3272,7 @@ Connect each `*_cmd.main` into `run_sbtdd.SUBCOMMAND_DISPATCH` replacing the 9 p
 - Modify: `skills/sbtdd/scripts/run_sbtdd.py`
 - Create: `tests/test_run_sbtdd_wiring.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_run_sbtdd_wiring.py
@@ -3291,9 +3291,9 @@ def test_dispatcher_status_returns_0_with_no_state(tmp_path):
     assert rc == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — placeholder handler still in dispatch.
+- [x] **Step 2: Run test to verify it fails** — placeholder handler still in dispatch.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `run_sbtdd.py`, add at top of imports: `import status_cmd`.
 
@@ -3313,9 +3313,9 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes** — 2 tests.
+- [x] **Step 4: Run test to verify it passes** — 2 tests.
 
-- [ ] **Step 5: Commit** — `feat: wire status_cmd into run_sbtdd dispatcher`.
+- [x] **Step 5: Commit** — `feat: wire status_cmd into run_sbtdd dispatcher`.
 
 ---
 
@@ -3323,7 +3323,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
 
 **Files:** Modify `run_sbtdd.py` + `tests/test_run_sbtdd_wiring.py`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 def test_dispatcher_routes_close_task_to_close_task_cmd():
@@ -3332,15 +3332,15 @@ def test_dispatcher_routes_close_task_to_close_task_cmd():
     assert run_sbtdd.SUBCOMMAND_DISPATCH["close-task"] is close_task_cmd.main
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — placeholder still present.
+- [x] **Step 2: Run test to verify it fails** — placeholder still present.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Add `import close_task_cmd`. Replace dispatch entry value.
 
-- [ ] **Step 4: Run test to verify it passes** — 3 tests.
+- [x] **Step 4: Run test to verify it passes** — 3 tests.
 
-- [ ] **Step 5: Commit** — `feat: wire close_task_cmd into run_sbtdd dispatcher`.
+- [x] **Step 5: Commit** — `feat: wire close_task_cmd into run_sbtdd dispatcher`.
 
 ---
 
@@ -3348,11 +3348,11 @@ Add `import close_task_cmd`. Replace dispatch entry value.
 
 Identical pattern to Task 38; replace `"close-phase"` entry. Commit `feat: wire close_phase_cmd into run_sbtdd dispatcher`.
 
-- [ ] **Step 1:** test `test_dispatcher_routes_close_phase_to_close_phase_cmd` asserting `SUBCOMMAND_DISPATCH["close-phase"] is close_phase_cmd.main`.
-- [ ] **Step 2:** FAIL.
-- [ ] **Step 3:** `import close_phase_cmd`; replace entry.
-- [ ] **Step 4:** PASS (4 tests total).
-- [ ] **Step 5:** Commit.
+- [x] **Step 1:** test `test_dispatcher_routes_close_phase_to_close_phase_cmd` asserting `SUBCOMMAND_DISPATCH["close-phase"] is close_phase_cmd.main`.
+- [x] **Step 2:** FAIL.
+- [x] **Step 3:** `import close_phase_cmd`; replace entry.
+- [x] **Step 4:** PASS (4 tests total).
+- [x] **Step 5:** Commit.
 
 ---
 
@@ -3400,7 +3400,7 @@ After Task 45 all 9 entries point to real `*_cmd.main` functions; `_default_hand
 
 **Files:** Modify `run_sbtdd.py` + `tests/test_run_sbtdd_wiring.py`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 def test_default_handler_factory_is_removed():
@@ -3415,9 +3415,9 @@ def test_replace_point_marker_is_removed():
     assert "MILESTONE-C-REPLACE-POINT" not in src
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — factory + marker still present.
+- [x] **Step 2: Run test to verify it fails** — factory + marker still present.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Delete `_default_handler_factory` function. Rewrite `SUBCOMMAND_DISPATCH` as a clean dict literal:
 
@@ -3437,9 +3437,9 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
 
 Remove the `MILESTONE-C-REPLACE-POINT` comment block entirely. Update the module docstring to remove references to "placeholder handlers" and Milestone B wiring; add a final line "In Milestone C, all 9 entries point to the real subcomando implementations."
 
-- [ ] **Step 4: Run test to verify it passes** — 13 tests total.
+- [x] **Step 4: Run test to verify it passes** — 13 tests total.
 
-- [ ] **Step 5: Commit** — `refactor: remove Milestone C placeholder scaffolding from dispatcher`.
+- [x] **Step 5: Commit** — `refactor: remove Milestone C placeholder scaffolding from dispatcher`.
 
 ---
 
@@ -3453,7 +3453,7 @@ Remove the `MILESTONE-C-REPLACE-POINT` comment block entirely. Update the module
 
 **Rationale (addresses Finding 7 Balthasar):** Tasks 47-50 are integration tests that need to stub `superpowers_dispatch.*` and `magi_dispatch.invoke_magi` consistently. Sketching these stubs inline in each test creates drift and duplicated bugs. Consolidating them here gives each integration test a single import point and documented behavior.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 import pytest
@@ -3492,9 +3492,9 @@ def test_stub_magi_raises_on_exhausted_sequence():
         stub.invoke_magi(context_paths=[], cwd="/tmp")
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `ModuleNotFoundError` on `tests.fixtures.skill_stubs`.
+- [x] **Step 2: Run test to verify it fails** — `ModuleNotFoundError` on `tests.fixtures.skill_stubs`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -3619,9 +3619,9 @@ class StubMAGI:
 
 Tests 47-50 import `StubSuperpowers`, `StubMAGI`, `make_verdict` and wire them through `monkeypatch.setattr(superpowers_dispatch, "<name>", stub.<name>)` + `monkeypatch.setattr(magi_dispatch, "invoke_magi", stub.invoke_magi)`.
 
-- [ ] **Step 4: Run test to verify it passes** — 4 tests.
+- [x] **Step 4: Run test to verify it passes** — 4 tests.
 
-- [ ] **Step 5: Commit** — `test: add shared skill_stubs fixture for integration tests`.
+- [x] **Step 5: Commit** — `test: add shared skill_stubs fixture for integration tests`.
 
 ---
 
@@ -3629,7 +3629,7 @@ Tests 47-50 import `StubSuperpowers`, `StubMAGI`, `make_verdict` and wire them t
 
 **Files:** Create `tests/test_integration_full_cycle.py`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 from __future__ import annotations
@@ -3699,15 +3699,15 @@ def test_spec_then_three_close_phase_end_to_end(bootstrapped_project, monkeypatc
     assert state["current_phase"] == "done"
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — integration test may surface bugs in Tasks 1-45 wiring.
+- [x] **Step 2: Run test to verify it fails** — integration test may surface bugs in Tasks 1-45 wiring.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 No production code change expected. If the test fails, debug in the relevant `*_cmd.py` and fix via its own mini-cycle.
 
-- [ ] **Step 4: Run test to verify it passes** — 14 tests (13 wiring + 1 integration).
+- [x] **Step 4: Run test to verify it passes** — 14 tests (13 wiring + 1 integration).
 
-- [ ] **Step 5: Commit** — `test: end-to-end integration test spec-close_phase-x3`.
+- [x] **Step 5: Commit** — `test: end-to-end integration test spec-close_phase-x3`.
 
 ---
 
@@ -3715,7 +3715,7 @@ No production code change expected. If the test fails, debug in the relevant `*_
 
 **Files:** Modify `tests/test_integration_full_cycle.py`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 def test_auto_full_cycle_happy_path(bootstrapped_project, monkeypatch):
@@ -3741,13 +3741,13 @@ def test_auto_full_cycle_happy_path(bootstrapped_project, monkeypatch):
     assert state["current_task_id"] is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — requires full auto wiring to work.
+- [x] **Step 2: Run test to verify it fails** — requires full auto wiring to work.
 
-- [ ] **Step 3: Write minimal implementation** — debug as needed.
+- [x] **Step 3: Write minimal implementation** — debug as needed.
 
-- [ ] **Step 4: Run test to verify it passes** — 15 tests.
+- [x] **Step 4: Run test to verify it passes** — 15 tests.
 
-- [ ] **Step 5: Commit** — `test: end-to-end integration test auto full cycle happy path`.
+- [x] **Step 5: Commit** — `test: end-to-end integration test auto full cycle happy path`.
 
 ---
 
@@ -3755,7 +3755,7 @@ def test_auto_full_cycle_happy_path(bootstrapped_project, monkeypatch):
 
 **Files:** Modify `tests/test_integration_full_cycle.py`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 def test_resume_after_quota_exhaustion_continues_to_completion(
@@ -3781,7 +3781,7 @@ def test_resume_after_quota_exhaustion_continues_to_completion(
     assert rc == 0
 ```
 
-- [ ] **Step 2-5:** same pattern. Commit `test: end-to-end integration test resume after quota exhaustion`.
+- [x] **Step 2-5:** same pattern. Commit `test: end-to-end integration test resume after quota exhaustion`.
 
 ---
 
@@ -3789,7 +3789,7 @@ def test_resume_after_quota_exhaustion_continues_to_completion(
 
 **Files:** Modify `tests/test_integration_full_cycle.py`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 def test_finalize_blocks_on_degraded_verdict(bootstrapped_project, monkeypatch):
@@ -3810,7 +3810,7 @@ def test_finalize_blocks_on_degraded_verdict(bootstrapped_project, monkeypatch):
     assert rc == 9
 ```
 
-- [ ] **Step 2-5:** same pattern. Commit `test: integration test finalize rejects degraded verdict exit 9`.
+- [x] **Step 2-5:** same pattern. Commit `test: integration test finalize rejects degraded verdict exit 9`.
 
 ---
 
@@ -3818,7 +3818,7 @@ def test_finalize_blocks_on_degraded_verdict(bootstrapped_project, monkeypatch):
 
 **Files:** Edit module docstrings of all 9 `*_cmd.py`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_run_sbtdd_wiring.py (append)
@@ -3834,13 +3834,13 @@ def test_all_cmd_modules_reference_spec_section_in_docstring():
         assert "sec.S." in doc, f"{mod_name}: docstring lacks sec.S. reference"
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — may already pass if prior tasks seeded docstrings; otherwise fail with modules missing refs.
+- [x] **Step 2: Run test to verify it fails** — may already pass if prior tasks seeded docstrings; otherwise fail with modules missing refs.
 
-- [ ] **Step 3: Write minimal implementation** — edit each `*_cmd.py` docstring to reference its spec section (sec.S.5.1 through sec.S.5.10) and the relevant invariants (INV-0, INV-1..4, INV-27, INV-28, INV-29, INV-30 as appropriate).
+- [x] **Step 3: Write minimal implementation** — edit each `*_cmd.py` docstring to reference its spec section (sec.S.5.1 through sec.S.5.10) and the relevant invariants (INV-0, INV-1..4, INV-27, INV-28, INV-29, INV-30 as appropriate).
 
-- [ ] **Step 4: Run test to verify it passes** — 18 tests.
+- [x] **Step 4: Run test to verify it passes** — 18 tests.
 
-- [ ] **Step 5: Commit** — `docs: cross-reference spec sections and invariants in cmd docstrings`.
+- [x] **Step 5: Commit** — `docs: cross-reference spec sections and invariants in cmd docstrings`.
 
 ---
 
@@ -3848,7 +3848,7 @@ def test_all_cmd_modules_reference_spec_section_in_docstring():
 
 **Files:** None (verification-only task).
 
-- [ ] **Step 1: Run full test suite + time budget check** (Finding 8 Balthasar)
+- [x] **Step 1: Run full test suite + time budget check** (Finding 8 Balthasar)
 
 ```bash
 /usr/bin/time -f "%e" python -m pytest tests/ -v --tb=short 2> pytest-elapsed.txt
@@ -3857,7 +3857,7 @@ tail -1 pytest-elapsed.txt
 
 On Windows, use PowerShell `Measure-Command { python -m pytest tests/ }` and read the `.TotalSeconds` field. Expected: all tests pass (Milestones A+B baseline + ~130+ Milestone C tests). 0 failures. Wall-clock runtime of `make verify` on a developer laptop (Python 3.12 in `.venv`) MUST be `<= 60 seconds`. If exceeded, mark the slowest 20% with `@pytest.mark.slow` and introduce a fast/slow split in the Makefile (`make verify` = fast; `make verify-all` = fast + slow) before shipping Milestone C.
 
-- [ ] **Step 2: Run lint + format + types**
+- [x] **Step 2: Run lint + format + types**
 
 ```bash
 python -m ruff check .
@@ -3867,7 +3867,7 @@ python -m mypy .
 
 Expected: 0 warnings, clean format, 0 mypy errors (strict mode).
 
-- [ ] **Step 3: Scenario coverage audit**
+- [x] **Step 3: Scenario coverage audit**
 
 Cross-check BDD scenarios 11-19 from `sbtdd/spec-behavior.md`:
 
@@ -3884,11 +3884,11 @@ Cross-check BDD scenarios 11-19 from `sbtdd/spec-behavior.md`:
 | 19 (resume) | 32-36 + Task 49 |
 | Integration infra | Task 46a (skill_stubs shared fixture) |
 
-- [ ] **Step 4: INV scan**
+- [x] **Step 4: INV scan**
 
 Grep for INV tokens across `tests/` to confirm coverage: INV-0 (all commits via `commits.create`), INV-5..7 (Milestone A `validate_message`), INV-9 (Task 21 Loop 1 -> Loop 2), INV-22 (Task 28), INV-23 (Task 26-31 never toggles tdd-guard), INV-24 (Task 36 CONTINUE default), INV-25 (Task 30 no finishing skill in auto), INV-26 (Task 30-31 auto-run.json), INV-27 (Task 16), INV-28 (Tasks 18, 21, 24, 29, 50), INV-29 (Task 21), INV-30 (Tasks 32-36).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
