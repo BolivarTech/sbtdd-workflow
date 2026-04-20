@@ -567,3 +567,59 @@ def test_init_phase5_relocate_rolls_back_partial_copy_on_failure(
     # Rollback invariant: no new files must remain under dest_root.
     surviving = [p for p in dest.rglob("*") if p.is_file()]
     assert surviving == [], f"rollback left partial files behind: {surviving}"
+
+
+def test_rollback_leaves_no_empty_subdirectories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MAGI Loop 2 iter 2 W_iter2_1: rollback must remove empty subdirs too.
+
+    ``_phase5_relocate`` creates parent directories via
+    ``target.parent.mkdir(parents=True, exist_ok=True)``. When a per-file
+    copy fails midway the pre-fix rollback only unlinked the already-
+    copied files; the directories it created to host them survived. This
+    leaves a "half scaffolded" dest_root that confuses the next ``/sbtdd
+    init`` retry (Phase 4 file-conflict detection sees empty subdirs
+    that look abandoned). Post-fix: rollback also removes every
+    subdirectory it freshly created, leaf-to-root, via ``os.rmdir``
+    (which is deliberately loud if the dir is not empty -- that acts as
+    a safety check that we are only removing dirs the copy itself made).
+    """
+    import shutil as _shutil
+
+    import init_cmd
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    nested = staging / "subA" / "subB"
+    nested.mkdir(parents=True)
+    (nested / "deep.txt").write_text("deep", encoding="utf-8")
+    (staging / "top.txt").write_text("top", encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    # Fail on the second copy so at least one subdir has already been
+    # created by parent.mkdir; the first successful copy populates
+    # either subA/subB or just the top-level file depending on rglob
+    # order. Either way the rollback must clean any dirs it created.
+    original_copy2 = _shutil.copy2
+    call_counter = {"n": 0}
+
+    def flaky_copy2(src: object, dst: object, **kw: object) -> object:
+        call_counter["n"] += 1
+        if call_counter["n"] >= 2:
+            raise OSError("simulated permission denied")
+        return original_copy2(str(src), str(dst))
+
+    monkeypatch.setattr(_shutil, "copy2", flaky_copy2)
+
+    with pytest.raises(OSError, match="simulated permission denied"):
+        init_cmd._phase5_relocate(staging, dest)
+
+    # No files under dest.
+    surviving_files = [p for p in dest.rglob("*") if p.is_file()]
+    assert surviving_files == [], f"rollback left partial files behind: {surviving_files}"
+    # No subdirectories freshly created by the copy.
+    surviving_dirs = [p for p in dest.rglob("*") if p.is_dir()]
+    assert surviving_dirs == [], f"rollback left empty subdirectories behind: {surviving_dirs}"
