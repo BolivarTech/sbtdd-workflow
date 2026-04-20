@@ -467,7 +467,6 @@ def test_pre_merge_loop2_aborts_after_max_iterations(
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", lambda *a, **kw: "stub")
 
     with pytest.raises(MAGIGateError):
         pre_merge_cmd.main(["--project-root", str(tmp_path)])
@@ -560,13 +559,19 @@ def test_pre_merge_loop2_accepted_condition_emits_no_commits_and_writes_conditio
 
     invocations: list[tuple[str, str]] = []
 
+    # Guard: monkeypatch the ``commits`` module so any accidental call to
+    # ``commits.create`` from within ``_loop2`` would register here. The
+    # iter-3 redesign removed the mini-cycle orchestration; we assert
+    # zero invocations to detect a regression to the empty-commit path.
+    import commits as commits_module
+
     def fake_commit_create(prefix: str, message: str, cwd: str | None = None) -> str:
         invocations.append((prefix, message))
         return "stub"
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", fake_commit_create)
+    monkeypatch.setattr(commits_module, "create", fake_commit_create)
 
     with pytest.raises(MAGIGateError):
         pre_merge_cmd.main(["--project-root", str(tmp_path)])
@@ -617,13 +622,15 @@ def test_pre_merge_loop2_rejected_condition_feeds_into_next_iteration(
 
     commit_calls: list[str] = []
 
+    import commits as commits_module
+
     def fake_commit_create(prefix: str, message: str, cwd: str | None = None) -> str:
         commit_calls.append(prefix)
         return "stub"
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", fake_commit_create)
+    monkeypatch.setattr(commits_module, "create", fake_commit_create)
 
     rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
     assert rc == 0
@@ -696,7 +703,6 @@ def test_parse_receiving_review_empty_stdout_returns_empty_lists(
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", lambda *a, **kw: "stub")
 
     with pytest.raises(ValidationError):
         pre_merge_cmd.main(["--project-root", str(tmp_path)])
@@ -739,7 +745,6 @@ def test_loop2_writes_magi_feedback_file_when_rejections_accumulate(
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
-    monkeypatch.setattr(pre_merge_cmd, "commit_create", lambda *a, **kw: "stub")
 
     pre_merge_cmd.main(["--project-root", str(tmp_path)])
     feedback = (tmp_path / ".claude" / "magi-feedback.md").read_text(encoding="utf-8")
@@ -766,14 +771,6 @@ def test_loop2_does_not_write_feedback_file_when_no_rejections(
 
     pre_merge_cmd.main(["--project-root", str(tmp_path)])
     assert not (tmp_path / ".claude" / "magi-feedback.md").exists()
-
-
-def test_conditions_low_risk_classifies_structural_test_as_structural() -> None:
-    """W8: 'test' is NOT in low-risk keywords (structural test != low risk)."""
-    import pre_merge_cmd
-
-    assert pre_merge_cmd._conditions_low_risk(("add structural test for timeout path",)) is False
-    assert pre_merge_cmd._conditions_low_risk(("fix docstring naming",)) is True
 
 
 # ---------------------------------------------------------------------------

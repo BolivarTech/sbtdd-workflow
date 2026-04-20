@@ -2,18 +2,30 @@
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-19
-"""/sbtdd pre-merge -- Loop 1 + Loop 2 (sec.S.5.6, INV-9/28/29)."""
+"""/sbtdd pre-merge -- Loop 1 + Loop 2 (sec.S.5.6, INV-9/28/29).
+
+Loop 1 runs ``/requesting-code-review`` until it reports ``clean-to-go``
+(mechanical findings) with a hardcoded safety valve of 10 iterations.
+Loop 2 runs ``/magi:magi`` to evaluate trade-offs and design risks. When
+MAGI returns accepted conditions (through the INV-29 gate of
+``/receiving-code-review``), Loop 2 writes them to
+``.claude/magi-conditions.md`` and raises :class:`errors.MAGIGateError`
+(exit 8) instead of emitting empty commits. The user applies each
+condition via ``sbtdd close-phase`` (which has the real TDD cycle
+machinery) and re-runs ``sbtdd pre-merge`` to re-evaluate. Rejected
+conditions feed into ``.claude/magi-feedback.md`` so the next MAGI
+invocation receives their rationale as context -- this is the sterile
+loop breaker preserved from iter-1.
+"""
 
 from __future__ import annotations
 
 import argparse
 import re
-from collections.abc import Callable
 from pathlib import Path
 
 import magi_dispatch
 import superpowers_dispatch
-from commits import create as commit_create
 from config import PluginConfig, load_plugin_local
 from drift import detect_drift
 from errors import (
@@ -27,43 +39,8 @@ from models import VERDICT_RANK
 from state_file import SessionState
 from state_file import load as load_state
 
-#: Type alias for the three staging callbacks required by
-#: :func:`_apply_condition_via_mini_cycle`. Each callback must stage (via
-#: ``git add``) exactly the files that belong to its TDD phase; the helper
-#: raises :class:`NotImplementedError` if any callback is ``None`` so
-#: callers cannot silently emit empty commits (MAGI Loop 2 iter 1 Finding 1).
-StageCallback = Callable[[], None]
-
-
-def _noop_stage() -> None:
-    """Named no-op staging callback used by :func:`_loop2`.
-
-    ``_loop2`` is the non-diff-producing caller of
-    :func:`_apply_condition_via_mini_cycle` -- the actual code edits come
-    from the upstream orchestrator which has already staged the files
-    before reaching loop2. The helper still rejects ``None`` (Finding 1)
-    so we hand it a named, documented no-op rather than an anonymous
-    ``lambda: None`` which obscures intent and defeats mypy hover info.
-    """
-    return None
-
-
 #: Safety valve for Loop 1 (sec.S.5.6, INV-11). Exceeding aborts with exit 7.
 _LOOP1_MAX: int = 10
-
-#: Low-risk keyword set (iter-2 Finding W8): 'test' deliberately EXCLUDED.
-#: Phrases like "add structural test for X" are structural, not low-risk; only
-#: keywords that genuinely don't require a re-MAGI remain (doc/docstring/
-#: naming/rename/comment/logging/message).
-_LOW_RISK_KEYWORDS: tuple[str, ...] = (
-    "doc",
-    "docstring",
-    "naming",
-    "rename",
-    "comment",
-    "logging",
-    "message",
-)
 
 #: Filename of the auxiliary rejection-feedback file written between iterations.
 #: Lives inside the destination project's ``.claude/`` (gitignored, never
@@ -142,12 +119,11 @@ def _is_clean_to_go(result: object) -> bool:
 def _loop1(root: Path) -> None:
     """Run Loop 1 -- ``/requesting-code-review`` until clean-to-go (sec.S.5.6).
 
-    Each iteration invokes ``/requesting-code-review``. If the skill result
-    does not advertise ``clean-to-go`` the loop invokes
-    ``/receiving-code-review`` to apply fixes (the concrete mini-cycle TDD
-    commits are materialised by ``_apply_condition_via_mini_cycle`` in Loop
-    2; Loop 1 stays at the skill-invocation level because the
-    superpowers contract does not expose individual findings here).
+    Each iteration invokes ``/requesting-code-review``. If the skill
+    result does not advertise ``clean-to-go`` the loop invokes
+    ``/receiving-code-review`` to apply fixes. Loop 1 stays at the
+    skill-invocation level because the superpowers contract does not
+    expose individual findings here; the skill owns the remediation.
 
     Args:
         root: Project root directory passed to the skill as ``cwd``.
@@ -162,15 +138,6 @@ def _loop1(root: Path) -> None:
             return
         superpowers_dispatch.receiving_code_review(cwd=str(root))
     raise Loop1DivergentError(f"Loop 1 did not converge in {_LOOP1_MAX} iterations")
-
-
-def _conditions_low_risk(conditions: tuple[str, ...]) -> bool:
-    """Return True iff every condition matches at least one low-risk keyword.
-
-    Empty tuple returns True vacuously (no conditions == no gate work),
-    but the caller guards the empty-conditions path separately.
-    """
-    return all(any(kw in c.lower() for kw in _LOW_RISK_KEYWORDS) for c in conditions)
 
 
 #: Regex matching ``## Accepted`` / ``## Rejected`` section headers.
@@ -246,85 +213,6 @@ def _safe_threshold_rank(threshold: str) -> int:
             f"(valid values: {', '.join(sorted(VERDICT_RANK))})"
         )
     return VERDICT_RANK[threshold]
-
-
-def _apply_condition_via_mini_cycle(
-    condition: str,
-    root: Path,
-    iteration: int,
-    idx: int,
-    *,
-    stage_test: StageCallback | None,
-    stage_fix: StageCallback | None,
-    stage_refactor: StageCallback | None,
-) -> tuple[str, str, str]:
-    """Orchestrate a 3-commit mini-cycle for an accepted MAGI condition.
-
-    MAGI Loop 2 iter 1 Finding 1 fix: the helper no longer assumes the
-    caller pre-stages the working tree before invocation; instead, each
-    commit boundary is preceded by the caller-supplied staging callback
-    that places exactly the files of that TDD phase in the index. The
-    helper becomes a coordinator/observer: it never edits files, it only
-    sequences ``stage`` → ``commit_create`` per phase. This eliminates
-    the "three empty commits" failure mode where ``commit_create`` was
-    invoked three times back-to-back with nothing staged between them.
-
-    Args:
-        condition: The accepted condition text (used verbatim inside the
-            commit message so the audit trail records which finding
-            triggered this mini-cycle).
-        root: Project root directory (passed through as ``cwd=`` to
-            ``commit_create`` so git runs in the destination repo).
-        iteration: 1-indexed MAGI iteration number (for the commit tag).
-        idx: 1-indexed condition index inside the iteration.
-        stage_test: Callable that stages the failing reproducing test.
-        stage_fix: Callable that stages the minimal implementation.
-        stage_refactor: Callable that stages post-green polish (may be a
-            lambda that does nothing if no refactor is warranted, but
-            MUST NOT be ``None`` -- callers must make this explicit).
-
-    Returns:
-        ``(test_sha, fix_sha, refactor_sha)`` -- the SHAs of the three
-        commits created, in order.
-
-    Raises:
-        NotImplementedError: Any of ``stage_test`` / ``stage_fix`` /
-            ``stage_refactor`` is ``None``. Defaulting to ``None`` in the
-            signature forces every caller to think about what they are
-            staging per phase; silent empty commits are no longer possible.
-        CommitError: Propagated from :func:`commits.create` when git
-            rejects the commit (including the empty-commit rejection if
-            the caller's callback failed to stage anything).
-
-    Contract (post-Finding 1):
-      - Both interactive ``pre-merge`` and shoot-and-forget ``auto``
-        callers pass concrete callbacks. Interactive mode typically
-        presents a UI prompt letting the user apply + stage the fix;
-        ``auto`` mode dispatches the subagent-driven-development
-        orchestrator to produce the diff then stages it.
-      - ``/receiving-code-review`` has already validated the approach
-        (INV-29 gate) BEFORE this helper runs; the condition text that
-        reaches here is ACCEPTED.
-
-    INV-29 compliance: ``/receiving-code-review`` acts as the technical
-    gate BEFORE this helper runs. Mini-cycle atomicity per sec.M.5 row 5:
-    ``test:`` (reproducing), ``fix:`` (resolution), ``refactor:`` (polish).
-    """
-    if stage_test is None or stage_fix is None or stage_refactor is None:
-        raise NotImplementedError(
-            "_apply_condition_via_mini_cycle requires all three staging "
-            "callbacks (stage_test, stage_fix, stage_refactor); None is not "
-            "permitted -- pass an explicit no-op lambda if a phase stages "
-            "nothing. See MAGI Loop 2 iter 1 Finding 1."
-        )
-    tag = f"magi iter {iteration} cond {idx}"
-    stage_test()
-    test_sha = commit_create("test", f"add reproducing test for {condition} ({tag})", cwd=str(root))
-    stage_fix()
-    fix_sha = commit_create("fix", f"apply fix for {condition} ({tag})", cwd=str(root))
-    stage_refactor()
-    refactor_sha = commit_create("refactor", f"polish {condition} ({tag})", cwd=str(root))
-    return test_sha, fix_sha, refactor_sha
 
 
 def _write_magi_conditions_file(
