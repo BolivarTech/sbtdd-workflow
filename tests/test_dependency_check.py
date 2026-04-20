@@ -115,3 +115,57 @@ def test_format_report_empty_when_all_ok():
 
     rep = DependencyReport(checks=(DependencyCheck("python", "OK", "3.12", None),))
     assert rep.format_report() == ""
+
+
+def test_check_python_passes_on_current_interpreter():
+    from dependency_check import check_python
+
+    chk = check_python()
+    assert chk.name == "python"
+    assert chk.status == "OK"
+    assert "3." in chk.detail
+
+
+def test_check_git_returns_missing_when_not_in_path(monkeypatch):
+    from dependency_check import check_git
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    chk = check_git()
+    assert chk.status == "MISSING"
+    assert chk.remediation is not None
+
+
+def test_check_git_returns_ok_when_present(monkeypatch):
+    from dependency_check import check_git
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/git")
+
+    class FakeProc:
+        returncode = 0
+        stdout = "git version 2.43.0\n"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    chk = check_git()
+    assert chk.status == "OK"
+    assert "2.43" in chk.detail
+
+
+def test_check_tdd_guard_binary_missing(monkeypatch):
+    from dependency_check import check_tdd_guard_binary
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    chk = check_tdd_guard_binary()
+    assert chk.status == "MISSING"
+    assert "npm install -g" in (chk.remediation or "")
+
+
+def test_check_tdd_guard_data_dir_writable(tmp_path):
+    from dependency_check import check_tdd_guard_data_dir
+
+    chk = check_tdd_guard_data_dir(project_root=tmp_path)
+    assert chk.status == "OK"
+    assert (tmp_path / ".claude" / "tdd-guard" / "data").exists()

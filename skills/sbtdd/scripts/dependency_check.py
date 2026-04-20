@@ -12,7 +12,13 @@ never short-circuits. Caller (init, status) decides abort vs report-only.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+
+import subprocess_utils
 
 #: Allowed values for DependencyCheck.status (sec.S.5.1.1 reporte formato).
 VALID_STATUSES: tuple[str, ...] = ("OK", "MISSING", "BROKEN")
@@ -69,3 +75,110 @@ class DependencyReport:
         lines.append(f"{len(failures)} issues found. /sbtdd init aborted. Exit code 2.")
         lines.append("No files were created in the project.")
         return "\n".join(lines)
+
+
+def check_python() -> DependencyCheck:
+    """Verify Python >= 3.9 (sec.S.1.3 item 1)."""
+    v = sys.version_info
+    if v >= (3, 9):
+        return DependencyCheck(
+            name="python",
+            status="OK",
+            detail=f"Python {v.major}.{v.minor}.{v.micro}",
+            remediation=None,
+        )
+    return DependencyCheck(
+        name="python",
+        status="BROKEN",
+        detail=f"Python {v.major}.{v.minor}.{v.micro} < 3.9 required",
+        remediation="Install Python 3.9+ from python.org",
+    )
+
+
+def check_git() -> DependencyCheck:
+    """Verify git binary is in PATH and responds (sec.S.1.3 item 2)."""
+    if shutil.which("git") is None:
+        return DependencyCheck(
+            name="git",
+            status="MISSING",
+            detail="Binary not found in PATH.",
+            remediation="https://git-scm.com/downloads",
+        )
+    try:
+        result = subprocess_utils.run_with_timeout(["git", "--version"], timeout=5)
+    except subprocess.TimeoutExpired:
+        return DependencyCheck(
+            name="git",
+            status="BROKEN",
+            detail="git --version timed out after 5s",
+            remediation="Check PATH / reinstall git",
+        )
+    if result.returncode != 0:
+        return DependencyCheck(
+            name="git",
+            status="BROKEN",
+            detail=f"git --version returncode={result.returncode}",
+            remediation="Reinstall git",
+        )
+    return DependencyCheck(
+        name="git",
+        status="OK",
+        detail=result.stdout.strip(),
+        remediation=None,
+    )
+
+
+def check_tdd_guard_binary() -> DependencyCheck:
+    """Verify tdd-guard binary is in PATH and responds (sec.S.1.3 item 3)."""
+    if shutil.which("tdd-guard") is None:
+        return DependencyCheck(
+            name="tdd-guard",
+            status="MISSING",
+            detail="Binary not found in PATH.",
+            remediation="npm install -g @nizos/tdd-guard",
+        )
+    try:
+        result = subprocess_utils.run_with_timeout(["tdd-guard", "--version"], timeout=5)
+    except subprocess.TimeoutExpired:
+        return DependencyCheck(
+            name="tdd-guard",
+            status="BROKEN",
+            detail="tdd-guard --version timed out after 5s",
+            remediation="Reinstall tdd-guard",
+        )
+    if result.returncode != 0:
+        return DependencyCheck(
+            name="tdd-guard",
+            status="BROKEN",
+            detail=f"tdd-guard --version returncode={result.returncode}",
+            remediation="npm install -g @nizos/tdd-guard",
+        )
+    return DependencyCheck(
+        name="tdd-guard",
+        status="OK",
+        detail=result.stdout.strip() or "tdd-guard present",
+        remediation=None,
+    )
+
+
+def check_tdd_guard_data_dir(project_root: Path) -> DependencyCheck:
+    """Verify .claude/tdd-guard/data/ is creatable and writable (sec.S.1.3 item 3)."""
+    data_dir = project_root / ".claude" / "tdd-guard" / "data"
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        probe = data_dir / ".write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        return DependencyCheck(
+            name="tdd-guard data directory",
+            status="BROKEN",
+            detail=f"{data_dir} not writable: {exc}",
+            remediation="Check filesystem permissions on the project directory.",
+        )
+    return DependencyCheck(
+        name="tdd-guard data directory",
+        status="OK",
+        detail=f"{data_dir} writable",
+        remediation=None,
+    )
