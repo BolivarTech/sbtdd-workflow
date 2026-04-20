@@ -28,6 +28,7 @@ from typing import Callable, MutableMapping
 
 import close_phase_cmd
 import close_task_cmd
+import init_cmd
 import status_cmd
 from errors import EXIT_CODES, SBTDDError, ValidationError
 from models import VALID_SUBCOMMANDS
@@ -57,7 +58,7 @@ def _default_handler_factory(name: str) -> SubcommandHandler:
 #: entries here to install real ``{subcommand}_cmd.run`` functions without
 #: touching the dispatcher.
 SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
-    "init": _default_handler_factory("init"),
+    "init": init_cmd.main,
     "spec": _default_handler_factory("spec"),
     "close-phase": close_phase_cmd.main,
     "close-task": close_task_cmd.main,

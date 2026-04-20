@@ -38,3 +38,10 @@ def test_dispatcher_routes_close_phase_to_close_phase_cmd():
     import run_sbtdd
 
     assert run_sbtdd.SUBCOMMAND_DISPATCH["close-phase"] is close_phase_cmd.main
+
+
+def test_dispatcher_routes_init_to_init_cmd():
+    import init_cmd
+    import run_sbtdd
+
+    assert run_sbtdd.SUBCOMMAND_DISPATCH["init"] is init_cmd.main
