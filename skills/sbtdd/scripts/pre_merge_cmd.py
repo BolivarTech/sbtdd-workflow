@@ -209,18 +209,17 @@ def _parse_receiving_review(
     """
     accepted: list[str] = []
     rejected: list[str] = []
+    # Map canonical section name (lower-cased header group) -> target
+    # list. Using a dict instead of an if-chain keeps the dispatch
+    # declarative and makes the set of recognised sections explicit.
+    dispatch: dict[str, list[str]] = {"accepted": accepted, "rejected": rejected}
     section: list[str] | None = None
     stdout = getattr(skill_result, "stdout", "") or ""
     for line in stdout.splitlines():
         s = line.strip()
         match = _SECTION_HEADER_RE.match(s)
         if match is not None:
-            # Group(1) is "Accepted" / "Rejected" (case-preserved). Lower
-            # for dispatch so the section lookup is capitalisation-free.
-            if match.group(1).lower() == "accepted":
-                section = accepted
-            else:
-                section = rejected
+            section = dispatch[match.group(1).lower()]
             continue
         if section is not None and s.startswith(("-", "*")):
             section.append(s.lstrip("-* ").strip())
