@@ -146,21 +146,23 @@ def _assert_state_stable_between_reads(path: Path) -> None:
     """
     if not path.exists():
         return
-    first_mtime = path.stat().st_mtime_ns
+    first_mtime_ns = path.stat().st_mtime_ns
     first_content = path.read_bytes()
     # See docstring: small sleep catches typical racing writers; not a
     # synchronisation primitive.
     _time.sleep(0.01)
-    second_mtime = path.stat().st_mtime_ns
+    second_mtime_ns = path.stat().st_mtime_ns
     second_content = path.read_bytes()
-    if first_content != second_content:
+    content_diverged = first_content != second_content
+    mtime_diverged = first_mtime_ns != second_mtime_ns
+    if content_diverged:
         raise StateFileError(
             f"concurrent modification detected on {path} "
             f"(content changed between reads). "
             f"Abort to avoid acting on stale state; re-run /sbtdd resume "
             f"once writers have stopped."
         )
-    if first_mtime != second_mtime:
+    if mtime_diverged:
         # mtime-only divergence: expected on Windows NTFS editor saves
         # where the same bytes get rewritten. Emit a diagnostic so the
         # signal is still visible, but do not trap the user.
