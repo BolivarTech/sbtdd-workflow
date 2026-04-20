@@ -26,6 +26,7 @@ from __future__ import annotations
 import sys
 from typing import Callable, MutableMapping
 
+import auto_cmd
 import close_phase_cmd
 import close_task_cmd
 import finalize_cmd
@@ -68,7 +69,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
     "status": status_cmd.main,
     "pre-merge": pre_merge_cmd.main,
     "finalize": finalize_cmd.main,
-    "auto": _default_handler_factory("auto"),
+    "auto": auto_cmd.main,
     "resume": _default_handler_factory("resume"),
 }
 

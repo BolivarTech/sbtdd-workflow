@@ -66,3 +66,10 @@ def test_dispatcher_routes_finalize_to_finalize_cmd():
     import run_sbtdd
 
     assert run_sbtdd.SUBCOMMAND_DISPATCH["finalize"] is finalize_cmd.main
+
+
+def test_dispatcher_routes_auto_to_auto_cmd():
+    import auto_cmd
+    import run_sbtdd
+
+    assert run_sbtdd.SUBCOMMAND_DISPATCH["auto"] is auto_cmd.main
