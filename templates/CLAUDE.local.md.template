@@ -1,3 +1,12 @@
+<!--
+Template placeholders in this file are lowercase snake_case matching
+PluginConfig field names (stack, author, error_type, verification_commands).
+Milestone C init_cmd builds the expansion context from
+dataclasses.asdict(config); PascalCase placeholders would silently leak
+into the generated file. See tests/test_templates_files.py
+::test_all_templates_expand_cleanly_from_snake_case_context (MAGI Loop 2
+Milestone B iter 1 Finding 3, caspar).
+-->
 # CLAUDE.local.md — Project rules (stack: {stack})
 
 > Local project rules. Not tracked by git. Maintained by the developer; the
