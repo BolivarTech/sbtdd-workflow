@@ -445,13 +445,21 @@ def _loop2(
         )
     diff_paths = [str(root / cfg.plan_path)]
     rejections: list[str] = []
+    last_accepted: tuple[str, ...] = ()
+    last_rejected: tuple[str, ...] = ()
+    last_verdict: magi_dispatch.MAGIVerdict | None = None
     for iteration in range(1, cfg.magi_max_iterations + 1):
         iter_paths = list(diff_paths)
         if rejections:
             iter_paths.append(str(_write_magi_feedback_file(root, rejections)))
         verdict = magi_dispatch.invoke_magi(context_paths=iter_paths, cwd=str(root))
+        last_verdict = verdict
         if magi_dispatch.verdict_is_strong_no_go(verdict):
-            raise MAGIGateError(f"MAGI STRONG_NO_GO at iter {iteration}")
+            raise MAGIGateError(
+                f"MAGI STRONG_NO_GO at iter {iteration}",
+                verdict=verdict.verdict,
+                iteration=iteration,
+            )
         if verdict.conditions:
             review_result = superpowers_dispatch.receiving_code_review(
                 args=_conditions_to_skill_args(verdict.conditions),
@@ -463,6 +471,8 @@ def _loop2(
                     f"/receiving-code-review produced no decisions for "
                     f"{len(verdict.conditions)} MAGI conditions; cannot proceed"
                 )
+            last_accepted = tuple(accepted)
+            last_rejected = tuple(rejected)
             rejections.extend(f"iter {iteration} rejected: {c}" for c in rejected)
             if accepted:
                 # iter-3 redesign: surface to the user via conditions
@@ -471,7 +481,11 @@ def _loop2(
                 raise MAGIGateError(
                     f"MAGI iter {iteration} produced {len(accepted)} accepted "
                     f"condition(s); apply them via `sbtdd close-phase` and "
-                    f"re-run `sbtdd pre-merge`. See {conditions_path}."
+                    f"re-run `sbtdd pre-merge`. See {conditions_path}.",
+                    accepted_conditions=last_accepted,
+                    rejected_conditions=last_rejected,
+                    verdict=verdict.verdict,
+                    iteration=iteration,
                 )
             # All conditions rejected: feedback is written next iter;
             # re-invoke MAGI to see if the rationale drops or escalates
@@ -480,7 +494,11 @@ def _loop2(
         if magi_dispatch.verdict_passes_gate(verdict, threshold):
             return verdict
     raise MAGIGateError(
-        f"MAGI did not converge to full {threshold}+ after {cfg.magi_max_iterations} iterations"
+        f"MAGI did not converge to full {threshold}+ after {cfg.magi_max_iterations} iterations",
+        accepted_conditions=last_accepted,
+        rejected_conditions=last_rejected,
+        verdict=last_verdict.verdict if last_verdict is not None else None,
+        iteration=cfg.magi_max_iterations,
     )
 
 

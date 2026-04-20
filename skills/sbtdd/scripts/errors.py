@@ -43,7 +43,40 @@ class PreconditionError(SBTDDError):
 
 
 class MAGIGateError(SBTDDError):
-    """MAGI verdict below threshold or STRONG_NO_GO — exit 8 (MAGI_GATE_BLOCKED)."""
+    """MAGI verdict below threshold or STRONG_NO_GO -- exit 8 (MAGI_GATE_BLOCKED).
+
+    Carries the gate decision context as typed attributes so downstream
+    audit-trail writers (``auto_cmd.main``) can enrich ``.claude/auto-run.json``
+    without parsing the free-form message string. All new attributes are
+    keyword-only with safe defaults; existing raisers that pass only a
+    positional ``message`` continue to work unchanged (Plan D, scope
+    addition -- Finding 1).
+
+    Attributes:
+        accepted_conditions: MAGI conditions that ``/receiving-code-review``
+            accepted, awaiting user-materialised fixes via ``close-phase``.
+        rejected_conditions: MAGI conditions rejected with rationale,
+            fed back as context in the next MAGI iteration.
+        verdict: The MAGI verdict string at gate-block time (``GO`` /
+            ``GO_WITH_CAVEATS`` / ``STRONG_NO_GO`` / ``HOLD`` / ``HOLD_TIE``).
+        iteration: The MAGI iteration number at which the gate blocked
+            (1-indexed).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        accepted_conditions: tuple[str, ...] = (),
+        rejected_conditions: tuple[str, ...] = (),
+        verdict: str | None = None,
+        iteration: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.accepted_conditions = accepted_conditions
+        self.rejected_conditions = rejected_conditions
+        self.verdict = verdict
+        self.iteration = iteration
 
 
 class QuotaExhaustedError(SBTDDError):

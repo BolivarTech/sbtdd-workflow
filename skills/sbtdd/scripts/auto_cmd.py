@@ -653,7 +653,12 @@ def main(argv: list[str] | None = None) -> int:
         # STRONG_NO_GO (exit 8 requiring replan). Both map to exit 8 via
         # EXIT_CODES[MAGIGateError]; the status / error fields in
         # auto-run.json are the only signal that survives the exception.
+        # Plan D Task 4: source counts from exc's typed attributes (no
+        # regex parse) and tasks_completed from the last incremental
+        # audit write in Phase 2 (raise-safe partial count).
         tasks_completed = _read_audit_tasks_completed(auto_run)
+        accepted_count = len(exc.accepted_conditions)
+        rejected_count = len(exc.rejected_conditions)
         _write_auto_run_audit(
             auto_run,
             AutoRunAudit(
@@ -661,13 +666,18 @@ def main(argv: list[str] | None = None) -> int:
                 auto_started_at=started,
                 auto_finished_at=_now_iso(),
                 status="magi_gate_blocked",
-                verdict=getattr(exc, "verdict", None),
+                verdict=exc.verdict,
                 degraded=None,
-                accepted_conditions=len(getattr(exc, "accepted_conditions", ()) or ()),
-                rejected_conditions=len(getattr(exc, "rejected_conditions", ()) or ()),
+                accepted_conditions=accepted_count,
+                rejected_conditions=rejected_count,
                 tasks_completed=tasks_completed,
                 error=str(exc),
             ),
+        )
+        sys.stderr.write(
+            f"/sbtdd auto: MAGI gate blocked "
+            f"(accepted={accepted_count}, rejected={rejected_count}). See "
+            f"{auto_run} and .claude/magi-conditions.md for next steps.\n"
         )
         raise
     _phase4_checklist(ns.project_root, state, cfg)
