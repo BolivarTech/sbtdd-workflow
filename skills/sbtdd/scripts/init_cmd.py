@@ -12,7 +12,11 @@ leaves the project intact (staging dir discarded on error).
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+from dependency_check import check_environment
+from errors import DependencyError, ValidationError
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -36,6 +40,33 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _resolve_args(ns: argparse.Namespace) -> argparse.Namespace:
+    """Prompt for missing stack/author/error_type when a TTY is attached.
+
+    In non-interactive mode every missing required flag raises
+    :class:`ValidationError` so the caller maps to exit 1.
+    """
+    if ns.stack is None:
+        if sys.stdin.isatty():
+            raw = input("Stack (rust/python/cpp): ").strip()
+            if raw not in ("rust", "python", "cpp"):
+                raise ValidationError(f"stack must be rust, python, or cpp; got '{raw}'")
+            ns.stack = raw
+        else:
+            raise ValidationError("--stack is required in non-interactive mode")
+    if ns.author is None:
+        if sys.stdin.isatty():
+            ns.author = input("Author name: ").strip() or "Unknown"
+        else:
+            raise ValidationError("--author is required in non-interactive mode")
+    if ns.stack == "rust" and ns.error_type is None:
+        if sys.stdin.isatty():
+            ns.error_type = input("Error type name (e.g. MyErr): ").strip() or "Error"
+        else:
+            raise ValidationError("--error-type is required for --stack rust")
+    return ns
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the init subcommand.
 
@@ -44,9 +75,18 @@ def main(argv: list[str] | None = None) -> int:
 
     Returns:
         Process exit code (0 on success).
+
+    Raises:
+        ValidationError: Missing required flags in non-interactive mode.
+        DependencyError: Pre-flight check aggregated failures.
     """
     parser = _build_parser()
-    parser.parse_args(argv)
+    ns = parser.parse_args(argv)
+    ns = _resolve_args(ns)
+    report = check_environment(ns.stack, ns.project_root, ns.plugins_root)
+    if not report.ok():
+        sys.stderr.write(report.format_report() + "\n")
+        raise DependencyError(f"{len(report.failed())} pre-flight checks failed")
     return 0
 
 
