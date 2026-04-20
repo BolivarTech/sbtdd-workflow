@@ -17,6 +17,7 @@ import argparse
 import re
 from pathlib import Path
 
+import superpowers_dispatch
 from errors import PreconditionError
 
 # INV-27 forbids the three uppercase word-tokens below from appearing in
@@ -74,6 +75,30 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _run_spec_flow(root: Path) -> None:
+    """Invoke ``/brainstorming`` then ``/writing-plans`` as sec.S.5.2 step 2-3.
+
+    Each skill must produce the expected downstream file; absent output is
+    treated as a precondition failure.
+
+    Args:
+        root: Project root (destination of ``sbtdd/`` and ``planning/``).
+
+    Raises:
+        PreconditionError: When a skill completed but its output file is
+            missing.
+    """
+    spec_base = root / "sbtdd" / "spec-behavior-base.md"
+    spec_behavior = root / "sbtdd" / "spec-behavior.md"
+    superpowers_dispatch.brainstorming(args=[f"@{spec_base}"])
+    if not spec_behavior.exists():
+        raise PreconditionError(f"/brainstorming completed but {spec_behavior} was not generated")
+    plan_org = root / "planning" / "claude-plan-tdd-org.md"
+    superpowers_dispatch.writing_plans(args=[f"@{spec_behavior}"])
+    if not plan_org.exists():
+        raise PreconditionError(f"/writing-plans completed but {plan_org} was not generated")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the spec subcommand.
 
@@ -84,11 +109,13 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code (0 on success).
 
     Raises:
-        PreconditionError: INV-27 violation or skeleton markers present.
+        PreconditionError: INV-27 violation, skeleton markers, or missing
+            downstream spec/plan artifact.
     """
     parser = _build_parser()
     ns = parser.parse_args(argv)
     _validate_spec_base_no_placeholders(ns.project_root / "sbtdd" / "spec-behavior-base.md")
+    _run_spec_flow(ns.project_root)
     return 0
 
 
