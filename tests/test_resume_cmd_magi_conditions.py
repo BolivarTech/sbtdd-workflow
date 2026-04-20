@@ -47,9 +47,7 @@ def test_decide_delegation_with_magi_conditions_pending(
         "magi-verdict.json": False,
         "magi-conditions.md": True,
     }
-    module_name, extra = resume_cmd._decide_delegation(
-        state, tree_dirty=False, runtime=runtime
-    )
+    module_name, extra = resume_cmd._decide_delegation(state, tree_dirty=False, runtime=runtime)
     assert module_name == "magi-conditions-pending"
     assert extra == []
 

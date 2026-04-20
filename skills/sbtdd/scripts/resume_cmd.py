@@ -91,6 +91,7 @@ def _report_diagnostic(root: Path) -> dict[str, Any]:
     runtime = {
         "magi-verdict.json": (root / ".claude" / "magi-verdict.json").exists(),
         "auto-run.json": (root / ".claude" / "auto-run.json").exists(),
+        "magi-conditions.md": (root / ".claude" / "magi-conditions.md").exists(),
     }
     sys.stdout.write("State file:\n")
     sys.stdout.write(f"  current_task_id:          {state.current_task_id}\n")
@@ -173,8 +174,16 @@ def _decide_delegation(
     Returns:
         ``(module_name_or_sentinel, extra_args)``. ``module_name`` is
         ``None`` when no delegation is appropriate;
-        ``"uncommitted-resolution"`` signals the caller to enter Phase 4.
+        ``"uncommitted-resolution"`` signals the caller to enter Phase 4;
+        ``"magi-conditions-pending"`` signals scope item 8 (pre-merge
+        interrupted after accepted conditions).
     """
+    # Scope item 8: mid-pre-merge interruption leaves magi-conditions.md
+    # behind. Surface to the user before any delegation -- running
+    # `sbtdd pre-merge` again without applying conditions just produces
+    # the same gate block.
+    if runtime.get("magi-conditions.md"):
+        return ("magi-conditions-pending", [])
     if state.current_phase in ("red", "green", "refactor") and not tree_dirty:
         if runtime.get("auto-run.json"):
             return ("auto_cmd", [])
@@ -303,6 +312,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     if module_name is None:
         sys.stdout.write("Nothing to delegate. Run a manual subcommand.\n")
+        return 0
+    if module_name == "magi-conditions-pending":
+        sys.stdout.write(
+            "\nPending MAGI conditions detected in .claude/magi-conditions.md.\n"
+            "The previous `sbtdd pre-merge` produced accepted conditions that\n"
+            "have not been applied yet. Next step:\n"
+            "  1. Read .claude/magi-conditions.md.\n"
+            "  2. For each condition, run `sbtdd close-phase` with a TDD\n"
+            "     mini-cycle that addresses it.\n"
+            "  3. Re-run `sbtdd pre-merge` once all conditions are applied.\n"
+        )
         return 0
     if ns.dry_run:
         sys.stdout.write(f"Would delegate to: {module_name} with args {extra}\n")
