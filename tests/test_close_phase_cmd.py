@@ -356,12 +356,13 @@ def test_close_phase_refactor_cascades_to_close_task(
     rc = close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "refa"])
     assert rc == 0
     assert len(advance_calls) == 1
-    phase_arg, root_arg = advance_calls[0]  # type: ignore[misc]
+    first_call = advance_calls[0]
     # Refactor close passes the post-refactor SessionState (phase is
     # still 'refactor' at the call site; mark_and_advance itself flips
     # it to 'red'/'done' internally).
-    assert phase_arg == "refactor"
-    assert root_arg == str(tmp_path)
+    assert isinstance(first_call, tuple)
+    assert first_call[0] == "refactor"
+    assert first_call[1] == str(tmp_path)
 
 
 def test_close_phase_refactor_creates_refactor_commit_before_cascade(

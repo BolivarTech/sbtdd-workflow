@@ -16,7 +16,6 @@ validation), INV-16 (verification emits evidence via
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -165,14 +164,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     save_state(new_state, root / ".claude" / "session-state.json")
     if state.current_phase == "refactor":
-        rc = close_task_cmd.main(["--project-root", str(root)])
-        if rc != 0:
-            sys.stderr.write(
-                f"close-task cascade failed with rc={rc}; "
-                "refactor commit created but task bookkeeping incomplete. "
-                "Re-invoke /sbtdd close-task to recover.\n"
-            )
-            return rc
+        # MAGI Loop 2 iter 1 Finding 6: cascade directly into the public
+        # mark_and_advance helper (introduced in Milestone C iter-2 W1)
+        # instead of invoking close_task_cmd.main. ``main`` re-runs its
+        # own _preflight -> detect_drift which legitimately flags
+        # state=refactor + HEAD ``refactor:`` as drift ("close already
+        # landed but state not advanced"); in the cascade this IS the
+        # intermediate post-refactor-commit pre-advance state, not a
+        # real drift. ``mark_and_advance`` skips the precondition check
+        # and performs the plan-flip + chore commit + state save
+        # atomically. Exceptions raised inside propagate unchanged so
+        # the dispatcher maps them to the right sec.S.11.1 exit code.
+        close_task_cmd.mark_and_advance(new_state, root)
     return 0
 
 

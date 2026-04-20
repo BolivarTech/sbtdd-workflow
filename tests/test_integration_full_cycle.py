@@ -127,27 +127,18 @@ def _stage_scratch_change(root: Path, name: str, content: str) -> None:
 def test_spec_then_three_close_phase_end_to_end(bootstrapped_project, monkeypatch):
     """Scenario 13 end-to-end: spec approves plan, then 3 close-phase cycles complete task 1.
 
-    Uses ``close_task_cmd.mark_and_advance`` (the public helper per iter-2 W1)
-    in place of ``close_task_cmd.main`` in the cascade: the main() path re-runs
-    drift detection, which legitimately flags ``state=refactor + HEAD=refactor:``
-    as "close already landed but state not advanced". In the cascade context
-    this IS the intermediate pre-advance state, which :func:`mark_and_advance`
-    consumes directly (same path auto_cmd uses to side-step the spurious flag).
+    Post MAGI Loop 2 iter 1 Finding 6: close_phase now cascades directly
+    into ``close_task_cmd.mark_and_advance`` (the public helper per
+    iter-2 W1), which side-steps the spurious ``state=refactor +
+    HEAD=refactor:`` drift flag at the intermediate post-refactor-commit
+    pre-advance moment. The monkeypatch workaround that previously
+    replaced ``close_task_cmd.main`` is therefore no longer needed.
     """
-    import close_task_cmd
     import run_sbtdd
 
-    def cascade_without_drift_check(argv=None):
-        from pathlib import Path as _Path
-
-        from state_file import load as _load_state
-
-        parsed_root = _Path(argv[argv.index("--project-root") + 1]) if argv else _Path.cwd()
-        state = _load_state(parsed_root / ".claude" / "session-state.json")
-        close_task_cmd.mark_and_advance(state, parsed_root)
-        return 0
-
-    monkeypatch.setattr(close_task_cmd, "main", cascade_without_drift_check)
+    # NOTE: no cascade-override monkeypatch required post-Finding-6 --
+    # close_phase calls mark_and_advance directly and the intermediate
+    # drift state is no longer checked.
 
     # Run spec -- stubs write spec-behavior.md + plan-org.md, MAGI returns GO.
     rc = run_sbtdd.main(["spec", "--project-root", str(bootstrapped_project)])
