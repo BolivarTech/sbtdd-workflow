@@ -35,9 +35,7 @@ def _write_state(root: Path, phase: str) -> None:
     )
 
 
-def test_concurrent_state_write_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_concurrent_state_write_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Plan D iter 2 Caspar WARNING: the iter 1 variant relied on
     # `time.sleep(0.02)` + a racing writer. Deterministic replacement:
     # monkeypatch `Path.stat` so the two internal reads see different

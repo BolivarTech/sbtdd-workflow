@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time as _time
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,7 @@ import subprocess_utils
 from config import load_plugin_local
 from dependency_check import check_environment
 from drift import detect_drift
-from errors import DependencyError, DriftError, PreconditionError
+from errors import DependencyError, DriftError, PreconditionError, StateFileError
 from state_file import load as load_state
 
 
@@ -108,6 +109,50 @@ def _report_diagnostic(root: Path) -> dict[str, Any]:
     return {"state": state, "head_sha": sha, "tree_dirty": dirty, "runtime": runtime}
 
 
+def _assert_state_stable_between_reads(path: Path) -> None:
+    """Best-effort check that the state file isn't being concurrently written.
+
+    Reads mtime + contents twice with a small delay; raises
+    :class:`StateFileError` if either differs. This is a HEURISTIC, not
+    a guarantee -- a write completing entirely between the two reads
+    could still slip through. In practice, ``auto_cmd`` is the only
+    concurrent writer, and its state-file updates are atomic
+    (``os.replace`` via :func:`state_file.save`), so this check catches
+    the common case (an actively-running auto interrupted mid-write).
+    For single-user local development (the v0.1 deployment target),
+    this is sufficient. File locking would be more robust but is
+    cross-platform-fragile without third-party deps, which would
+    violate the stdlib-only constraint on hot paths (INV-21 /
+    CLAUDE.md sec.3 "stdlib-only on hot paths").
+
+    The 10 ms sleep window is chosen to be small enough that human
+    interaction latency dominates it (resume is never on a critical
+    path) and large enough that realistic concurrent writers
+    (a second shell running ``sbtdd status``) are observed by the
+    second stat. Finding 4 + Finding 8 of Plan D iter 1 both flagged
+    the heuristic nature; this docstring documents the tradeoff
+    explicitly rather than hiding it. Raises
+    :class:`StateFileError` on detected divergence, ``None`` on stable
+    reads.
+    """
+    if not path.exists():
+        return
+    first_mtime = path.stat().st_mtime_ns
+    first_content = path.read_bytes()
+    # See docstring: small sleep catches typical racing writers; not a
+    # synchronisation primitive.
+    _time.sleep(0.01)
+    second_mtime = path.stat().st_mtime_ns
+    second_content = path.read_bytes()
+    if first_mtime != second_mtime or first_content != second_content:
+        raise StateFileError(
+            f"concurrent modification detected on {path} "
+            f"(mtime or content changed between reads). "
+            f"Abort to avoid acting on stale state; re-run /sbtdd resume "
+            f"once writers have stopped."
+        )
+
+
 def _recheck_environment(root: Path) -> None:
     """Re-run pre-flight + drift detection before delegating.
 
@@ -121,15 +166,19 @@ def _recheck_environment(root: Path) -> None:
     Raises:
         DependencyError: Pre-flight reported non-OK.
         DriftError: State vs git vs plan inconsistency detected.
+        StateFileError: Concurrent state-file write observed between
+            the two internal reads (Plan D Task 10).
     """
+    state_path = root / ".claude" / "session-state.json"
+    _assert_state_stable_between_reads(state_path)
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
     report = check_environment(cfg.stack, root, Path.home() / ".claude" / "plugins")
     if not report.ok():
         sys.stderr.write(report.format_report() + "\n")
         raise DependencyError(f"{len(report.failed())} pre-flight checks failed")
-    state = load_state(root / ".claude" / "session-state.json")
+    state = load_state(state_path)
     plan_path = root / state.plan_path
-    dr = detect_drift(root / ".claude" / "session-state.json", plan_path, root)
+    dr = detect_drift(state_path, plan_path, root)
     if dr is not None:
         raise DriftError(
             f"drift at resume: state={dr.state_value}, HEAD={dr.git_value}:, plan={dr.plan_value}"
