@@ -350,6 +350,22 @@ def _mkdir_tracked(directory: Path, dest_root: Path, created_dirs: list[Path]) -
     so the rollback handler can walk ``created_dirs`` in reverse and
     call ``os.rmdir`` leaf-to-root without violating the "only empty
     dirs can be removed" contract enforced by ``os.rmdir``.
+
+    **Acceptable TOCTOU window.** Between ``_collect_created_dirs``
+    (which reads the filesystem to decide which ancestors are missing)
+    and ``path.mkdir(exist_ok=False)`` (which actually creates them)
+    there is a race. In the single-user invocation pattern of
+    ``/sbtdd init`` this window is ~microseconds and only matters when
+    another process -- typically an editor file watcher or a parallel
+    shell -- materializes an ancestor in the same instant. The
+    ``exist_ok=False`` is deliberate: if a peer created the directory
+    first, ``mkdir`` raises ``FileExistsError`` and the whole init
+    rolls back loudly. ``os.rmdir`` in the rollback path refuses to
+    remove non-empty dirs, so nothing a concurrent process placed
+    inside the ancestor is ever deleted by this code. The tradeoff is
+    acceptable because the alternative -- an advisory file lock --
+    costs complexity for a failure mode that is both rare and harmless
+    (``init`` is idempotent and the user re-runs with ``--force``).
     """
     for path in _collect_created_dirs(directory, dest_root):
         path.mkdir(exist_ok=False)
