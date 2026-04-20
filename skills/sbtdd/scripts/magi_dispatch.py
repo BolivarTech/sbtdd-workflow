@@ -32,10 +32,13 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from errors import ValidationError
+import quota_detector
+import subprocess_utils
+from errors import MAGIGateError, QuotaExhaustedError, ValidationError
 from models import VERDICT_RANK
 
 
@@ -146,3 +149,56 @@ def parse_verdict(raw_output: str) -> MAGIVerdict:
         findings=findings,
         raw_output=raw_output,
     )
+
+
+def _build_magi_cmd(context_paths: list[str]) -> list[str]:
+    """Build the argv list for ``claude -p /magi:magi`` with @file refs."""
+    cmd = ["claude", "-p", "/magi:magi"]
+    for path in context_paths:
+        cmd.append(f"@{path}")
+    return cmd
+
+
+def invoke_magi(
+    context_paths: list[str],
+    timeout: int = 1800,
+    cwd: str | None = None,
+) -> MAGIVerdict:
+    """Invoke /magi:magi and return a parsed MAGIVerdict.
+
+    Args:
+        context_paths: Files passed to MAGI as ``@file`` references
+            (spec-behavior.md, planning/claude-plan-tdd.md, or the diff).
+        timeout: Wall-clock seconds before SIGTERM. Default 1800 (30 min)
+            because MAGI runs 3 sub-agents sequentially and may need longer
+            than superpowers skills.
+        cwd: Working directory.
+
+    Returns:
+        :class:`MAGIVerdict` parsed from subprocess stdout.
+
+    Raises:
+        QuotaExhaustedError: If stderr matches any quota pattern (sec.S.11.4).
+        MAGIGateError: If the subprocess timed out, OR exited non-zero
+            without matching a quota pattern. Mapped to exit 8
+            (MAGI_GATE_BLOCKED) by run_sbtdd.py.
+        ValidationError: If stdout was not valid MAGI JSON / unknown verdict
+            (raised by :func:`parse_verdict`, mapped to exit 1).
+    """
+    cmd = _build_magi_cmd(context_paths)
+    try:
+        result = subprocess_utils.run_with_timeout(cmd, timeout=timeout, capture=True, cwd=cwd)
+    except subprocess.TimeoutExpired as exc:
+        raise MAGIGateError(f"/magi:magi timed out after {exc.timeout}s") from exc
+
+    if result.returncode != 0:
+        exhaustion = quota_detector.detect(result.stderr)
+        if exhaustion is not None:
+            msg = f"{exhaustion.kind}: {exhaustion.raw_message}"
+            if exhaustion.reset_time:
+                msg += f" (reset: {exhaustion.reset_time})"
+            raise QuotaExhaustedError(msg)
+        raise MAGIGateError(
+            f"/magi:magi failed (returncode={result.returncode}): {result.stderr.strip()}"
+        )
+    return parse_verdict(result.stdout)

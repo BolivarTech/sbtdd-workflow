@@ -244,3 +244,73 @@ def test_parse_verdict_rejects_label_with_punctuation():
     }
     with pytest.raises(ValidationError, match="invalid characters"):
         parse_verdict(json.dumps(payload))
+
+
+def test_invoke_magi_returns_verdict_on_success(monkeypatch):
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = '{"verdict": "GO", "degraded": false, "conditions": [], "findings": []}'
+        stderr = ""
+
+    captured: dict = {}
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    v = invoke_magi(context_paths=["spec.md", "plan.md"])
+    assert v.verdict == "GO"
+    # Command must be a list (shell=False), include magi reference.
+    assert isinstance(captured["cmd"], list)
+    assert any("magi" in tok for tok in captured["cmd"])
+
+
+def test_invoke_magi_wraps_timeout_as_magi_gate_error(monkeypatch):
+    import subprocess
+
+    from errors import MAGIGateError
+    from magi_dispatch import invoke_magi
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    with pytest.raises(MAGIGateError, match="timed out"):
+        invoke_magi(context_paths=["spec.md"])
+
+
+def test_invoke_magi_raises_quota_on_quota_pattern(monkeypatch):
+    from errors import QuotaExhaustedError
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 1
+        stdout = ""
+        stderr = "You've hit your session limit - resets 3:45pm"
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    with pytest.raises(QuotaExhaustedError):
+        invoke_magi(context_paths=["spec.md"])
+
+
+def test_invoke_magi_non_quota_nonzero_raises_magi_gate_error(monkeypatch):
+    from errors import MAGIGateError
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 3
+        stdout = ""
+        stderr = "consensus agent failure"
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    with pytest.raises(MAGIGateError, match="returncode=3"):
+        invoke_magi(context_paths=["spec.md"])
