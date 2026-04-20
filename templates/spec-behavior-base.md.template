@@ -1,0 +1,63 @@
+# Especificacion de comportamiento — feature: <REPLACE: feature name>
+
+> Base pre-brainstorming. Input to `/brainstorming`. Edit every <REPLACE:...>
+> marker with the actual content before running `/sbtdd spec`. The plugin
+> rejects this file with exit 2 if any of the three uppercase pending-marker
+> words remain (INV-27); use the `<REPLACE:...>` placeholder form while
+> drafting.
+
+---
+
+## 1. Objetivo
+
+<REPLACE: one sentence — what this feature achieves for the user>
+
+---
+
+## 2. Requerimientos SDD
+
+### Requerimientos funcionales (F)
+
+F1. <REPLACE: first functional requirement>
+F2. <REPLACE: second functional requirement>
+
+### Requerimientos no-funcionales (NF)
+
+NF1. <REPLACE: performance / reliability / portability goal>
+
+---
+
+## 3. Restricciones y constraints duros
+
+- <REPLACE: hard constraint 1>
+- <REPLACE: hard constraint 2>
+
+---
+
+## 4. Escenarios BDD (Given / When / Then)
+
+### Escenario 1: <REPLACE: scenario name>
+
+> **Given:** <REPLACE: pre-condition>
+> **When:** <REPLACE: action>
+> **Then:** <REPLACE: observable outcome>
+
+### Escenario 2: <REPLACE: scenario name>
+
+> **Given:** <REPLACE: pre-condition>
+> **When:** <REPLACE: action>
+> **Then:** <REPLACE: observable outcome>
+
+---
+
+## 5. Scope exclusions
+
+- <REPLACE: out-of-scope item 1>
+- <REPLACE: out-of-scope item 2>
+
+---
+
+## 6. Criterios de aceptacion finales
+
+- <REPLACE: measurable criterion 1>
+- <REPLACE: measurable criterion 2>

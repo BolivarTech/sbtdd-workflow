@@ -123,6 +123,32 @@ def test_claude_local_template_references_verification_section():
     assert "0.1" in raw or "verification" in raw.lower()
 
 
+def test_spec_behavior_base_template_exists():
+    assert (TEMPLATES_DIR / "spec-behavior-base.md.template").exists()
+
+
+def test_spec_behavior_base_template_no_uppercase_markers():
+    """INV-27: spec-behavior-base.md.template must not contain the three pending-marker words."""
+    import re
+
+    raw = (TEMPLATES_DIR / "spec-behavior-base.md.template").read_text(encoding="utf-8")
+    assert not re.search(r"\bTODO\b", raw)
+    assert not re.search(r"\bTODOS\b", raw)
+    assert not re.search(r"\bTBD\b", raw)
+
+
+def test_spec_behavior_base_template_has_replace_markers():
+    """Skeleton uses <REPLACE: ...> markers (not the uppercase pending words) to indicate user edits."""
+    raw = (TEMPLATES_DIR / "spec-behavior-base.md.template").read_text(encoding="utf-8")
+    assert "<REPLACE:" in raw
+
+
+def test_spec_behavior_base_template_has_sbtdd_sections():
+    raw = (TEMPLATES_DIR / "spec-behavior-base.md.template").read_text(encoding="utf-8")
+    for section in ("Objetivo", "Requerimientos", "Escenarios", "Restricciones"):
+        assert section in raw, f"section '{section}' missing from spec template"
+
+
 def test_plugin_local_template_has_all_required_keys():
     raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
     required = [
