@@ -49,6 +49,7 @@ from errors import (
     DependencyError,
     DriftError,
     PreconditionError,
+    QuotaExhaustedError,
     VerificationIrremediableError,
 )
 from models import COMMIT_PREFIX_MAP
@@ -168,6 +169,16 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
         try:
             superpowers_dispatch.verification_before_completion(cwd=str(root))
             return
+        except QuotaExhaustedError:
+            # MAGI Loop 2 iter 1 Finding 2: quota exhaustion is NOT a
+            # retryable failure -- it signals an Anthropic API hard cap
+            # (429 rate limit, session/weekly/Opus subscription limit,
+            # credit balance exhausted, server throttle). Wrapping it as
+            # VerificationIrremediableError would remap exit 11 (quota)
+            # to exit 6 (irremediable), destroying the telemetry that
+            # `/sbtdd resume` relies on to detect quota interruptions.
+            # Propagate unchanged; the dispatcher maps to exit 11.
+            raise
         except Exception as exc:
             if attempt >= retries:
                 raise VerificationIrremediableError(
