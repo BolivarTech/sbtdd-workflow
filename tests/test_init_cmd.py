@@ -507,3 +507,57 @@ def test_init_rollback_on_smoke_test_failure(
     # Staging must have been cleaned up.
     assert "path" in staging_captured
     assert not staging_captured["path"].exists()
+
+
+def test_init_phase5_relocate_rolls_back_partial_copy_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MAGI Loop 2 iter 1 Finding 3: mid-copy failure removes partial files.
+
+    ``_phase5_relocate`` copies the staging tree into ``dest_root`` file by
+    file with ``shutil.copy2``. If the process dies midway (disk full,
+    permission denied on N-th file, etc.), the pre-fix implementation
+    left a partial tree in ``dest_root``. Post-fix contract: on ANY
+    per-file copy failure the helper best-effort removes every file it
+    already copied, then re-raises. True atomicity across volumes is
+    impossible without ``os.rename``; this is "best effort atomicity
+    with rollback" -- sufficient because a subsequent ``/sbtdd init``
+    invocation sees a clean dest_root and can retry cleanly.
+    """
+    import shutil as _shutil
+
+    import init_cmd
+
+    # Build a minimal staging tree with several files so the copy loop
+    # has something to fail partway through.
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "a.txt").write_text("a", encoding="utf-8")
+    (staging / "b.txt").write_text("b", encoding="utf-8")
+    nested = staging / "sub"
+    nested.mkdir()
+    (nested / "c.txt").write_text("c", encoding="utf-8")
+    (nested / "d.txt").write_text("d", encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    # Monkeypatch shutil.copy2 to succeed for the first 2 files, then
+    # fail. The rollback must remove both already-copied files.
+    original_copy2 = _shutil.copy2
+    call_counter = {"n": 0}
+
+    def flaky_copy2(src: str, dst: str, *a: object, **kw: object) -> object:
+        call_counter["n"] += 1
+        if call_counter["n"] >= 3:
+            raise OSError("simulated disk full")
+        return original_copy2(src, dst, *a, **kw)
+
+    monkeypatch.setattr(init_cmd.shutil, "copy2", flaky_copy2)
+
+    with pytest.raises(OSError, match="simulated disk full"):
+        init_cmd._phase5_relocate(staging, dest)
+
+    # Rollback invariant: no new files must remain under dest_root.
+    surviving = [p for p in dest.rglob("*") if p.is_file()]
+    assert surviving == [], f"rollback left partial files behind: {surviving}"
