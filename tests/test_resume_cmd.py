@@ -315,6 +315,28 @@ def test_resume_delegates_to_finalize_when_done_and_verdict_present() -> None:
     assert module == "finalize_cmd"
 
 
+def test_resume_prefers_auto_when_interrupted_mid_auto_at_done_phase() -> None:
+    """MAGI Loop 2 iter 1 Finding 9: state=done + auto-run.json + no verdict -> auto.
+
+    An auto run that completed the task loop (phase advanced to done) but
+    died before Loop 2 wrote magi-verdict.json should resume as ``auto``
+    (which re-enters its own phases with its elevated MAGI budget), NOT
+    as fresh ``pre_merge`` (which uses the interactive budget and does
+    not update auto-run.json). The signal that auto was active is the
+    presence of ``.claude/auto-run.json``; absence of the verdict means
+    Loop 2 did not complete.
+    """
+    import resume_cmd
+
+    state = _FakeState("done", current_task_id=None)
+    module, _ = resume_cmd._decide_delegation(
+        state,
+        tree_dirty=False,
+        runtime={"auto-run.json": True, "magi-verdict.json": False},
+    )
+    assert module == "auto_cmd"
+
+
 def test_resume_dry_run_prints_plan_without_delegating(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
