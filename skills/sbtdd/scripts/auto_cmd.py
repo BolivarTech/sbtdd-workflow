@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -620,7 +621,20 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
         )
     payload.validate_schema()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload.to_dict(), indent=2), encoding="utf-8")
+    # Atomic write via tmp + os.replace (MAGI Loop 2 D iter 1 Caspar):
+    # mirrors state_file.save so a process killed mid-write never leaves
+    # a corrupted auto-run.json. If os.replace fails the tmp file is
+    # cleaned up before the error propagates so nothing leaks.
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(payload.to_dict(), indent=2), encoding="utf-8")
+    try:
+        os.replace(tmp, path)  # atomic on POSIX and Windows
+    except OSError:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
