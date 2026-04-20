@@ -1,9 +1,11 @@
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-19
-"""Tests for reporters.tdd_guard_schema (Task 14)."""
+"""Tests for reporters.tdd_guard_schema (Tasks 14-15)."""
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -94,3 +96,76 @@ def test_test_json_omits_errors_key_when_empty():
     data = j.to_dict()
     # Passing tests: no "errors" key (conftest.py behavior).
     assert "errors" not in data["testModules"][0]["tests"][0]
+
+
+def test_write_test_json_creates_parent_dir_and_writes(tmp_path):
+    from reporters.tdd_guard_schema import (
+        TestEntry,
+        TestModule,
+        TestJSON,
+        write_test_json,
+    )
+
+    j = TestJSON(
+        test_modules=(
+            TestModule(
+                module_id="tests/t.py",
+                tests=(TestEntry(name="t1", full_name="f::t1", state="passed"),),
+            ),
+        ),
+        reason="passed",
+    )
+    target = tmp_path / ".claude" / "tdd-guard" / "data" / "test.json"
+    write_test_json(j, target)
+    assert target.exists()
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["reason"] == "passed"
+    assert data["testModules"][0]["moduleId"] == "tests/t.py"
+
+
+def test_write_test_json_atomic_no_tmp_leak(tmp_path):
+    from reporters.tdd_guard_schema import (
+        TestEntry,
+        TestModule,
+        TestJSON,
+        write_test_json,
+    )
+
+    j = TestJSON(
+        test_modules=(
+            TestModule(
+                module_id="m",
+                tests=(TestEntry(name="t", full_name="m::t", state="passed"),),
+            ),
+        ),
+        reason="passed",
+    )
+    target = tmp_path / "test.json"
+    write_test_json(j, target)
+    # No *.tmp.<pid> file should remain.
+    assert list(tmp_path.glob("*.tmp.*")) == []
+
+
+def test_write_test_json_overwrites_existing(tmp_path):
+    from reporters.tdd_guard_schema import (
+        TestEntry,
+        TestModule,
+        TestJSON,
+        write_test_json,
+    )
+
+    target = tmp_path / "test.json"
+    target.write_text('{"stale": true}', encoding="utf-8")
+    j = TestJSON(
+        test_modules=(
+            TestModule(
+                module_id="m",
+                tests=(TestEntry(name="t", full_name="m::t", state="passed"),),
+            ),
+        ),
+        reason="passed",
+    )
+    write_test_json(j, target)
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert "stale" not in data
+    assert data["reason"] == "passed"

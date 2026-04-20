@@ -31,7 +31,10 @@ also gives ``conftest.py.template`` (Task 23) a concrete reference.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from errors import ValidationError
@@ -100,3 +103,29 @@ class TestJSON:
                 tests_out.append(entry)
             modules.append({"moduleId": m.module_id, "tests": tests_out})
         return {"testModules": modules, "reason": self.reason}
+
+
+def write_test_json(doc: TestJSON, target: Path) -> None:
+    """Write ``doc`` to ``target`` atomically (tmp + os.replace).
+
+    Creates parent directories if missing. On :class:`OSError` during the
+    final ``os.replace``, the tmp file is unlinked before re-raising so no
+    ``*.tmp.<pid>`` residue is left behind (mirrors ``state_file.save``
+    and ``magi_dispatch.write_verdict_artifact``).
+
+    Args:
+        doc: Fully constructed :class:`TestJSON` to serialise.
+        target: Destination path (typically
+            ``.claude/tdd-guard/data/test.json``).
+
+    Raises:
+        OSError: If the atomic replace fails.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(doc.to_dict(), indent=2), encoding="utf-8")
+    try:
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
