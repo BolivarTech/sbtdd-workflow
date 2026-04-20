@@ -454,6 +454,20 @@ def _loop2(
         raise ValidationError(
             f"--magi-threshold can only elevate; {threshold} < config {cfg.magi_threshold}"
         )
+    # MAGI Loop 2 D iter 1 Caspar: unlink any stale ``magi-conditions.md``
+    # from a previous exit-8 run before starting this loop. If the gate
+    # later reaches GO we leave no spurious artifact behind; if it exits
+    # 8 again, ``_write_magi_conditions_file`` rewrites the file fresh
+    # with current-iteration frontmatter. Net guarantee: at most one
+    # ``magi-conditions.md`` exists after ``_loop2`` returns/raises, and
+    # its content always matches the current invocation -- never a prior
+    # run's already-resolved conditions that would trap ``resume_cmd``
+    # into misdirecting the user.
+    _stale_conditions = root / ".claude" / _MAGI_CONDITIONS_FILENAME
+    try:
+        _stale_conditions.unlink()
+    except FileNotFoundError:
+        pass
     diff_paths = [str(root / cfg.plan_path)]
     rejections: list[str] = []
     last_accepted: tuple[str, ...] = ()
