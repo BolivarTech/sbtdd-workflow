@@ -428,6 +428,23 @@ def _phase5_report(root: Path, started: str, verdict: object) -> None:
     )
 
 
+def _write_auto_run_audit(path: Path, payload: dict[str, object]) -> None:
+    """Write ``.claude/auto-run.json`` with a JSON-serialised payload.
+
+    Centralises the parent-dir creation, indentation, and encoding so
+    the main entry point stays linear. All audit-trail mutations go
+    through here to guarantee a single byte-identical layout across
+    successful runs, ``MAGIGateError`` gate blocks, and any future
+    failure modes that need to leave a breadcrumb.
+
+    Args:
+        path: Absolute path to ``auto-run.json`` (parent is created).
+        payload: Mapping serialised via :func:`json.dumps` with indent=2.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd auto (shoot-and-forget full-cycle)."""
     parser = _build_parser()
@@ -442,8 +459,7 @@ def main(argv: list[str] | None = None) -> int:
     state, cfg = _phase1_preflight(ns)
     started = _now_iso()
     auto_run = ns.project_root / ".claude" / "auto-run.json"
-    auto_run.parent.mkdir(parents=True, exist_ok=True)
-    auto_run.write_text(json.dumps({"auto_started_at": started}, indent=2), encoding="utf-8")
+    _write_auto_run_audit(auto_run, {"auto_started_at": started})
     if state.current_phase != "done":
         state = _phase2_task_loop(ns, state, cfg)
     try:
@@ -455,17 +471,14 @@ def main(argv: list[str] | None = None) -> int:
         # STRONG_NO_GO (exit 8 requiring replan). Both map to exit 8 via
         # EXIT_CODES[MAGIGateError]; the status / error fields in
         # auto-run.json are the only signal that survives the exception.
-        auto_run.write_text(
-            json.dumps(
-                {
-                    "auto_started_at": started,
-                    "auto_finished_at": _now_iso(),
-                    "status": "magi_gate_blocked",
-                    "error": str(exc),
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
+        _write_auto_run_audit(
+            auto_run,
+            {
+                "auto_started_at": started,
+                "auto_finished_at": _now_iso(),
+                "status": "magi_gate_blocked",
+                "error": str(exc),
+            },
         )
         raise
     _phase4_checklist(ns.project_root, state, cfg)
