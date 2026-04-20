@@ -138,8 +138,11 @@ def main(argv: list[str] | None = None) -> int:
     Four-step protocol: preflight (state + drift) -> verification (with
     ``cwd=root`` per MAGI Loop 2 Finding 4) -> atomic commit with the
     sec.M.5 prefix -> state file update. When closing ``refactor`` the
-    function cascades into :mod:`close_task_cmd` to mark the task [x]
-    in the plan.
+    function cascades into :func:`close_task_cmd.mark_and_advance`
+    (MAGI Loop 2 Finding 6: cascade via public helper to skip the
+    spurious drift recheck at the intermediate pre-advance moment) to
+    mark the task ``[x]`` in the plan, create the ``chore:`` bookkeeping
+    commit, and update state with the next task / ``done``.
     """
     parser = _build_parser()
     ns = parser.parse_args(argv)
