@@ -432,6 +432,39 @@ def test_close_phase_refactor_propagates_cascade_exception(
         close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "m"])
 
 
+def test_close_phase_refactor_cascade_exception_maps_to_correct_exit_code(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    """MAGI Loop 2 iter 2 W_iter2_2: cascade exception maps through dispatcher.
+
+    ``test_close_phase_refactor_propagates_cascade_exception`` (above)
+    verifies the exception reaches ``close_phase_cmd.main``'s caller
+    unchanged. This test takes the next hop: invokes the subcommand
+    through ``run_sbtdd.main`` (the process-level dispatcher) and
+    asserts that :func:`run_sbtdd._exit_code_for` maps the cascade
+    exception to the canonical sec.S.11.1 exit code via
+    :data:`errors.EXIT_CODES`. Covers the full behaviour change
+    introduced by Finding 6 (``rc``-return-code shim → exception
+    propagation): not just that the exception leaves the subcommand,
+    but that the dispatcher hands the process the RIGHT exit code.
+    """
+    import close_task_cmd
+    import run_sbtdd
+    from errors import EXIT_CODES, ValidationError
+
+    _seed_state(tmp_path, current_phase="refactor")
+    captured: dict[str, object] = {}
+    _install_happy_path_patches(monkeypatch, captured)
+
+    def broken_advance(state, root):  # type: ignore[no-untyped-def]
+        raise ValidationError("simulated advance validation failure")
+
+    monkeypatch.setattr(close_task_cmd, "mark_and_advance", broken_advance)
+
+    exit_code = run_sbtdd.main(["close-phase", "--project-root", str(tmp_path), "--message", "m"])
+    assert exit_code == EXIT_CODES[ValidationError]
+
+
 def test_close_phase_verification_receives_project_root_as_cwd(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # type: ignore[no-untyped-def]
