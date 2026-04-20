@@ -68,9 +68,26 @@ def _preflight(root: Path) -> SessionState:
     return state
 
 
-def _run_verification() -> None:
-    """Invoke /verification-before-completion; errors propagate unchanged."""
-    superpowers_dispatch.verification_before_completion()
+def _run_verification(root: Path) -> None:
+    """Invoke /verification-before-completion with ``root`` as the working dir.
+
+    MAGI Loop 2 iter 1 Finding 4: the skill wrapper spawns a subprocess
+    that shells out to the stack's test runner (pytest / cargo / ctest).
+    Without a ``cwd=`` those tools attempt to discover tests relative to
+    wherever ``/sbtdd close-phase`` was invoked from -- typically a
+    subdirectory of the project root, which breaks test discovery and
+    produces a spurious "no tests collected" result. Passing ``cwd=root``
+    makes the working directory match the project root regardless of
+    which subdirectory the user invoked the command from.
+
+    Args:
+        root: Project root directory (``--project-root``).
+
+    Raises:
+        ValidationError: Skill wrapper raised (timeout / non-zero exit).
+        QuotaExhaustedError: Anthropic API cap hit during verification.
+    """
+    superpowers_dispatch.verification_before_completion(cwd=str(root))
 
 
 def _prefix_for(phase: str, variant: str | None) -> str:
@@ -121,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     ns = parser.parse_args(argv)
     root: Path = ns.project_root
     state = _preflight(root)
-    _run_verification()
+    _run_verification(root)
     prefix = _prefix_for(state.current_phase, ns.variant)
     if ns.message is None:
         raise ValidationError("close-phase requires --message")
