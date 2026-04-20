@@ -191,6 +191,32 @@ def test_conftest_template_has_author_header():
     assert "# Date:" in raw
 
 
+def test_gitignore_fragment_exists():
+    assert (TEMPLATES_DIR / "gitignore.fragment").exists()
+
+
+def test_gitignore_fragment_contains_required_entries():
+    raw = (TEMPLATES_DIR / "gitignore.fragment").read_text(encoding="utf-8")
+    required = [
+        ".claude/",
+        "CLAUDE.local.md",
+    ]
+    for entry in required:
+        assert entry in raw, f".gitignore fragment missing {entry}"
+
+
+def test_gitignore_fragment_ends_with_newline():
+    """Fragment should end with newline so append concatenation doesn't join lines."""
+    raw = (TEMPLATES_DIR / "gitignore.fragment").read_text(encoding="utf-8")
+    assert raw.endswith("\n")
+
+
+def test_gitignore_fragment_has_header_comment():
+    raw = (TEMPLATES_DIR / "gitignore.fragment").read_text(encoding="utf-8")
+    # A comment identifies the fragment so a reader knows where the entries came from.
+    assert "SBTDD" in raw or "sbtdd" in raw
+
+
 def test_plugin_local_template_has_all_required_keys():
     raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
     required = [

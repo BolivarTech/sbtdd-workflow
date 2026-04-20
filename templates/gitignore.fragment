@@ -1,0 +1,6 @@
+# --- SBTDD-workflow appended by /sbtdd init ---
+.claude/
+CLAUDE.local.md
+CLAUDE.md
+sbtdd/spec-behavior.md
+# --- end SBTDD-workflow ---
