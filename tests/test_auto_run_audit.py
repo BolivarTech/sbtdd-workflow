@@ -128,3 +128,64 @@ def test_write_auto_run_audit_rejects_dict(tmp_path: Path) -> None:
             {"auto_started_at": "2026-04-19T10:00:00Z"},  # type: ignore[arg-type]
         )
     assert not target.exists()
+
+
+def test_write_auto_run_audit_is_atomic_on_os_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MAGI Loop 2 D iter 1 Caspar: incremental audit write must be atomic.
+
+    If ``os.replace`` raises (permission denied, cross-device rename,
+    read-only target) the tmp file must be cleaned up before the error
+    propagates. Otherwise a Windows process killed mid-write leaves
+    ``auto-run.json.tmp.<pid>`` leaking onto disk and corrupts the
+    raise-safety guarantee that the last-persisted audit = truth.
+    """
+    target = tmp_path / ".claude" / "auto-run.json"
+    audit = auto_cmd.AutoRunAudit(
+        schema_version=1,
+        auto_started_at="2026-04-19T10:00:00Z",
+        auto_finished_at=None,
+        status="success",
+        verdict="GO",
+        degraded=False,
+        accepted_conditions=0,
+        rejected_conditions=0,
+        tasks_completed=1,
+        error=None,
+    )
+
+    def _boom(_src: object, _dst: object) -> None:
+        raise OSError("simulated replace failure")
+
+    import os as _os
+
+    monkeypatch.setattr(_os, "replace", _boom)
+    with pytest.raises(OSError):
+        auto_cmd._write_auto_run_audit(target, audit)
+
+    # Target must not exist (atomic failure) and tmp must be cleaned up.
+    assert not target.exists()
+    leftovers = list(target.parent.glob("auto-run.json.tmp.*"))
+    assert leftovers == [], f"stray tmp files leaked: {leftovers}"
+
+
+def test_write_auto_run_audit_persists_via_replace(tmp_path: Path) -> None:
+    """Happy path writes via tmp + replace, leaving no residual tmp files."""
+    target = tmp_path / ".claude" / "auto-run.json"
+    audit = auto_cmd.AutoRunAudit(
+        schema_version=1,
+        auto_started_at="2026-04-19T10:00:00Z",
+        auto_finished_at="2026-04-19T10:05:00Z",
+        status="success",
+        verdict="GO",
+        degraded=False,
+        accepted_conditions=0,
+        rejected_conditions=0,
+        tasks_completed=1,
+        error=None,
+    )
+    auto_cmd._write_auto_run_audit(target, audit)
+    assert target.exists()
+    leftovers = list(target.parent.glob("auto-run.json.tmp.*"))
+    assert leftovers == []
