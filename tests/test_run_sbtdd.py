@@ -109,6 +109,28 @@ def test_main_maps_unknown_sbtdd_error_to_exit_1(monkeypatch):
     assert main(["status"]) == 1
 
 
+def test_main_walks_mro_for_derived_sbtdd_errors(monkeypatch):
+    """Subclass of a registered SBTDDError inherits the ancestor's exit code.
+
+    MAGI Loop 2 Milestone B iter 1 Finding 1 (melchior): ``_exit_code_for``
+    must walk ``type(exc).__mro__`` rather than doing a direct ``type(exc)``
+    lookup -- otherwise future-added subclasses of the registered errors
+    (eg. ``DerivedDriftError(DriftError)``) silently fall to the default
+    exit 1 instead of inheriting the ancestor's code (3 in this case).
+    """
+    from errors import DriftError
+    from run_sbtdd import SUBCOMMAND_DISPATCH, main
+
+    class DerivedDriftError(DriftError):
+        """Hypothetical future subclass -- must still exit 3, not default 1."""
+
+    def raising(argv):
+        raise DerivedDriftError("drifted further")
+
+    monkeypatch.setitem(SUBCOMMAND_DISPATCH, "status", raising)
+    assert main(["status"]) == 3
+
+
 def test_dispatch_table_has_all_nine_subcommands():
     from models import VALID_SUBCOMMANDS
     from run_sbtdd import SUBCOMMAND_DISPATCH
