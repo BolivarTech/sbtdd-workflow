@@ -134,6 +134,14 @@ def _current_head_sha(root: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point for /sbtdd close-phase (sec.S.5.3).
+
+    Four-step protocol: preflight (state + drift) -> verification (with
+    ``cwd=root`` per MAGI Loop 2 Finding 4) -> atomic commit with the
+    sec.M.5 prefix -> state file update. When closing ``refactor`` the
+    function cascades into :mod:`close_task_cmd` to mark the task [x]
+    in the plan.
+    """
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root: Path = ns.project_root
