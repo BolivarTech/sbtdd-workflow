@@ -929,3 +929,20 @@ def test_parse_receiving_review_handles_mixedcase_headers() -> None:
     accepted, rejected = pre_merge_cmd._parse_receiving_review(_make_skill_result(stdout=stdout))
     assert accepted == ["cond 1"]
     assert rejected == ["cond 2"]
+
+
+def test_gitignore_covers_magi_feedback_file() -> None:
+    """MAGI Loop 2 iter 1 Finding 8: ``.claude/magi-feedback.md`` ignored.
+
+    ``_write_magi_feedback_file`` writes rejection history to
+    ``.claude/magi-feedback.md`` between MAGI iterations. The file MUST
+    be gitignored so the TDD Red/Green/Refactor commits never accidentally
+    ship it. Verified by scanning ``.gitignore`` for either an explicit
+    ``magi-feedback.md`` entry or a blanket ``.claude/`` directory
+    pattern (which the project already uses).
+    """
+    repo_root = Path(__file__).parent.parent
+    gitignore_text = (repo_root / ".gitignore").read_text(encoding="utf-8")
+    assert ".claude/" in gitignore_text or "magi-feedback.md" in gitignore_text, (
+        "`.gitignore` must cover `.claude/magi-feedback.md` so pre-merge iter-debug state is never committed"
+    )
