@@ -736,7 +736,12 @@ def _read_audit_tasks_completed(path: Path) -> int:
     try:
         data = json.loads(path.read_text("utf-8"))
         return int(data.get("tasks_completed", 0))
-    except (json.JSONDecodeError, ValueError, OSError) as exc:
+    except (json.JSONDecodeError, ValueError, TypeError, OSError) as exc:
+        # TypeError covers `int({...})` when a caller writes a nested
+        # object where a scalar was expected; the remaining three cover
+        # unreadable bytes / malformed JSON / non-numeric content. All
+        # four are "something went wrong -- surface it on stderr but do
+        # not abort the auto-run-error path".
         sys.stderr.write(
             f"warning: failed to parse {path}: {type(exc).__name__}: {exc}. "
             f"Falling back to tasks_completed=0 for auto-run audit. "
