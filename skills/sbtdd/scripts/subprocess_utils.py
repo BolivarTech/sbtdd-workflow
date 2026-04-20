@@ -15,6 +15,7 @@ from __future__ import annotations
 import signal
 import subprocess
 import sys
+from typing import Any
 
 
 def run_with_timeout(
@@ -48,7 +49,7 @@ def run_with_timeout(
     )
 
 
-def kill_tree(proc: subprocess.Popen[str]) -> None:
+def kill_tree(proc: subprocess.Popen[Any]) -> None:
     """Terminate process and all children cross-platform.
 
     Windows: taskkill /F /T /PID <pid> BEFORE proc.kill() (MAGI R3-1 —
@@ -56,7 +57,10 @@ def kill_tree(proc: subprocess.Popen[str]) -> None:
     POSIX: SIGTERM + 3-second wait + SIGKILL fallback.
 
     Args:
-        proc: Running Popen instance.
+        proc: Running Popen instance. Generic parameter is :data:`Any` to
+            accept both ``Popen[str]`` (text mode) and ``Popen[bytes]``
+            (binary pipelines, e.g. ``rust_reporter`` piping JSON bytes
+            from ``cargo nextest`` into ``tdd-guard-rust``).
     """
     if proc.poll() is not None:
         return  # Already exited.
