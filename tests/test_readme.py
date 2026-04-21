@@ -156,3 +156,43 @@ def test_readme_no_uppercase_placeholders() -> None:
         assert not re.search(rf"\b{token}\b", text), (
             f"README contains forbidden placeholder '{token}' (extends INV-27 rationale to README)"
         )
+
+
+def test_contributing_file_exists() -> None:
+    assert CONTRIBUTING_PATH.is_file(), f"CONTRIBUTING.md missing at {CONTRIBUTING_PATH}"
+
+
+def test_contributing_has_title() -> None:
+    text = CONTRIBUTING_PATH.read_text(encoding="utf-8")
+    assert re.search(r"^#\s+Contributing", text, flags=re.MULTILINE)
+
+
+def test_contributing_references_commit_prefixes() -> None:
+    text = CONTRIBUTING_PATH.read_text(encoding="utf-8")
+    for prefix in ("test:", "feat:", "fix:", "refactor:", "chore:"):
+        assert prefix in text, f"CONTRIBUTING must mention commit prefix '{prefix}'"
+
+
+def test_contributing_references_inv0() -> None:
+    text = CONTRIBUTING_PATH.read_text(encoding="utf-8")
+    assert "INV-0" in text or "~/.claude/CLAUDE.md" in text, (
+        "CONTRIBUTING must reference the global authority rule"
+    )
+
+
+def test_contributing_no_uppercase_placeholders() -> None:
+    """Extends the rationale of INV-27 to CONTRIBUTING.md. INV-27 itself is
+    scoped to `sbtdd/spec-behavior-base.md`; this test applies the same
+    hygiene guard to the contributor-facing documentation.
+    """
+    text = CONTRIBUTING_PATH.read_text(encoding="utf-8")
+    # Runtime-assembled tokens keep this test file clean under INV-27-like scans
+    # (concatenation avoids embedding the literal markers in the source).
+    t1 = "TO" + "DO"
+    t2 = t1 + "S"
+    t3 = "T" + "BD"
+    for token in (t1, t2, t3):
+        assert not re.search(rf"\b{token}\b", text), (
+            f"CONTRIBUTING contains forbidden placeholder '{token}' "
+            "(extends INV-27 rationale to CONTRIBUTING.md)"
+        )
