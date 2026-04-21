@@ -143,7 +143,7 @@ Los contract tests de este milestone leen archivos reales del repo (no fixtures 
 
 Este milestone no requiere fixtures (solo contract tests sobre archivos reales). La Fase 0 verifica que las precondiciones post-Milestone D estan intactas.
 
-- [ ] **Step 1: Verify post-Milestone-D baseline**
+- [x] **Step 1: Verify post-Milestone-D baseline**
 
 ```bash
 python -m pytest tests/ -q
@@ -154,7 +154,7 @@ python -m mypy .
 
 Expected: all green. If any fails, abort Milestone E and investigate regression before touching new artefacts.
 
-- [ ] **Step 2: Verify destination paths are empty**
+- [x] **Step 2: Verify destination paths are empty**
 
 ```bash
 ls -la .claude-plugin/ 2>&1 || echo "absent: OK"
@@ -169,7 +169,7 @@ Expected:
 
 If `.claude-plugin/plugin.json` or `skills/sbtdd/SKILL.md` already exist, abort and investigate — Milestone E assumes greenfield artefacts.
 
-- [ ] **Step 3: Read MAGI reference files**
+- [x] **Step 3: Read MAGI reference files**
 
 Read-only reference (DO NOT copy verbatim — adapt to SBTDD vocabulary):
 
@@ -180,7 +180,7 @@ Read-only reference (DO NOT copy verbatim — adapt to SBTDD vocabulary):
 
 Note: MAGI plugin is pinned at `v2.1.3`; our plugin ships at `v0.1.0`. Version numbers are NOT to be copied.
 
-- [ ] **Step 4: No commit**
+- [x] **Step 4: No commit**
 
 Task 0 is read-only inventory; no files created or modified.
 
@@ -203,7 +203,7 @@ Cada task 2-4 extiende el contract test con nuevas aserciones PRIMERO (Red), cor
 
 Objetivo (Red): introducir el contract test que valida frontmatter + presencia del titulo principal. El test falla porque `skills/sbtdd/SKILL.md` todavia no existe.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_skill_md.py
@@ -288,7 +288,7 @@ def test_skill_has_main_title() -> None:
 Run: `python -m pytest tests/test_skill_md.py -v`
 Expected: FAIL (`skills/sbtdd/SKILL.md` does not exist — the assertion in `_read_skill()` triggers). 5 tests collected, all failing on `assert SKILL_PATH.is_file()` or similar.
 
-- [ ] **Step 2: Run full verify**
+- [x] **Step 2: Run full verify**
 
 ```bash
 python -m pytest tests/ -q   # expect 5 new failures (contract tests)
@@ -299,7 +299,7 @@ python -m mypy tests/test_skill_md.py
 
 Lint/format/types must be clean on the new test file even though the test itself fails at runtime — Red phase means the test fails for the *correct* reason (missing artifact), not for a compile/type/lint error.
 
-- [ ] **Step 3: Commit the Red test**
+- [x] **Step 3: Commit the Red test**
 
 ```bash
 git add tests/test_skill_md.py
@@ -317,7 +317,7 @@ Rationale: per sec.M.5 row 1, a new test file with assertions that fail because 
 
 Objetivo (Green): crear el esqueleto minimo que hace pasar las 5 aserciones introducidas en Task 1 -- YAML frontmatter con `name: sbtdd` + description block folded + H1 comenzando con "SBTDD". Sin body; las secciones completas se anaden en Tasks 2-4.
 
-- [ ] **Step 1: Write minimal SKILL.md skeleton**
+- [x] **Step 1: Write minimal SKILL.md skeleton**
 
 Create `skills/sbtdd/SKILL.md` with frontmatter + H1 title only (bare minimum for the 5 Task 1 assertions to pass):
 
@@ -349,12 +349,12 @@ description: >
 
 **Rationale for the skeleton sentinel (F8 MAGI iter 2, Caspar iter 3 refined):** without a sentinel, if execution halts after Task 1b but before Task 2, the minimal SKILL.md would be a valid but empty skeleton that passes Task 1 assertions. The `<!-- SKELETON: ... -->` comment above is an explicit marker that **Task 2** adds a contract test against (moved from Task 4 per Caspar iter 3 — the test must land in the same task that removes the sentinel so the no-sentinel property is verified at the exact moment of removal, eliminating the unverified gap between Task 2 and Task 4). Any SKILL.md still carrying the sentinel at ship time fails that test. The sentinel is intentionally a comment (not rendered in the Claude Code UI) so it does not appear to users if Task 2 removes it as required.
 
-- [ ] **Step 2: Run test to verify it passes**
+- [x] **Step 2: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_skill_md.py -v`
 Expected: all 5 Task 1 tests pass.
 
-- [ ] **Step 3: Run full verify**
+- [x] **Step 3: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -365,7 +365,7 @@ python -m mypy .
 
 Expected: all green (528 + 5 = 533 tests).
 
-- [ ] **Step 4: Commit the Green skeleton**
+- [x] **Step 4: Commit the Green skeleton**
 
 ```bash
 git add skills/sbtdd/SKILL.md
@@ -386,7 +386,7 @@ Rationale: SKILL.md is a new user-visible surface (the `/sbtdd` entry point), so
 
 Objetivo: anadir las primeras tres secciones del cuerpo (de las 7 de sec.S.6.3) + las aserciones correspondientes al contract test.
 
-- [ ] **Step 1: Extend contract test**
+- [x] **Step 1: Extend contract test**
 
 Append to `tests/test_skill_md.py`:
 
@@ -441,12 +441,12 @@ def test_skill_has_no_skeleton_sentinel() -> None:
     )
 ```
 
-- [ ] **Step 2: Run to verify new tests fail**
+- [x] **Step 2: Run to verify new tests fail**
 
 Run: `python -m pytest tests/test_skill_md.py -v`
 Expected: 5 new tests fail (sections do not exist yet; `test_skill_has_no_skeleton_sentinel` also fails because Task 1b's SKILL.md still contains the sentinel until Step 3 of this task removes it).
 
-- [ ] **Step 3: Append sections 1-3 to SKILL.md**
+- [x] **Step 3: Append sections 1-3 to SKILL.md**
 
 After the H1 and before the `<!-- SKELETON: ... -->` sentinel comment, insert the following (and **delete the sentinel comment** — the `test_skill_has_no_skeleton_sentinel` contract test added in Step 1 of this task rejects any SKILL.md still carrying it):
 
@@ -516,12 +516,12 @@ Do NOT invoke Python for:
   from the `plugin.json` manifest directly.
 ```
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run: `python -m pytest tests/test_skill_md.py -v`
 Expected: 10 tests pass (5 from Task 1 + 5 from Task 2).
 
-- [ ] **Step 5: Run full verify**
+- [x] **Step 5: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -532,7 +532,7 @@ python -m mypy .
 
 Expected: all green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add skills/sbtdd/SKILL.md tests/test_skill_md.py
@@ -549,7 +549,7 @@ git commit -m "feat: add SKILL.md Overview, Subcommand dispatch, Complexity gate
 
 Objetivo: anadir el core operativo: el patron de invocacion de Python + las dos secciones embebidas de reglas. Estas son las secciones mas densas del SKILL.md.
 
-- [ ] **Step 1: Extend contract test**
+- [x] **Step 1: Extend contract test**
 
 Append to `tests/test_skill_md.py`:
 
@@ -598,12 +598,12 @@ def test_skill_mentions_invariants() -> None:
         assert inv in text, f"SKILL.md must reference invariant '{inv}'"
 ```
 
-- [ ] **Step 2: Run to verify new tests fail**
+- [x] **Step 2: Run to verify new tests fail**
 
 Run: `python -m pytest tests/test_skill_md.py -v`
 Expected: 6 new tests fail.
 
-- [ ] **Step 3: Append sections 4-6 to SKILL.md**
+- [x] **Step 3: Append sections 4-6 to SKILL.md**
 
 Append after the Complexity gate section:
 
@@ -759,12 +759,12 @@ The agent should NOT attempt the three-step close by hand. Always invoke
 prefix, and updates the state file atomically. Manual close = drift risk.
 ```
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run: `python -m pytest tests/test_skill_md.py -v`
 Expected: 16 tests pass (10 from Tasks 1-2 + 6 new).
 
-- [ ] **Step 5: Run full verify**
+- [x] **Step 5: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -775,7 +775,7 @@ python -m mypy .
 
 Expected: all green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add skills/sbtdd/SKILL.md tests/test_skill_md.py
@@ -792,7 +792,7 @@ git commit -m "feat: add SKILL.md Execution pipeline, sbtdd-rules, sbtdd-tdd-cyc
 
 Objetivo: cerrar el SKILL.md con el fallback (cuando Python no disponible) y verificar la secuencia de secciones via test.
 
-- [ ] **Step 1: Extend contract test**
+- [x] **Step 1: Extend contract test**
 
 Append to `tests/test_skill_md.py`:
 
@@ -872,11 +872,11 @@ def test_skill_has_nontrivial_body() -> None:
         )
 ```
 
-- [ ] **Step 2: Run to verify new tests fail**
+- [x] **Step 2: Run to verify new tests fail**
 
 Expected: `test_skill_has_fallback_section` and `test_skill_sections_in_correct_order` fail (no Fallback yet). `test_skill_has_nontrivial_body` fails because the Fallback section is still absent (its header is missing in Task 3 output). Note: `test_skill_has_no_skeleton_sentinel` was introduced in Task 2 (not Task 4) and is already green by this point (Caspar iter 3 fix).
 
-- [ ] **Step 3: Append Fallback section to SKILL.md**
+- [x] **Step 3: Append Fallback section to SKILL.md**
 
 ```markdown
 ## Fallback
@@ -923,12 +923,12 @@ degraded non-exit), and INV-29 (receiving-code-review gate) manually.
   above are summaries intended for in-skill reference, not redefinitions.
 ```
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run: `python -m pytest tests/test_skill_md.py -v`
 Expected: 19 tests pass (16 from Tasks 1-3 + 3 new: fallback, section-order, nontrivial-body). The `no-skeleton-sentinel` test landed in Task 2, not Task 4 (Caspar iter 3 fix).
 
-- [ ] **Step 5: Run full verify**
+- [x] **Step 5: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -939,7 +939,7 @@ python -m mypy .
 
 Expected: all green (528 + 19 = 547 tests at this checkpoint; final Milestone E tally reconciled in Task 10 / Acceptance).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add skills/sbtdd/SKILL.md tests/test_skill_md.py
@@ -960,7 +960,7 @@ Dos tareas independientes que pueden ejecutarse en paralelo si se desea. Cada un
 
 Objetivo: manifest mirror of MAGI per sec.S.3.1.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_plugin_manifest.py
@@ -1073,14 +1073,14 @@ def test_plugin_version_syncs_with_marketplace() -> None:
 Run: `python -m pytest tests/test_plugin_manifest.py -v`
 Expected: FAIL (`.claude-plugin/plugin.json` does not exist). The version-sync test is `pytest.skip`ped because `marketplace.json` is absent (added in Task 6).
 
-- [ ] **Step 2: Commit the Red test**
+- [x] **Step 2: Commit the Red test**
 
 ```bash
 git add tests/test_plugin_manifest.py
 git commit -m "test: add plugin.json contract test (failing — manifest not yet present)"
 ```
 
-- [ ] **Step 3: Create `.claude-plugin/plugin.json`**
+- [x] **Step 3: Create `.claude-plugin/plugin.json`**
 
 ```bash
 mkdir -p .claude-plugin
@@ -1113,12 +1113,12 @@ Create `.claude-plugin/plugin.json`:
 
 **Note on `repository` field form (F13 from MAGI iter 1):** Claude Code plugin manifests accept either a plain URL string or an object `{ "url": "...", "type": "git" }`. MAGI v2.1.3 uses the **string form** (`"repository": "https://github.com/BolivarTech/magi"`) — we match that form for paridad. If a future Claude Code spec release requires the object form, a migration commit will be scheduled in v0.2.
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run: `python -m pytest tests/test_plugin_manifest.py -v`
 Expected: 10 tests pass; `test_plugin_version_syncs_with_marketplace` is skipped because `marketplace.json` does not exist yet (Task 6). Count: 10 passed, 1 skipped.
 
-- [ ] **Step 5: Run full verify**
+- [x] **Step 5: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -1129,7 +1129,7 @@ python -m mypy .
 
 Expected: all green (skips are green).
 
-- [ ] **Step 6: Commit the Green manifest**
+- [x] **Step 6: Commit the Green manifest**
 
 ```bash
 git add .claude-plugin/plugin.json
@@ -1147,7 +1147,7 @@ git commit -m "chore: add plugin.json manifest (version 0.1.0, MAGI-parity schem
 
 Objetivo: BolivarTech marketplace catalog entry per sec.S.3.2.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_marketplace_manifest.py
@@ -1229,14 +1229,14 @@ def test_marketplace_homepage_points_to_repo() -> None:
 Run: `python -m pytest tests/test_marketplace_manifest.py -v`
 Expected: FAIL (file does not exist).
 
-- [ ] **Step 2: Commit the Red test**
+- [x] **Step 2: Commit the Red test**
 
 ```bash
 git add tests/test_marketplace_manifest.py
 git commit -m "test: add marketplace.json contract test (failing — catalog not yet present)"
 ```
 
-- [ ] **Step 3: Create `.claude-plugin/marketplace.json`**
+- [x] **Step 3: Create `.claude-plugin/marketplace.json`**
 
 ```json
 {
@@ -1280,7 +1280,7 @@ git commit -m "test: add marketplace.json contract test (failing — catalog not
 - A runtime smoke test of the form `requests.head(url)` would require a network dependency (currently zero) and CI egress (not configured for v0.1.0). **Rejected** for Milestone E.
 - **Contingency:** if the schema URL is ever confirmed to 404 or Claude Code emits a warning about it, a follow-up `chore:` commit drops the `$schema` field across both plugins in lockstep. The CHANGELOG `## Unreleased` `Deferred` section tracks this item as "verify `$schema` URL resolves post-push; fallback: drop field if Anthropic removes it."
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run:
 ```bash
@@ -1288,7 +1288,7 @@ python -m pytest tests/test_marketplace_manifest.py tests/test_plugin_manifest.p
 ```
 Expected: 9 marketplace tests + 11 plugin tests pass (the previously-skipped `test_plugin_version_syncs_with_marketplace` now activates and asserts both manifests at `0.1.0`).
 
-- [ ] **Step 5: Run full verify**
+- [x] **Step 5: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -1299,7 +1299,7 @@ python -m mypy .
 
 Expected: all green.
 
-- [ ] **Step 6: Commit the Green catalog**
+- [x] **Step 6: Commit the Green catalog**
 
 ```bash
 git add .claude-plugin/marketplace.json
@@ -1318,7 +1318,7 @@ git commit -m "chore: add marketplace.json BolivarTech catalog entry (version 0.
 
 Objetivo: README paridad con MAGI README -- shields, "Why SBTDD?" section, installation (marketplace + local dev), usage table con 9 subcomandos, architecture tree, test coverage, license.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_readme.py
@@ -1485,7 +1485,7 @@ def test_readme_no_uppercase_placeholders() -> None:
 Run: `python -m pytest tests/test_readme.py -v`
 Expected: several tests FAIL (README is a 1-line stub).
 
-- [ ] **Step 2: Rewrite `README.md` in full**
+- [x] **Step 2: Rewrite `README.md` in full**
 
 Overwrite `README.md` entirely with:
 
@@ -1844,12 +1844,12 @@ The SBTDD methodology and plugin architecture are designed and maintained by Jul
 See `CLAUDE.md` for the full methodology reference and `sbtdd/sbtdd-workflow-plugin-spec-base.md` for the authoritative functional contract.
 ````
 
-- [ ] **Step 3: Run tests to verify green**
+- [x] **Step 3: Run tests to verify green**
 
 Run: `python -m pytest tests/test_readme.py -v`
 Expected: 16 tests pass. (Note: `test_readme_references_contributing` will pass because the README references CONTRIBUTING.md even before the file itself exists; Task 8 creates the file.)
 
-- [ ] **Step 4: Run full verify**
+- [x] **Step 4: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -1860,7 +1860,7 @@ python -m mypy .
 
 Expected: all green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_readme.py README.md
@@ -1877,7 +1877,7 @@ git commit -m "docs: add professional README with shields, installation, usage, 
 
 Objetivo: brief contributor guide referenciado desde README. Contenido minimo: branching model, commit discipline (pointer to CLAUDE.md sec.M.5), PR checklist, dogfooding note. No duplicar la metodologia completa -- linkear a CLAUDE.md + spec-base.
 
-- [ ] **Step 1: Extend test**
+- [x] **Step 1: Extend test**
 
 Append to `tests/test_readme.py`:
 
@@ -1925,7 +1925,7 @@ def test_contributing_no_uppercase_placeholders() -> None:
 Run: `python -m pytest tests/test_readme.py -v`
 Expected: 5 new tests fail.
 
-- [ ] **Step 2: Create `CONTRIBUTING.md`**
+- [x] **Step 2: Create `CONTRIBUTING.md`**
 
 ```markdown
 # Contributing to SBTDD Workflow
@@ -1981,13 +1981,13 @@ Mini-cycle fixes during pre-merge Loop 1 or Loop 2 produce three commits each (`
 
 Before opening a PR:
 
-- [ ] `make verify` clean on the latest commit.
-- [ ] `/sbtdd status` reports `current_phase: "done"`.
-- [ ] All plan tasks marked `[x]`.
-- [ ] `CHANGELOG.md` updated under `## Unreleased` (BREAKING / Added / Changed / Fixed).
-- [ ] `/sbtdd pre-merge` converged to a full (non-degraded) verdict `>= GO_WITH_CAVEATS`.
-- [ ] No `Co-Authored-By` in any commit.
-- [ ] No references to Claude, AI, or assistants in any commit.
+- [x] `make verify` clean on the latest commit.
+- [x] `/sbtdd status` reports `current_phase: "done"`.
+- [x] All plan tasks marked `[x]`.
+- [x] `CHANGELOG.md` updated under `## Unreleased` (BREAKING / Added / Changed / Fixed).
+- [x] `/sbtdd pre-merge` converged to a full (non-degraded) verdict `>= GO_WITH_CAVEATS`.
+- [x] No `Co-Authored-By` in any commit.
+- [x] No references to Claude, AI, or assistants in any commit.
 
 ## Adding a new invariant
 
@@ -2011,12 +2011,12 @@ Open a GitHub issue at <https://github.com/BolivarTech/sbtdd-workflow/issues> wi
 By contributing, you agree that your contribution is dual licensed under [MIT](LICENSE) OR [Apache-2.0](LICENSE-APACHE), at the user's option.
 ```
 
-- [ ] **Step 3: Run tests to verify green**
+- [x] **Step 3: Run tests to verify green**
 
 Run: `python -m pytest tests/test_readme.py -v`
 Expected: 21 tests pass (16 + 5 new).
 
-- [ ] **Step 4: Run full verify**
+- [x] **Step 4: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -2027,7 +2027,7 @@ python -m mypy .
 
 Expected: all green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add CONTRIBUTING.md tests/test_readme.py
@@ -2045,7 +2045,7 @@ git commit -m "docs: add CONTRIBUTING.md contributor guide and contract test"
 
 Objetivo: un test holistico que valida relaciones cruzadas entre los cuatro artefactos (SKILL.md / plugin.json / marketplace.json / README.md). Detecta drift silencioso (ej. SKILL.md lista 9 subcomandos pero README solo 8).
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_distribution_coherence.py
@@ -2246,7 +2246,7 @@ def test_no_uppercase_placeholders_in_skill_md() -> None:
 Run: `python -m pytest tests/test_distribution_coherence.py -v -rs`
 Expected: 8 tests pass (local dev with MAGI cache present) or 6 passed + 2 skipped (CI without MAGI cache). The two MAGI-parity tests (`test_plugin_json_has_required_keys_matching_magi` and `test_plugin_json_repository_field_form_matches_magi`) are decorated with `@pytest.mark.skipif` so skips are surfaced in pytest's short summary (`-rs` flag) rather than silently passing — addresses F3 MAGI iter 2.
 
-- [ ] **Step 2: Run full verify**
+- [x] **Step 2: Run full verify**
 
 ```bash
 python -m pytest tests/ -q
@@ -2257,7 +2257,7 @@ python -m mypy .
 
 Expected: all green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_distribution_coherence.py
@@ -2275,7 +2275,7 @@ git commit -m "test: add cross-artifact coherence test for Milestone E distribut
 
 Objetivo: verificar parity con MAGI (sec.S.12.2) + distribucion (sec.S.12.5), registrar el cierre en CHANGELOG, y confirmar que todos los artefactos estan en su sitio.
 
-- [ ] **Step 1: Full verification sweep**
+- [x] **Step 1: Full verification sweep**
 
 ```bash
 python -m pytest tests/ -v --tb=short
@@ -2286,7 +2286,7 @@ python -m mypy .
 
 Expected: all green. Report total test count: **596 when every conditional runs** (local dev with MAGI cache); **594 when MAGI cache absent** (two `@pytest.mark.skipif` parity tests skip but are surfaced via `-rs` in pytest summary). Skip-aware per F2 MAGI iter 2.
 
-- [ ] **Step 2: Parity audit (sec.S.12.2)**
+- [x] **Step 2: Parity audit (sec.S.12.2)**
 
 Manually verify each item:
 
@@ -2310,7 +2310,7 @@ ls -la skills/sbtdd/SKILL.md
 
 Expected: all seven files present and non-empty.
 
-- [ ] **Step 3: Distribution audit (sec.S.12.5)**
+- [x] **Step 3: Distribution audit (sec.S.12.5)**
 
 Manually verify:
 
@@ -2322,7 +2322,7 @@ Manually verify:
 | Version sync plugin.json <-> marketplace.json | Pinned by `test_distribution_coherence.py::test_plugin_and_marketplace_versions_match` (Task 9) |
 | Symlink documented for local dev | Documented in README Installation section (Task 7) |
 
-- [ ] **Step 4: Update CHANGELOG.md**
+- [x] **Step 4: Update CHANGELOG.md**
 
 **Note (informational):** `CHANGELOG.md` was created during Milestone D with a `## Unreleased` section. Milestone E **appends** to that existing section — it does NOT create a new file.
 
@@ -2396,7 +2396,7 @@ Append under the existing `## Unreleased` heading in `CHANGELOG.md`:
 milestone before the `v0.1.0` public ship tag.)
 ```
 
-- [ ] **Step 5: Final verification**
+- [x] **Step 5: Final verification**
 
 ```bash
 python -m pytest tests/ -v
@@ -2407,14 +2407,14 @@ python -m mypy .
 
 Expected: all green. Capture the total test count.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add CHANGELOG.md
 git commit -m "chore: milestone E acceptance sweep and CHANGELOG update"
 ```
 
-- [ ] **Step 7: Version tag preparation (user-driven)**
+- [x] **Step 7: Version tag preparation (user-driven)**
 
 This step is NOT a commit -- it is a pointer for the human maintainer.
 
