@@ -140,6 +140,30 @@ every post-v0.1 release.
   Scenario-4 class of defects (plan-level tests green but spec-level
   scenario uncovered) is the target; options 1-3 are mechanical,
   4-7 are semantic.
+- **Interactive escalation prompt on MAGI exhaustion** — v0.1 does NOT
+  prompt the user interactively when the safety valve (INV-11) exhausts.
+  It writes artifacts (`.claude/magi-conditions.md`, `.claude/magi-feedback.md`,
+  iter-report.json), emits stderr summary, and exits 8. User must re-invoke
+  manually. Deliberate for headless contexts (auto_cmd INV-22 sequential,
+  CI, non-TTY). But for interactive `spec_cmd` and `pre_merge_cmd`, a
+  guided prompt would materially improve UX. During Milestone D Checkpoint
+  2 iter 3 DEGRADED, the assistant-orchestrator presented options a/b/c/d
+  in chat and the user replied `a`; that conversation pattern could be
+  native to the plugin. Evaluate for v0.2: (1) `input()`-based prompt in
+  `spec_cmd`/`pre_merge_cmd` when `sys.stdin.isatty()` and no `--non-interactive`
+  flag, offering `(a)` INV-0 override, `(b)` retry iteration, `(c)` abandon,
+  `(d)` v0.1 behavior; (2) `--override-checkpoint --reason "<text>"` CLI
+  flag with mandatory reason string (paired with decision-record artifact
+  at `.claude/magi-escalations/<timestamp>.json` for audit trail); (3)
+  `.claude/magi-auto-policy.json` upfront config for `auto_cmd` headless
+  path (`{on_exhausted: "abort" | "override_strong_go_only" | "retry_once"}`,
+  default `abort`); (4) `resume_cmd` detects `.claude/magi-escalation-pending.md`
+  and prompts resume if user Ctrl+C-ed the original prompt. Design
+  invariants: skippable in non-TTY (EOFError wrap, same pattern as
+  `resume_cmd`), forbidden in `auto_cmd` (INV-22), every override produces
+  audit artifact, default behavior = v0.1 (backward compat), `--reason`
+  mandatory on override. Target: automate the chat-orchestrator
+  conversation pattern observed through Milestones A-E.
 
 (Milestones A-C changelog is implied from the git log; post-v0.1
 releases will carry fully human-curated entries. Milestone E is the last
