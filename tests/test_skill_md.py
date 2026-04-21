@@ -126,3 +126,47 @@ def test_skill_has_no_skeleton_sentinel() -> None:
         "SKILL.md still contains the Task 1b skeleton sentinel; "
         "Task 2 must remove it while populating the first three sections"
     )
+
+
+def test_skill_has_execution_pipeline_section() -> None:
+    text = _read_skill()
+    assert re.search(r"^##\s+Execution pipeline\s*$", text, flags=re.MULTILINE), (
+        "Execution pipeline section required (sec.S.6.3 item 4)"
+    )
+
+
+def test_skill_documents_python_invocation_pattern() -> None:
+    text = _read_skill()
+    # The canonical invocation line from sec.S.6.3 item 4
+    assert re.search(
+        r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/sbtdd/scripts/run_sbtdd\.py",
+        text,
+    ), "SKILL.md must document the ${CLAUDE_PLUGIN_ROOT}/.../run_sbtdd.py pattern"
+
+
+def test_skill_has_sbtdd_rules_section() -> None:
+    text = _read_skill()
+    assert re.search(r"^##\s+sbtdd-rules\s*$", text, flags=re.MULTILINE), (
+        "sbtdd-rules section required (sec.S.6.3 item 5)"
+    )
+
+
+def test_skill_has_sbtdd_tdd_cycle_section() -> None:
+    text = _read_skill()
+    assert re.search(r"^##\s+sbtdd-tdd-cycle\s*$", text, flags=re.MULTILINE), (
+        "sbtdd-tdd-cycle section required (sec.S.6.3 item 6)"
+    )
+
+
+def test_skill_rules_reference_commit_prefix_map() -> None:
+    text = _read_skill()
+    # All five sec.M.5 prefixes must appear, confirming the rules section is non-trivial
+    for prefix in ("test:", "feat:", "fix:", "refactor:", "chore:"):
+        assert prefix in text, f"SKILL.md must reference commit prefix '{prefix}'"
+
+
+def test_skill_mentions_invariants() -> None:
+    text = _read_skill()
+    # At minimum reference the critical invariants mentioned throughout the plugin
+    for inv in ("INV-0", "INV-27", "INV-28", "INV-29"):
+        assert inv in text, f"SKILL.md must reference invariant '{inv}'"
