@@ -27,9 +27,9 @@ def test_marketplace_json_is_valid_json() -> None:
     _load_marketplace()
 
 
-def test_marketplace_name_is_bolivartech_plugins() -> None:
+def test_marketplace_name_is_bolivartech_sbtdd() -> None:
     d = _load_marketplace()
-    assert d["name"] == "bolivartech-plugins"
+    assert d["name"] == "bolivartech-sbtdd"
 
 
 def test_marketplace_has_owner_structure() -> None:

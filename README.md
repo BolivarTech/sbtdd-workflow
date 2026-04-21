@@ -71,7 +71,7 @@ For trivial fixes or exploratory hacks, use the fallback manual mode -- the full
 /plugin marketplace add BolivarTech/sbtdd-workflow
 
 # 2. Install the plugin
-/plugin install sbtdd-workflow@bolivartech-plugins
+/plugin install sbtdd-workflow@bolivartech-sbtdd
 
 # 3. Bootstrap a project that uses SBTDD
 cd /path/to/your/project

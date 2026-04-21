@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "bolivartech-plugins",
-  "description": "Claude Code plugins by BolivarTech",
+  "name": "bolivartech-sbtdd",
+  "description": "SBTDD-workflow plugin marketplace by BolivarTech",
   "version": "0.1.0",
   "owner": {
     "name": "BolivarTech",
