@@ -121,36 +121,35 @@ every post-v0.1 release.
   + `repository` field-form check) pin against MAGI v2.1.3 artifacts
   cached locally; if MAGI evolves its manifest schema, these tests must
   be refreshed against the new cache snapshot to remain meaningful.
-- **Continuous spec-drift detection** — v0.1 verifies code-vs-spec
-  alignment only at two gates (Checkpoint 2 MAGI before code, pre-merge
-  Loop 2 MAGI after all code) + TDD discipline during execution. Per-task
-  spec drift surfaces only at pre-merge (e.g., Milestone A caspar caught
-  `detect_drift` missing Scenario 4 at the final MAGI gate, not at the
-  Task 14/15 close). **Key insight (session 2026-04-21)**: the superpowers
-  ecosystem already ships a per-task spec-compliance reviewer as part of
-  `superpowers:subagent-driven-development` (two-stage review: spec
-  compliance first, then code quality). Its prompt template catches
-  missing requirements + over-engineering + misunderstandings, with the
-  directive "verify by reading code, NOT by trusting report". SBTDD v0.1
-  does NOT integrate this primitive — `auto_cmd` dispatches implementers
-  but never spawns a dedicated spec-reviewer subagent per task. For v0.2,
-  **recommended primary integration path**: (8) `auto_cmd._phase2_task_loop`
-  and `close_task_cmd` gain an explicit spec-reviewer dispatch (using
-  the existing `superpowers:subagent-driven-development/spec-reviewer-prompt.md`
-  template) after the implementer reports DONE, before `mark_and_advance`.
-  `close-task --skip-spec-review` flag as escape valve. New subcommand
-  `/sbtdd review-spec-compliance <task-id>` for manual/executing-plans
-  flows. Trade-off: +1 `claude -p` call per task (~36 extra for a plan
-  the size of Milestone A). Mechanical complements: (1) `scenario_coverage_check.py`
-  parsing `sbtdd/spec-behavior.md §4` + enforcing 1+ test per scenario;
-  (5) auto-generated scenario test stubs from `/writing-plans` forcing
-  1:1 scenario-test mapping at Checkpoint 2. Audit extension: (2)
-  spec-snapshot diff at pre-merge entry vs `planning/spec-snapshot.json`
-  catches silent spec edits. Supersedes earlier options (4) per-phase
-  MAGI-lite and (7) bespoke LLM drift detector — option (8) already
-  covers semantic drift via the superpowers skill. Revised recommendation:
-  (8) + (1) + (5) minimum viable; (2) as audit. Full option matrix +
-  rationale in local `CLAUDE.md`.
+- **Spec-reviewer integration per task — LOCKED v0.2.0 release blocker**
+  (user directive session 2026-04-23: "para v0.2 solo 8, los demas para
+  0.3"). v0.1 verifies code-vs-spec alignment only at two gates
+  (Checkpoint 2 MAGI before code, pre-merge Loop 2 MAGI after all code) +
+  TDD discipline during execution. Per-task spec drift surfaces only at
+  pre-merge (e.g., Milestone A caspar caught `detect_drift` missing
+  Scenario 4 at the final MAGI gate, not at Task 14/15 close). v0.2 MUST
+  integrate `superpowers:subagent-driven-development/spec-reviewer-prompt.md`
+  per task. Implementation scope: (a) `auto_cmd._phase2_task_loop` after
+  implementer DONE + before `close_task_cmd.mark_and_advance` dispatches
+  spec-reviewer subagent; input = task text + diff from task's commits;
+  output = approved | issues. Issues route through `/receiving-code-review`
+  (INV-29 gate extended) + mini-cycle fix + re-review; 3-iter safety valve.
+  (b) `close_task_cmd --skip-spec-review` escape valve for manual flows.
+  (c) New subcommand `/sbtdd review-spec-compliance <task-id>` for
+  `executing-plans` / manual. (d) New module `spec_review_dispatch.py`
+  with `SpecReviewResult` dataclass + audit artifact at
+  `.claude/spec-reviews/<task-id>-<timestamp>.json`. (e) `StubSpecReviewer`
+  in `skills_stubs.py`. (f) Proposed INV-31: every task close MUST pass
+  spec-reviewer approval before `mark_and_advance` unless skip flag.
+  Design invariants: reviewer on task diff + task text only (cost-bounded),
+  issues through `/receiving-code-review`, non-TTY safe, audit artifact
+  per invocation, quota-detector integrated (exit 11 on quota), safety
+  valve 3 iters. Full spec + rationale in local `CLAUDE.md`
+  "v0.2 requirement (LOCKED) — superpowers spec-reviewer integration"
+  section. **Scope explicitly NOT in v0.2**: mechanical pre-filters,
+  spec-snapshot diff, traceability matrix, per-phase MAGI-lite, auto-gen
+  stubs, watermark comments, bespoke LLM drift detector → all deferred
+  to v0.3.
 - **Interactive escalation prompt on MAGI exhaustion — LOCKED v0.2.0
   release blocker** — v0.1 does NOT prompt the user interactively when
   the safety valve (INV-11) exhausts. It writes artifacts
@@ -182,6 +181,23 @@ every post-v0.1 release.
   language preserves Spanish + English mix matching session-observed
   convention, template ≤40 lines emitted. See CLAUDE.md for full spec.
 
+### Deferred (tracked for v0.3.0)
+
+v0.3 backlog composed of the seven complementary spec-drift detection options evaluated alongside the v0.2 spec-reviewer integration but explicitly deferred per user directive session 2026-04-23. These layer on top of the v0.2 (8) primary integration to add mechanical cheap filters, plan-time enforcement, and audit extensions. Full option matrix + rationale in local `CLAUDE.md` "v0.3 backlog — complementary spec-drift detection options".
+
+- **(1) `scenario_coverage_check.py`** — mechanical regex pre-filter parsing `sbtdd/spec-behavior.md §4` + grep'ing `tests/` for scenario references. Runs at `close-task` before invoking v0.2 reviewer to skip tasks trivially covered. Cost: zero (stdlib).
+- **(2) Spec-snapshot diff** — `planning/spec-snapshot.json` captured at plan approval; pre-merge entry diffs current spec-behavior.md against snapshot; silent spec edits fail gate. Orthogonal audit layer catching a risk class (8) cannot. **Proposed LOCKED for v0.3 regardless of v0.2 empirical data.**
+- **(3) Inverted traceability matrix** — per-task `Scenario coverage:` line in plan; `close-task` validates the task's diff references scenarios listed. Plan-writer accountability.
+- **(4) Per-phase MAGI-lite** — `/magi:magi analysis` on task diff + task scenarios (not full spec) at each `close-phase refactor`. 3-perspective semantic check (higher fidelity than (8)'s 1-perspective). Opt-in via flag; cost-expensive.
+- **(5) Auto-generated scenario stubs** — extend `/writing-plans` to emit `test_<scenario_N>_<slug>()` skeletons; missing = Checkpoint 2 failure. Plan-time enforcement upstream of any runtime check. **Strong candidate for v0.3 LOCKED** if v0.2 shows planners forgetting scenarios.
+- **(6) Watermark comments** — `# Implements: spec-behavior.md §4.X` + lint rule. Human-readable traceability surviving refactors.
+- **(7) LLM drift detector** — dedicated `spec_drift_detector.py` invoking `claude -p` full spec + diff at `close-phase`. Mostly redundant with (8); keep as opt-in for cross-task semantic drift.
+
+**Tentative v0.3 minimum viable** (subject to v0.2 empirical data): (2) + (5). Optional: (1) as pre-filter if (8) cost proves problematic. (3), (4), (6), (7) opt-in via flags.
+
 (Milestones A-C changelog is implied from the git log; post-v0.1
 releases will carry fully human-curated entries. Milestone E is the last
-milestone before the `v0.1.0` public ship tag.)
+milestone before the `v0.1.0` public ship tag. v0.2 release blockers:
+interactive MAGI escalation prompt + superpowers spec-reviewer integration.
+v0.3 scope: complementary spec-drift options (1)-(7) re-evaluated with
+v0.2 field data.)
