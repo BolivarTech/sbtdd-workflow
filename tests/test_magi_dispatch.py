@@ -246,6 +246,19 @@ def test_parse_verdict_rejects_label_with_punctuation():
         parse_verdict(json.dumps(payload))
 
 
+def _extract_output_dir(cmd: list[str]) -> str:
+    """Pull ``--output-dir <path>`` out of the claude ``-p`` prompt string.
+
+    The new ``_build_magi_cmd`` packs the slash command, its ``@file`` refs,
+    and the MAGI flags into a single prompt (``cmd[-1]``) because ``claude``
+    does not accept ``--output-dir`` as its own CLI flag -- the flag belongs
+    to MAGI and must travel through the prompt so the sub-session forwards
+    it to ``run_magi.py``.
+    """
+    tokens = cmd[-1].split()
+    return tokens[tokens.index("--output-dir") + 1]
+
+
 def _magi_report_payload(consensus_label: str = "GO (2-1)", degraded: bool = False) -> dict:
     """Build a minimal magi-report.json payload matching run_magi.py:445."""
     payload: dict = {
@@ -280,7 +293,7 @@ def test_invoke_magi_returns_verdict_on_success(monkeypatch):
         captured["cmd"] = cmd
         # The new contract: MAGI writes <output-dir>/magi-report.json.
         # Locate the --output-dir arg and drop the report there.
-        output_dir = cmd[cmd.index("--output-dir") + 1]
+        output_dir = _extract_output_dir(cmd)
         (Path(output_dir) / "magi-report.json").write_text(
             json.dumps(_magi_report_payload(consensus_label="GO (2-1)")),
             encoding="utf-8",
@@ -291,10 +304,13 @@ def test_invoke_magi_returns_verdict_on_success(monkeypatch):
     v = invoke_magi(context_paths=["spec.md", "plan.md"])
     assert v.verdict == "GO"
     assert v.degraded is False
-    # Command must be a list (shell=False), include magi reference + --output-dir.
+    # Command must be a list (shell=False) ending in a single prompt string
+    # containing the slash command + @-refs + --output-dir flag.
     assert isinstance(captured["cmd"], list)
-    assert any("magi" in tok for tok in captured["cmd"])
-    assert "--output-dir" in captured["cmd"]
+    assert captured["cmd"][:2] == ["claude", "-p"]
+    prompt = captured["cmd"][-1]
+    assert "/magi:magi" in prompt
+    assert "--output-dir" in prompt
 
 
 def test_invoke_magi_strips_split_suffix_from_label(monkeypatch):
@@ -307,7 +323,7 @@ def test_invoke_magi_strips_split_suffix_from_label(monkeypatch):
         stderr = ""
 
     def fake_run(cmd, timeout, capture=True, cwd=None):
-        output_dir = cmd[cmd.index("--output-dir") + 1]
+        output_dir = _extract_output_dir(cmd)
         (Path(output_dir) / "magi-report.json").write_text(
             json.dumps(_magi_report_payload(consensus_label="HOLD (2-1)")),
             encoding="utf-8",
@@ -329,7 +345,7 @@ def test_invoke_magi_reads_degraded_flag_from_report(monkeypatch):
         stderr = ""
 
     def fake_run(cmd, timeout, capture=True, cwd=None):
-        output_dir = cmd[cmd.index("--output-dir") + 1]
+        output_dir = _extract_output_dir(cmd)
         (Path(output_dir) / "magi-report.json").write_text(
             json.dumps(_magi_report_payload(consensus_label="GO (2-0)", degraded=True)),
             encoding="utf-8",
@@ -370,7 +386,7 @@ def test_invoke_magi_raises_validation_on_malformed_report(monkeypatch):
         stderr = ""
 
     def fake_run(cmd, timeout, capture=True, cwd=None):
-        output_dir = cmd[cmd.index("--output-dir") + 1]
+        output_dir = _extract_output_dir(cmd)
         (Path(output_dir) / "magi-report.json").write_text("not-valid-json{", encoding="utf-8")
         return FakeProc()
 

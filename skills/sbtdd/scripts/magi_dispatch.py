@@ -295,16 +295,17 @@ def parse_magi_report(report: dict[str, Any], raw_output: str = "") -> MAGIVerdi
 def _build_magi_cmd(context_paths: list[str], output_dir: str | None = None) -> list[str]:
     """Build the argv list for ``claude -p /magi:magi`` with @file refs.
 
-    When ``output_dir`` is provided, ``--output-dir <dir>`` is appended so the
-    MAGI orchestrator writes ``magi-report.json`` inside that directory
-    instead of a disposable temp dir we cannot read.
+    The slash command and its flags MUST be packed into the single prompt
+    string passed to ``claude -p``. ``claude`` itself does NOT accept
+    ``--output-dir`` -- that flag belongs to MAGI's ``run_magi.py`` and has
+    to travel through the prompt so the sub-session forwards it.
     """
-    cmd = ["claude", "-p", "/magi:magi"]
+    prompt_parts = ["/magi:magi"]
     for path in context_paths:
-        cmd.append(f"@{path}")
+        prompt_parts.append(f"@{path}")
     if output_dir is not None:
-        cmd.extend(["--output-dir", output_dir])
-    return cmd
+        prompt_parts.extend(["--output-dir", output_dir])
+    return ["claude", "-p", " ".join(prompt_parts)]
 
 
 def invoke_magi(
