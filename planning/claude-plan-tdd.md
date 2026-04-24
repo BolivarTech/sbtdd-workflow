@@ -2015,8 +2015,8 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
 
 ### Task H8: close-task Milestone H
 
-- [ ] **Step 1**: mark Milestone H complete.
-- [ ] **Step 2**: `git commit --allow-empty -m "chore: mark task H complete"`.
+- [x] **Step 1**: mark Milestone H complete.
+- [x] **Step 2**: `git commit --allow-empty -m "chore: mark task H complete"`.
 
 ---
 
