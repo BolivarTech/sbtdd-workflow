@@ -75,6 +75,36 @@ def test_changelog_still_present_and_references_v0_1() -> None:
     assert "Unreleased" in changelog or "0.1" in changelog
 
 
+def test_changelog_v02_section_references_features() -> None:
+    """Task I2: the 0.2.0 release section must exist as a top-level heading
+    and mention all three LOCKED features (Feature A escalation, Feature B
+    spec-reviewer, Feature C MAGI semver auto-resolver).
+
+    The substring ``0.2.0`` alone is insufficient: the Deferred block of
+    earlier releases already references ``v0.2.0`` as backlog context. This
+    test therefore requires the explicit ``## [0.2.0] - YYYY-MM-DD`` heading
+    Step 4 Green produces, and checks the three feature markers only in the
+    body of that section (not the whole file).
+    """
+    t = CHANGELOG_MD.read_text(encoding="utf-8")
+    heading_re = re.compile(r"^## \[0\.2\.0\] - \d{4}-\d{2}-\d{2}\s*$", re.MULTILINE)
+    match = heading_re.search(t)
+    assert match is not None, "Missing '## [0.2.0] - YYYY-MM-DD' release heading"
+
+    body_start = match.end()
+    next_section = re.search(r"^## \[", t[body_start:], re.MULTILINE)
+    body = (
+        t[body_start:]
+        if next_section is None
+        else t[body_start : body_start + next_section.start()]
+    )
+    body_lower = body.lower()
+
+    assert "escalation" in body_lower
+    assert "spec-reviewer" in body_lower or "spec reviewer" in body_lower
+    assert "semver" in body_lower or "auto-resolve" in body_lower
+
+
 def _semver_key(v: str) -> tuple[int, ...]:
     """Convert '2.1.4' -> (2, 1, 4); non-numeric segments sort last (-1)."""
     parts: list[int] = []
