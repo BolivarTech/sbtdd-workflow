@@ -220,7 +220,7 @@ every post-v0.1 release.
   extraction, no-split-suffix labels (`STRONG GO` / `STRONG NO-GO` /
   `HOLD -- TIE`), missing-consensus rejection, unknown-label rejection.
 
-## Unreleased
+## [0.2.0] - 2026-04-24
 
 ### BREAKING
 
