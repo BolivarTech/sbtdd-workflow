@@ -113,3 +113,39 @@ def test_format_escalation_message_structural_defect_omits_retry() -> None:
     msg = format_escalation_message(ctx)
     # option (b) retry should be absent when STRONG_NO_GO present
     assert "retry" not in msg.lower() or "abandonar" in msg.lower()
+
+
+def test_prompt_user_non_tty_defaults_to_abandon(monkeypatch, capsys) -> None:
+    from escalation_prompt import prompt_user, _compose_options
+    iters = [_mkv("HOLD", degraded=True), _mkv("HOLD", degraded=True)]
+    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
+    opts = _compose_options(ctx)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    decision = prompt_user(ctx, opts, non_interactive=True)
+    assert decision.action == "abandon"
+    assert decision.chosen_option == "d"
+
+
+def test_prompt_user_tty_accepts_letter(monkeypatch) -> None:
+    from escalation_prompt import prompt_user, _compose_options
+    iters = [_mkv("HOLD", degraded=True)] * 3
+    ctx = build_escalation_context(iters, plan_id="X", context="checkpoint2")
+    opts = _compose_options(ctx)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    inputs = iter(["a", "caspar JSON bug"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+    decision = prompt_user(ctx, opts, non_interactive=False)
+    assert decision.action == "override"
+    assert decision.reason == "caspar JSON bug"
+
+
+def test_prompt_user_invalid_letter_reprompts(monkeypatch) -> None:
+    from escalation_prompt import prompt_user, _compose_options
+    iters = [_mkv("HOLD", degraded=True)] * 3
+    ctx = build_escalation_context(iters, plan_id="X", context="checkpoint2")
+    opts = _compose_options(ctx)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    inputs = iter(["z", "A", "reason text"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+    decision = prompt_user(ctx, opts, non_interactive=False)
+    assert decision.chosen_option == "a"
