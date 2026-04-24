@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,11 @@ def _make_cfg() -> Any:
             "magi_max_iterations": 3,
         },
     )()
+
+
+def _make_ns() -> argparse.Namespace:
+    """Return a minimal argparse namespace with Feature A flags at defaults."""
+    return argparse.Namespace(override_checkpoint=False, reason=None, non_interactive=False)
 
 
 def test_loop2_writes_conditions_and_emits_stderr_summary(
@@ -69,7 +75,7 @@ def test_loop2_writes_conditions_and_emits_stderr_summary(
     )
 
     with pytest.raises(MAGIGateError):
-        pre_merge_cmd._loop2(root, cfg, threshold_override=None)
+        pre_merge_cmd._loop2(root, cfg, threshold_override=None, ns=_make_ns())
     captured = capsys.readouterr()
     # magi-conditions.md written
     assert (root / ".claude" / "magi-conditions.md").exists()
@@ -118,7 +124,7 @@ def test_loop2_unlinks_stale_conditions_on_successful_gate(
     monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", lambda v: False)
     monkeypatch.setattr(magi_dispatch, "verdict_passes_gate", lambda v, t: True)
 
-    result = pre_merge_cmd._loop2(root, cfg, threshold_override=None)
+    result = pre_merge_cmd._loop2(root, cfg, threshold_override=None, ns=_make_ns())
     assert result is not None
     # Stale file must be gone once the gate passed cleanly.
     assert not stale.exists(), "stale magi-conditions.md not cleaned up on GO verdict"
@@ -169,7 +175,7 @@ def test_loop2_cleans_stale_before_new_write_on_conditions(
     )
 
     with pytest.raises(MAGIGateError):
-        pre_merge_cmd._loop2(root, cfg, threshold_override=None)
+        pre_merge_cmd._loop2(root, cfg, threshold_override=None, ns=_make_ns())
     _ = capsys.readouterr()  # drain stderr so it does not clutter output
     # File exists (new write) and does NOT carry the stale iter 99 marker.
     assert stale.exists()

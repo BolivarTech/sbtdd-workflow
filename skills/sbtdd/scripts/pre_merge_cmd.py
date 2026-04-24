@@ -26,6 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import escalation_prompt
 import magi_dispatch
 import subprocess_utils
 import superpowers_dispatch
@@ -68,7 +69,33 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override magi_threshold (ELEVATE only).",
     )
+    p.add_argument(
+        "--override-checkpoint",
+        action="store_true",
+        help="Override MAGI gate per INV-0 on safety-valve exhaustion; requires --reason",
+    )
+    p.add_argument(
+        "--reason",
+        type=str,
+        default=None,
+        help="Mandatory when --override-checkpoint is set",
+    )
+    p.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Force headless path on safety-valve exhaustion (apply .claude/magi-auto-policy.json)",
+    )
     return p
+
+
+def _plan_id_from_path(name: str) -> str:
+    """Extract plan id suffix from filename (``claude-plan-tdd-A.md`` -> ``"A"``).
+
+    Returns ``"X"`` when the filename has no ``-<ID>.md`` suffix (the plain
+    pre-merge default ``claude-plan-tdd.md``).
+    """
+    m = re.search(r"-([A-Z0-9]+)\.md$", name)
+    return m.group(1) if m else "X"
 
 
 def _preflight(root: Path) -> SessionState:
@@ -393,8 +420,67 @@ def _conditions_to_skill_args(conditions: tuple[str, ...]) -> list[str]:
     return [c for c in conditions]
 
 
+def _handle_safety_valve_exhaustion(
+    root: Path,
+    cfg: PluginConfig,
+    verdict_history: list[magi_dispatch.MAGIVerdict],
+    last_verdict: magi_dispatch.MAGIVerdict | None,
+    last_accepted: tuple[str, ...],
+    last_rejected: tuple[str, ...],
+    ns: argparse.Namespace,
+) -> magi_dispatch.MAGIVerdict:
+    """Route exhausted Loop 2 through ``escalation_prompt`` (Feature A).
+
+    Mirror of ``spec_cmd._handle_safety_valve_exhaustion`` for pre-merge
+    Loop 2. Terminal outcomes:
+
+    * ``override`` (or ``--override-checkpoint --reason``): return
+      ``last_verdict``, letting the caller proceed per INV-0 user authority.
+    * ``abandon`` or any other action: raise :class:`MAGIGateError` carrying
+      the iteration cap and the rejected/accepted conditions seen across the
+      loop (mirrors the MAGIGateError payload of the v0.1 raise path).
+
+    In every outcome ``escalation_prompt.apply_decision`` writes a JSON
+    audit artifact under ``<root>/.claude/magi-escalations/``.
+
+    Raises:
+        MAGIGateError: ``--override-checkpoint`` without ``--reason``, no
+            ``last_verdict`` observed while overriding, or the user chose to
+            abandon the flow.
+    """
+    ctx = escalation_prompt.build_escalation_context(
+        iterations=list(verdict_history),
+        plan_id=_plan_id_from_path(Path(cfg.plan_path).name),
+        context="pre-merge",
+    )
+    options = escalation_prompt._compose_options(ctx)
+    if ns.override_checkpoint:
+        if not ns.reason:
+            raise MAGIGateError("--override-checkpoint requires --reason")
+        decision = escalation_prompt.UserDecision(
+            chosen_option="a", action="override", reason=ns.reason
+        )
+    else:
+        decision = escalation_prompt.prompt_user(
+            ctx, options, non_interactive=ns.non_interactive, project_root=root
+        )
+    escalation_prompt.apply_decision(decision, ctx, root)
+    if decision.action == "override" and last_verdict is not None:
+        return last_verdict
+    raise MAGIGateError(
+        f"user chose '{decision.action}' on pre-merge Loop 2 exhaustion",
+        accepted_conditions=last_accepted,
+        rejected_conditions=last_rejected,
+        verdict=last_verdict.verdict if last_verdict is not None else None,
+        iteration=cfg.magi_max_iterations,
+    )
+
+
 def _loop2(
-    root: Path, cfg: PluginConfig, threshold_override: str | None
+    root: Path,
+    cfg: PluginConfig,
+    threshold_override: str | None,
+    ns: argparse.Namespace | None = None,
 ) -> magi_dispatch.MAGIVerdict:
     """Run Loop 2 -- ``/magi:magi`` with INV-28 + INV-29 (sec.S.5.6).
 
@@ -483,12 +569,14 @@ def _loop2(
     last_accepted: tuple[str, ...] = ()
     last_rejected: tuple[str, ...] = ()
     last_verdict: magi_dispatch.MAGIVerdict | None = None
+    verdict_history: list[magi_dispatch.MAGIVerdict] = []
     for iteration in range(1, cfg.magi_max_iterations + 1):
         iter_paths = list(diff_paths)
         if rejections:
             iter_paths.append(str(_write_magi_feedback_file(root, rejections)))
         verdict = magi_dispatch.invoke_magi(context_paths=iter_paths, cwd=str(root))
         last_verdict = verdict
+        verdict_history.append(verdict)
         if magi_dispatch.verdict_is_strong_no_go(verdict):
             raise MAGIGateError(
                 f"MAGI STRONG_NO_GO at iter {iteration}",
@@ -537,12 +625,22 @@ def _loop2(
             continue
         if magi_dispatch.verdict_passes_gate(verdict, threshold):
             return verdict
-    raise MAGIGateError(
-        f"MAGI did not converge to full {threshold}+ after {cfg.magi_max_iterations} iterations",
-        accepted_conditions=last_accepted,
-        rejected_conditions=last_rejected,
-        verdict=last_verdict.verdict if last_verdict is not None else None,
-        iteration=cfg.magi_max_iterations,
+    # INV-22: callers that have not opted into Feature A (notably ``auto_cmd``
+    # which runs headless) pass ``ns=None`` so this branch preserves the
+    # v0.1 behavior -- raise :class:`MAGIGateError` directly without ever
+    # reaching ``escalation_prompt.prompt_user``. Only ``main`` wires the
+    # Feature A flags through ``ns``.
+    if ns is None:
+        raise MAGIGateError(
+            f"MAGI did not converge to full {threshold}+ after "
+            f"{cfg.magi_max_iterations} iterations",
+            accepted_conditions=last_accepted,
+            rejected_conditions=last_rejected,
+            verdict=last_verdict.verdict if last_verdict is not None else None,
+            iteration=cfg.magi_max_iterations,
+        )
+    return _handle_safety_valve_exhaustion(
+        root, cfg, verdict_history, last_verdict, last_accepted, last_rejected, ns
     )
 
 
@@ -554,7 +652,7 @@ def main(argv: list[str] | None = None) -> int:
     _preflight(root)
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
     _loop1(root)
-    verdict = _loop2(root, cfg, ns.magi_threshold)
+    verdict = _loop2(root, cfg, ns.magi_threshold, ns)
     magi_dispatch.write_verdict_artifact(verdict, root / ".claude" / "magi-verdict.json")
     return 0
 

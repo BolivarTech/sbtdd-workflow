@@ -169,7 +169,9 @@ def test_pre_merge_loop1_exits_on_clean_to_go(
     monkeypatch.setattr(pre_merge_cmd, "detect_drift", lambda *a, **kw: None)
     # Loop 2 stub: bypass for Loop-1-only test; pre_merge_cmd may still call
     # _loop2 depending on Task order. Patch _loop2 to a no-op here.
-    monkeypatch.setattr(pre_merge_cmd, "_loop2", lambda root, cfg, override: None, raising=False)
+    monkeypatch.setattr(
+        pre_merge_cmd, "_loop2", lambda root, cfg, override, ns: None, raising=False
+    )
     # Guard against unexpected MAGI verdict artifact write.
     import magi_dispatch
 
@@ -221,7 +223,9 @@ def test_pre_merge_loop1_applies_fixes_until_clean(
     monkeypatch.setattr(superpowers_dispatch, "requesting_code_review", fake_requesting)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
     monkeypatch.setattr(pre_merge_cmd, "detect_drift", lambda *a, **kw: None)
-    monkeypatch.setattr(pre_merge_cmd, "_loop2", lambda root, cfg, override: None, raising=False)
+    monkeypatch.setattr(
+        pre_merge_cmd, "_loop2", lambda root, cfg, override, ns: None, raising=False
+    )
     import magi_dispatch
 
     monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **kw: None)
