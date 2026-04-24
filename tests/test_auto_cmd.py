@@ -329,6 +329,129 @@ def test_auto_phase2_processes_single_task_red_green_refactor(
     assert final.current_task_id is None
 
 
+def test_auto_phase2_recovers_when_implementer_precommitted_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Implementer subagent commits the phase; auto's commit_create raises
+    CommitError (nothing staged). Auto must recover because HEAD advanced.
+
+    Regression for the 2026-04-24 F1 auto run: /writing-plans emits plans
+    with explicit ``git add`` + ``git commit -m`` steps per phase, so the
+    implementer following the plan literally commits at each phase end.
+    Auto's own commit_create afterwards finds an empty stage (rc=1
+    "nothing to commit") and raises CommitError. Pre-fix, that aborted the
+    task loop even though the phase commit had landed. Post-fix, auto
+    verifies HEAD moved past the pre-phase SHA and treats the
+    implementer's commit as the authoritative phase commit.
+    """
+    import auto_cmd
+    import close_task_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from errors import CommitError
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+
+    # Simulate implementer landing a real commit BEFORE auto's commit_create
+    # runs. We drive this through test_driven_development's stub: when the
+    # stub runs, it creates a file + stages + commits with the
+    # plan-prescribed message. Then auto's commit_create (unstubbed: real
+    # commits.create) sees an empty stage and raises CommitError. Auto
+    # must recover because HEAD advanced past the pre-phase SHA.
+    phase_counter = {"n": 0}
+
+    def precommit_stub(**kw: object) -> None:
+        phase_counter["n"] += 1
+        (tmp_path / f"implementer-{phase_counter['n']}.txt").write_text(
+            f"phase {phase_counter['n']}\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"test: implementer commit {phase_counter['n']}"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", precommit_stub, raising=False
+    )
+
+    # close_task_cmd's commit_create still needs to work for the chore
+    # commit because mark_and_advance flips the plan checkboxes and stages
+    # them -- that commit IS auto's responsibility and has real content.
+    # We leave the real close_task_cmd.commit_create in place.
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    # Baseline to prove CommitError is the expected raise-and-recover path.
+    assert CommitError is not None  # import-usage smoke
+    final = auto_cmd._phase2_task_loop(ns, state, cfg)
+
+    # 3 implementer commits + 1 chore commit = 4 beyond the initial.
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=str(tmp_path), check=True, capture_output=True, text=True
+    )
+    lines = log.stdout.strip().splitlines()
+    assert len(lines) == 5, f"expected 5 commits, got {len(lines)}:\n{log.stdout}"
+    assert final.current_phase == "done"
+    assert final.current_task_id is None
+    # Cross-check: all three implementer commits are visible (not
+    # overwritten or deduplicated).
+    assert sum(1 for line in lines if "implementer commit" in line) == 3
+    # Neutralise close_task_cmd leak so later tests aren't affected.
+    _ = close_task_cmd  # keep import alive without affecting behaviour
+
+
+def test_auto_phase2_reraises_commit_error_when_head_did_not_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing staged AND HEAD unchanged -> real failure, re-raise CommitError.
+
+    Defensive guard: if the implementer produced nothing committable for a
+    phase (no commit, no stage) we must NOT silently skip; that would let
+    auto advance the state past a phase where no work happened.
+    """
+    import auto_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from errors import CommitError
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+
+    with pytest.raises(CommitError):
+        auto_cmd._phase2_task_loop(ns, state, cfg)
+
+
 def test_auto_phase2_respects_verification_retries_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

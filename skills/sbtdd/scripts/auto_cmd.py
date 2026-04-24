@@ -58,6 +58,7 @@ from dependency_check import check_environment
 from drift import detect_drift
 from errors import (
     ChecklistError,
+    CommitError,
     DependencyError,
     DriftError,
     MAGIGateError,
@@ -431,10 +432,29 @@ def _phase2_task_loop(
             else 0
         )
         for phase in _PHASE_ORDER[phase_idx:]:
+            pre_phase_sha = _current_head_sha(root)
             superpowers_dispatch.test_driven_development(args=[f"--phase={phase}"], cwd=str(root))
             _run_verification_with_retries(root, retries)
             prefix = _phase_prefix(phase)
-            commit_create(prefix, f"{phase} for task {current.current_task_id}", cwd=str(root))
+            try:
+                commit_create(prefix, f"{phase} for task {current.current_task_id}", cwd=str(root))
+            except CommitError:
+                # ``git commit`` returns rc=1 with "nothing to commit" when
+                # the implementer subagent already committed the phase work
+                # itself -- plans emitted by ``/writing-plans`` typically
+                # include explicit ``git add`` + ``git commit -m`` steps per
+                # phase (and ``git commit --allow-empty`` for refactor).
+                # Observed 2026-04-24 during the first successful F1 auto
+                # run: all three plan-prescribed commits landed from the
+                # implementer, then auto's own commit_create failed on the
+                # now-empty stage. Recover by verifying HEAD moved past
+                # pre_phase_sha; if it did, the implementer's commit is the
+                # authoritative phase commit and we proceed. If HEAD did
+                # not advance, the implementer produced nothing committable
+                # -- re-raise the original error since that is a genuine
+                # verification-irremediable state.
+                if _current_head_sha(root) == pre_phase_sha:
+                    raise
             new_sha = _current_head_sha(root)
             if phase != "refactor":
                 next_phase = _PHASE_ORDER[_PHASE_ORDER.index(phase) + 1]
