@@ -1154,11 +1154,11 @@ git commit --allow-empty -m "refactor: spec_cmd wiring reviewed"
 
 Mirror Task G6 for `pre_merge_cmd._loop2`. The non-convergence raise at `pre_merge_cmd.py:540-546` becomes the escalation entry. Pass `context="pre-merge"` and `plan_id` derived analogously. The `MAGIGateError` constructor already carries `accepted_conditions` / `rejected_conditions` / `verdict` / `iteration` — preserve them on re-raise paths when the user picks abandon.
 
-- [ ] **Step 1-3 (Red commit)**
+- [x] **Step 1-3 (Red commit)**
 
 Same structure as G6 step 1-3.
 
-- [ ] **Step 4 (Green)**
+- [x] **Step 4 (Green)**
 
 Add `import escalation_prompt` and modify the final raise in `_loop2`:
 
@@ -1189,7 +1189,7 @@ raise MAGIGateError(
 
 Accumulate `_verdict_history` inside the existing `for iteration in range(...)` loop and add the same three flags to `_build_parser()`. Pass `ns` into `_loop2`.
 
-- [ ] **Step 5-8**: verify + commits.
+- [x] **Step 5-8**: verify + commits.
 
 ### Task G8: `finalize_cmd --override-checkpoint --reason`
 
