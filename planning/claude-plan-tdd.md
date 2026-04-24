@@ -1812,13 +1812,13 @@ from errors import DriftError, PreconditionError, SpecReviewError
 - Modify: `skills/sbtdd/scripts/auto_cmd.py`
 - Create: `tests/test_auto_cmd_spec_review.py`
 
-- [ ] **Step 1 (Red)**: integration tests using `StubSpecReviewer` — auto loop with 3 tasks where task 2 returns issues that route via `/receiving-code-review` + mini-cycle.
+- [x] **Step 1 (Red)**: integration tests using `StubSpecReviewer` — auto loop with 3 tasks where task 2 returns issues that route via `/receiving-code-review` + mini-cycle.
 
 For v0.2 simplification: `auto_cmd` invokes the dispatcher which is already wrapped with its own safety-valve loop. On `SpecReviewError` the loop aborts with exit 12.
 
-- [ ] **Step 2-3**: commit `test:`.
+- [x] **Step 2-3**: commit `test:`.
 
-- [ ] **Step 4 (Green)**: in `auto_cmd.py`, import `spec_review_dispatch`. In `_phase2_task_loop`, right before the `current = close_task_cmd.mark_and_advance(current, root)` line (currently at auto_cmd.py:441):
+- [x] **Step 4 (Green)**: in `auto_cmd.py`, import `spec_review_dispatch`. In `_phase2_task_loop`, right before the `current = close_task_cmd.mark_and_advance(current, root)` line (currently at auto_cmd.py:441):
 
 ```python
             else:
@@ -1871,7 +1871,7 @@ from errors import (
 )
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [x] **Step 5-8**: verify + commits.
 
 ### Task H7: new subcommand `review-spec-compliance`
 
