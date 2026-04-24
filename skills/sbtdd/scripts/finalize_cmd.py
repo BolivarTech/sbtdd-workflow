@@ -202,7 +202,7 @@ def _checklist(
     )
     items.append(
         (
-            "MAGI verdict >= threshold AND not degraded",
+            _MAGI_GATE_ITEM_NAME,
             gate_pass,
             f"verdict={v_data['verdict']}, degraded={v_data.get('degraded')}",
         )

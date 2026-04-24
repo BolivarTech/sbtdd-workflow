@@ -1197,7 +1197,7 @@ Accumulate `_verdict_history` inside the existing `for iteration in range(...)` 
 - Modify: `skills/sbtdd/scripts/finalize_cmd.py`
 - Create: `tests/test_finalize_cmd_override.py`
 
-- [ ] **Step 1-3 (Red)**: test asserting override flag produces audit artifact + bypasses `degraded: true` reject.
+- [x] **Step 1-3 (Red)**: test asserting override flag produces audit artifact + bypasses `degraded: true` reject.
 
 - [ ] **Step 4 (Green)**: add `--override-checkpoint --reason` to `finalize_cmd._build_parser`. In `main()`, before rejecting a degraded verdict, check `ns.override_checkpoint`. When set, build an abbreviated `EscalationContext` (synthesize a single-iter history from `.claude/magi-verdict.json`), call `apply_decision` with the user's reason, and permit the gate to pass. The audit artifact is the record.
 
