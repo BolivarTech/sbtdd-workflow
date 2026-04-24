@@ -1345,8 +1345,8 @@ git commit --allow-empty -m "refactor: A8 test reviewed, clean"
 
 ### Task G10: close-task Milestone G
 
-- [ ] **Step 1**: mark Milestone G checkbox [x] in the plan.
-- [ ] **Step 2**: commit.
+- [x] **Step 1**: mark Milestone G checkbox [x] in the plan.
+- [x] **Step 2**: commit.
 
 ```bash
 git commit --allow-empty -m "chore: mark task G complete"
