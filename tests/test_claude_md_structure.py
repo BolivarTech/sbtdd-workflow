@@ -43,9 +43,7 @@ def test_v02_release_notes_section_points_to_changelog() -> None:
     """
     text = CLAUDE_MD.read_text(encoding="utf-8")
     anchor = "## v0.2 release notes"
-    assert anchor in text, (
-        f"CLAUDE.md must contain '{anchor}' heading pointing at CHANGELOG"
-    )
+    assert anchor in text, f"CLAUDE.md must contain '{anchor}' heading pointing at CHANGELOG"
     after_anchor = text.split(anchor, 1)[1]
     section_body = re.split(
         r"^## ",
@@ -53,6 +51,4 @@ def test_v02_release_notes_section_points_to_changelog() -> None:
         maxsplit=1,
         flags=re.MULTILINE,
     )[0]
-    assert "CHANGELOG.md" in section_body, (
-        "v0.2 release notes section must reference CHANGELOG.md"
-    )
+    assert "CHANGELOG.md" in section_body, "v0.2 release notes section must reference CHANGELOG.md"
