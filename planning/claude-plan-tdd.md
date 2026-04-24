@@ -1364,7 +1364,7 @@ git commit --allow-empty -m "chore: mark task G complete"
 - Modify: `skills/sbtdd/scripts/errors.py`
 - Modify: `tests/test_errors.py`
 
-- [ ] **Step 1 (Red)**:
+- [x] **Step 1 (Red)**:
 
 Append to `tests/test_errors.py`:
 
@@ -1379,9 +1379,9 @@ def test_spec_review_error_is_sbtdd_error() -> None:
     assert issubclass(SpecReviewError, SBTDDError)
 ```
 
-- [ ] **Step 2-3**: run, fail, commit `test:`.
+- [x] **Step 2-3**: run, fail, commit `test:`.
 
-- [ ] **Step 4 (Green)**: in `skills/sbtdd/scripts/errors.py`:
+- [x] **Step 4 (Green)**: in `skills/sbtdd/scripts/errors.py`:
 
 ```python
 class SpecReviewError(SBTDDError):
@@ -1411,7 +1411,7 @@ Add to `_EXIT_CODES_MUTABLE`:
     SpecReviewError: 12,
 ```
 
-- [ ] **Step 5-8**: tests pass, `feat:`, verify, `refactor:` commits.
+- [x] **Step 5-8**: tests pass, `feat:`, verify, `refactor:` commits.
 
 ### Task H2: `SpecReviewResult` + `SpecIssue` dataclasses
 
