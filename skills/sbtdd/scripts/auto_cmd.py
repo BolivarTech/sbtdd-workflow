@@ -353,6 +353,33 @@ def _phase_prefix(phase: str) -> str:
     raise ValueError(f"unknown phase '{phase}'")
 
 
+def _run_spec_review_gate(task_id: str, plan_path: Path, root: Path) -> None:
+    """Dispatch the spec-reviewer before :func:`close_task_cmd.mark_and_advance` (INV-31).
+
+    Thin wrapper around :func:`spec_review_dispatch.dispatch_spec_reviewer`
+    that flattens :func:`_phase2_task_loop`'s inner ``else`` branch: callers
+    see a single gate line instead of a multi-kwarg dispatch dict. The real
+    dispatcher raises :class:`SpecReviewError` on non-approval after the
+    safety-valve iteration cap; the raise propagates to
+    :func:`_phase2_task_loop`'s ``except SpecReviewError`` branch, which
+    records the blocked task count in ``.claude/auto-run.json`` before
+    re-raising.
+
+    Mirrors :func:`close_task_cmd._run_spec_review` for the interactive
+    task-close path; both share the INV-31 contract. Auto relies on the
+    dispatcher raising (no defensive ``result.approved`` check) because
+    the try/except already captures the failure and the stub fixtures
+    exercising auto drive :class:`SpecReviewError` directly to cover the
+    blocked-advance test path (see
+    ``tests/test_auto_cmd_spec_review.py``).
+    """
+    spec_review_dispatch.dispatch_spec_reviewer(
+        task_id=task_id,
+        plan_path=plan_path,
+        repo_root=root,
+    )
+
+
 def _phase2_task_loop(
     ns: argparse.Namespace, state: SessionState, cfg: PluginConfig
 ) -> SessionState:
@@ -511,15 +538,8 @@ def _phase2_task_loop(
                     save_state(current, state_path)
                 else:
                     # H6 (INV-31): spec-reviewer gate BEFORE mark_and_advance.
-                    # SpecReviewError propagates to the outer except so the
-                    # audit trail records the blocked task count before the
-                    # exception reaches the dispatcher.
                     assert current.current_task_id is not None
-                    spec_review_dispatch.dispatch_spec_reviewer(
-                        task_id=current.current_task_id,
-                        plan_path=plan_path,
-                        repo_root=root,
-                    )
+                    _run_spec_review_gate(current.current_task_id, plan_path, root)
                     # W1: delegate to public helper in close_task_cmd instead
                     # of duplicating the entire flip / commit chore / advance
                     # sequence.
