@@ -81,3 +81,36 @@ def test_build_escalation_context_checkpoint2_returns_frozen_struct() -> None:
     assert ctx.context == "checkpoint2"
     assert len(ctx.iterations) == 3
     assert ctx.root_cause in set(_RootCause)
+
+
+from pathlib import Path
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "magi-escalations"
+
+
+def test_format_escalation_message_matches_golden_checkpoint2_infra() -> None:
+    from escalation_prompt import format_escalation_message
+
+    iters = [
+        _mkv("HOLD", degraded=True),
+        _mkv("GO", degraded=False),
+        _mkv("HOLD", degraded=True),
+    ]
+    ctx = build_escalation_context(iters, plan_id="D", context="checkpoint2")
+    msg = format_escalation_message(ctx)
+    # Render must be <=40 lines and include the four expected markers
+    assert msg.count("\n") <= 40
+    assert "Escalando al usuario" in msg
+    assert "Opciones per INV-0" in msg
+    assert "(a)" in msg and "(b)" in msg and "(c)" in msg and "(d)" in msg
+    assert "Cual?" in msg or "¿Cuál?" in msg
+
+
+def test_format_escalation_message_structural_defect_omits_retry() -> None:
+    from escalation_prompt import format_escalation_message
+
+    iters = [_mkv("STRONG_NO_GO")]
+    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
+    msg = format_escalation_message(ctx)
+    # option (b) retry should be absent when STRONG_NO_GO present
+    assert "retry" not in msg.lower() or "abandonar" in msg.lower()
