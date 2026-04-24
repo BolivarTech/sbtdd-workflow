@@ -201,3 +201,21 @@ def test_no_uppercase_placeholders_in_skill_md() -> None:
             f"SKILL.md contains forbidden placeholder '{token}' "
             "(extends INV-27 rationale to SKILL.md)"
         )
+
+
+def test_semver_key_orders_patch_bump() -> None:
+    from tests.test_distribution_coherence import _semver_key
+
+    assert _semver_key("2.1.4") > _semver_key("2.1.3")
+    assert _semver_key("2.2.0") > _semver_key("2.1.99")
+    assert _semver_key("3.0.0") > _semver_key("2.99.99")
+
+
+def test_semver_key_handles_mixed_version_strings() -> None:
+    from tests.test_distribution_coherence import _semver_key
+
+    # non-numeric segment sorts BELOW numeric (we use -1 as the sentinel)
+    assert _semver_key("2.1.3") > _semver_key("2.1.beta")
+    assert _semver_key("2.1.0") > _semver_key("garbage")
+    # ties resolve deterministically
+    assert _semver_key("2.1.3") == _semver_key("2.1.3")
