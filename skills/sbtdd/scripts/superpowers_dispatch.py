@@ -115,6 +115,19 @@ def invoke_skill(
 # what ``monkeypatch.setattr`` replaces.
 
 
+# Per-skill default timeouts (seconds). The global default is 600s; skills
+# whose subprocess reliably needs more time override it below. ``/writing-plans``
+# is raised to 1800s because empirically (v0.2 Checkpoint 2 first run,
+# 2026-04-23) the subprocess exceeded 600s even when the plan file was already
+# written to disk -- the sub-session spends non-trivial post-write time on
+# closing actions, and killing it at 600s aborts the whole ``/sbtdd spec``
+# pipeline before MAGI Checkpoint 2 can run.
+_DEFAULT_TIMEOUT = 600
+_SKILL_TIMEOUT_OVERRIDES: dict[str, int] = {
+    "writing-plans": 1800,
+}
+
+
 def _make_wrapper(
     skill_name: str,
 ) -> Callable[..., SkillResult]:
@@ -123,11 +136,16 @@ def _make_wrapper(
     Resolves ``invoke_skill`` at call time via the module's own attribute
     table so ``monkeypatch.setattr('superpowers_dispatch.invoke_skill', ...)``
     takes effect in tests.
+
+    The wrapper's default timeout comes from ``_SKILL_TIMEOUT_OVERRIDES[skill_name]``
+    when defined, else ``_DEFAULT_TIMEOUT``. Callers can still pass an
+    explicit ``timeout=`` kwarg to override per call.
     """
+    default_timeout = _SKILL_TIMEOUT_OVERRIDES.get(skill_name, _DEFAULT_TIMEOUT)
 
     def _wrapper(
         args: list[str] | None = None,
-        timeout: int = 600,
+        timeout: int = default_timeout,
         cwd: str | None = None,
     ) -> SkillResult:
         module = _sys.modules[__name__]

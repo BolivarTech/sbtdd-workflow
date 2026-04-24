@@ -182,3 +182,55 @@ def test_wrapper_monkeypatch_propagates_through_module_attr(monkeypatch):
         "wrapper closure captured invoke_skill; monkeypatch must replace "
         "module attribute and be picked up via sys.modules[__name__].invoke_skill"
     )
+
+
+def test_writing_plans_default_timeout_is_1800s(monkeypatch):
+    """``/writing-plans`` subprocess must default to 1800s.
+
+    Empirical v0.2 Checkpoint 2 run (2026-04-23): the subprocess exceeded
+    600s even when ``planning/claude-plan-tdd-org.md`` was already fully
+    written. Raising the per-skill default prevents the ``ValidationError:
+    skill '/writing-plans' timed out after 600s`` that aborted
+    ``/sbtdd spec`` before MAGI Checkpoint 2 could run.
+    """
+    from superpowers_dispatch import SkillResult, writing_plans
+
+    captured: dict = {}
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        captured["timeout"] = timeout
+        return SkillResult(skill=skill, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    writing_plans(["@spec.md"])
+    assert captured["timeout"] == 1800
+
+
+def test_brainstorming_default_timeout_is_600s(monkeypatch):
+    """Skills without a per-skill override keep the 600s default."""
+    from superpowers_dispatch import SkillResult, brainstorming
+
+    captured: dict = {}
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        captured["timeout"] = timeout
+        return SkillResult(skill=skill, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    brainstorming(["@spec-base.md"])
+    assert captured["timeout"] == 600
+
+
+def test_writing_plans_explicit_timeout_still_overrides(monkeypatch):
+    """Caller-provided ``timeout=`` kwarg still wins over the per-skill default."""
+    from superpowers_dispatch import SkillResult, writing_plans
+
+    captured: dict = {}
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        captured["timeout"] = timeout
+        return SkillResult(skill=skill, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    writing_plans(["@spec.md"], timeout=3600)
+    assert captured["timeout"] == 3600
