@@ -8,6 +8,33 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## 0.1.3 - 2026-04-24
+
+### Fixed
+
+- `check_stack_toolchain("python")` now invokes each tool via
+  `[sys.executable, "-m", <module>, "--version"]` instead of
+  `shutil.which(bare_name) + [bare_name, "--version"]`. Observed two
+  false-negative modes on layered Python installs (2026-04-24): (a)
+  `shutil.which("pytest")` resolved a stale Python 3.6 `pytest.EXE`
+  from a Scripts/ directory on PATH that crashed with returncode=1 even
+  though Python 3.14's `python -m pytest` ran the 609-test suite
+  cleanly; (b) `ruff` / `mypy` installed only as modules under the
+  active interpreter (no Scripts/ entry points exposed on PATH)
+  reported MISSING. The new `_check_python_module_tool` helper aligns
+  the check with `plugin.local.md`'s `verification_commands` (which
+  already use `python -m <tool>`), maps `No module named` stderr to
+  MISSING with a `pip install <tool>` remediation, and other non-zero
+  exits to BROKEN. Rust + C++ stacks keep the binary-resolution path
+  unchanged.
+
+### Added
+
+- 2 new tests in `test_dependency_check`: one pins the
+  `[sys.executable, "-m", <module>, "--version"]` invocation form for
+  all three Python-stack tools; one verifies `No module named` stderr
+  maps to MISSING rather than BROKEN.
+
 ## 0.1.2 - 2026-04-24
 
 ### Fixed
