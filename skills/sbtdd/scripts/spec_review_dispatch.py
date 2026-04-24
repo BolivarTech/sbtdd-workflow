@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-24
@@ -31,7 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 _SeverityLit = Literal["MISSING", "EXTRA", "MISUNDERSTANDING"]
 
@@ -72,6 +73,6 @@ class SpecReviewResult:
     """
 
     approved: bool
-    issues: Tuple[SpecIssue, ...]
+    issues: tuple[SpecIssue, ...]
     reviewer_iter: int
-    artifact_path: Optional[Path]
+    artifact_path: Path | None
