@@ -99,6 +99,27 @@ class VerificationIrremediableError(SBTDDError):
     """Phase verification failed after auto retry budget (exit 6)."""
 
 
+class SpecReviewError(SBTDDError):
+    """Spec-reviewer safety valve exhausted — exit 12 (SPEC_REVIEW_ISSUES).
+
+    Introduced in v0.2 (Feature B). Carries the last-iteration issues
+    list as a typed attribute so dispatchers can enrich audit artifacts.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        task_id: str | None = None,
+        iteration: int | None = None,
+        issues: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.task_id = task_id
+        self.iteration = iteration
+        self.issues = issues
+
+
 _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     ValidationError: 1,
     StateFileError: 1,
@@ -111,6 +132,7 @@ _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     MAGIGateError: 8,
     ChecklistError: 9,
     QuotaExhaustedError: 11,
+    SpecReviewError: 12,
 }
 
 #: Read-only exception-class -> exit-code registry (sec.S.11.1 canonical

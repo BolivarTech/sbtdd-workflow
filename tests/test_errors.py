@@ -83,6 +83,7 @@ def test_all_ten_subclasses_exist():
         "Loop1DivergentError",
         "ChecklistError",
         "VerificationIrremediableError",
+        "SpecReviewError",
     }
     actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
@@ -166,6 +167,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         MAGIGateError,
         PreconditionError,
         QuotaExhaustedError,
+        SpecReviewError,
         StateFileError,
         ValidationError,
         VerificationIrremediableError,
@@ -183,6 +185,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         Loop1DivergentError,
         ChecklistError,
         VerificationIrremediableError,
+        SpecReviewError,
     }
     assert set(EXIT_CODES.keys()) == expected_classes
 
