@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from magi_dispatch import MAGIVerdict
+from spec_review_dispatch import SpecIssue, SpecReviewResult
 from superpowers_dispatch import SkillResult
 
 
@@ -129,3 +130,40 @@ class StubMAGI:
             }
         )
         return self.sequence.pop(0)
+
+
+@dataclass
+class StubSpecReviewer:
+    """Stub for ``spec_review_dispatch.dispatch_spec_reviewer`` (Feature B).
+
+    Each entry in ``sequence`` maps FIFO to one ``dispatch_spec_reviewer``
+    call: ``True`` yields an approved :class:`SpecReviewResult`, ``False``
+    yields a one-issue ``MISSING`` result. Exhausted sequence raises
+    ``IndexError`` so runaway loops fail loud, matching the :class:`StubMAGI`
+    convention.
+    """
+
+    sequence: list[bool]
+    calls: list[dict[str, Any]] = field(default_factory=list)
+    iter_count: int = 1
+
+    def dispatch_spec_reviewer(
+        self,
+        *,
+        task_id: str,
+        plan_path: Any,
+        repo_root: Any,
+        max_iterations: int = 3,
+        timeout: int = 900,
+    ) -> SpecReviewResult:
+        self.calls.append({"task_id": task_id, "max_iterations": max_iterations})
+        approved = self.sequence.pop(0)
+        issues: tuple[SpecIssue, ...] = ()
+        if not approved:
+            issues = (SpecIssue(severity="MISSING", text=f"stub issue for task {task_id}"),)
+        return SpecReviewResult(
+            approved=approved,
+            issues=issues,
+            reviewer_iter=self.iter_count,
+            artifact_path=None,
+        )
