@@ -41,16 +41,17 @@ def test_plugin_version_is_semver() -> None:
     assert re.match(r"^\d+\.\d+\.\d+$", d["version"]), f"version must be semver: {d['version']}"
 
 
-def test_plugin_version_is_current_v0_1_patch() -> None:
-    """Plugin must ship a 0.1.x patch on the v0.1 series until the v0.2 bump.
+def test_plugin_version_is_current_v0_2_patch() -> None:
+    """Plugin must ship a 0.2.x patch on the v0.2 series until the v0.3 bump.
 
-    Originally pinned to ``0.1.0`` (Milestone E ship); relaxed to accept any
-    ``0.1.x`` patch so fix-only releases (e.g. the v0.1.1 ``magi_dispatch``
-    JSON-contract fix) don't require editing the contract test itself.
+    Originally pinned to ``0.1.0`` (Milestone E ship); relaxed to ``0.1.x`` so
+    fix-only releases on v0.1 didn't require editing this test. Retargeted to
+    ``0.2.x`` at the v0.2 bump (Task I3) so the same tripwire continues to
+    flag accidental bumps until the v0.3 line opens.
     """
     d = _load_plugin()
-    assert re.match(r"^0\.1\.\d+$", d["version"]), (
-        f"version must be on the v0.1.x patch series until v0.2 bump, got {d['version']}"
+    assert re.match(r"^0\.2\.\d+$", d["version"]), (
+        f"version must be on the v0.2.x patch series until v0.3 bump, got {d['version']}"
     )
 
 
