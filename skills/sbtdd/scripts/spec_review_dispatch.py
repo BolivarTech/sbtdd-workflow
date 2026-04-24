@@ -280,7 +280,7 @@ def dispatch_spec_reviewer(
     task_id: str,
     plan_path: Path,
     repo_root: Path,
-    max_iterations: int = 3,
+    max_iterations: int = 1,
     timeout: int = 900,
 ) -> SpecReviewResult:
     """Run the spec-reviewer for ONE task with a bounded retry budget.
@@ -303,7 +303,15 @@ def dispatch_spec_reviewer(
         plan_path: Path to the approved plan (``planning/claude-plan-tdd.md``).
         repo_root: Destination project root; used both as git cwd and as
             audit-artifact base.
-        max_iterations: Safety valve cap (default 3, matching Checkpoint 2).
+        max_iterations: Safety valve cap. **Pinned to 1 in v0.2** per MAGI
+            Loop 2 CRITICAL finding (2026-04-24): the loop re-invokes the
+            reviewer on byte-identical inputs across iterations because
+            spec-base §2.2's mini-cycle TDD feedback between dispatches is
+            explicitly deferred to v0.2.1 (B6 relaxation). Without feedback
+            the reviewer is nominally deterministic, so iter 2+ burn quota
+            for zero semantic benefit. When v0.2.1 lands
+            ``/receiving-code-review`` + mini-cycle fix + re-dispatch the
+            default bumps back to 3.
         timeout: Per-call subprocess timeout in seconds (default 900, the
             reviewer budget prescribed by ``CLAUDE.md`` v0.2 Feature B).
 

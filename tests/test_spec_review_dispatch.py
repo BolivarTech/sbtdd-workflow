@@ -42,6 +42,25 @@ def test_dispatch_approved_path(tmp_path, monkeypatch) -> None:
     assert result.issues == ()
 
 
+def test_dispatch_default_max_iterations_is_one_per_b6_defer() -> None:
+    """dispatch_spec_reviewer defaults max_iterations=1 in v0.2 per B6 defer.
+
+    Regression for MAGI Loop 2 CRITICAL finding (2026-04-24): the default
+    was 3 but the loop re-invokes the reviewer on byte-identical inputs
+    because spec-base §2.2's mini-cycle TDD feedback between dispatches
+    is deferred to v0.2.1. With no input mutation between iters the
+    reviewer is nominally deterministic, so iter 2+ burn quota for zero
+    semantic benefit. Pinning default=1 until v0.2.1 lands the feedback
+    path bumps it back to 3.
+    """
+    import inspect
+
+    from spec_review_dispatch import dispatch_spec_reviewer  # type: ignore[import-not-found]
+
+    sig = inspect.signature(dispatch_spec_reviewer)
+    assert sig.parameters["max_iterations"].default == 1
+
+
 def test_dispatch_safety_valve_raises_spec_review_error(tmp_path, monkeypatch) -> None:
     from spec_review_dispatch import dispatch_spec_reviewer  # type: ignore[import-not-found,attr-defined]
 
