@@ -618,7 +618,7 @@ make verify && git commit --allow-empty -m "refactor: classifier reviewed, clean
 - Modify: `tests/test_escalation_prompt.py`
 - Create: `tests/fixtures/magi-escalations/checkpoint2-infra-transient.txt`
 
-- [ ] **Step 1 (Red): golden-output test**
+- [x] **Step 1 (Red): golden-output test**
 
 Create `tests/fixtures/magi-escalations/checkpoint2-infra-transient.txt` with the full template from CLAUDE.md "canonical output template" section, adapted to synthetic inputs. Then append to `tests/test_escalation_prompt.py`:
 
@@ -654,14 +654,14 @@ def test_format_escalation_message_structural_defect_omits_retry() -> None:
     assert "retry" not in msg.lower() or "abandonar" in msg.lower()
 ```
 
-- [ ] **Step 2-3 (Red commit)**
+- [x] **Step 2-3 (Red commit)**
 
 ```bash
 git add tests/test_escalation_prompt.py tests/fixtures/magi-escalations/
 git commit -m "test: add golden-output tests for format_escalation_message"
 ```
 
-- [ ] **Step 4 (Green): implement `format_escalation_message` + dynamic option composer**
+- [x] **Step 4 (Green): implement `format_escalation_message` + dynamic option composer**
 
 Append to `skills/sbtdd/scripts/escalation_prompt.py`:
 
@@ -742,13 +742,13 @@ def format_escalation_message(ctx: EscalationContext) -> str:
     return "\n".join(lines)
 ```
 
-- [ ] **Step 5 (verify tests PASS)**
+- [x] **Step 5 (verify tests PASS)**
 
 ```bash
 python -m pytest tests/test_escalation_prompt.py -v
 ```
 
-- [ ] **Step 6-8 (Green + Refactor commits)**
+- [x] **Step 6-8 (Green + Refactor commits)**
 
 ```bash
 git add skills/sbtdd/scripts/escalation_prompt.py
