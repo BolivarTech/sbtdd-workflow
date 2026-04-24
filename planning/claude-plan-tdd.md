@@ -1199,9 +1199,9 @@ Accumulate `_verdict_history` inside the existing `for iteration in range(...)` 
 
 - [x] **Step 1-3 (Red)**: test asserting override flag produces audit artifact + bypasses `degraded: true` reject.
 
-- [ ] **Step 4 (Green)**: add `--override-checkpoint --reason` to `finalize_cmd._build_parser`. In `main()`, before rejecting a degraded verdict, check `ns.override_checkpoint`. When set, build an abbreviated `EscalationContext` (synthesize a single-iter history from `.claude/magi-verdict.json`), call `apply_decision` with the user's reason, and permit the gate to pass. The audit artifact is the record.
+- [x] **Step 4 (Green)**: add `--override-checkpoint --reason` to `finalize_cmd._build_parser`. In `main()`, before rejecting a degraded verdict, check `ns.override_checkpoint`. When set, build an abbreviated `EscalationContext` (synthesize a single-iter history from `.claude/magi-verdict.json`), call `apply_decision` with the user's reason, and permit the gate to pass. The audit artifact is the record.
 
-- [ ] **Step 5-8**: tests + commits.
+- [x] **Step 5-8**: tests + commits.
 
 ### Task G9: `resume_cmd` detects pending escalation
 
