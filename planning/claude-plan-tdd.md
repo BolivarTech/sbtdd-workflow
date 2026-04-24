@@ -300,11 +300,11 @@ git commit --allow-empty -m "refactor: keep _resolve_magi_plugin_json pure; cach
 
 ### Task F3: close-task bookkeeping
 
-- [ ] **Step 1: update plan checkbox for Milestone F**
+- [x] **Step 1: update plan checkbox for Milestone F**
 
 (Handled by `/sbtdd close-task` or manual edit.)
 
-- [ ] **Step 2: close-task commit**
+- [x] **Step 2: close-task commit**
 
 ```bash
 git commit --allow-empty -m "chore: mark task F complete"
