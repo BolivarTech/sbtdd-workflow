@@ -2029,7 +2029,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
 - Modify: `sbtdd/sbtdd-workflow-plugin-spec-base.md` (sec.S.10)
 - Modify: `tests/test_inv_documentation.py`
 
-- [ ] **Step 1 (Red)**: test asserting INV-31 appears in both artifacts.
+- [x] **Step 1 (Red)**: test asserting INV-31 appears in both artifacts.
 
 ```python
 def test_inv31_documented_in_claude_md() -> None:
@@ -2038,7 +2038,7 @@ def test_inv31_documented_in_claude_md() -> None:
     assert "spec-reviewer" in t
 ```
 
-- [ ] **Step 2-4**: commit `test:`, add the INV-31 bullet to both docs, commit `feat:`.
+- [x] **Step 2-4**: commit `test:`, add the INV-31 bullet to both docs, commit `feat:`.
 
 In `CLAUDE.md` under "Invariants Summary":
 
@@ -2046,7 +2046,7 @@ In `CLAUDE.md` under "Invariants Summary":
 - **INV-31** Every task close in `auto_cmd` and `close_task_cmd` (interactive) MUST pass spec-reviewer approval before `mark_and_advance` advances state, unless `--skip-spec-review` flag set (manual workflows) or stub fixture injected (tests). Introduced in v0.2 (Feature B).
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [x] **Step 5-8**: verify + commits.
 
 ### Task I1b: D2/D3 — update SKILL.md dispatch + README usage
 
