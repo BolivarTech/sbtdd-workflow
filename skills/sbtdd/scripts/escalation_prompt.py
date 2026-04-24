@@ -261,8 +261,42 @@ def prompt_user(
     tty = sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
     if non_interactive or not tty:
         policy = _read_headless_policy(project_root or Path.cwd())
-        if policy == "override_strong_go_only" and ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
-            return _decision_for(options, "override", "headless policy: override_strong_go_only")
+        # MAGI Loop 2 v0.2 pre-merge WARNING #2 (2026-04-24): in headless
+        # paths, the configured policy is silently applied. CI users who
+        # never opted into ``.claude/magi-auto-policy.json`` get the
+        # ``abort`` default and never discover the knob exists. Emit a
+        # one-line stderr breadcrumb so operators at least see the choice
+        # being made and can grep their CI logs to find the configuration
+        # surface. Cost: one stderr line per pre-merge / spec / auto-mode
+        # exhaustion, which is rare. Quiet for normal TTY runs.
+        sys.stderr.write(
+            f"[escalation_prompt] headless policy='{policy}' "
+            f"(configure .claude/magi-auto-policy.json to change)\n"
+        )
+        # MAGI Loop 2 v0.2 pre-merge WARNING #4 (2026-04-24):
+        # ``override_strong_go_only`` originally tested
+        # ``ctx.root_cause != STRUCTURAL_DEFECT`` -- but
+        # ``_classify_root_cause`` only returns STRUCTURAL_DEFECT when a
+        # STRONG_NO_GO verdict appears in the history. The predicate
+        # therefore overrode on INFRA_TRANSIENT, PLAN_VS_SPEC, AND
+        # SPEC_AMBIGUITY (every non-STRONG_NO_GO failure mode), which is
+        # the inverse of what the policy name suggests. Operators who
+        # picked ``override_strong_go_only`` expecting "auto-override
+        # only when MAGI was leaning toward GO" instead got auto-override
+        # on degraded HOLD loops, plan-vs-spec gaps, and ambiguous specs.
+        # The fix tightens the predicate: only override when the
+        # most-recent verdict is STRONG_GO or GO (i.e. the verdict was
+        # genuinely on the GO side and the safety valve still tripped --
+        # likely an infra/transient issue worth overriding). Other
+        # verdicts (HOLD, HOLD_TIE, GO_WITH_CAVEATS, STRONG_NO_GO) keep
+        # the human-in-the-loop default of ``abort``.
+        if policy == "override_strong_go_only":
+            last_iter = ctx.iterations[-1] if ctx.iterations else None
+            last_verdict = str(last_iter.get("verdict", "")) if isinstance(last_iter, dict) else ""
+            if last_verdict in ("GO", "STRONG_GO"):
+                return _decision_for(
+                    options, "override", "headless policy: override_strong_go_only"
+                )
         if policy == "retry_once" and any(o.action == "retry" for o in options):
             return _decision_for(options, "retry", "headless policy: retry_once")
         return _decision_for(options, "abandon", "headless policy: abort (default)")

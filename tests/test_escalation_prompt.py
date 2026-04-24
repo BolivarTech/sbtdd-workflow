@@ -127,6 +127,80 @@ def test_prompt_user_non_tty_defaults_to_abandon(monkeypatch, capsys) -> None:
     assert decision.chosen_option == "d"
 
 
+def test_prompt_user_headless_override_strong_go_only_overrides_only_on_GO_verdicts(
+    tmp_path, monkeypatch
+) -> None:
+    """`override_strong_go_only` policy must override ONLY when last verdict is GO/STRONG_GO.
+
+    Regression for MAGI Loop 2 v0.2 pre-merge WARNING #4 (2026-04-24):
+    the predicate originally compared ``ctx.root_cause`` to
+    STRUCTURAL_DEFECT, which only fires on STRONG_NO_GO. As a result
+    the policy overrode on every other failure mode (degraded HOLD,
+    plan-vs-spec gap, ambiguous spec) -- the inverse of the policy
+    name. The fix tightens the predicate to check the last-iter
+    verdict label directly so the policy fires only when MAGI was
+    leaning toward GO and a transient/infra issue tripped the safety
+    valve.
+    """
+    import json
+
+    from escalation_prompt import _compose_options, prompt_user
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "magi-auto-policy.json").write_text(
+        json.dumps({"on_exhausted": "override_strong_go_only"}), encoding="utf-8"
+    )
+
+    # Case 1: last verdict is HOLD (degraded) -> policy should NOT override.
+    iters_hold = [_mkv("HOLD", degraded=True)] * 3
+    ctx_hold = build_escalation_context(iters_hold, plan_id="X", context="pre-merge")
+    opts_hold = _compose_options(ctx_hold)
+    decision_hold = prompt_user(ctx_hold, opts_hold, project_root=tmp_path)
+    assert decision_hold.action == "abandon", (
+        f"override_strong_go_only must NOT override on HOLD verdict; got {decision_hold.action!r}"
+    )
+
+    # Case 2: last verdict is GO -> policy SHOULD override.
+    iters_go = [_mkv("HOLD"), _mkv("GO_WITH_CAVEATS"), _mkv("GO")]
+    ctx_go = build_escalation_context(iters_go, plan_id="X", context="pre-merge")
+    opts_go = _compose_options(ctx_go)
+    decision_go = prompt_user(ctx_go, opts_go, project_root=tmp_path)
+    assert decision_go.action == "override", (
+        f"override_strong_go_only must override when last verdict is GO; got {decision_go.action!r}"
+    )
+
+    # Case 3: last verdict is STRONG_GO -> policy SHOULD override.
+    iters_sg = [_mkv("STRONG_GO")] * 2
+    ctx_sg = build_escalation_context(iters_sg, plan_id="X", context="pre-merge")
+    opts_sg = _compose_options(ctx_sg)
+    decision_sg = prompt_user(ctx_sg, opts_sg, project_root=tmp_path)
+    assert decision_sg.action == "override"
+
+
+def test_prompt_user_headless_emits_policy_breadcrumb_to_stderr(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Headless path emits a one-line stderr breadcrumb naming the policy.
+
+    Regression for MAGI Loop 2 v0.2 pre-merge WARNING #2 (2026-04-24):
+    CI users who never opted into ``.claude/magi-auto-policy.json``
+    silently get the ``abort`` default and never discover the knob.
+    The breadcrumb makes the policy choice visible in CI logs.
+    """
+    from escalation_prompt import _compose_options, prompt_user
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    iters = [_mkv("HOLD", degraded=True)] * 3
+    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
+    opts = _compose_options(ctx)
+    prompt_user(ctx, opts, project_root=tmp_path)
+
+    captured = capsys.readouterr()
+    assert "[escalation_prompt] headless policy=" in captured.err
+    assert "magi-auto-policy.json" in captured.err
+
+
 def test_prompt_user_tty_accepts_letter(monkeypatch) -> None:
     from escalation_prompt import prompt_user, _compose_options
 
