@@ -368,6 +368,21 @@ def _phase2_task_loop(
     expected one for the NEW phase -- re-checking inside the inner loop
     would flag every legitimate transition as drift.
 
+    .. note::
+       **v0.1.x limitation (pending v0.2 Feature B redesign).**
+       The current call shape ``test_driven_development(args=[f"--phase={phase}"])``
+       forwards the phase as a narrative hint inside the ``claude -p`` prompt.
+       The superpowers ``/test-driven-development`` skill is prose-only and does
+       NOT formally define a ``--phase`` flag; it interprets the hint via
+       Claude's natural-language understanding. No task context (task id, plan
+       path, file list, acceptance criteria) is passed explicitly -- the
+       sub-session has to discover context by reading
+       ``planning/claude-plan-tdd.md`` and ``.claude/session-state.json`` on
+       its own. This is workable via ``cwd=str(root)`` but fragile. **Feature
+       B of v0.2** (``spec_review_dispatch`` + task-loop redesign) will
+       replace this with an explicit task-context prompt builder. Until then,
+       auto's task loop relies on the sub-session's discovery heuristics.
+
     Args:
         ns: Parsed argparse namespace.
         state: Current :class:`SessionState` (entry phase may be
