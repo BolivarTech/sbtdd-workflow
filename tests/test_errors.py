@@ -252,3 +252,15 @@ def test_mro_is_flat_single_inheritance():
     ]
     for cls in subclasses:
         assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"
+
+
+def test_spec_review_error_maps_to_exit_12() -> None:
+    from errors import EXIT_CODES, SpecReviewError
+
+    assert EXIT_CODES[SpecReviewError] == 12
+
+
+def test_spec_review_error_is_sbtdd_error() -> None:
+    from errors import SBTDDError, SpecReviewError
+
+    assert issubclass(SpecReviewError, SBTDDError)
