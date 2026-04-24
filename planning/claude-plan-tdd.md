@@ -1237,7 +1237,7 @@ if pending.is_file():
 
 Acceptance criterion A8 (`spec-behavior-base.md:282`) and INV-22 both require that Feature A's interactive prompt NEVER runs inside `/sbtdd auto`. This task proves the invariant with two orthogonal checks: a static import check (`auto_cmd.py` does not import `prompt_user`) and a behavioral check (stubbing `prompt_user` to count calls, then driving `auto_cmd` through a MAGI-exhaustion path and asserting zero calls).
 
-- [ ] **Step 1 (Red): create `tests/test_auto_cmd_escalation_headless.py`**
+- [x] **Step 1 (Red): create `tests/test_auto_cmd_escalation_headless.py`**
 
 ```python
 # Author: Julian Bolivar
@@ -1302,34 +1302,34 @@ def test_auto_cmd_magi_exhaustion_never_calls_prompt_user(tmp_path: Path) -> Non
             auto_cmd.main(["--dry-run=false"])
 ```
 
-- [ ] **Step 2: run tests to confirm Red**
+- [x] **Step 2: run tests to confirm Red**
 
 ```bash
 python -m pytest tests/test_auto_cmd_escalation_headless.py -v
 ```
 Expected: `test_auto_cmd_does_not_import_prompt_user` FAILS if Task G6/G7 accidentally leaked the import into `auto_cmd.py`; `test_auto_cmd_magi_exhaustion_never_calls_prompt_user` FAILS with `NotImplementedError` on the `...` placeholder until the stage helper is concretized.
 
-- [ ] **Step 3 (Red commit)**
+- [x] **Step 3 (Red commit)**
 
 ```bash
 git add tests/test_auto_cmd_escalation_headless.py
 git commit -m "test: add A8 invariant — prompt_user never called inside auto_cmd"
 ```
 
-- [ ] **Step 4 (Green): concretize the stage helper**
+- [x] **Step 4 (Green): concretize the stage helper**
 
 Replace the `...` line with the real staging code lifted from `tests/test_auto_cmd.py::_stage_auto_run` (or equivalent fixture helper). Ensure the test run uses a stub pre-merge Loop 2 that exhausts iterations with HOLD verdicts.
 
 > **Do NOT ship literal `...`**: any `...` left in committed test code is a landing-time failure. Replace every `...` placeholder with real code before the Green commit, and re-run `pytest` + `ruff check` to confirm zero warnings.
 
-- [ ] **Step 5: run tests, confirm PASS**
+- [x] **Step 5: run tests, confirm PASS**
 
 ```bash
 python -m pytest tests/test_auto_cmd_escalation_headless.py -v
 ```
 Expected: both tests PASS. If the behavioral test passes vacuously (auto_cmd raises before reaching the Loop 2 exhaustion at all), add an explicit `assert verdict_exhausted_code_was_hit` breadcrumb inside the stage helper to detect the vacuous case.
 
-- [ ] **Step 6 (Green commit)**
+- [x] **Step 6 (Green commit)**
 
 ```bash
 make verify
@@ -1337,7 +1337,7 @@ git add tests/test_auto_cmd_escalation_headless.py
 git commit -m "feat: concretize A8 headless invariant test"
 ```
 
-- [ ] **Step 7 (Refactor)**
+- [x] **Step 7 (Refactor)**
 
 ```bash
 git commit --allow-empty -m "refactor: A8 test reviewed, clean"
