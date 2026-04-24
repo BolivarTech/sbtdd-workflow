@@ -329,8 +329,6 @@ def test_check_working_tree_missing_without_git(tmp_path):
 def test_check_stack_toolchain_python_ok(monkeypatch):
     from dependency_check import check_stack_toolchain
 
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
-
     class FakeProc:
         returncode = 0
         stdout = "version 1.0.0"
@@ -344,6 +342,63 @@ def test_check_stack_toolchain_python_ok(monkeypatch):
     assert all(c.status == "OK" for c in checks), [c.name for c in checks if c.status != "OK"]
     names = {c.name for c in checks}
     assert names == {"python (pytest)", "python (ruff)", "python (mypy)"}
+
+
+def test_check_stack_toolchain_python_uses_python_m_invocation(monkeypatch):
+    """Python tool checks MUST use ``python -m <module>``, not bare binary.
+
+    Regression for the 2026-04-24 false-negative: on Windows, a stale
+    ``pytest.EXE`` from an older Python install (Python 3.6 Scripts/ on
+    PATH ahead of 3.14) resolved via shutil.which but crashed at
+    ``pytest --version`` with returncode=1 -- even though Python 3.14's
+    ``python -m pytest`` ran the 609-test suite cleanly. Similarly,
+    ``ruff`` / ``mypy`` installed only as modules under the active
+    interpreter (no Scripts/ entry point exposed to PATH) reported
+    MISSING. The fix aligns the check with ``plugin.local.md``'s
+    ``verification_commands`` (which already use ``python -m <tool>``).
+    """
+    import sys
+
+    from dependency_check import check_stack_toolchain
+
+    captured: list = []
+
+    class FakeProc:
+        returncode = 0
+        stdout = "tool 1.0.0"
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        captured.append(cmd)
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    check_stack_toolchain("python")
+    # All three Python-stack invocations must take the python -m form.
+    assert len(captured) == 3
+    for cmd in captured:
+        assert cmd[0] == sys.executable, f"expected sys.executable as argv[0], got {cmd[0]!r}"
+        assert cmd[1] == "-m", f"expected '-m' as argv[1], got {cmd[1]!r}"
+        assert cmd[2] in {"pytest", "ruff", "mypy"}
+        assert cmd[3] == "--version"
+
+
+def test_check_python_tool_reports_missing_when_module_not_importable(monkeypatch):
+    """python -m <tool> with 'No module named' stderr must map to MISSING."""
+    from dependency_check import _check_python_module_tool
+
+    class FakeProc:
+        returncode = 1
+        stdout = ""
+        stderr = "C:\\Python314\\python.exe: No module named ruff\n"
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    chk = _check_python_module_tool("ruff", "python (ruff)")
+    assert chk.status == "MISSING"
+    assert chk.remediation == "pip install ruff"
 
 
 def test_check_stack_toolchain_rust_missing_tdd_guard_rust(monkeypatch):

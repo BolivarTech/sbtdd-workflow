@@ -501,6 +501,49 @@ def _check_binary(binary: str, display: str) -> DependencyCheck:
     )
 
 
+def _check_python_module_tool(module: str, display: str) -> DependencyCheck:
+    """Verify a Python tool is importable under the active interpreter.
+
+    The Python stack invokes pytest / ruff / mypy via ``python -m <module>``
+    in ``verification_commands`` (see ``plugin.local.md``). The dep check
+    MUST use the same invocation form -- otherwise a system with (a) a stale
+    ``pytest.exe`` from an older Python on PATH, (b) ``ruff`` / ``mypy``
+    installed only as modules under the current interpreter (no Scripts/
+    entry point exposed on PATH) will false-negative even though
+    ``python -m <tool>`` works fine, which is what the whole workflow
+    actually runs. Observed 2026-04-24: ``pytest.EXE`` on PATH resolved to a
+    Python 3.6 install with returncode=1 while Python 3.14's ``python -m
+    pytest`` ran the 609-test suite cleanly.
+    """
+    cmd = [sys.executable, "-m", module, "--version"]
+    try:
+        result = subprocess_utils.run_with_timeout(cmd, timeout=15)
+    except subprocess.TimeoutExpired:
+        return DependencyCheck(
+            name=display,
+            status="BROKEN",
+            detail=f"python -m {module} --version timed out",
+            remediation=f"Reinstall {module} in the active interpreter",
+        )
+    if result.returncode != 0:
+        first_stderr_line = (result.stderr or "").strip().splitlines()
+        suffix = f": {first_stderr_line[0]}" if first_stderr_line else ""
+        return DependencyCheck(
+            name=display,
+            status="MISSING" if "No module named" in (result.stderr or "") else "BROKEN",
+            detail=f"python -m {module} --version returncode={result.returncode}{suffix}",
+            remediation=f"pip install {module}",
+        )
+    combined = (result.stdout or result.stderr).strip()
+    detail = combined.splitlines()[0] if combined else f"{module} present"
+    return DependencyCheck(
+        name=display,
+        status="OK",
+        detail=detail,
+        remediation=None,
+    )
+
+
 def check_stack_toolchain(stack: str) -> tuple[DependencyCheck, ...]:
     """Run all toolchain checks for the chosen stack (sec.S.1.3 item 6).
 
@@ -516,6 +559,11 @@ def check_stack_toolchain(stack: str) -> tuple[DependencyCheck, ...]:
     """
     if stack not in _STACK_TOOLCHAINS:
         raise ValidationError(f"stack='{stack}' not in {sorted(_STACK_TOOLCHAINS)}")
+    if stack == "python":
+        # Python tools invoked via ``python -m <module>`` -- matches the form
+        # used in plugin.local.md verification_commands; robust against stale
+        # .exe shadowing + modules-only-no-entry-point installs.
+        return tuple(_check_python_module_tool(b, d) for b, d in _STACK_TOOLCHAINS[stack])
     return tuple(_check_binary(b, d) for b, d in _STACK_TOOLCHAINS[stack])
 
 
