@@ -1755,11 +1755,11 @@ class StubSpecReviewer:
 - Modify: `skills/sbtdd/scripts/close_task_cmd.py`
 - Create: `tests/test_close_task_cmd_spec_review.py`
 
-- [ ] **Step 1 (Red)**: tests asserting default-invoke + `--skip-spec-review` bypass + reviewer-issues abort.
+- [x] **Step 1 (Red)**: tests asserting default-invoke + `--skip-spec-review` bypass + reviewer-issues abort.
 
-- [ ] **Step 2-3**: commit `test:`.
+- [x] **Step 2-3**: commit `test:`.
 
-- [ ] **Step 4 (Green)**: modify `close_task_cmd._build_parser`:
+- [x] **Step 4 (Green)**: modify `close_task_cmd._build_parser`:
 
 ```python
 def _build_parser() -> argparse.ArgumentParser:
@@ -1804,7 +1804,7 @@ Add the import:
 from errors import DriftError, PreconditionError, SpecReviewError
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [x] **Step 5-8**: verify + commits.
 
 ### Task H6: `auto_cmd._phase2_task_loop` integration
 
