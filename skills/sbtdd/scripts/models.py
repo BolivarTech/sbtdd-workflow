@@ -68,3 +68,7 @@ VALID_SUBCOMMANDS: tuple[str, ...] = (
     "auto",
     "resume",
 )
+
+#: Allowed values for the headless `on_exhausted` policy in
+#: `.claude/magi-auto-policy.json` (Feature A, v0.2 NF10).
+AUTO_POLICIES: tuple[str, ...] = ("abort", "override_strong_go_only", "retry_once")

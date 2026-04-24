@@ -20,10 +20,14 @@ Precedent: Milestone D Checkpoint 2 iter 3 chat escalation (commit 5d7bfc4).
 from __future__ import annotations
 
 import enum
+import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from magi_dispatch import MAGIVerdict
+from models import AUTO_POLICIES
 
 
 class _RootCause(enum.Enum):
@@ -95,6 +99,8 @@ _OPT_ABANDON = EscalationOption(
 )
 
 _MENU_LETTERS = ("a", "b", "c", "d")
+
+_HEADLESS_POLICY_FILE = ".claude/magi-auto-policy.json"
 
 
 def _finding_severity(finding: Any, default: str = "INFO") -> str:
@@ -200,3 +206,88 @@ def format_escalation_message(ctx: EscalationContext) -> str:
     lines.append("")
     lines.append("¿Cuál?")
     return "\n".join(lines)
+
+
+def _read_headless_policy(root: Path) -> str:
+    """Return the configured policy or 'abort' (default)."""
+    p = root / _HEADLESS_POLICY_FILE
+    if not p.is_file():
+        return "abort"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "abort"
+    policy = str(data.get("on_exhausted", "abort"))
+    return policy if policy in AUTO_POLICIES else "abort"
+
+
+def prompt_user(
+    ctx: EscalationContext,
+    options: tuple[EscalationOption, ...],
+    *,
+    non_interactive: bool = False,
+    project_root: Path | None = None,
+) -> UserDecision:
+    """Print the formatted escalation message + prompt user for choice.
+
+    Non-TTY / --non-interactive / auto path: apply headless policy from
+    .claude/magi-auto-policy.json (default 'abort' = option d).
+
+    TTY path: loop input() until user enters a valid letter; then collect
+    a one-line reason (mandatory for override action).
+    """
+    sys.stderr.write(format_escalation_message(ctx) + "\n")
+    tty = sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
+    if non_interactive or not tty:
+        policy = _read_headless_policy(project_root or Path.cwd())
+        if policy == "override_strong_go_only" and ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
+            match = next((o for o in options if o.action == "override"), options[-1])
+            return UserDecision(
+                chosen_option=match.letter,
+                action=match.action,
+                reason="headless policy: override_strong_go_only",
+            )
+        if policy == "retry_once" and any(o.action == "retry" for o in options):
+            match = next(o for o in options if o.action == "retry")
+            return UserDecision(
+                chosen_option=match.letter,
+                action=match.action,
+                reason="headless policy: retry_once",
+            )
+        # default 'abort' -> option d (abandon)
+        match = next((o for o in options if o.action == "abandon"), options[-1])
+        return UserDecision(
+            chosen_option=match.letter,
+            action=match.action,
+            reason="headless policy: abort (default)",
+        )
+    valid = {o.letter: o for o in options}
+    while True:
+        try:
+            choice = input("Option (a/b/c/d): ").strip().lower()
+        except EOFError:
+            match = next((o for o in options if o.action == "abandon"), options[-1])
+            return UserDecision(
+                chosen_option=match.letter,
+                action=match.action,
+                reason="EOFError during prompt; headless default",
+            )
+        if choice in valid:
+            break
+        sys.stderr.write(f"Invalid choice '{choice}'; expected one of {sorted(valid)}.\n")
+    opt = valid[choice]
+    if opt.action == "override":
+        try:
+            reason = input("Reason (mandatory for override): ").strip()
+        except EOFError:
+            reason = ""
+        if not reason:
+            sys.stderr.write("Override requires non-empty --reason; falling back to abandon.\n")
+            match = next((o for o in options if o.action == "abandon"), options[-1])
+            return UserDecision(
+                chosen_option=match.letter,
+                action=match.action,
+                reason="override requested without reason",
+            )
+        return UserDecision(chosen_option=choice, action="override", reason=reason)
+    return UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
