@@ -8,6 +8,39 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## 0.1.1 - 2026-04-23
+
+### Fixed
+
+- `magi_dispatch.invoke_magi` no longer parses MAGI stdout as JSON. The
+  canonical machine-readable output is `<output-dir>/magi-report.json` on
+  disk; stdout is the ASCII banner + markdown report produced by
+  `reporting.format_report`. v0.1.0 incorrectly called
+  `json.loads(result.stdout)` which always failed with
+  `ValidationError: MAGI output is not valid JSON: Expecting value: line 1
+  column 1 (char 0)`, blocking every `/sbtdd spec` and `/sbtdd pre-merge`
+  invocation. Fix follows the "Option 1" pattern (sbtdd-side only, zero
+  changes to MAGI): `invoke_magi` now creates a `tempfile.TemporaryDirectory`,
+  passes `--output-dir <tmpdir>` to the slash command, and reads
+  `magi-report.json` from disk. stdout is preserved on
+  `MAGIVerdict.raw_output` for diagnostics. Also added a new parser
+  `parse_magi_report(report: dict, raw_output: str = "") -> MAGIVerdict`
+  that handles MAGI's native structure (`consensus.consensus` banner label,
+  top-level `degraded` flag, `consensus.conditions` list of
+  `{agent, condition}` dicts). The label's optional `(N-M)` split suffix
+  is stripped before normalisation via a new `_strip_magi_split_suffix`
+  helper + `_MAGI_SPLIT_SUFFIX_RE` regex. `parse_verdict` retained
+  unchanged for the sbtdd-flat `magi-verdict.json` artifact round-trip.
+
+### Added
+
+- 8 new tests in `test_magi_dispatch.py` covering the disk-based contract:
+  happy path with `--output-dir` assertion, split-suffix stripping on
+  labels, top-level `degraded` flag propagation, missing-report error
+  path, malformed-JSON error path, `parse_magi_report` condition
+  extraction, no-split-suffix labels (`STRONG GO` / `STRONG NO-GO` /
+  `HOLD -- TIE`), missing-consensus rejection, unknown-label rejection.
+
 ## Unreleased
 
 ### BREAKING
@@ -103,24 +136,30 @@ every post-v0.1 release.
 - `README.md`: rewrote from the previous single-line stub into the full
   user-facing GitHub README.
 
-### Deferred (tracked for v0.2.0)
+### Deferred (tracked for v0.2.0 — LOCKED release blockers only)
 
-- GitHub Actions CI workflow (`.github/workflows/ci.yml`) running `make verify`
-  on push and PR, with a live "tests passing" shield (Milestone E intentionally
-  ships without a `tests-passing` badge rather than publish a fake one — F2 of
-  MAGI Checkpoint 2 Plan E iter 1).
-- `schema_version` field in `plugin.local.md` (sec.S.13 item 5).
-- GoogleTest / Catch2 / bazel / meson adapters for C++ stack (sec.S.13 item 7).
-- Verify `marketplace.json` `$schema` URL
-  (`https://anthropic.com/claude-code/marketplace.schema.json`) resolves
-  post-push. Fallback: drop the field across both plugins in lockstep if
-  Anthropic removes it or Claude Code emits a warning (F6 MAGI iter 2).
-- MAGI-version coupling in parity tests — track for v0.2 if MAGI v2.2+
-  changes schema (Caspar iter 3 final recommendation). The two parity
-  tests in `test_distribution_coherence.py` (required-keys subset check
-  + `repository` field-form check) pin against MAGI v2.1.3 artifacts
-  cached locally; if MAGI evolves its manifest schema, these tests must
-  be refreshed against the new cache snapshot to remain meaningful.
+User directive session 2026-04-23: "solo vamos con lo lock a v0.2 todo lo demas a v0.3". Only the two LOCKED items below are v0.2.0 release blockers. Everything else originally in v0.2 backlog (CI workflow, schema_version, C++ adapters, $schema verification, MAGI parity refresh) moved to v0.3.0.
+
+- **MAGI version-agnostic parity tests — LOCKED v0.2.0 release blocker**
+  (user directive session 2026-04-23: "actualiza MAGI de una vez en v0.2").
+  v0.1 `test_distribution_coherence.py` hardcodes MAGI cache path to
+  version `2.1.3`. MAGI shipped v2.1.4 (patch bump, no schema change —
+  verified: only `"version"` string differs between 2.1.3 and 2.1.4
+  `plugin.json`; `marketplace.json` byte-identical). Rather than bump
+  the hardcoded pin (repeating for every future patch), v0.2 MUST make
+  the pin version-agnostic via a resolver that enumerates installed
+  MAGI versions under `~/.claude/plugins/cache/bolivartech-plugins/magi/`
+  and picks the latest by semver ordering. Implementation scope: rewrite
+  `_resolve_magi_plugin_json()` in `test_distribution_coherence.py` to
+  scan `cache_base.iterdir()`, sort by `_semver_key(version)` tuple
+  `(major, minor, patch)`, pick max. Add `test_semver_key_handles_mixed_version_strings`
+  validating tie-break + non-numeric handling. `MAGI_PLUGIN_ROOT` env var
+  override preserved for CI. Graceful skipif on empty cache. Existing
+  subset-based parity tests tolerate optional field additions from MAGI
+  (Plan E iter-2 fix). Moved from v0.3 Group A (where it was tracked as
+  "MAGI-version coupling refresh") to v0.2 LOCKED per session 2026-04-23
+  directive. Full spec in local `CLAUDE.md` "v0.2 requirement (LOCKED) —
+  MAGI version-agnostic parity tests" section.
 - **Spec-reviewer integration per task — LOCKED v0.2.0 release blocker**
   (user directive session 2026-04-23: "para v0.2 solo 8, los demas para
   0.3"). v0.1 verifies code-vs-spec alignment only at two gates
@@ -183,7 +222,25 @@ every post-v0.1 release.
 
 ### Deferred (tracked for v0.3.0)
 
-v0.3 backlog composed of the seven complementary spec-drift detection options evaluated alongside the v0.2 spec-reviewer integration but explicitly deferred per user directive session 2026-04-23. These layer on top of the v0.2 (8) primary integration to add mechanical cheap filters, plan-time enforcement, and audit extensions. Full option matrix + rationale in local `CLAUDE.md` "v0.3 backlog — complementary spec-drift detection options".
+v0.3 backlog consolidates everything that is NOT a v0.2 LOCKED blocker per user directive session 2026-04-23. Two groupings: (A) operational/infra items originally in v0.2 backlog, now moved; (B) seven complementary spec-drift detection options layered on top of the v0.2 (8) primary integration.
+
+#### Group A — operational / infra items (moved from v0.2)
+
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`) running `make verify`
+  on push and PR, with a live "tests passing" shield (Milestone E intentionally
+  ships without a `tests-passing` badge rather than publish a fake one — F2 of
+  MAGI Checkpoint 2 Plan E iter 1).
+- `schema_version` field in `plugin.local.md` (sec.S.13 item 5).
+- GoogleTest / Catch2 / bazel / meson adapters for C++ stack (sec.S.13 item 7).
+- Verify `marketplace.json` `$schema` URL
+  (`https://anthropic.com/claude-code/marketplace.schema.json`) resolves
+  post-push. Fallback: drop the field across both plugins in lockstep if
+  Anthropic removes it or Claude Code emits a warning (F6 MAGI iter 2).
+- ~~MAGI-version coupling refresh~~ — **MOVED to v0.2 LOCKED blockers**
+  per user directive session 2026-04-23 ("actualiza MAGI de una vez en
+  v0.2"). See v0.2.0 section above for the version-agnostic resolver spec.
+
+#### Group B — complementary spec-drift detection options (full matrix in local CLAUDE.md)
 
 - **(1) `scenario_coverage_check.py`** — mechanical regex pre-filter parsing `sbtdd/spec-behavior.md §4` + grep'ing `tests/` for scenario references. Runs at `close-task` before invoking v0.2 reviewer to skip tasks trivially covered. Cost: zero (stdlib).
 - **(2) Spec-snapshot diff** — `planning/spec-snapshot.json` captured at plan approval; pre-merge entry diffs current spec-behavior.md against snapshot; silent spec edits fail gate. Orthogonal audit layer catching a risk class (8) cannot. **Proposed LOCKED for v0.3 regardless of v0.2 empirical data.**
@@ -193,11 +250,12 @@ v0.3 backlog composed of the seven complementary spec-drift detection options ev
 - **(6) Watermark comments** — `# Implements: spec-behavior.md §4.X` + lint rule. Human-readable traceability surviving refactors.
 - **(7) LLM drift detector** — dedicated `spec_drift_detector.py` invoking `claude -p` full spec + diff at `close-phase`. Mostly redundant with (8); keep as opt-in for cross-task semantic drift.
 
-**Tentative v0.3 minimum viable** (subject to v0.2 empirical data): (2) + (5). Optional: (1) as pre-filter if (8) cost proves problematic. (3), (4), (6), (7) opt-in via flags.
+**Tentative v0.3 minimum viable** (subject to v0.2 empirical data): Group A items per operational need + Group B (2) + (5). Optional: (1) as pre-filter if (8) cost proves problematic. (3), (4), (6), (7) opt-in via flags.
 
 (Milestones A-C changelog is implied from the git log; post-v0.1
 releases will carry fully human-curated entries. Milestone E is the last
 milestone before the `v0.1.0` public ship tag. v0.2 release blockers:
-interactive MAGI escalation prompt + superpowers spec-reviewer integration.
-v0.3 scope: complementary spec-drift options (1)-(7) re-evaluated with
-v0.2 field data.)
+interactive MAGI escalation prompt + superpowers spec-reviewer integration
+ONLY. v0.3 scope: all operational items originally in v0.2 backlog +
+complementary spec-drift options (1)-(7), re-evaluated with v0.2 field
+data.)

@@ -246,26 +246,189 @@ def test_parse_verdict_rejects_label_with_punctuation():
         parse_verdict(json.dumps(payload))
 
 
-def test_invoke_magi_returns_verdict_on_success(monkeypatch):
-    from magi_dispatch import invoke_magi
+def _magi_report_payload(consensus_label: str = "GO (2-1)", degraded: bool = False) -> dict:
+    """Build a minimal magi-report.json payload matching run_magi.py:445."""
+    payload: dict = {
+        "agents": [],
+        "consensus": {
+            "consensus": consensus_label,
+            "consensus_verdict": "approve",
+            "conditions": [],
+            "findings": [],
+            "recommendations": {},
+            "dissent": [],
+        },
+    }
+    if degraded:
+        payload["degraded"] = True
+        payload["failed_agents"] = ["caspar"]
+    return payload
 
-    class FakeProc:
-        returncode = 0
-        stdout = '{"verdict": "GO", "degraded": false, "conditions": [], "findings": []}'
-        stderr = ""
+
+def test_invoke_magi_returns_verdict_on_success(monkeypatch):
+    """Happy path: MAGI writes magi-report.json to --output-dir, we parse it."""
+    from magi_dispatch import invoke_magi
 
     captured: dict = {}
 
+    class FakeProc:
+        returncode = 0
+        stdout = "+==== ASCII banner ====+\n| GO (2-1) |\n"
+        stderr = ""
+
     def fake_run(cmd, timeout, capture=True, cwd=None):
         captured["cmd"] = cmd
+        # The new contract: MAGI writes <output-dir>/magi-report.json.
+        # Locate the --output-dir arg and drop the report there.
+        output_dir = cmd[cmd.index("--output-dir") + 1]
+        (Path(output_dir) / "magi-report.json").write_text(
+            json.dumps(_magi_report_payload(consensus_label="GO (2-1)")),
+            encoding="utf-8",
+        )
         return FakeProc()
 
     monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
     v = invoke_magi(context_paths=["spec.md", "plan.md"])
     assert v.verdict == "GO"
-    # Command must be a list (shell=False), include magi reference.
+    assert v.degraded is False
+    # Command must be a list (shell=False), include magi reference + --output-dir.
     assert isinstance(captured["cmd"], list)
     assert any("magi" in tok for tok in captured["cmd"])
+    assert "--output-dir" in captured["cmd"]
+
+
+def test_invoke_magi_strips_split_suffix_from_label(monkeypatch):
+    """MAGI banner labels like 'HOLD (2-1)' must normalise to 'HOLD'."""
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        output_dir = cmd[cmd.index("--output-dir") + 1]
+        (Path(output_dir) / "magi-report.json").write_text(
+            json.dumps(_magi_report_payload(consensus_label="HOLD (2-1)")),
+            encoding="utf-8",
+        )
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    v = invoke_magi(context_paths=["spec.md"])
+    assert v.verdict == "HOLD"
+
+
+def test_invoke_magi_reads_degraded_flag_from_report(monkeypatch):
+    """INV-28: top-level 'degraded' flag in magi-report.json is surfaced."""
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        output_dir = cmd[cmd.index("--output-dir") + 1]
+        (Path(output_dir) / "magi-report.json").write_text(
+            json.dumps(_magi_report_payload(consensus_label="GO (2-0)", degraded=True)),
+            encoding="utf-8",
+        )
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    v = invoke_magi(context_paths=["spec.md"])
+    assert v.degraded is True
+
+
+def test_invoke_magi_raises_when_report_missing(monkeypatch):
+    """Returncode 0 with no magi-report.json on disk is a contract violation."""
+    from errors import MAGIGateError
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    with pytest.raises(MAGIGateError, match="magi-report.json"):
+        invoke_magi(context_paths=["spec.md"])
+
+
+def test_invoke_magi_raises_validation_on_malformed_report(monkeypatch):
+    """Malformed JSON on disk raises ValidationError, not MAGIGateError."""
+    from errors import ValidationError
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        output_dir = cmd[cmd.index("--output-dir") + 1]
+        (Path(output_dir) / "magi-report.json").write_text("not-valid-json{", encoding="utf-8")
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    with pytest.raises(ValidationError, match="malformed"):
+        invoke_magi(context_paths=["spec.md"])
+
+
+def test_parse_magi_report_extracts_conditions_as_strings():
+    """consensus.conditions is a list of {agent, condition} dicts; we want strings."""
+    from magi_dispatch import parse_magi_report
+
+    report = {
+        "consensus": {
+            "consensus": "GO WITH CAVEATS (3-0)",
+            "conditions": [
+                {"agent": "melchior", "condition": "add unit test for edge case"},
+                {"agent": "balthasar", "condition": "document trade-off in readme"},
+            ],
+            "findings": [],
+        },
+    }
+    v = parse_magi_report(report)
+    assert v.verdict == "GO_WITH_CAVEATS"
+    assert v.conditions == (
+        "add unit test for edge case",
+        "document trade-off in readme",
+    )
+
+
+def test_parse_magi_report_handles_strong_no_go_no_split_suffix():
+    """STRONG GO / STRONG NO-GO / HOLD -- TIE have no (N-M) suffix."""
+    from magi_dispatch import parse_magi_report
+
+    for label, expected in (
+        ("STRONG GO", "STRONG_GO"),
+        ("STRONG NO-GO", "STRONG_NO_GO"),
+        ("HOLD -- TIE", "HOLD_TIE"),
+    ):
+        report = {"consensus": {"consensus": label, "conditions": [], "findings": []}}
+        assert parse_magi_report(report).verdict == expected
+
+
+def test_parse_magi_report_rejects_missing_consensus():
+    from errors import ValidationError
+    from magi_dispatch import parse_magi_report
+
+    with pytest.raises(ValidationError, match="consensus"):
+        parse_magi_report({"agents": []})
+
+
+def test_parse_magi_report_rejects_unknown_label():
+    from errors import ValidationError
+    from magi_dispatch import parse_magi_report
+
+    report = {"consensus": {"consensus": "MAYBE (1-1)", "conditions": [], "findings": []}}
+    with pytest.raises(ValidationError, match="MAYBE"):
+        parse_magi_report(report)
 
 
 def test_invoke_magi_wraps_timeout_as_magi_gate_error(monkeypatch):
