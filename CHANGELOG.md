@@ -8,6 +8,37 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## 0.1.4 - 2026-04-24
+
+### Fixed
+
+- `superpowers_dispatch._build_skill_cmd` now packs the slash command
+  and every skill arg into the single prompt string passed to
+  `claude -p`, instead of appending them as separate argv tokens. The
+  v0.1.0 shape `["claude", "-p", "/<skill>", "--flag"]` caused `claude`
+  to parse `--flag` as one of its own CLI options and reject with
+  `error: unknown option '<flag>'`. Observed when `/sbtdd auto`
+  invoked `/test-driven-development --phase=red` (auto's phase loop).
+  Same pattern fixed for `_build_magi_cmd` in v0.1.2 — now consistent
+  across both dispatchers.
+
+### Documentation
+
+- `auto_cmd._phase2_task_loop` docstring now explicitly flags the
+  task-loop's minimal prompt as a v0.1.x limitation. `/test-driven-development`
+  is a prose-only skill with no formal `--phase` argument; the current
+  call forwards the phase as a narrative hint and the sub-session
+  discovers task context (id, plan path, files) by reading
+  `session-state.json` and the plan on its own. Workable via
+  `cwd=root` but fragile. **Feature B of v0.2** replaces this with an
+  explicit task-context prompt builder.
+
+### Added
+
+- 1 new test in `test_superpowers_dispatch` asserting argv is exactly
+  `["claude", "-p", "<single prompt>"]` and the prompt string embeds
+  the slash command + every passed arg.
+
 ## 0.1.3 - 2026-04-24
 
 ### Fixed
