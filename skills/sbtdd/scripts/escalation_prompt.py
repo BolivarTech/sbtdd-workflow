@@ -62,6 +62,41 @@ class UserDecision:
     reason: str
 
 
+_ROOT_LABELS: dict[_RootCause, str] = {
+    _RootCause.INFRA_TRANSIENT: "transient-infra (agent degraded repite)",
+    _RootCause.PLAN_VS_SPEC: "plan-vs-spec gap (CRITICAL findings persisten)",
+    _RootCause.STRUCTURAL_DEFECT: "defecto estructural (STRONG_NO_GO)",
+    _RootCause.SPEC_AMBIGUITY: "spec ambiguity (confidence trending down)",
+}
+
+_OPT_OVERRIDE = EscalationOption(
+    letter="a",
+    action="override",
+    rationale="Override INV-0 (user authority)",
+    caveat="requires --reason; audit artifact written.",
+)
+_OPT_RETRY = EscalationOption(
+    letter="b",
+    action="retry",
+    rationale="Re-invocar MAGI una iter mas (safety valve +1)",
+    caveat="consume iter extra; INV-0 override del INV-11.",
+)
+_OPT_ALTERNATIVE = EscalationOption(
+    letter="c",
+    action="alternative",
+    rationale="Replan: split spec o ajustar scope",
+    caveat="reinicia flujo desde sec.1.",
+)
+_OPT_ABANDON = EscalationOption(
+    letter="d",
+    action="abandon",
+    rationale="Exit 8 (v0.1 behavior) + artefactos para review manual",
+    caveat="default en non-TTY.",
+)
+
+_MENU_LETTERS = ("a", "b", "c", "d")
+
+
 def _finding_severity(finding: Any, default: str = "INFO") -> str:
     """Normalize a finding's ``severity`` field to an uppercase string."""
     return str(finding.get("severity", default)).upper()
@@ -114,53 +149,22 @@ def build_escalation_context(
 def _compose_options(ctx: EscalationContext) -> tuple[EscalationOption, ...]:
     """Build a context-aware menu (<=4 options) keyed by root cause.
 
-    STRUCTURAL_DEFECT only exposes (d) abandon; every other root cause
+    STRUCTURAL_DEFECT only exposes (a) abandon; every other root cause
     exposes override, retry, alternative, abandon so the canonical
     template emits four sequential letters.
     """
-    opts: list[EscalationOption] = []
-    if ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
-        opts.append(
-            EscalationOption(
-                letter="a",
-                action="override",
-                rationale="Override INV-0 (user authority)",
-                caveat="requires --reason; audit artifact written.",
-            )
-        )
-        opts.append(
-            EscalationOption(
-                letter="b",
-                action="retry",
-                rationale="Re-invocar MAGI una iter mas (safety valve +1)",
-                caveat="consume iter extra; INV-0 override del INV-11.",
-            )
-        )
-        opts.append(
-            EscalationOption(
-                letter="c",
-                action="alternative",
-                rationale="Replan: split spec o ajustar scope",
-                caveat="reinicia flujo desde sec.1.",
-            )
-        )
-    opts.append(
-        EscalationOption(
-            letter="d",
-            action="abandon",
-            rationale="Exit 8 (v0.1 behavior) + artefactos para review manual",
-            caveat="default en non-TTY.",
-        )
-    )
-    letters = ("a", "b", "c", "d")
+    if ctx.root_cause == _RootCause.STRUCTURAL_DEFECT:
+        opts: tuple[EscalationOption, ...] = (_OPT_ABANDON,)
+    else:
+        opts = (_OPT_OVERRIDE, _OPT_RETRY, _OPT_ALTERNATIVE, _OPT_ABANDON)
     return tuple(
         EscalationOption(
-            letter=letters[i],
+            letter=_MENU_LETTERS[i],
             action=o.action,
             rationale=o.rationale,
             caveat=o.caveat,
         )
-        for i, o in enumerate(opts[:4])
+        for i, o in enumerate(opts)
     )
 
 
@@ -173,12 +177,7 @@ def format_escalation_message(ctx: EscalationContext) -> str:
     """
     n = len(ctx.iterations)
     last = ctx.iterations[-1] if ctx.iterations else {"verdict": "?", "degraded": False}
-    root_label = {
-        _RootCause.INFRA_TRANSIENT: "transient-infra (agent degraded repite)",
-        _RootCause.PLAN_VS_SPEC: "plan-vs-spec gap (CRITICAL findings persisten)",
-        _RootCause.STRUCTURAL_DEFECT: "defecto estructural (STRONG_NO_GO)",
-        _RootCause.SPEC_AMBIGUITY: "spec ambiguity (confidence trending down)",
-    }[ctx.root_cause]
+    root_label = _ROOT_LABELS[ctx.root_cause]
     opts = _compose_options(ctx)
     lines = [
         f"MAGI iter {n} FINAL ({ctx.context}): veredicto '{last['verdict']}' degraded={last['degraded']}.",
