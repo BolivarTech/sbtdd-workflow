@@ -161,54 +161,42 @@ def _first_open_task(plan: Path) -> tuple[str, str]:
     return _plan_ops.first_open_task(plan.read_text(encoding="utf-8"))
 
 
-def _run_magi_checkpoint2(
-    root: Path, cfg: object, ns: argparse.Namespace
+def _handle_safety_valve_exhaustion(
+    root: Path,
+    spec: Path,
+    plan_org: Path,
+    plan: Path,
+    threshold: str,
+    verdict_history: list[magi_dispatch.MAGIVerdict],
+    ns: argparse.Namespace,
 ) -> magi_dispatch.MAGIVerdict:
-    """Run the Checkpoint 2 MAGI loop honoring INV-28 degraded handling.
+    """Route exhausted Checkpoint 2 loop through ``escalation_prompt`` (Feature A).
 
-    On INV-11 safety-valve exhaustion, route to :mod:`escalation_prompt`
-    (Feature A). ``--override-checkpoint --reason`` bypasses the prompt and
-    accepts the last verdict; ``--non-interactive`` forces the headless
-    policy; otherwise ``prompt_user`` is invoked interactively.
+    Three terminal outcomes:
 
-    Args:
-        root: Project root.
-        cfg: :class:`config.PluginConfig` carrying threshold + iteration cap.
-        ns: Parsed argparse namespace carrying escalation flags.
+    * ``override`` (or ``--override-checkpoint --reason``): return the last
+      observed verdict, letting the caller proceed per INV-0 user authority.
+    * ``retry``: run one extra MAGI iteration and return if it passes the
+      gate; otherwise raise ``MAGIGateError``.
+    * ``abandon`` (or any other action): raise ``MAGIGateError`` describing
+      the user's choice.
 
-    Returns:
-        The ``MAGIVerdict`` that passed the gate (full, non-degraded,
-        >= threshold) or the last observed verdict under override.
+    In every outcome ``escalation_prompt.apply_decision`` writes a JSON
+    audit artifact under ``<root>/.claude/magi-escalations/``.
 
     Raises:
-        MAGIGateError: STRONG_NO_GO at any iteration, ``--override-checkpoint``
-            without ``--reason``, retry-iter failure, or the user chose to
+        MAGIGateError: ``--override-checkpoint`` without ``--reason``, the
+            retry iteration also failed the gate, or the user chose to
             abandon the flow.
     """
-    spec = root / "sbtdd" / "spec-behavior.md"
-    plan_org = root / "planning" / "claude-plan-tdd-org.md"
-    plan = root / "planning" / "claude-plan-tdd.md"
-    max_iter = int(getattr(cfg, "magi_max_iterations"))
-    threshold = str(getattr(cfg, "magi_threshold"))
-    verdict_history: list[magi_dispatch.MAGIVerdict] = []
-    for iteration in range(1, max_iter + 1):
-        verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
-        verdict_history.append(verdict)
-        if magi_dispatch.verdict_is_strong_no_go(verdict):
-            raise MAGIGateError(
-                f"MAGI returned STRONG_NO_GO at iter {iteration}. Refine spec-behavior-base.md."
-            )
-        _write_plan_tdd(root, verdict, plan_org, plan)
-        if verdict.degraded:
-            continue  # INV-28: degraded never exits.
-        if magi_dispatch.verdict_passes_gate(verdict, threshold):
-            return verdict
-    # Exhaustion path: build context + escalate (Feature A).
     ctx = escalation_prompt.build_escalation_context(
         iterations=list(verdict_history),
         plan_id=_plan_id_from_path(plan.name),
         context="checkpoint2",
     )
+    # _compose_options is a semi-public helper (also consumed by tests in
+    # test_escalation_prompt.py); promoting it to a public name is scoped
+    # out to a future refactor to avoid churning Task G7's mirror wiring.
     options = escalation_prompt._compose_options(ctx)
     if ns.override_checkpoint:
         if not ns.reason:
@@ -230,6 +218,54 @@ def _run_magi_checkpoint2(
             return verdict
         raise MAGIGateError("retry iter also failed gate")
     raise MAGIGateError(f"user chose '{decision.action}' on safety-valve exhaustion")
+
+
+def _run_magi_checkpoint2(
+    root: Path, cfg: object, ns: argparse.Namespace
+) -> magi_dispatch.MAGIVerdict:
+    """Run the Checkpoint 2 MAGI loop honoring INV-28 degraded handling.
+
+    On INV-11 safety-valve exhaustion, delegate to
+    :func:`_handle_safety_valve_exhaustion` (Feature A wiring).
+    ``--override-checkpoint --reason`` bypasses the prompt and accepts the
+    last verdict; ``--non-interactive`` forces the headless policy;
+    otherwise ``prompt_user`` is invoked interactively.
+
+    Args:
+        root: Project root.
+        cfg: :class:`config.PluginConfig` carrying threshold + iteration cap.
+        ns: Parsed argparse namespace carrying escalation flags.
+
+    Returns:
+        The ``MAGIVerdict`` that passed the gate (full, non-degraded,
+        >= threshold) or the last observed verdict under override.
+
+    Raises:
+        MAGIGateError: STRONG_NO_GO at any iteration, or any of the
+            terminal outcomes surfaced by
+            :func:`_handle_safety_valve_exhaustion`.
+    """
+    spec = root / "sbtdd" / "spec-behavior.md"
+    plan_org = root / "planning" / "claude-plan-tdd-org.md"
+    plan = root / "planning" / "claude-plan-tdd.md"
+    max_iter = int(getattr(cfg, "magi_max_iterations"))
+    threshold = str(getattr(cfg, "magi_threshold"))
+    verdict_history: list[magi_dispatch.MAGIVerdict] = []
+    for iteration in range(1, max_iter + 1):
+        verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
+        verdict_history.append(verdict)
+        if magi_dispatch.verdict_is_strong_no_go(verdict):
+            raise MAGIGateError(
+                f"MAGI returned STRONG_NO_GO at iter {iteration}. Refine spec-behavior-base.md."
+            )
+        _write_plan_tdd(root, verdict, plan_org, plan)
+        if verdict.degraded:
+            continue  # INV-28: degraded never exits.
+        if magi_dispatch.verdict_passes_gate(verdict, threshold):
+            return verdict
+    return _handle_safety_valve_exhaustion(
+        root, spec, plan_org, plan, threshold, verdict_history, ns
+    )
 
 
 def _create_state_file(root: Path, cfg: object, plan: Path) -> None:
