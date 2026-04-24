@@ -322,7 +322,7 @@ git commit --allow-empty -m "chore: mark task F complete"
 - Create: `skills/sbtdd/scripts/escalation_prompt.py`
 - Create: `tests/test_escalation_prompt.py`
 
-- [ ] **Step 1 (Red): write failing test for `EscalationContext` + `UserDecision` + `EscalationOption` dataclasses**
+- [x] **Step 1 (Red): write failing test for `EscalationContext` + `UserDecision` + `EscalationOption` dataclasses**
 
 `tests/test_escalation_prompt.py`:
 
@@ -372,20 +372,20 @@ def test_escalation_option_has_letter_action_rationale() -> None:
     assert opt.action == "override"
 ```
 
-- [ ] **Step 2: run, confirm `ModuleNotFoundError: escalation_prompt`**
+- [x] **Step 2: run, confirm `ModuleNotFoundError: escalation_prompt`**
 
 ```bash
 python -m pytest tests/test_escalation_prompt.py -v
 ```
 
-- [ ] **Step 3 (Red commit)**
+- [x] **Step 3 (Red commit)**
 
 ```bash
 git add tests/test_escalation_prompt.py
 git commit -m "test: add failing tests for escalation_prompt dataclasses"
 ```
 
-- [ ] **Step 4 (Green): implement module skeleton**
+- [x] **Step 4 (Green): implement module skeleton**
 
 `skills/sbtdd/scripts/escalation_prompt.py`:
 
@@ -452,26 +452,26 @@ class UserDecision:
     reason: str
 ```
 
-- [ ] **Step 5: run tests, confirm PASS**
+- [x] **Step 5: run tests, confirm PASS**
 
 ```bash
 python -m pytest tests/test_escalation_prompt.py -v
 ```
 
-- [ ] **Step 6 (Green commit)**
+- [x] **Step 6 (Green commit)**
 
 ```bash
 git add skills/sbtdd/scripts/escalation_prompt.py tests/test_escalation_prompt.py
 git commit -m "feat: add escalation_prompt skeleton with typed dataclasses"
 ```
 
-- [ ] **Step 7 (Refactor + verify)**
+- [x] **Step 7 (Refactor + verify)**
 
 ```bash
 make verify
 ```
 
-- [ ] **Step 8 (Refactor commit)**
+- [x] **Step 8 (Refactor commit)**
 
 ```bash
 git commit --allow-empty -m "refactor: escalation_prompt skeleton reviewed, clean"
