@@ -102,6 +102,7 @@ _OPT_ABANDON = EscalationOption(
 _MENU_LETTERS = ("a", "b", "c", "d")
 
 _HEADLESS_POLICY_FILE = ".claude/magi-auto-policy.json"
+_AUDIT_DIR = ".claude/magi-escalations"
 
 
 def _finding_severity(finding: Any, default: str = "INFO") -> str:
@@ -293,7 +294,7 @@ def apply_decision(decision: UserDecision, ctx: EscalationContext, project_root:
         0 if decision is override/retry/alternative (caller continues);
         8 if abandon (exit 8 matches v0.1 behavior so wrappers can propagate).
     """
-    artifact_dir = project_root / ".claude" / "magi-escalations"
+    artifact_dir = project_root / _AUDIT_DIR
     artifact_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     safe_ts = ts.replace(":", "-")

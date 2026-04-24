@@ -181,8 +181,6 @@ def test_apply_decision_abandon_returns_exit_8(tmp_path) -> None:
 
     iters = [_mkv("HOLD_TIE")] * 3
     ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
-    decision = UserDecision(
-        chosen_option="d", action="abandon", reason="headless policy"
-    )
+    decision = UserDecision(chosen_option="d", action="abandon", reason="headless policy")
     code = apply_decision(decision, ctx, project_root=tmp_path)
     assert code == 8
