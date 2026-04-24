@@ -439,22 +439,54 @@ def _phase2_task_loop(
             try:
                 commit_create(prefix, f"{phase} for task {current.current_task_id}", cwd=str(root))
             except CommitError:
-                # ``git commit`` returns rc=1 with "nothing to commit" when
-                # the implementer subagent already committed the phase work
-                # itself -- plans emitted by ``/writing-plans`` typically
-                # include explicit ``git add`` + ``git commit -m`` steps per
-                # phase (and ``git commit --allow-empty`` for refactor).
-                # Observed 2026-04-24 during the first successful F1 auto
-                # run: all three plan-prescribed commits landed from the
-                # implementer, then auto's own commit_create failed on the
-                # now-empty stage. Recover by verifying HEAD moved past
-                # pre_phase_sha; if it did, the implementer's commit is the
-                # authoritative phase commit and we proceed. If HEAD did
-                # not advance, the implementer produced nothing committable
-                # -- re-raise the original error since that is a genuine
-                # verification-irremediable state.
+                # ``git commit`` returns rc=1 with "nothing to commit" for
+                # three distinct reasons we must handle differently
+                # (2026-04-24 observations):
+                #
+                # 1. HEAD advanced: implementer committed the phase directly
+                #    (plan-prescribed ``git commit``). That commit IS the
+                #    phase close; proceed with state advance.
+                # 2. HEAD unchanged AND ``git status`` shows tracked-file
+                #    modifications: implementer edited files but never
+                #    staged. ``git add -u`` captures the modifications (no
+                #    untracked files, so this stays scoped) and a retry
+                #    commits the real phase work.
+                # 3. HEAD unchanged AND nothing to stage: implementer
+                #    collapsed phases (e.g., did red+green together in an
+                #    earlier commit, leaving the current phase with no
+                #    residual work). Record an empty commit so auto's
+                #    state still advances; verification has already proven
+                #    the phase's acceptance criterion is met.
                 if _current_head_sha(root) == pre_phase_sha:
-                    raise
+                    # Case 2: stage tracked-file modifications and retry.
+                    subprocess_utils.run_with_timeout(
+                        ["git", "add", "-u"], timeout=30, cwd=str(root)
+                    )
+                    try:
+                        commit_create(
+                            prefix,
+                            f"{phase} for task {current.current_task_id}",
+                            cwd=str(root),
+                        )
+                    except CommitError:
+                        # Case 3: still nothing to commit -> empty marker
+                        # commit mirroring the plan-prescribed
+                        # refactor-phase --allow-empty convention.
+                        r = subprocess_utils.run_with_timeout(
+                            [
+                                "git",
+                                "commit",
+                                "--allow-empty",
+                                "-m",
+                                f"{prefix}: {phase} for task "
+                                f"{current.current_task_id} "
+                                f"(no-op; phase collapsed into earlier commit)",
+                            ],
+                            timeout=30,
+                            cwd=str(root),
+                        )
+                        if r.returncode != 0:
+                            raise
             new_sha = _current_head_sha(root)
             if phase != "refactor":
                 next_phase = _PHASE_ORDER[_PHASE_ORDER.index(phase) + 1]

@@ -416,19 +416,100 @@ def test_auto_phase2_recovers_when_implementer_precommitted_phase(
     _ = close_task_cmd  # keep import alive without affecting behaviour
 
 
-def test_auto_phase2_reraises_commit_error_when_head_did_not_move(
+def test_auto_phase2_stages_unstaged_modifications_and_commits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Nothing staged AND HEAD unchanged -> real failure, re-raise CommitError.
+    """Implementer edits tracked files without staging -> auto captures them.
 
-    Defensive guard: if the implementer produced nothing committable for a
-    phase (no commit, no stage) we must NOT silently skip; that would let
-    auto advance the state past a phase where no work happened.
+    Observed 2026-04-24 on F2 auto run: the green-phase subagent edited
+    ``tests/test_distribution_coherence.py`` (added ``_magi_cache_base``
+    + rewrote ``_resolve_magi_plugin_json``) but never ran ``git add``.
+    Auto's ``commit_create`` raised ``CommitError`` ("nothing to commit")
+    with HEAD unchanged and the changes in the working tree. The fix
+    runs ``git add -u`` before retrying so auto captures tracked-file
+    modifications the implementer forgot to stage.
     """
     import auto_cmd
     import superpowers_dispatch
     from config import load_plugin_local
-    from errors import CommitError
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    # First create a tracked file in the initial commit so ``git add -u``
+    # has something to stage when the implementer modifies it later.
+    initial_file = tmp_path / "src.py"
+    initial_file.write_text("# placeholder\n", encoding="utf-8")
+    subprocess.run(["git", "add", "src.py"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "chore: seed tracked file"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+
+    phase_counter = {"n": 0}
+
+    def edit_without_staging(**kw: object) -> None:
+        """Simulate the implementer editing a tracked file but not staging."""
+        phase_counter["n"] += 1
+        initial_file.write_text(f"# edited for phase {phase_counter['n']}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        superpowers_dispatch,
+        "test_driven_development",
+        edit_without_staging,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    final = auto_cmd._phase2_task_loop(ns, state, cfg)
+
+    # Red phase captured + green phase captured + refactor phase captured
+    # + chore close = 4 real commits. Plus seed + initial = 6 total.
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=str(tmp_path), check=True, capture_output=True, text=True
+    )
+    lines = log.stdout.strip().splitlines()
+    assert len(lines) == 6, f"expected 6 commits, got {len(lines)}:\n{log.stdout}"
+    # First 3 auto phase commits must NOT be --allow-empty no-op markers
+    # because git add -u captured real changes. Verify by counting
+    # "no-op" markers in the phase-close commits (expect 0 in the top 3).
+    phase_lines = lines[:3]
+    assert all("no-op" not in line for line in phase_lines), phase_lines
+    assert final.current_phase == "done"
+    assert final.current_task_id is None
+
+
+def test_auto_phase2_allow_empty_fallback_when_head_did_not_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing staged AND HEAD unchanged -> record empty phase-close commit.
+
+    Observed 2026-04-24 on F2 auto run: the red-phase implementer
+    committed both the failing tests AND the production impl in one
+    commit (phase collapse). Auto's state advanced to green as expected
+    and dispatched ``/test-driven-development --phase=green``. The
+    subagent had nothing to do (impl already landed), auto's own
+    ``commit_create`` raised ``CommitError`` with HEAD unchanged. Since
+    verification had already passed (the green-phase acceptance
+    criterion), we record an empty phase-close commit so state still
+    advances. Verification provides the acceptance-criteria check; the
+    empty commit is a bookkeeping marker that also makes the log show
+    one commit per phase transition.
+    """
+    import auto_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
     from state_file import load as load_state
 
     _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
@@ -447,9 +528,26 @@ def test_auto_phase2_reraises_commit_error_when_head_did_not_move(
 
     ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
     state = load_state(tmp_path / ".claude" / "session-state.json")
+    final = auto_cmd._phase2_task_loop(ns, state, cfg)
 
-    with pytest.raises(CommitError):
-        auto_cmd._phase2_task_loop(ns, state, cfg)
+    # The task advances to done even when the implementer produced no
+    # commits at all: 3 empty phase-close commits + 1 chore commit.
+    log = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    lines = log.stdout.strip().splitlines()
+    # Initial commit + 3 empty phase closes + 1 chore = 5 commits.
+    assert len(lines) == 5, f"expected 5 commits, got {len(lines)}:\n{log.stdout}"
+    # All three empty commits carry the "no-op; phase collapsed" marker
+    # so the log remains legible as diagnostic context.
+    no_op_commits = [line for line in lines if "no-op" in line]
+    assert len(no_op_commits) == 3
+    assert final.current_phase == "done"
+    assert final.current_task_id is None
 
 
 def test_auto_phase2_respects_verification_retries_budget(
