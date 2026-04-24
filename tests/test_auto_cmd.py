@@ -264,6 +264,22 @@ def _seed_auto_env(
     _seed_loop_state(tmp_path, task_id=task_id, current_phase=current_phase)
 
 
+def _stub_reviewer_approve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub ``spec_review_dispatch.dispatch_spec_reviewer`` to always approve.
+
+    Non-H6 Phase 2 tests exercise commit/state behaviour and must not
+    invoke the real reviewer subprocess. Installed per-test so the H6
+    spec-review suite is free to install its own scripted stub.
+    """
+    import spec_review_dispatch
+    from spec_review_dispatch import SpecReviewResult
+
+    def _auto_approve(**kwargs: object) -> SpecReviewResult:
+        return SpecReviewResult(approved=True, issues=(), reviewer_iter=1, artifact_path=None)
+
+    monkeypatch.setattr(spec_review_dispatch, "dispatch_spec_reviewer", _auto_approve)
+
+
 def test_auto_phase2_processes_single_task_red_green_refactor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -288,6 +304,7 @@ def test_auto_phase2_processes_single_task_red_green_refactor(
     )
     # Disable drift detection in Phase 2 helper.
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+    _stub_reviewer_approve(monkeypatch)
 
     # Each phase of each task commits an empty diff; simulate tree changes by
     # touching a file between invocations.
@@ -364,6 +381,7 @@ def test_auto_phase2_recovers_when_implementer_precommitted_phase(
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+    _stub_reviewer_approve(monkeypatch)
 
     # Simulate implementer landing a real commit BEFORE auto's commit_create
     # runs. We drive this through test_driven_development's stub: when the
@@ -469,6 +487,7 @@ def test_auto_phase2_stages_unstaged_modifications_and_commits(
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+    _stub_reviewer_approve(monkeypatch)
 
     ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
     state = load_state(tmp_path / ".claude" / "session-state.json")
@@ -525,6 +544,7 @@ def test_auto_phase2_allow_empty_fallback_when_head_did_not_move(
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+    _stub_reviewer_approve(monkeypatch)
 
     ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
     state = load_state(tmp_path / ".claude" / "session-state.json")
@@ -663,6 +683,7 @@ def test_auto_phase2_sequential_order(tmp_path: Path, monkeypatch: pytest.Monkey
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+    _stub_reviewer_approve(monkeypatch)
 
     counter = {"n": 0}
 
@@ -759,6 +780,7 @@ def test_auto_phase2_inner_loop_entry_phase_respects_state(
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+    _stub_reviewer_approve(monkeypatch)
 
     counter = {"n": 0}
 
@@ -1122,6 +1144,7 @@ def test_auto_happy_path_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    _stub_reviewer_approve(monkeypatch)
     fake_commit = _fake_commit_factory(tmp_path)
     monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
     monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
@@ -1187,6 +1210,7 @@ def test_auto_quota_exhaustion_propagates_exit_11(
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    _stub_reviewer_approve(monkeypatch)
 
     # QuotaExhaustedError is NOT suppressed by the retry wrapper: it's not
     # a generic Exception signalling a legitimate retry, it's a hard cap
@@ -1233,6 +1257,7 @@ def test_auto_pre_merge_conditions_pending_propagates_exit_8(
         superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    _stub_reviewer_approve(monkeypatch)
     monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
 
     def fake_loop2_blocks(root: Path, shadow: object, threshold: str | None) -> object:
@@ -1360,6 +1385,7 @@ def test_auto_never_toggles_tdd_guard(
         superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
     )
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    _stub_reviewer_approve(monkeypatch)
     fake_commit = _fake_commit_factory(tmp_path)
     monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
     monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)

@@ -226,6 +226,19 @@ def test_auto_full_cycle_happy_path(bootstrapped_project, monkeypatch):
     monkeypatch.setattr(auto_cmd, "check_environment", lambda *a, **k: _ok_dep_report())
     monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
 
+    # H6: auto's task loop now dispatches spec-reviewer per task (INV-31).
+    # Stub to always approve so the reviewer subprocess is never invoked.
+    import spec_review_dispatch
+    from spec_review_dispatch import SpecReviewResult
+
+    monkeypatch.setattr(
+        spec_review_dispatch,
+        "dispatch_spec_reviewer",
+        lambda **kw: SpecReviewResult(
+            approved=True, issues=(), reviewer_iter=1, artifact_path=None
+        ),
+    )
+
     # commit_create fakes that actually create a real git commit (so HEAD advances).
     def fake_commit(prefix, message, cwd=None):
         subprocess.run(

@@ -50,6 +50,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import close_task_cmd
+import spec_review_dispatch
 import subprocess_utils
 import superpowers_dispatch
 from commits import create as commit_create
@@ -64,6 +65,7 @@ from errors import (
     MAGIGateError,
     PreconditionError,
     QuotaExhaustedError,
+    SpecReviewError,
     ValidationError,
     VerificationIrremediableError,
 )
@@ -84,6 +86,7 @@ _ALLOWED_AUTO_RUN_STATUSES: tuple[str, ...] = (
     "checklist_failed",
     "drift_detected",
     "precondition_failed",
+    "spec_review_issues",
 )
 
 #: Current schema version for ``.claude/auto-run.json``. Bump when a
@@ -425,108 +428,144 @@ def _phase2_task_loop(
         except (json.JSONDecodeError, OSError):
             pass
     tasks_completed = 0
-    while current.current_task_id is not None:
-        phase_idx = (
-            _PHASE_ORDER.index(current.current_phase)
-            if current.current_phase in _PHASE_ORDER
-            else 0
-        )
-        for phase in _PHASE_ORDER[phase_idx:]:
-            pre_phase_sha = _current_head_sha(root)
-            superpowers_dispatch.test_driven_development(args=[f"--phase={phase}"], cwd=str(root))
-            _run_verification_with_retries(root, retries)
-            prefix = _phase_prefix(phase)
-            try:
-                commit_create(prefix, f"{phase} for task {current.current_task_id}", cwd=str(root))
-            except CommitError:
-                # ``git commit`` returns rc=1 with "nothing to commit" for
-                # three distinct reasons we must handle differently
-                # (2026-04-24 observations):
-                #
-                # 1. HEAD advanced: implementer committed the phase directly
-                #    (plan-prescribed ``git commit``). That commit IS the
-                #    phase close; proceed with state advance.
-                # 2. HEAD unchanged AND ``git status`` shows tracked-file
-                #    modifications: implementer edited files but never
-                #    staged. ``git add -u`` captures the modifications (no
-                #    untracked files, so this stays scoped) and a retry
-                #    commits the real phase work.
-                # 3. HEAD unchanged AND nothing to stage: implementer
-                #    collapsed phases (e.g., did red+green together in an
-                #    earlier commit, leaving the current phase with no
-                #    residual work). Record an empty commit so auto's
-                #    state still advances; verification has already proven
-                #    the phase's acceptance criterion is met.
-                if _current_head_sha(root) == pre_phase_sha:
-                    # Case 2: stage tracked-file modifications and retry.
-                    subprocess_utils.run_with_timeout(
-                        ["git", "add", "-u"], timeout=30, cwd=str(root)
+    try:
+        while current.current_task_id is not None:
+            phase_idx = (
+                _PHASE_ORDER.index(current.current_phase)
+                if current.current_phase in _PHASE_ORDER
+                else 0
+            )
+            for phase in _PHASE_ORDER[phase_idx:]:
+                pre_phase_sha = _current_head_sha(root)
+                superpowers_dispatch.test_driven_development(
+                    args=[f"--phase={phase}"], cwd=str(root)
+                )
+                _run_verification_with_retries(root, retries)
+                prefix = _phase_prefix(phase)
+                try:
+                    commit_create(
+                        prefix, f"{phase} for task {current.current_task_id}", cwd=str(root)
                     )
-                    try:
-                        commit_create(
-                            prefix,
-                            f"{phase} for task {current.current_task_id}",
-                            cwd=str(root),
+                except CommitError:
+                    # ``git commit`` returns rc=1 with "nothing to commit" for
+                    # three distinct reasons we must handle differently
+                    # (2026-04-24 observations):
+                    #
+                    # 1. HEAD advanced: implementer committed the phase directly
+                    #    (plan-prescribed ``git commit``). That commit IS the
+                    #    phase close; proceed with state advance.
+                    # 2. HEAD unchanged AND ``git status`` shows tracked-file
+                    #    modifications: implementer edited files but never
+                    #    staged. ``git add -u`` captures the modifications (no
+                    #    untracked files, so this stays scoped) and a retry
+                    #    commits the real phase work.
+                    # 3. HEAD unchanged AND nothing to stage: implementer
+                    #    collapsed phases (e.g., did red+green together in an
+                    #    earlier commit, leaving the current phase with no
+                    #    residual work). Record an empty commit so auto's
+                    #    state still advances; verification has already proven
+                    #    the phase's acceptance criterion is met.
+                    if _current_head_sha(root) == pre_phase_sha:
+                        # Case 2: stage tracked-file modifications and retry.
+                        subprocess_utils.run_with_timeout(
+                            ["git", "add", "-u"], timeout=30, cwd=str(root)
                         )
-                    except CommitError:
-                        # Case 3: still nothing to commit -> empty marker
-                        # commit mirroring the plan-prescribed
-                        # refactor-phase --allow-empty convention.
-                        r = subprocess_utils.run_with_timeout(
-                            [
-                                "git",
-                                "commit",
-                                "--allow-empty",
-                                "-m",
-                                f"{prefix}: {phase} for task "
-                                f"{current.current_task_id} "
-                                f"(no-op; phase collapsed into earlier commit)",
-                            ],
-                            timeout=30,
-                            cwd=str(root),
-                        )
-                        if r.returncode != 0:
-                            raise
-            new_sha = _current_head_sha(root)
-            if phase != "refactor":
-                next_phase = _PHASE_ORDER[_PHASE_ORDER.index(phase) + 1]
-                current = SessionState(
-                    plan_path=current.plan_path,
-                    current_task_id=current.current_task_id,
-                    current_task_title=current.current_task_title,
-                    current_phase=next_phase,
-                    phase_started_at_commit=new_sha,
-                    last_verification_at=_now_iso(),
-                    last_verification_result="passed",
-                    plan_approved_at=current.plan_approved_at,
-                )
-                save_state(current, state_path)
-            else:
-                # W1: delegate to public helper in close_task_cmd instead
-                # of duplicating the entire flip / commit chore / advance
-                # sequence.
-                current = close_task_cmd.mark_and_advance(current, root)
-                tasks_completed += 1
-                # Plan D iter 2 Caspar: incremental audit write after
-                # each task close so a mid-loop raise preserves the
-                # partial tasks_completed count on disk.
-                _write_auto_run_audit(
-                    auto_run,
-                    AutoRunAudit(
-                        schema_version=_AUTO_RUN_SCHEMA_VERSION,
-                        auto_started_at=started_at,
-                        auto_finished_at=None,
-                        status="success",
-                        verdict=None,
-                        degraded=None,
-                        accepted_conditions=0,
-                        rejected_conditions=0,
-                        tasks_completed=tasks_completed,
-                        error=None,
-                    ),
-                )
-        # After refactor cascade, outer loop re-evaluates against updated
-        # current.current_task_id (None -> terminate).
+                        try:
+                            commit_create(
+                                prefix,
+                                f"{phase} for task {current.current_task_id}",
+                                cwd=str(root),
+                            )
+                        except CommitError:
+                            # Case 3: still nothing to commit -> empty marker
+                            # commit mirroring the plan-prescribed
+                            # refactor-phase --allow-empty convention.
+                            r = subprocess_utils.run_with_timeout(
+                                [
+                                    "git",
+                                    "commit",
+                                    "--allow-empty",
+                                    "-m",
+                                    f"{prefix}: {phase} for task "
+                                    f"{current.current_task_id} "
+                                    f"(no-op; phase collapsed into earlier commit)",
+                                ],
+                                timeout=30,
+                                cwd=str(root),
+                            )
+                            if r.returncode != 0:
+                                raise
+                new_sha = _current_head_sha(root)
+                if phase != "refactor":
+                    next_phase = _PHASE_ORDER[_PHASE_ORDER.index(phase) + 1]
+                    current = SessionState(
+                        plan_path=current.plan_path,
+                        current_task_id=current.current_task_id,
+                        current_task_title=current.current_task_title,
+                        current_phase=next_phase,
+                        phase_started_at_commit=new_sha,
+                        last_verification_at=_now_iso(),
+                        last_verification_result="passed",
+                        plan_approved_at=current.plan_approved_at,
+                    )
+                    save_state(current, state_path)
+                else:
+                    # H6 (INV-31): spec-reviewer gate BEFORE mark_and_advance.
+                    # SpecReviewError propagates to the outer except so the
+                    # audit trail records the blocked task count before the
+                    # exception reaches the dispatcher.
+                    assert current.current_task_id is not None
+                    spec_review_dispatch.dispatch_spec_reviewer(
+                        task_id=current.current_task_id,
+                        plan_path=plan_path,
+                        repo_root=root,
+                    )
+                    # W1: delegate to public helper in close_task_cmd instead
+                    # of duplicating the entire flip / commit chore / advance
+                    # sequence.
+                    current = close_task_cmd.mark_and_advance(current, root)
+                    tasks_completed += 1
+                    # Plan D iter 2 Caspar: incremental audit write after
+                    # each task close so a mid-loop raise preserves the
+                    # partial tasks_completed count on disk.
+                    _write_auto_run_audit(
+                        auto_run,
+                        AutoRunAudit(
+                            schema_version=_AUTO_RUN_SCHEMA_VERSION,
+                            auto_started_at=started_at,
+                            auto_finished_at=None,
+                            status="success",
+                            verdict=None,
+                            degraded=None,
+                            accepted_conditions=0,
+                            rejected_conditions=0,
+                            tasks_completed=tasks_completed,
+                            error=None,
+                        ),
+                    )
+            # After refactor cascade, outer loop re-evaluates against updated
+            # current.current_task_id (None -> terminate).
+    except SpecReviewError:
+        # INV-31 audit: on safety-valve exhaustion, persist the partial
+        # tasks_completed count + error classifier BEFORE re-raising so
+        # operators can diagnose without grepping logs. Mirrors the
+        # MAGIGateError audit path in ``main``.
+        _write_auto_run_audit(
+            auto_run,
+            AutoRunAudit(
+                schema_version=_AUTO_RUN_SCHEMA_VERSION,
+                auto_started_at=started_at,
+                auto_finished_at=_now_iso(),
+                status="spec_review_issues",
+                verdict=None,
+                degraded=None,
+                accepted_conditions=0,
+                rejected_conditions=0,
+                tasks_completed=tasks_completed,
+                error="SpecReviewError",
+            ),
+        )
+        raise
     return current
 
 

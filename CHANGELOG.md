@@ -405,6 +405,58 @@ v0.3 backlog consolidates everything that is NOT a v0.2 LOCKED blocker per user 
 
 #### Group A — operational / infra items (moved from v0.2)
 
+- **Auto progress streaming — v0.3 LOCKED PRIORITY** (user directive
+  session 2026-04-24 after observing v0.2 auto runs). **UX problem**:
+  the subprocess stdout is pipe-buffered (Python stdio + ``tee``) so a
+  multi-hour run of ``/sbtdd auto`` shows an empty log file while ~60
+  commits land on git. Visually indistinguishable from a hung process
+  — the user repeatedly asked "is it doing anything?" during v0.2 runs
+  because there was no observable signal other than polling git log
+  and ``session-state.json`` manually. The silence is a real failure
+  mode: users will Ctrl+C a working process because they assume it
+  stalled, losing hours of autonomous execution.
+
+  **Locked v0.3 deliverables** (all four land together; individually
+  insufficient):
+
+  1. **Unbuffered dispatcher invocation.** ``run_sbtdd.py`` must call
+     ``sys.stdout.reconfigure(line_buffering=True)`` (or set
+     ``PYTHONUNBUFFERED=1`` / document ``python -u`` invocation) so
+     every print flushes immediately. Applies to both the orchestrator
+     and every subprocess wrapper (``claude -p``, ``git`` wrappers).
+  2. **Per-phase progress line on stderr.** Every phase entry/exit
+     emits a structured line to ``sys.stderr`` (stderr is
+     line-buffered by default on most platforms and survives ``tee``
+     better): format ``[auto] <ISO-8601> task=<id> phase=<name>
+     action=<start|verify|commit|done> sha=<head>``. Grep-friendly,
+     tooling-parseable, cheap.
+  3. **Periodic ``.claude/auto-run.json`` updates.** The existing
+     audit artifact gains a ``current_task_id`` + ``current_phase`` +
+     ``last_updated_at`` triple written at every phase transition so
+     ``/sbtdd status`` can tail it mid-run and report live progress.
+     Schema change: bump ``_AUTO_RUN_SCHEMA_VERSION`` to 2, add the
+     three fields as optional (backward compat).
+  4. **``/sbtdd status --watch`` flag.** New read-only mode that tails
+     ``session-state.json`` + ``auto-run.json`` + ``git log`` every N
+     seconds, prints a compact dashboard line: ``12/28 tasks · H6/green
+     · HEAD=cced3ec · 76min elapsed · est. 2-4h remaining``. Lets the
+     user observe progress without reading the log file directly.
+
+  **Why locked and not deferred**: the UX problem is not cosmetic —
+  it actively undermines trust in ``auto`` and leads users to kill
+  working runs. Every v0.2 auto invocation to date has triggered the
+  same "is it hung?" question from the operator. Shipping v0.2 without
+  addressing this ships a feature that people won't use beyond the
+  first hour. Counterexample: MAGI v2.1.4 prints a per-agent banner
+  + per-iteration summary to stderr, so a MAGI invocation is visibly
+  progressing even when individual agent subprocess calls take 10+
+  minutes. Mirror that pattern.
+
+  **Testing**: golden tests on the stderr progress-line format
+  (line-by-line comparison tolerating only the ISO-8601 timestamp),
+  + integration test running a one-task stub plan and asserting that
+  ``.claude/auto-run.json`` contains ``current_task_id`` after each
+  simulated phase transition.
 - GitHub Actions CI workflow (`.github/workflows/ci.yml`) running `make verify`
   on push and PR, with a live "tests passing" shield (Milestone E intentionally
   ships without a `tests-passing` badge rather than publish a fake one — F2 of
