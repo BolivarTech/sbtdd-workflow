@@ -8,6 +8,37 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## 0.1.5 - 2026-04-24
+
+### Fixed
+
+- `auto_cmd._phase2_task_loop` now recovers when the implementer
+  subagent commits phase work itself. `/writing-plans` emits plans
+  with explicit `git add` + `git commit -m` steps per phase (plus
+  `git commit --allow-empty` for refactor). The implementer following
+  the plan literally commits each phase, leaving auto's own
+  `commit_create` to hit an empty stage and raise `CommitError`
+  ("nothing to commit"). Observed 2026-04-24 during the first
+  successful F1 auto run: three plan-prescribed commits landed,
+  then auto crashed at the refactor phase commit call. Recovery: wrap
+  `commit_create` in `try/except CommitError`; on failure, verify
+  HEAD SHA advanced past `pre_phase_sha` to confirm the implementer's
+  commit is authoritative, then proceed. If HEAD did not advance,
+  the error is genuine and re-raises.
+- `close_task_cmd.mark_and_advance` skips the `git add` +
+  `commit_create` steps when `flip_task_checkboxes` returns
+  bytes-identical output (i.e., the plan checkboxes are already
+  flipped to `[x]`). Previously it unconditionally ran the stage +
+  commit, triggering `CommitError` and leaving state stuck at
+  `current_phase=refactor`. State advance to the next open task
+  still runs so bookkeeping doesn't stall.
+
+### Added
+
+- 3 new regression tests: two for `auto_cmd` (implementer-precommitted
+  recovery + nothing-staged-nothing-committed re-raise) and one for
+  `close_task_cmd` (no-op flip + state advance).
+
 ## 0.1.4 - 2026-04-24
 
 ### Fixed
