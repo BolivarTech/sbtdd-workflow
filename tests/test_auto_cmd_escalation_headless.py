@@ -20,9 +20,10 @@ Spec refs: ``spec-behavior-base.md:282`` (A8), ``~/.claude/CLAUDE.md`` INV-22.
 from __future__ import annotations
 
 import ast
+import shutil
+import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -54,31 +55,88 @@ def test_auto_cmd_does_not_import_prompt_user() -> None:
     )
 
 
-def test_auto_cmd_magi_exhaustion_never_calls_prompt_user(tmp_path: Path) -> None:
-    """A8 behavioral guarantee: drive ``auto_cmd`` through a MAGI
-    non-convergence path with a stubbed pre-merge loop that returns HOLD on
-    every iter. ``prompt_user`` is patched to raise on invocation. The run
-    must abort with ``MAGIGateError`` (or the headless policy verdict) without
-    ever calling ``prompt_user``.
+def _setup_git_repo(root: Path) -> None:
+    """Init a git repo with one commit so HEAD resolves cleanly.
 
-    **Red-phase note**: the stage helper below is a placeholder (``...``) that
-    will be concretized in Step 4 (Green) using the real staging code lifted
-    from ``tests/test_auto_cmd.py``. The ``...`` here makes this test FAIL at
-    Red as required -- it is not a passing stub.
+    Mirrors ``tests/test_auto_cmd.py::_setup_git_repo`` rather than importing
+    it, keeping this A8 test self-contained.
     """
-    from tests.fixtures.skill_stubs import StubMAGI  # noqa: F401  # used by Green
-    import auto_cmd  # noqa: F401  # used by Green
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tester@example.com"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Tester"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+    )
+    (root / "README.md").write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=str(root), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "chore: initial"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+    )
+
+
+def _seed_plugin_local(root: Path) -> None:
+    """Copy the valid-python plugin.local.md fixture into ``root/.claude``."""
+    claude = root / ".claude"
+    claude.mkdir(exist_ok=True)
+    fixture = Path(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md"
+    shutil.copy(fixture, claude / "plugin.local.md")
+
+
+def test_auto_cmd_magi_exhaustion_never_calls_prompt_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A8 behavioral guarantee: drive ``auto_cmd`` through a MAGI
+    non-convergence path where ``pre_merge_cmd._loop2`` raises
+    :class:`MAGIGateError` (simulating exhausted-iterations from HOLD
+    verdicts). ``prompt_user`` is patched to raise on invocation. The run
+    must abort with ``MAGIGateError`` without ever calling ``prompt_user`` --
+    the headless ``auto_cmd`` path must never delegate to the TTY prompt.
+    """
+    import auto_cmd
     import escalation_prompt
+    import pre_merge_cmd
+    from config import load_plugin_local
+    from errors import MAGIGateError
 
-    # Stage a minimal project: state file done-with-plan, plan approved, one
-    # pre-merge Loop 2 non-convergence path. Reuse existing
-    # tests/fixtures/auto-runs staging helpers (lifted from
-    # tests/test_auto_cmd.py setup). Concretized in Green.
-    ...  # concretize: reuse _stage_auto_run(tmp_path) helper, approved plan, all tasks [x]
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
 
-    def _boom(*a: object, **kw: object) -> None:
-        raise AssertionError("prompt_user invoked inside auto_cmd -- INV-22 violated")
+    prompt_user_calls: list[object] = []
 
-    with patch.object(escalation_prompt, "prompt_user", _boom):
-        with pytest.raises(Exception):  # MAGIGateError or SystemExit
-            auto_cmd.main(["--dry-run=false"])
+    def _boom_prompt(*a: object, **kw: object) -> None:
+        prompt_user_calls.append((a, kw))
+        raise AssertionError("prompt_user invoked inside auto_cmd -- INV-22 / A8 violated")
+
+    def _fake_loop2(root: Path, shadow_cfg: object, threshold: str | None) -> object:
+        raise MAGIGateError("MAGI iterations exhausted with HOLD verdicts")
+
+    monkeypatch.setattr(escalation_prompt, "prompt_user", _boom_prompt)
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", _fake_loop2)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    with pytest.raises(MAGIGateError):
+        auto_cmd._phase3_pre_merge(ns, cfg)
+
+    # Explicit breadcrumb per plan Step 5 note: guard against vacuous pass.
+    assert prompt_user_calls == [], (
+        "prompt_user was invoked during auto_cmd MAGI exhaustion -- "
+        "INV-22 violation. auto_cmd must remain headless."
+    )
