@@ -208,17 +208,35 @@ def format_escalation_message(ctx: EscalationContext) -> str:
     return "\n".join(lines)
 
 
+_DEFAULT_POLICY = "abort"
+
+
 def _read_headless_policy(root: Path) -> str:
     """Return the configured policy or 'abort' (default)."""
     p = root / _HEADLESS_POLICY_FILE
     if not p.is_file():
-        return "abort"
+        return _DEFAULT_POLICY
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return "abort"
-    policy = str(data.get("on_exhausted", "abort"))
-    return policy if policy in AUTO_POLICIES else "abort"
+        return _DEFAULT_POLICY
+    policy = str(data.get("on_exhausted", _DEFAULT_POLICY))
+    return policy if policy in AUTO_POLICIES else _DEFAULT_POLICY
+
+
+def _decision_for(
+    options: tuple[EscalationOption, ...],
+    action: _ActionLit,
+    reason: str,
+) -> UserDecision:
+    """Build a ``UserDecision`` from the option whose action matches.
+
+    Falls back to ``options[-1]`` when no option carries ``action`` (e.g. a
+    STRUCTURAL_DEFECT menu that only exposes abandon). The resulting
+    decision reflects the matched option's action, not the requested one.
+    """
+    match = next((o for o in options if o.action == action), options[-1])
+    return UserDecision(chosen_option=match.letter, action=match.action, reason=reason)
 
 
 def prompt_user(
@@ -241,37 +259,16 @@ def prompt_user(
     if non_interactive or not tty:
         policy = _read_headless_policy(project_root or Path.cwd())
         if policy == "override_strong_go_only" and ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
-            match = next((o for o in options if o.action == "override"), options[-1])
-            return UserDecision(
-                chosen_option=match.letter,
-                action=match.action,
-                reason="headless policy: override_strong_go_only",
-            )
+            return _decision_for(options, "override", "headless policy: override_strong_go_only")
         if policy == "retry_once" and any(o.action == "retry" for o in options):
-            match = next(o for o in options if o.action == "retry")
-            return UserDecision(
-                chosen_option=match.letter,
-                action=match.action,
-                reason="headless policy: retry_once",
-            )
-        # default 'abort' -> option d (abandon)
-        match = next((o for o in options if o.action == "abandon"), options[-1])
-        return UserDecision(
-            chosen_option=match.letter,
-            action=match.action,
-            reason="headless policy: abort (default)",
-        )
+            return _decision_for(options, "retry", "headless policy: retry_once")
+        return _decision_for(options, "abandon", "headless policy: abort (default)")
     valid = {o.letter: o for o in options}
     while True:
         try:
             choice = input("Option (a/b/c/d): ").strip().lower()
         except EOFError:
-            match = next((o for o in options if o.action == "abandon"), options[-1])
-            return UserDecision(
-                chosen_option=match.letter,
-                action=match.action,
-                reason="EOFError during prompt; headless default",
-            )
+            return _decision_for(options, "abandon", "EOFError during prompt; headless default")
         if choice in valid:
             break
         sys.stderr.write(f"Invalid choice '{choice}'; expected one of {sorted(valid)}.\n")
@@ -283,11 +280,6 @@ def prompt_user(
             reason = ""
         if not reason:
             sys.stderr.write("Override requires non-empty --reason; falling back to abandon.\n")
-            match = next((o for o in options if o.action == "abandon"), options[-1])
-            return UserDecision(
-                chosen_option=match.letter,
-                action=match.action,
-                reason="override requested without reason",
-            )
+            return _decision_for(options, "abandon", "override requested without reason")
         return UserDecision(chosen_option=choice, action="override", reason=reason)
     return UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
