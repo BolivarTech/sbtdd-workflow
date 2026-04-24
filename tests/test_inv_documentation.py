@@ -68,14 +68,13 @@ def test_inv31_documented_in_claude_md() -> None:
     section. The canonical bullet format is `- **INV-31** ...`.
     """
     import re
+
     text = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     assert re.search(r"^- \*\*INV-31\*\*", text, re.MULTILINE), (
         "CLAUDE.md Invariants Summary must contain the INV-31 bullet"
     )
     # The bullet must reference the spec-reviewer gate concept.
-    assert "spec-reviewer" in text.lower(), (
-        "CLAUDE.md INV-31 bullet must mention spec-reviewer"
-    )
+    assert "spec-reviewer" in text.lower(), "CLAUDE.md INV-31 bullet must mention spec-reviewer"
 
 
 def test_inv31_documented_in_spec_base() -> None:
@@ -83,12 +82,9 @@ def test_inv31_documented_in_spec_base() -> None:
     sec.S.10 using the same bold bullet format used for INV-22..INV-30.
     """
     import re
-    text = (REPO_ROOT / "sbtdd" / "sbtdd-workflow-plugin-spec-base.md").read_text(
-        encoding="utf-8"
-    )
+
+    text = (REPO_ROOT / "sbtdd" / "sbtdd-workflow-plugin-spec-base.md").read_text(encoding="utf-8")
     assert re.search(r"^- \*\*INV-31\b", text, re.MULTILINE), (
         "spec-base sec.S.10 must register INV-31 with a bold bullet"
     )
-    assert "spec-reviewer" in text.lower(), (
-        "spec-base INV-31 entry must mention spec-reviewer"
-    )
+    assert "spec-reviewer" in text.lower(), "spec-base INV-31 entry must mention spec-reviewer"

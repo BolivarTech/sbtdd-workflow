@@ -2399,6 +2399,19 @@ el plugin. Son invariantes globales, no de componentes individuales.
   checkboxes) y degradar a exit 3 ante inconsistencia. Sesiones son
   stateless por contrato; el estado runtime vive en disco.
 
+- **INV-31 (spec-reviewer gate en task close):** todo cierre de
+  tarea en `auto_cmd` y `close_task_cmd` (interactive) DEBE pasar
+  aprobacion del spec-reviewer (superpowers `/subagent-driven-development`
+  spec-reviewer-prompt.md) antes de que `mark_and_advance` avance el
+  state file, excepto cuando `--skip-spec-review` este presente (flows
+  manuales donde el usuario ya verifico compliance) o cuando un stub
+  de test inyectado reemplace el dispatcher. El reviewer opera sobre
+  el diff del task + texto del task (NO el spec completo) para mantener
+  cost acotado. Findings rutean via `/receiving-code-review` (extension
+  de INV-29 a spec-review findings). Safety valve: 3 iter por task;
+  exhaustion lanza `SpecReviewError` y bloquea `mark_and_advance`.
+  Introducido en v0.2 (Feature B).
+
 ### 10.4 Invariantes de seguridad
 
 - **INV-13 (no force push):** nunca `git push --force` ni `git reset --hard`
