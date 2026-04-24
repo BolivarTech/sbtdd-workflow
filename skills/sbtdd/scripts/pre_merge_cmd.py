@@ -57,6 +57,7 @@ _MAGI_FEEDBACK_FILENAME: str = "magi-feedback.md"
 #: diff must be authored by a human or subagent via ``close-phase``).
 #: Lives inside ``.claude/`` (gitignored, never committed).
 _MAGI_CONDITIONS_FILENAME: str = "magi-conditions.md"
+_MAGI_FINDINGS_FILENAME: str = "magi-findings.md"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -382,6 +383,58 @@ def _write_magi_conditions_file(
     return path
 
 
+def _write_magi_findings_file(
+    findings: tuple[dict[str, object], ...],
+    root: Path,
+    verdict: magi_dispatch.MAGIVerdict,
+    iteration: int,
+) -> Path | None:
+    """Persist MAGI's full ``consensus.findings`` list to ``.claude/magi-findings.md``.
+
+    ``magi-conditions.md`` captures the ONE-LINE agent-level summaries
+    that ``/receiving-code-review`` accepts as blocking conditions, but
+    those summaries rarely contain the actionable defect detail the user
+    needs to fix (observed 2026-04-24 pre-merge Loop 2 iter 1: conditions
+    said "four concrete correctness defects" without enumerating them).
+    The detail lives in ``consensus.findings`` -- severity-tagged
+    finding dicts with ``title``, ``detail``, ``sources``. This file
+    persists them alongside the conditions so the user can act on the
+    concrete defects without re-running MAGI just to recover output.
+
+    Returns ``None`` when the verdict produced zero findings (no file
+    written); otherwise the absolute path to the written file.
+    """
+    if not findings:
+        return None
+    path = root / ".claude" / _MAGI_FINDINGS_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = _build_conditions_frontmatter(root, verdict, iteration)
+    body += "# MAGI Loop 2 -- consensus findings\n\n"
+    body += (
+        f"MAGI iteration {iteration} returned verdict `{verdict.verdict}` with "
+        f"the following {len(findings)} finding(s) from the deduplicated "
+        "``consensus.findings`` list. Use these as the concrete defect "
+        "list when applying the accepted conditions in "
+        f"``.claude/{_MAGI_CONDITIONS_FILENAME}``.\n\n"
+    )
+    for i, finding in enumerate(findings, start=1):
+        severity = str(finding.get("severity", "unknown")).upper()
+        title = str(finding.get("title", "(no title)"))
+        detail = str(finding.get("detail", "")).strip()
+        sources_raw = finding.get("sources", [])
+        if isinstance(sources_raw, list):
+            sources = ", ".join(str(s) for s in sources_raw)
+        else:
+            sources = str(sources_raw)
+        body += f"## {i}. [{severity}] {title}\n\n"
+        if sources:
+            body += f"**Sources:** {sources}\n\n"
+        if detail:
+            body += f"{detail}\n\n"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
 def _write_magi_feedback_file(root: Path, rejections: list[str]) -> Path:
     """Persist rejection history to ``.claude/magi-feedback.md`` for next iter.
 
@@ -627,14 +680,32 @@ def _loop2(
                 # iter-3 redesign: surface to the user via conditions
                 # file instead of emitting empty mini-cycle commits.
                 conditions_path = _write_magi_conditions_file(accepted, root, verdict, iteration)
+                # 2026-04-24: also persist the full MAGI ``consensus.findings``
+                # list so the user has the CONCRETE defect detail, not just
+                # the agent-level one-liners in magi-conditions.md. MAGI's
+                # temp output dir is cleaned up when invoke_magi returns, so
+                # without this persistence the detail is lost on exit 8.
+                # ``getattr`` fallback keeps the call compatible with
+                # verdict-like objects used in tests that do not populate
+                # the ``findings`` field (they predate this persistence
+                # path). Real ``MAGIVerdict`` always carries findings, so
+                # the fallback only fires in test harnesses.
+                findings_path = _write_magi_findings_file(
+                    getattr(verdict, "findings", ()), root, verdict, iteration
+                )
                 # Plan D Task 12: user-facing stderr summary so exit 8
                 # is self-explanatory without having to read the
                 # exception message or the conditions file first.
+                findings_hint = (
+                    f" Concrete defect detail written to {findings_path}."
+                    if findings_path is not None
+                    else ""
+                )
                 sys.stderr.write(
                     f"pre-merge exit 8: accepted={len(accepted)}, "
                     f"rejected={len(rejected)}. Applied conditions not yet "
                     f"in diff. See {conditions_path} and run `sbtdd close-phase` "
-                    f"for each, then re-run `sbtdd pre-merge`.\n"
+                    f"for each, then re-run `sbtdd pre-merge`.{findings_hint}\n"
                 )
                 raise MAGIGateError(
                     f"MAGI iter {iteration} produced {len(accepted)} accepted "

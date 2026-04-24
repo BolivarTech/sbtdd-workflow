@@ -716,6 +716,73 @@ def test_parse_receiving_review_empty_stdout_returns_empty_lists(
         pre_merge_cmd.main(["--project-root", str(tmp_path)])
 
 
+def test_write_magi_findings_file_persists_severity_tagged_details(tmp_path: Path) -> None:
+    """Exit-8 path must write .claude/magi-findings.md with concrete defect detail.
+
+    MAGI's ``consensus.findings`` carries severity + title + detail +
+    sources per finding; ``consensus.conditions`` only carries the
+    one-line agent summaries. Without the findings file the user only
+    sees vague conditions like "four concrete correctness defects" and
+    cannot act. Observed 2026-04-24 on v0.2 pre-merge Loop 2.
+    """
+    import pre_merge_cmd
+    from magi_dispatch import MAGIVerdict
+
+    findings = (
+        {
+            "severity": "critical",
+            "title": "unterminated regex in foo.py",
+            "detail": "L42 has an unterminated character class.",
+            "sources": ["melchior", "caspar"],
+        },
+        {
+            "severity": "warning",
+            "title": "missing isinstance guard in bar.py",
+            "detail": "Assumes dict but receives str on edge case.",
+            "sources": ["balthasar"],
+        },
+    )
+    verdict = MAGIVerdict(
+        verdict="GO_WITH_CAVEATS",
+        degraded=False,
+        conditions=("agent summary",),
+        findings=findings,
+        raw_output="",
+    )
+    (tmp_path / ".claude").mkdir()
+    path = pre_merge_cmd._write_magi_findings_file(findings, tmp_path, verdict, iteration=1)
+    assert path is not None
+    assert path.exists()
+    body = path.read_text(encoding="utf-8")
+    # Frontmatter preserved so audit trail matches conditions file.
+    assert "verdict: GO_WITH_CAVEATS" in body
+    # Severity-upcase + title + detail + sources all present.
+    assert "[CRITICAL]" in body
+    assert "unterminated regex" in body
+    assert "L42 has an unterminated character class." in body
+    assert "melchior, caspar" in body
+    assert "[WARNING]" in body
+    assert "missing isinstance guard" in body
+
+
+def test_write_magi_findings_file_returns_none_when_findings_empty(tmp_path: Path) -> None:
+    """Empty findings => no file written, return None (defensive no-op)."""
+    import pre_merge_cmd
+    from magi_dispatch import MAGIVerdict
+
+    verdict = MAGIVerdict(
+        verdict="GO",
+        degraded=False,
+        conditions=(),
+        findings=(),
+        raw_output="",
+    )
+    (tmp_path / ".claude").mkdir()
+    path = pre_merge_cmd._write_magi_findings_file((), tmp_path, verdict, iteration=1)
+    assert path is None
+    assert not (tmp_path / ".claude" / "magi-findings.md").exists()
+
+
 def test_conditions_to_skill_args_injects_format_contract() -> None:
     """/receiving-code-review prompt MUST lead with the format contract.
 
