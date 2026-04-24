@@ -142,7 +142,7 @@ def test_close_task_flips_checkbox_in_plan_section(
     captured: dict[str, object] = {}
     _install_happy_path_patches(monkeypatch, captured)
 
-    close_task_cmd.main(["--project-root", str(tmp_path)])
+    close_task_cmd.main(["--project-root", str(tmp_path), "--skip-spec-review"])
 
     plan_text = (tmp_path / "planning" / "claude-plan-tdd.md").read_text(encoding="utf-8")
     # Task 2 section should now have [x] for all steps.
@@ -166,7 +166,7 @@ def test_close_task_creates_chore_commit_with_task_id(
     captured: dict[str, object] = {}
     _install_happy_path_patches(monkeypatch, captured)
 
-    close_task_cmd.main(["--project-root", str(tmp_path)])
+    close_task_cmd.main(["--project-root", str(tmp_path), "--skip-spec-review"])
 
     calls = captured["commit_calls"]
     assert isinstance(calls, list)
@@ -200,7 +200,7 @@ def test_close_task_chore_commit_contains_only_plan_edit(
     monkeypatch.setattr("close_task_cmd.subprocess_utils.run_with_timeout", fake_run)
     monkeypatch.setattr("close_task_cmd.commit_create", lambda prefix, message, cwd=None: "")
 
-    close_task_cmd.main(["--project-root", str(tmp_path)])
+    close_task_cmd.main(["--project-root", str(tmp_path), "--skip-spec-review"])
 
     ga = captured["git_add_args"]
     assert isinstance(ga, list)
@@ -219,7 +219,7 @@ def test_close_task_advances_state_when_next_task_exists(
     captured: dict[str, object] = {}
     _install_happy_path_patches(monkeypatch, captured)
 
-    close_task_cmd.main(["--project-root", str(tmp_path)])
+    close_task_cmd.main(["--project-root", str(tmp_path), "--skip-spec-review"])
 
     state = json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
     assert state["current_task_id"] == "3"
@@ -258,7 +258,7 @@ def test_close_task_closes_plan_when_no_next_task(
     captured: dict[str, object] = {}
     _install_happy_path_patches(monkeypatch, captured)
 
-    close_task_cmd.main(["--project-root", str(tmp_path)])
+    close_task_cmd.main(["--project-root", str(tmp_path), "--skip-spec-review"])
 
     state = json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
     assert state["current_task_id"] is None
@@ -275,7 +275,7 @@ def test_close_task_updates_phase_started_at_commit_to_chore_sha(
     captured: dict[str, object] = {"new_sha": "deadbee"}
     _install_happy_path_patches(monkeypatch, captured)
 
-    close_task_cmd.main(["--project-root", str(tmp_path)])
+    close_task_cmd.main(["--project-root", str(tmp_path), "--skip-spec-review"])
 
     state = json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
     assert state["phase_started_at_commit"] == "deadbee"

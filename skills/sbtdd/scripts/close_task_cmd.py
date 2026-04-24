@@ -25,16 +25,22 @@ import sys
 from pathlib import Path
 
 import _plan_ops
+import spec_review_dispatch
 import subprocess_utils
 from commits import create as commit_create
 from drift import detect_drift
-from errors import DriftError, PreconditionError
+from errors import DriftError, PreconditionError, SpecReviewError
 from state_file import SessionState, load as load_state, save as save_state
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sbtdd close-task")
     p.add_argument("--project-root", type=Path, default=Path.cwd())
+    p.add_argument(
+        "--skip-spec-review",
+        action="store_true",
+        help="Skip spec-reviewer dispatch (INV-31 escape valve)",
+    )
     return p
 
 
@@ -134,6 +140,19 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = ns.project_root
     state = _preflight(root)
     closed_task_id = state.current_task_id
+    if not ns.skip_spec_review:
+        result = spec_review_dispatch.dispatch_spec_reviewer(
+            task_id=closed_task_id or "",
+            plan_path=root / state.plan_path,
+            repo_root=root,
+        )
+        if not result.approved:
+            raise SpecReviewError(
+                f"spec-reviewer did not approve task {closed_task_id}",
+                task_id=closed_task_id or "",
+                iteration=result.reviewer_iter,
+                issues=tuple(i.text for i in result.issues),
+            )
     new_state = mark_and_advance(state, root)
     next_msg = (
         f"Next: task {new_state.current_task_id}" if new_state.current_task_id else "Plan complete."
