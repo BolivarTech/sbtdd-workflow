@@ -8,6 +8,39 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## 0.1.6 - 2026-04-24
+
+### Fixed
+
+- `auto_cmd._phase2_task_loop` CommitError recovery now covers two more
+  cases beyond v0.1.5's HEAD-advanced branch:
+  - **Unstaged tracked-file modifications**: the implementer subagent
+    edited files but never ran `git add`. Auto now runs `git add -u`
+    (tracked-file modifications only, no untracked surprises) and
+    retries `commit_create`. Observed F2 green phase 2026-04-24: the
+    subagent rewrote `_resolve_magi_plugin_json` + added
+    `_magi_cache_base` but didn't stage, leaving the impl in the
+    working tree while auto's commit failed with "nothing to commit".
+  - **Phase-collapse empty commit**: if after `git add -u` there is
+    STILL nothing staged (e.g., the implementer did red+green together
+    in an earlier commit, leaving the current phase with no residual
+    work), record a `git commit --allow-empty` marker so state still
+    advances. Verification has already proven the phase's acceptance
+    criterion is met; the empty commit carries a "(no-op; phase
+    collapsed into earlier commit)" suffix for log legibility.
+
+### Changed
+
+- v0.1.5's test `test_auto_phase2_reraises_commit_error_when_head_did_not_move`
+  renamed to `test_auto_phase2_allow_empty_fallback_when_head_did_not_move`
+  and its assertion flipped: the HEAD-unchanged + nothing-staged path
+  now records an empty marker commit instead of re-raising.
+
+### Added
+
+- 1 new regression test asserting `git add -u` captures tracked-file
+  modifications (no empty marker; real phase content committed).
+
 ## 0.1.5 - 2026-04-24
 
 ### Fixed
