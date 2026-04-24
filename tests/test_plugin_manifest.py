@@ -44,10 +44,9 @@ def test_plugin_version_is_semver() -> None:
 def test_plugin_version_is_current_v0_2_patch() -> None:
     """Plugin must ship a 0.2.x patch on the v0.2 series until the v0.3 bump.
 
-    Originally pinned to ``0.1.0`` (Milestone E ship); relaxed to ``0.1.x`` so
-    fix-only releases on v0.1 didn't require editing this test. Retargeted to
-    ``0.2.x`` at the v0.2 bump (Task I3) so the same tripwire continues to
-    flag accidental bumps until the v0.3 line opens.
+    Tripwire: this test forces updating the pinned series when bumping the
+    major/minor version, preventing accidental patch bumps that cross a series
+    boundary without updating the contract.
     """
     d = _load_plugin()
     assert re.match(r"^0\.2\.\d+$", d["version"]), (
