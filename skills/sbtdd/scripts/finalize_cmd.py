@@ -96,7 +96,13 @@ def _override_magi_gate(
 
     The synthesised history is intentionally one entry: ``finalize`` is a
     re-evaluation of the verdict pre-merge already produced -- there is no
-    iteration loop to summarise.
+    iteration loop to summarise. The :class:`~escalation_prompt.UserDecision`
+    is constructed directly with ``chosen_option="a"`` to match the sibling
+    override paths in :mod:`spec_cmd` and :mod:`pre_merge_cmd` verbatim --
+    ``finalize`` has no interactive prompt path, so ``_compose_options`` is
+    unnecessary here, and bypassing it also avoids the ``_decision_for``
+    fallback that would silently downgrade a ``STRUCTURAL_DEFECT`` menu's
+    audit decision to ``"abandon"``.
     """
     data = json.loads(magi_verdict_path.read_text(encoding="utf-8"))
     synthetic = magi_dispatch.MAGIVerdict(
@@ -111,8 +117,7 @@ def _override_magi_gate(
         plan_id=_plan_id_from_path(Path(state.plan_path).name),
         context="pre-merge",
     )
-    options = escalation_prompt._compose_options(ctx)
-    decision = escalation_prompt._decision_for(options, "override", reason)
+    decision = escalation_prompt.UserDecision(chosen_option="a", action="override", reason=reason)
     escalation_prompt.apply_decision(decision, ctx, root)
 
 
