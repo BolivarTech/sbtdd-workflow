@@ -919,7 +919,7 @@ git commit --allow-empty -m "refactor: prompt_user reviewed for EOFError safety"
 - Modify: `skills/sbtdd/scripts/escalation_prompt.py`
 - Modify: `tests/test_escalation_prompt.py`
 
-- [ ] **Step 1 (Red): audit artifact test**
+- [x] **Step 1 (Red): audit artifact test**
 
 Append:
 
@@ -954,7 +954,7 @@ def test_apply_decision_abandon_returns_exit_8(tmp_path) -> None:
     assert code == 8
 ```
 
-- [ ] **Step 2-3 (Red commit)**
+- [x] **Step 2-3 (Red commit)**
 
 ```bash
 python -m pytest tests/test_escalation_prompt.py -v
@@ -962,7 +962,7 @@ git add tests/test_escalation_prompt.py
 git commit -m "test: add apply_decision audit artifact + exit-code tests"
 ```
 
-- [ ] **Step 4 (Green)**
+- [x] **Step 4 (Green)**
 
 Append to `skills/sbtdd/scripts/escalation_prompt.py`:
 
@@ -1000,9 +1000,9 @@ def apply_decision(decision: UserDecision, ctx: EscalationContext, project_root:
     return 8 if decision.action == "abandon" else 0
 ```
 
-- [ ] **Step 5: tests PASS**
+- [x] **Step 5: tests PASS**
 
-- [ ] **Step 6-8**
+- [x] **Step 6-8**
 
 ```bash
 git add skills/sbtdd/scripts/escalation_prompt.py
