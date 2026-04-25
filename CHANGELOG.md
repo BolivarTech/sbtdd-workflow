@@ -11,10 +11,52 @@ every post-v0.1 release.
 ## Unreleased (Deferred — tracked for v1.0.0)
 
 All v0.2 cycle deferred items closed. Open backlog tracked under
-v1.0.0 LOCKED (auto progress streaming, MAGI dispatch hardening +
-retried_agents telemetry, MAGI → /requesting-code-review cross-check,
-Group B spec-drift detection options re-evaluation, INV-31
-default-on opt-in re-evaluation based on v0.2/v0.2.1 field data).
+v1.0.0 LOCKED:
+
+- Auto progress streaming (UX gap during multi-hour `auto` runs --
+  `python -u` + per-phase stderr breadcrumbs + `auto-run.json` live
+  updates + `/sbtdd status --watch`).
+- MAGI dispatch hardening + `retried_agents` telemetry (marker-based
+  path discovery defensive over `--output-dir`; consume new MAGI
+  2.2.1+ `retried_agents` field in verdict parsing).
+- MAGI → `/requesting-code-review` cross-check (meta-reviewer pattern;
+  user has validated empirically in adjacent projects -- catches MAGI
+  false-positive CRITICALs before INV-29 gate).
+- Group B spec-drift detection options (1)-(7) re-evaluation, with
+  v0.2/v0.2.1/v0.2.2 field data informing which subset becomes
+  required vs. opt-in for v1.0.0.
+- INV-31 default-on opt-in re-evaluation based on v0.2/v0.2.1 field
+  data (whether the spec-reviewer per-task default flips to opt-in).
+- **Per-skill model selection flag** (cost optimization). Today every
+  `claude -p` subprocess in `superpowers_dispatch.py`,
+  `spec_review_dispatch.py`, and `magi_dispatch.py` inherits the
+  user's session model (no `--model` flag passed). For long `auto`
+  runs the implementer + spec-reviewer + MAGI dispatch on every task
+  can dominate the bill if the session model is Opus. v1.0.0 adds:
+  (a) per-skill model fields in `plugin.local.md`
+  (`implementer_model`, `spec_reviewer_model`, `code_review_model`,
+  `magi_dispatch_model`; default `null` = inherit session, preserves
+  v0.x behavior), (b) wiring through the three dispatch modules to
+  pass `--model <id>` when set, (c) CLI override
+  `--model-override <skill>:<model>` on `auto`, `pre-merge`,
+  `close-task`, `review-spec-compliance` for one-off bumps,
+  (d) `dependency_check.py` validation that requested model strings
+  match the published Claude model IDs the local `claude` CLI
+  supports. Recommended baseline shipped in
+  `templates/plugin.local.md.template`: Sonnet 4.6 for implementer +
+  code review (depth needed for refactors and bug/security
+  detection), Haiku 4.5 for spec reviewer (pattern-match task),
+  `null` for magi_dispatch_model (the outer dispatcher is I/O; the 3
+  sub-agents pick their own model). Projected cost reduction on a
+  36-task `auto` run: ~70-80% vs default-Opus session, preserving
+  Opus only in the 3-5 MAGI Loop 2 iterations where multi-perspective
+  consensus value is highest. Caveat: MAGI's 3 sub-agents
+  (Melchior/Balthasar/Caspar) pick their own model internally per the
+  MAGI plugin contract; the `magi_dispatch_model` flag affects only
+  MAGI's outer dispatcher process, not the per-agent verdict
+  generation. New flag must honor INV-0 -- if `~/.claude/CLAUDE.md`
+  pins a model, that wins, and the dispatcher emits a stderr
+  breadcrumb explaining the cost implication.
 
 ## [0.2.2] - 2026-04-25
 
