@@ -97,23 +97,25 @@ def test_dispatch_approved_path(tmp_path, monkeypatch) -> None:
     assert result.issues == ()
 
 
-def test_dispatch_default_max_iterations_is_one_per_b6_defer() -> None:
-    """dispatch_spec_reviewer defaults max_iterations=1 in v0.2 per B6 defer.
+def test_dispatch_default_max_iterations_is_three_per_b6_shipped() -> None:
+    """dispatch_spec_reviewer defaults max_iterations=3 in v0.2.1 per B6 ship.
 
-    Regression for MAGI Loop 2 CRITICAL finding (2026-04-24): the default
-    was 3 but the loop re-invokes the reviewer on byte-identical inputs
-    because spec-base §2.2's mini-cycle TDD feedback between dispatches
-    is deferred to v0.2.1. With no input mutation between iters the
-    reviewer is nominally deterministic, so iter 2+ burn quota for zero
-    semantic benefit. Pinning default=1 until v0.2.1 lands the feedback
-    path bumps it back to 3.
+    v0.2.0 pinned this to 1 because the loop re-invoked the reviewer on
+    byte-identical inputs (no feedback loop between dispatches), so iter
+    2+ burned quota for zero semantic benefit. v0.2.1 ships the
+    auto-feedback loop (see ``auto_cmd._apply_spec_review_findings_via_mini_cycle``):
+    accepted reviewer findings now route through ``/receiving-code-review``
+    + a mini-cycle TDD fix per accepted finding (test/fix/refactor) + a
+    re-dispatch of the reviewer on the now-mutated diff. With real input
+    mutation between iterations the safety valve has work to do, so the
+    default reverts to the original B6 design value of 3.
     """
     import inspect
 
     from spec_review_dispatch import dispatch_spec_reviewer  # type: ignore[import-not-found]
 
     sig = inspect.signature(dispatch_spec_reviewer)
-    assert sig.parameters["max_iterations"].default == 1
+    assert sig.parameters["max_iterations"].default == 3
 
 
 def test_find_task_chore_sha_exact_match_only(tmp_path: Path) -> None:
