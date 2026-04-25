@@ -10,53 +10,185 @@ every post-v0.1 release.
 
 ## Unreleased (Deferred — tracked for v1.0.0)
 
-All v0.2 cycle deferred items closed. Open backlog tracked under
-v1.0.0 LOCKED:
+v0.3.0 shipped Track D (auto progress visibility) and Track E (per-skill
+model selection) as a focused subset of the v1.0.0 backlog. Open
+v1.0.0 LOCKED items remaining:
 
-- Auto progress streaming (UX gap during multi-hour `auto` runs --
-  `python -u` + per-phase stderr breadcrumbs + `auto-run.json` live
-  updates + `/sbtdd status --watch`).
+- D5 `/sbtdd status --watch` companion command (poll
+  `.claude/auto-run.json` and stream the `progress` field to a separate
+  TTY without re-entering `auto_cmd`). Deferred from v0.3.0 because the
+  emitter (`_update_progress` atomic write contract) is in place but the
+  reader/poller wants its own subcommand and a small terminal UI; it is
+  orthogonal to the v0.3.0 streaming + breadcrumb deliverables.
+- E2 `schema_version: 2` bump for `plugin.local.md` (formal schema
+  versioning of the four model fields). v0.3.0 added the fields under
+  the existing schema with `null` defaults so v0.2.x configs continue
+  to load unchanged. Bumping requires a migration story for older
+  configs which is part of the v1.0.0 schema-versioning pass.
+- F (per-phase MAGI lite at refactor close), G (Group B spec-drift
+  detection options (1)-(7) re-evaluation with v0.2/v0.2.1/v0.2.2/v0.3
+  field data), H (INV-31 default-on opt-in re-evaluation based on field
+  data of whether the spec-reviewer per-task default flips to opt-in).
 - MAGI dispatch hardening + `retried_agents` telemetry (marker-based
   path discovery defensive over `--output-dir`; consume new MAGI
   2.2.1+ `retried_agents` field in verdict parsing).
 - MAGI → `/requesting-code-review` cross-check (meta-reviewer pattern;
   user has validated empirically in adjacent projects -- catches MAGI
   false-positive CRITICALs before INV-29 gate).
-- Group B spec-drift detection options (1)-(7) re-evaluation, with
-  v0.2/v0.2.1/v0.2.2 field data informing which subset becomes
-  required vs. opt-in for v1.0.0.
-- INV-31 default-on opt-in re-evaluation based on v0.2/v0.2.1 field
-  data (whether the spec-reviewer per-task default flips to opt-in).
-- **Per-skill model selection flag** (cost optimization). Today every
-  `claude -p` subprocess in `superpowers_dispatch.py`,
-  `spec_review_dispatch.py`, and `magi_dispatch.py` inherits the
-  user's session model (no `--model` flag passed). For long `auto`
-  runs the implementer + spec-reviewer + MAGI dispatch on every task
-  can dominate the bill if the session model is Opus. v1.0.0 adds:
-  (a) per-skill model fields in `plugin.local.md`
-  (`implementer_model`, `spec_reviewer_model`, `code_review_model`,
-  `magi_dispatch_model`; default `null` = inherit session, preserves
-  v0.x behavior), (b) wiring through the three dispatch modules to
-  pass `--model <id>` when set, (c) CLI override
-  `--model-override <skill>:<model>` on `auto`, `pre-merge`,
-  `close-task`, `review-spec-compliance` for one-off bumps,
-  (d) `dependency_check.py` validation that requested model strings
-  match the published Claude model IDs the local `claude` CLI
-  supports. Recommended baseline shipped in
-  `templates/plugin.local.md.template`: Sonnet 4.6 for implementer +
-  code review (depth needed for refactors and bug/security
-  detection), Haiku 4.5 for spec reviewer (pattern-match task),
-  `null` for magi_dispatch_model (the outer dispatcher is I/O; the 3
-  sub-agents pick their own model). Projected cost reduction on a
-  36-task `auto` run: ~70-80% vs default-Opus session, preserving
-  Opus only in the 3-5 MAGI Loop 2 iterations where multi-perspective
-  consensus value is highest. Caveat: MAGI's 3 sub-agents
-  (Melchior/Balthasar/Caspar) pick their own model internally per the
-  MAGI plugin contract; the `magi_dispatch_model` flag affects only
-  MAGI's outer dispatcher process, not the per-agent verdict
-  generation. New flag must honor INV-0 -- if `~/.claude/CLAUDE.md`
-  pins a model, that wins, and the dispatcher emits a stderr
-  breadcrumb explaining the cost implication.
+
+## [0.3.0] - 2026-04-25
+
+### Added
+
+- **Feature D — auto progress visibility** (UX gap from v0.2 dogfood:
+  multi-hour `/sbtdd auto` runs with `tee`-buffered subprocess output
+  looked hung). Four primitives ship:
+  1. `auto_cmd._stream_subprocess(proc, prefix)` — line-buffered
+     thread-pair pump that reads subprocess stdout/stderr via
+     `iter(stream.readline, "")` in two daemon threads and rewrites
+     each line to orchestrator stderr with an explicit `flush()` so
+     external observers see progress in real time. Returns the
+     accumulated `(stdout, stderr)` tuple for `CommitError` v0.1.6
+     diagnostic recovery.
+  2. `auto_cmd._build_run_sbtdd_argv(subcommand, extra_args)` — argv
+     builder that always prefixes invocations with `python -u` so the
+     dispatched subprocess does not buffer at the Python layer.
+  3. `auto_cmd._emit_phase_breadcrumb(phase, total_phases, ...)` —
+     state-machine one-line breadcrumb emitted at every auto phase
+     transition (pre-flight → spec → task loop → pre-merge → checklist)
+     and within the task loop on every TDD sub-phase advance.
+  4. `auto_cmd._update_progress(auto_run_path, ...)` — atomic
+     `tmp+os.replace` writer for the `progress` field of
+     `.claude/auto-run.json` (`{phase, task_index, task_total, sub_phase}`)
+     with a Windows PermissionError retry loop. The four keys are now
+     ALWAYS emitted (Finding #4 fix from MAGI iter 1): unknown values
+     surface as JSON `null` so future `/sbtdd status --watch` consumers
+     can rely on the shape contract.
+  5. `subprocess_utils.run_with_timeout` gains an optional
+     `stream_prefix: str | None = None` kwarg. When `None` (default)
+     behavior is byte-identical to v0.2.x (`subprocess.run(...,
+     capture_output=True)`). When set, the helper switches to
+     `subprocess.Popen` + `auto_cmd._stream_subprocess(proc,
+     stream_prefix)` so subprocess output reaches the operator's
+     stderr line-by-line during execution. The returned object remains
+     `subprocess.CompletedProcess` for compat with all 30+ existing
+     callers.
+  6. `superpowers_dispatch.invoke_skill`, `magi_dispatch.invoke_magi`,
+     and `spec_review_dispatch.dispatch_spec_reviewer` thread an
+     optional `stream_prefix` through to `run_with_timeout` so the
+     auto path now streams real subprocess output during 5-10 min
+     `/test-driven-development` invocations. Default-None preserves
+     v0.2.x behavior for non-auto callers.
+  7. Tests: 9 regression tests across `tests/test_auto_streaming.py`
+     (D1.1 line-buffered flush, D1.2 prefix rewrite, D1.3 SIGTERM
+     load-bearing test redesigned to exercise the helper concurrently
+     with `proc.terminate()`, D2.1 argv -u prefix, D3.1/D3.2
+     breadcrumbs) and `tests/test_auto_progress.py` (D4.1 atomicity
+     under concurrent reads, D4.2 strict shape with null sentinels,
+     D4.3 absent-field tolerance).
+- **Feature E — per-skill model selection** (cost optimization). Long
+  `/sbtdd auto` runs that inherit Opus from the user's session can
+  dominate the Anthropic bill; v0.3.0 ships per-skill `--model` wiring:
+  1. Four optional fields in `plugin.local.md`:
+     `implementer_model`, `spec_reviewer_model`, `code_review_model`,
+     `magi_dispatch_model`. Default `null` = inherit session,
+     preserving v0.2.x behavior exactly.
+  2. Cascade resolver (CLI override > plugin.local.md > None) with
+     INV-0 enforcement: if `~/.claude/CLAUDE.md` pins a model
+     globally (regex `INV_0_PINNED_MODEL_RE`), that wins and a stderr
+     breadcrumb is emitted explaining the cost implication. Iter 1
+     fix tightens the regex to require a pinning suffix (`for all
+     sessions`, `globally`, `as default`) to eliminate false positives
+     in narrative prose like "do not use claude-opus-4-7" or "for
+     example, use claude-haiku-4-5".
+  3. `--model-override <skill>:<model>` CLI flag on `/sbtdd auto`
+     for one-off bumps. Repeatable; multiple skills can be overridden
+     per invocation.
+  4. `dependency_check.check_model_ids(...)` validates that requested
+     model strings match `models.ALLOWED_CLAUDE_MODEL_IDS`.
+  5. Recommended baseline shipped commented in
+     `templates/plugin.local.md.template`: Sonnet 4.6 for implementer
+     and code review (depth needed for refactors + security
+     detection), Haiku 4.5 for spec reviewer (pattern-match task),
+     `null` for `magi_dispatch_model` (MAGI's 3 sub-agents pick their
+     own model internally; only the outer dispatcher process is
+     controlled by this flag).
+  6. Projected cost reduction on a 36-task `auto` run: ~70-80% vs
+     default-Opus session, preserving Opus only in the 3-5 MAGI Loop
+     2 iterations where multi-perspective consensus value is highest.
+  7. Tests: 21 regression tests across `tests/test_config_models.py`,
+     `tests/test_dispatch_model_kwarg.py`,
+     `tests/test_auto_model_override.py`,
+     `tests/test_dependency_check_models.py`,
+     `tests/test_models_constants.py`,
+     `tests/test_template_baseline.py`, plus 2 new false-positive
+     regression tests in `tests/test_models_constants.py` for the
+     tightened INV-0 regex.
+
+### Changed
+
+- `_update_progress` now ALWAYS emits the four keys
+  `{phase, task_index, task_total, sub_phase}`, using JSON `null` for
+  values unknown at the call site. Spec sec.2 D4.2 "shape exacto"
+  contract is now satisfied at runtime (was: keys conditionally
+  omitted when `_task_progress` returned `(None, None)` on missing
+  plan or task-id-not-found). Downstream consumers (e.g. v0.4.0
+  `/sbtdd status --watch`) can rely on the shape rather than guarding
+  every key access.
+- `INV_0_PINNED_MODEL_RE` tightened from
+  `\b(?:use|pin|...)\s+(claude-...)` to require a pinning suffix
+  (`globally`, `for all sessions`, `as default`, `as the (default|
+  fixed|pinned) model`, `across all sessions`). Eliminates the
+  false-positive surface flagged by MAGI iter 1 WARNING (do not use
+  claude-opus-4-7 in this skill, "for example, use claude-haiku-4-5
+  to optimize cost", "we always use claude-sonnet-4-6 in this
+  codebase notes" — none of these now match). The original imperative
+  example `Use claude-opus-4-7 for all sessions` continues to match.
+- `_update_progress` docstring documents the single-writer assumption
+  for `.claude/auto-run.json`. The read-modify-write window between
+  `read_text` and `os.replace` is intentionally unlocked because INV-22
+  guarantees a single auto orchestrator process. Future companion
+  writers (e.g. `/sbtdd status --watch` poller) MUST be read-only or
+  introduce a sentinel-file CAS.
+
+### Deferred (rolled to v0.4.0 / v1.0.0)
+
+- D5 `/sbtdd status --watch` companion command (emitter is in place,
+  reader pending).
+- E2 `schema_version: 2` bump in `plugin.local.md` (the four new
+  fields ship under the existing schema with `null` defaults).
+- F per-phase MAGI lite at refactor close.
+- G Group B spec-drift detection options (1)-(7) re-evaluation.
+- H INV-31 default-on opt-in re-evaluation based on field data.
+- INFO finding #10 (single `ResolvedModels` dataclass at preflight
+  threading all four model fields through every dispatch site, vs the
+  current per-call resolver).
+- INFO finding #11 (per-stream timeout in `_stream_subprocess` for the
+  pathological case where a subprocess writes a long line without a
+  newline and never exits without an external SIGTERM; outer
+  `subprocess_utils.run_with_timeout` already enforces a wall-clock
+  cap).
+- INFO finding #12 (`_update_progress` OSError handling at call sites:
+  observability metadata failure should not crash the auto run; the
+  retry loop is sensibly bounded but propagation is unguarded).
+
+### Process
+
+- Loop 1 surrogate via `make verify` clean (pytest + ruff check + ruff
+  format + mypy --strict, runtime <60s). The v0.2.x convention of
+  using `/requesting-code-review` as the formal Loop 1 driver is
+  preserved for hand-driven runs; for the v0.3.0 internal cycle the
+  `make verify` gate served as the equivalent mechanical filter
+  (Track D + Track E commits f0ded82..a73d7a5 each closed via
+  `make verify` clean).
+- MAGI Loop 2 converged in 2 iterations: iter 1 returned HOLD (1-1,
+  caspar degraded) with 2 CRITICAL + 6 WARNING + 3 INFO findings;
+  iter 2 applied all CRITICAL and WARNING findings via Loop 2 fix
+  mini-cycles (`test:` → `fix:` → `refactor:` per finding) and
+  deferred the 3 INFO findings via documented scope decision (above).
+- INV-29 honored: every MAGI finding evaluated for technical merit
+  before the mini-cycle TDD application; 0 findings rejected this
+  iteration (all CRITICAL+WARNING substantive).
 
 ## [0.2.2] - 2026-04-25
 
