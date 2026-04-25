@@ -1,375 +1,549 @@
-# Especificacion base — sbtdd-workflow v0.2.0
+# Especificacion base — sbtdd-workflow v1.0.0
 
 > Raw input para `/brainstorming` (primera fase del ciclo SBTDD para
-> v0.2). `/brainstorming` consumira este archivo y generara
+> v1.0.0). `/brainstorming` consumira este archivo y generara
 > `sbtdd/spec-behavior.md` (BDD overlay con escenarios Given/When/Then
 > testables).
 >
-> Generado 2026-04-23. Source of truth autoritativo para v0.1 frozen
-> se mantiene en `sbtdd/sbtdd-workflow-plugin-spec-base.md` (mega-contrato
-> de 2860 lineas); este documento NO lo reemplaza — solo agrega el delta
-> v0.2 a implementar sobre v0.1.
+> Generado 2026-04-25, post-v0.2.2 ship. v0.2 cycle cerrado completo.
+> Source of truth autoritativo para v0.1+v0.2 frozen se mantiene en
+> `sbtdd/sbtdd-workflow-plugin-spec-base.md` (mega-contrato 2860+
+> lineas); este documento NO lo reemplaza — agrega el delta v1.0.0
+> y, al landing, se incorporan sus decisiones a la base.
 >
 > Archivo cumple INV-27: no contiene los tres marcadores uppercase
-> enumerados en esa invariante (ver `sbtdd/sbtdd-workflow-plugin-spec-base.md`
+> enumerados en esa invariante (ver `sbtdd-workflow-plugin-spec-base.md`
 > sec.S.10 para la lista completa).
 
 ---
 
 ## 1. Objetivo
 
-Entregar **v0.2.0** del plugin `sbtdd-workflow` incorporando tres release blockers locked, derivados de gaps observables durante el desarrollo de v0.1 (Milestones A-E). El alcance v0.2 es deliberadamente minimal y enfocado; todo lo demas (operational items + siete opciones complementarias de spec-drift detection) se difiere a v0.3.
+Entregar **v1.0.0** (graduacion estable del plugin, salida del
+pre-1.0) consolidando cinco release blockers LOCKED derivados de gaps
+empiricos del dogfood v0.2 + items operacionales rolled forward del
+backlog v0.3 (renombrado a v1.0.0 en CHANGELOG forward sections el
+2026-04-25). El alcance v1.0.0 es deliberadamente focused en
+estabilidad operacional + control de costo + meta-review pattern; no
+introduce features de spec/plan ni cambia la semantica del ciclo TDD.
 
-Criterio de exito: el plugin sigue siendo instalable desde `BolivarTech/sbtdd-workflow` (marketplace sin collision, verified v0.1.0 hotfix), todos los tests de v0.1 (597) siguen pasando sin regresion, y los tres blockers nuevos suman cobertura de tests apropiada + acceptance criteria sec.S.12 extendidos para v0.2.
+Criterio de exito: el plugin sigue siendo instalable desde
+`BolivarTech/sbtdd-workflow` (marketplace `bolivartech-sbtdd`); todos
+los tests existentes (735 baseline post-v0.2.2) siguen pasando sin
+regresion; los cinco blockers nuevos suman cobertura de tests
+apropiada + acceptance criteria sec.S.12 extendidos para v1.0.0; y
+el plugin pasa su primer `/sbtdd auto` end-to-end usando la nueva
+config Sonnet+Haiku mix sin overrun de costo Opus-default.
+
+Decision pendiente al inicio del ciclo (refinable durante
+brainstorming): bundle de los 5 items en un solo `/sbtdd auto` cycle,
+o split en sub-ciclos secuenciales (p.ej. v0.3.0 = items operacionales
+1+2; v0.4.0 = MAGI hardening 3+4; v1.0.0 = re-eval 5 + tag estable).
 
 ---
 
-## 2. Alcance v0.2 — tres release blockers LOCKED
+## 2. Alcance v1.0.0 — cinco release blockers LOCKED
 
-### 2.1 Feature A — Interactive MAGI escalation prompt
+### 2.1 Feature D — Auto progress streaming (UX)
 
-**Problema v0.1**: cuando safety valve INV-11 se agota (3 iteraciones MAGI sin clearing el umbral), el plugin escribe artefactos (`.claude/magi-conditions.md`, `.claude/magi-feedback.md`, iter-report.json), emite resumen stderr, y hace exit 8. El usuario tiene que leer archivos y re-invocar manualmente. Durante desarrollo de Milestones A-E, el orquestador-asistente en chat presentaba un prompt de 4 opciones (a/b/c/d) al usuario; esa interaccion era puramente del assistant, NO del plugin.
+**Problema v0.2**: durante `/sbtdd auto` runs multi-hora (Milestone-A
+size, 36+ tasks), el operador no ve progreso intermedio. El subprocess
+`claude -p` del implementer captura stdout/stderr; sin `python -u`
+flushing + per-phase stderr breadcrumbs + actualizaciones live a
+`auto-run.json`, el run "looks hung" durante minutos. Empirico v0.2
+dogfood: tee buffering atrapaba salidas hasta task completion. Operador
+sin senal = aborta prematuramente o asume crash.
 
-**Directiva usuario 2026-04-21**: "quiero que se incorpore esa funcion de preguntar al usuario que hacer en ese caso de la misma forma que tu lo hiciste".
+**Entrega v1.0.0**:
 
-**Entrega v0.2**:
+- `auto_cmd.py` invoca subprocess con `stdout=PIPE, stderr=PIPE,
+  bufsize=1` + read-line loop que reescribe a stderr del orquestador
+  con prefijo `[task-N phase] ` para distinguir fuentes en logs.
+- `python -u` agregado a la invocacion (`["python", "-u",
+  run_sbtdd.py, ...]`) para deshabilitar Python output buffering en
+  el dispatcher mismo.
+- Per-phase stderr breadcrumbs: `auto_cmd` emite `[phase 2/5: task
+  loop -- task 14/36 (red)]` cada vez que avanza la state machine.
+- `auto-run.json` actualizado live (no solo al final): nuevo campo
+  `progress` con `{phase, task_index, task_total, sub_phase}`
+  reescrito con `tmp + os.replace` (atomic) cada transicion.
+- Nuevo subcomando `/sbtdd status --watch` que tail-followea
+  `auto-run.json` en intervalos de 1s y renderiza progress en TTY
+  (humano-friendly) o JSON (machine-friendly). Default = TTY.
 
-- Modulo nuevo `skills/sbtdd/scripts/escalation_prompt.py` con cuatro funciones publicas:
-  - `build_escalation_context(iterations, plan_path, context)` — recolecta historia de iteraciones, per-agent verdicts, findings clasificados por severidad, root-cause inference.
-  - `format_escalation_message(ctx)` — renderiza el template canonical (documentado verbatim en `CLAUDE.md` seccion "v0.2 requirement (LOCKED) — interactive escalation prompt on MAGI exhaustion").
-  - `prompt_user(ctx, options)` — emite mensaje + `input()` TTY-guarded + valida choice + retorna `UserDecision` estructurada.
-  - `apply_decision(decision)` — ejecuta la accion elegida (override, retry, abandon, alternative) + escribe audit artifact.
-- Clasificador de root-cause: infra-transient (mismo agente fallo N iters) / plan-vs-spec gap (CRITICAL findings persisten) / structural defect (STRONG_NO_GO de ≥1 agente) / spec ambiguity (confidence decreciente).
-- Opciones dinamicas: siempre disponibles `(a) override via INV-0 + --reason`, `(d) v0.1 exit-8 behavior`; condicionales `(b) retry iter`, `(c) replan/split`.
-- CLI flag `--override-checkpoint --reason "<text>"` en `finalize_cmd`, `spec_cmd`, `pre_merge_cmd`. `--reason` obligatorio.
-- Audit artifact `.claude/magi-escalations/<timestamp>-<plan_id>.json` con `decision`, `chosen_option`, `reason`, `escalation_context`, `timestamp`, `plan_id`, `magi_context`.
-- Headless fallback: cuando `sys.stdin.isatty()` es False OR `--non-interactive` flag OR invocado dentro de `auto_cmd`, aplica policy de `.claude/magi-auto-policy.json` (`{on_exhausted: "abort" | "override_strong_go_only" | "retry_once"}`, default `abort`).
-- `resume_cmd` detecta `.claude/magi-escalation-pending.md` y continua el prompt si el usuario hizo Ctrl+C.
-- Golden-output unit tests per root-cause class x context (checkpoint2/pre-merge/auto). Fixtures bajo `tests/fixtures/magi-escalations/`.
+**Invariantes obligatorios**:
 
-**Invariantes de diseño obligatorios**:
+- INV-22 sequential preservado — streaming es write-only del
+  dispatcher; no introduce parallelism.
+- Atomic writes a `auto-run.json` (mismo patron que `state_file.save`
+  + `magi-escalation-pending.md` de v0.2.1).
+- Stderr breadcrumbs siempre prefijados con `[sbtdd]` para distinguir
+  de subprocess output.
+- Cross-platform: Windows + POSIX line-buffering identico (test
+  cubre ambos).
 
-- Nunca corre dentro de `auto_cmd` (INV-22 sequential + headless).
-- Cada override produce audit artifact. Ningun override silencioso.
-- Non-TTY safe: EOFError wrap en `input()`. Nunca cuelga.
-- Backward-compatible: si usuario no hace eleccion, default = comportamiento v0.1 (exit 8 + artefactos).
-- `--reason` obligatorio en override — fuerza al desarrollador a articular por que esta overrideando verdict negativo.
-- Idioma: Spanish + English mix matching precedente de sesiones observadas (Plans A-E).
-- Template emite <= 40 lineas.
+### 2.2 Feature E — Per-skill model selection flag (cost)
 
-**Precedente historico**: Milestone D Checkpoint 2 iter 3 DEGRADED → orquestador presento opciones a/b/c/d → usuario respondio `a` → override documentado en commit `5d7bfc4`. v0.2 automatiza esta interaccion.
+**Problema v0.2**: cero `--model` flags en los tres dispatch modules
+(`superpowers_dispatch.py`, `spec_review_dispatch.py`,
+`magi_dispatch.py`). Todo subagent hereda el modelo de la sesion del
+orquestador. Si el operador corre con Opus default, un `/sbtdd auto`
+sobre 36 tasks dispara 36+ implementer dispatches + 36+ spec-reviewer
+dispatches + 5-15 MAGI iterations todos en Opus. Bill domina el
+costo del proyecto.
 
-### 2.2 Feature B — Superpowers spec-reviewer integration per task
+**Entrega v1.0.0**:
 
-**Problema v0.1**: el plugin verifica alineacion codigo-vs-spec solo en dos gates (Checkpoint 2 MAGI pre-codigo + pre-merge Loop 2 MAGI post-codigo) + disciplina TDD durante ejecucion (agente re-lee spec per task, tests nombrados por escenarios BDD). No hay check mecanico per-commit que el diff actual siga satisfaciendo cada escenario en `sbtdd/spec-behavior.md`. Los gaps se descubren solo en pre-merge. Ejemplo de Milestone A: caspar detecto que `detect_drift` omitia Scenario 4 (state=green + HEAD=refactor:) al final del milestone, no durante Task 14/15 close.
+- `plugin.local.md` schema extension: cuatro campos opcionales
+  default `null` (= inherit session, preserva v0.x behavior, fully
+  backward compat):
+  - `implementer_model: claude-sonnet-4-6` (recommended baseline)
+  - `spec_reviewer_model: claude-haiku-4-5` (recommended baseline)
+  - `code_review_model: claude-sonnet-4-6` (recommended baseline)
+  - `magi_dispatch_model: null` (recommended; outer dispatcher es
+    I/O; sub-agentes Melchior/Balthasar/Caspar pickn modelo
+    internamente per MAGI plugin contract).
+- `schema_version: 2` introducido en `plugin.local.md` (nuevo
+  campo, primera vez; bumpa de schema implicit v1 a explicit v2).
+- Wiring: cuando un campo es non-null, dispatch module agrega
+  `--model <id>` al argv. INV-0 honored: si `~/.claude/CLAUDE.md`
+  pina un modelo global, gana sobre `plugin.local.md` y emite
+  stderr breadcrumb explicando cost implication.
+- CLI override: `--model-override <skill>:<model>` en `auto`,
+  `pre-merge`, `close-task`, `review-spec-compliance`. Multi-flag.
+  Skill validation: solo cuatro nombres validos
+  (`implementer|spec_reviewer|code_review|magi_dispatch`).
+- `dependency_check.py` extension: valida que cada model string
+  configurado este en `models.ALLOWED_CLAUDE_MODEL_IDS` tuple
+  (Opus 4.x, Sonnet 4.x, Haiku 4.x families). Unknown ID = warning
+  en `init`, hard fail en runtime.
+- `models.py` agrega `ALLOWED_CLAUDE_MODEL_IDS` immutable tuple,
+  bumped cuando Anthropic shipea family nueva.
 
-**Directiva usuario 2026-04-23**: "para v0.2 solo 8, los demas para 0.3". La opcion 8 es integrar `superpowers:subagent-driven-development/spec-reviewer-prompt.md` como primary per-task drift detector — skill que ya existe en el ecosistema superpowers y captura tres defect classes: missing requirements, extra/unneeded work (over-engineering), misunderstandings. Directiva interna del prompt: "verify by reading code, NOT by trusting report".
+**Invariantes obligatorios**:
 
-**Entrega v0.2**:
+- INV-0 (CLAUDE.md pinned model wins; stderr breadcrumb obligatorio).
+- Default null = byte-identical argv a v0.x. Regression test pina.
+- Schema v2 backward-compat: plugins.local.md sin `schema_version`
+  field tratado como v1 (todos los model fields = null implicit).
+- MAGI sub-agent models NO controlados por v1.0.0 (caveat
+  documentado en CHANGELOG + SKILL.md operational impact).
 
-- Modulo nuevo `skills/sbtdd/scripts/spec_review_dispatch.py` con API publica:
-  - `dispatch_spec_reviewer(task_id, plan_path, repo_root)` -> `SpecReviewResult`.
-  - `SpecReviewResult = @dataclass(frozen=True)` con `approved: bool`, `issues: tuple[SpecIssue, ...]`, `reviewer_iter: int`, `artifact_path: Path`.
-  - Invoca subagent superpowers via subprocess `claude -p /subagent-driven-development/spec-reviewer-prompt.md`, pasa task text + diff de ultimos commits del task.
-- Integracion en `auto_cmd._phase2_task_loop`: despues de que implementer subagent reporta DONE, antes de `close_task_cmd.mark_and_advance`, despachar spec-reviewer. Si retorna `issues`, rutear via `/receiving-code-review` (extension de INV-29 gate), mini-cycle TDD fix per accepted finding, re-dispatch, safety valve 3 iter.
-- `close_task_cmd` gana flag `--skip-spec-review` como escape valve para flows manuales donde usuario ya verifico compliance. Default = invocar reviewer.
-- Nuevo subcomando `/sbtdd review-spec-compliance <task-id>` para flows `executing-plans` + manual. Lee task del plan, recolecta diff, despacha reviewer. Exit 0 en approved, exit 12 (propuesto) en issues.
-- Nueva excepcion `SpecReviewError(SBTDDError)` en `errors.py`, exit code 12 — extiende sec.S.11.1 taxonomy. Document en CHANGELOG BREAKING si codigo nuevo, o mapea a ValidationError (exit 1) si el blocker preferiria no expandir taxonomy.
-- Audit artifact `.claude/spec-reviews/<task-id>-<timestamp>.json` con reviewer output completo + accepted/rejected findings breakdown (similar al patron MAGI verdict artifact).
-- Integracion con `quota_detector`: si `quota_detector.detect(stderr)` fire durante reviewer dispatch, lanza `QuotaExhaustedError` (exit 11) + persiste estado para resume — mismo patron que MAGI dispatcher.
-- `StubSpecReviewer` en `tests/fixtures/skill_stubs.py` con knobs `approved: bool` + `issues: list[str]`, mirroring `StubMAGI` patron.
-- Propuesta de extension al invariant set: **INV-31** — "Every task close in `auto_cmd` and `close_task_cmd` (interactive) MUST pass spec-reviewer approval before `mark_and_advance` advances state, unless `--skip-spec-review` flag set (manual workflows) or stub fixture injected (tests)." Documentar en spec-base sec.S.10 + CLAUDE.md invariants summary.
+**Cost-impact projection**: 36-task auto run con Sonnet+Haiku mix vs
+default-Opus session = ~70-80% reduccion total, preservando Opus solo
+en MAGI Loop 2 iterations donde multi-perspective consensus value
+es maximo.
 
-**Invariantes de diseño obligatorios**:
+### 2.3 Feature F — MAGI dispatch hardening + retried_agents telemetry
 
-- Reviewer opera sobre task diff + task text (NO full spec) — mantiene cost bounded, prompt size ~1-5 KB por call.
-- Issues rutean via `/receiving-code-review` — extiende INV-29 gate a spec-review findings (no solo MAGI findings).
-- Non-TTY safe: es `claude -p` subprocess call, funciona headless (`auto_cmd`); no requiere interaccion de usuario a nivel reviewer.
-- Audit artifact per invocation: cada reviewer run escribe a `.claude/spec-reviews/` para post-mortem + provenance.
-- Safety valve per task: max 3 reviewer iters; exhaustion lanza `SpecReviewError` y bloquea `mark_and_advance` con error claro.
-- Quota-aware: quota_detector integrado.
-- Backward-compat: `--skip-spec-review` + stub injection paths mantienen ejecucion estilo Milestones A-E posible; default cambia a invocar.
+**Problema v0.2**: `magi_dispatch.py` localiza el output de MAGI
+buscando un archivo en una ruta esperada bajo `--output-dir`. Si MAGI
+cambia el layout (v2.2.x ya lo hizo parcialmente — observado en plan
+F del v0.2 cycle), la deteccion rompe. Adicionalmente, MAGI 2.2.1+
+introduce un nuevo campo `retried_agents` en su verdict JSON que el
+parser de SBTDD ignora silently.
 
-**Mitigacion de costo**: para un plan de 36 tasks (Milestone A size) eso suma 36 `claude -p` calls extra. El reviewer opera sobre task diff + task text (~1-5 KB), no full spec, manteniendo envelope aceptable. Observabilidad: audit artifacts permiten medir cost real vs beneficio post-v0.2 field usage.
+**Entrega v1.0.0**:
 
-### 2.3 Feature C — MAGI version-agnostic parity tests
+- `magi_dispatch.py` cambia de path-based discovery a
+  marker-based discovery: cada invocacion MAGI escribe un
+  `MAGI_VERDICT_MARKER.json` en un directorio conocido; SBTDD
+  enumera markers despues del subprocess return y picks el mas
+  reciente by mtime. Defensivo contra cambios de layout interno
+  de MAGI.
+- Parser extension: `MAGIVerdict` dataclass gana campo
+  `retried_agents: tuple[str, ...]`. Parser tolera ausencia (MAGI
+  < 2.2.1) defaulting a `()`. Fed back to user output via
+  `auto-run.json` + escalation_prompt context.
+- Backward compat: SBTDD funciona con MAGI 2.1.x+ y 2.2.x+ sin
+  bumps de version requirement; retried_agents simplemente vacio
+  en versiones viejas.
 
-**Problema v0.1**: `tests/test_distribution_coherence.py` hardcodea path a MAGI cache en version `2.1.3`:
+**Invariantes obligatorios**:
 
-```python
-Path.home() / ".claude" / "plugins" / "cache" / "bolivartech-plugins" / "magi" / "2.1.3"
-```
+- INV-28 (degraded MAGI no-exit) + INV-29 (receiving-code-review
+  gate) preservados sin cambio.
+- Tests parity: MAGI 2.1.x golden output + MAGI 2.2.x+ golden output
+  (con + sin retried_agents field) ambos pasan.
+- Marker file format: JSON con `verdict`, `iteration`, `agents`,
+  `retried_agents`, `timestamp`. Schema fixed in `models.py`.
 
-MAGI shipeo v2.1.4 el 2026-04-23 (patch bump, zero schema change verified: solo cambia `"version"` string en `plugin.json`; `marketplace.json` byte-identical).
+### 2.4 Feature G — MAGI -> /requesting-code-review cross-check (PRIORITY)
 
-**Directiva usuario 2026-04-23**: "actualiza MAGI de una vez en v0.2". Resolucion: en lugar de bumpear hardcoded pin de `2.1.3` a `2.1.4` (repitiendo esto para cada patch futuro), v0.2 hace el pin version-agnostic, resolviendo la version mas alta cacheada.
+**Problema v0.2**: MAGI Loop 2 a veces emite findings CRITICAL que
+son falsos positivos (interpretacion erronea de la spec, asuncion
+incorrecta sobre el plan, contexto faltante). El user los validado
+empiricamente en proyectos adyacentes corriendo
+`/requesting-code-review` AFTER MAGI sobre el mismo diff + el output
+MAGI como contexto: el code-reviewer cataches false-positive
+CRITICALs y los downgradea a INFO/WARNING o los rechaza directo.
+Pattern: MAGI primero (breadth, 3 perspectivas),
+`/requesting-code-review` segundo (depth meta-review).
 
-**Entrega v0.2**:
+**Entrega v1.0.0**:
 
-- Rewrite `_resolve_magi_plugin_json()` en `tests/test_distribution_coherence.py`:
-  - Enumera subdirs bajo `~/.claude/plugins/cache/bolivartech-plugins/magi/`.
-  - Ordena por semver key `(major, minor, patch)` tupla, picks max.
-  - Retorna path al `plugin.json` de la version mas alta.
-  - Graceful fallback: si `cache_base` no existe o dir vacio, retorna non-existent path (triggers existing `@pytest.mark.skipif` gate).
-- Helper `_semver_key(v: str) -> tuple[int, ...]`: convierte `"2.1.4"` a `(2, 1, 4)`; segmentos no-numericos ordenan last (`-1`).
-- Env var `MAGI_PLUGIN_ROOT` preservado como override para CI o ambientes sin cache — unchanged de v0.1.
-- Nuevo test `test_semver_key_handles_mixed_version_strings` validando tie-break + non-numeric segment handling.
-- Tests parity existentes (required-keys subset + `repository` field-form) continuan sin cambios — ya usan subset checks (Plan E iter-2 fix) asi que toleran MAGI agregando optional fields en el futuro.
-- Opcional: emite stderr warning si multiple versions MAGI cacheadas simultaneamente (detecta dev machines con cache stale); no fallar — Claude Code cache cleanup esta out-of-scope.
+- `pre_merge_cmd.py` Loop 2 nueva sub-fase: despues de MAGI emit
+  verdict, antes de aplicar findings via `/receiving-code-review`,
+  invoke `/requesting-code-review` pasando el diff + MAGI verdict
+  como contexto, instruyendo: "evalua si los findings MAGI son
+  technically sound o false positives". Output del cross-check
+  reduce/expand el set de findings a aplicar.
+- INV-29 ahora tiene tres-stage pipeline: MAGI emite findings ->
+  cross-check via `/requesting-code-review` (filtra) ->
+  `/receiving-code-review` evalua tecnico -> mini-cycle TDD aplica
+  los aprobados.
+- `auto_cmd._phase4_pre_merge_loop2` adopta el mismo pipeline.
+- Audit artifact: `.claude/magi-cross-check/<iter>-<timestamp>.json`
+  con set original de MAGI findings + decisions del cross-check
+  (kept/downgraded/rejected) + reason por cada decision.
+- Default behavior: cross-check ON. Opt-out via
+  `magi_cross_check: false` en `plugin.local.md` (nueva field).
 
-**Invariantes de diseño obligatorios**:
+**Invariantes obligatorios**:
 
-- Auto-resolver skip grazefully cuando `cache_base` no existe (CI sin MAGI instalado).
-- Semver ordering solo — no alpha/beta suffix handling en v0.2 (MAGI usa `major.minor.patch` limpio). Documentar supuesto en CHANGELOG.
-- No runtime mutation de MAGI cache — resolver es read-only reflection sobre filesystem state.
-- Backward compat: `MAGI_PLUGIN_ROOT` env var override preservado exactly, CI pipelines unaffected.
+- Nueva propuesta INV-32: "Loop 2 MAGI findings DEBEN pasar por
+  cross-check via `/requesting-code-review` antes de routear via
+  INV-29 gate, salvo que `magi_cross_check: false` este set."
+- Cross-check no afecta el verdict del Loop 2 (que sigue siendo
+  consenso MAGI con threshold y degraded handling). Solo afecta el
+  set de findings a aplicar.
+- Adicional iteration count del cross-check no consume safety valve
+  INV-11 (es meta-review, no una iteracion del Loop 2 mismo).
+
+### 2.5 Feature H — Group B spec-drift re-eval + INV-31 default-on opt-in re-eval
+
+**Problema v0.2**: siete opciones de spec-drift detection (Group B
+options 1-7) deferred a v1.0.0 cuando v0.2 se enfoco en option 8
+(spec-reviewer integration via Feature B). Field data de v0.2/v0.2.1/
+v0.2.2 no esta complete pero sugiere que option 8 cubre la mayoria
+de drift cases per-task. Decision deferida: que subset de options 1-7
+se requiere vs opt-in?
+
+Adicionalmente, INV-31 default-on (spec-reviewer per task) introduce
+overhead 1-3 `claude -p` calls por task close. Combined con Feature E
+(model flag), el overhead se reduce significativamente, pero la
+decision strategic queda: el default sigue siendo on, o flips a
+opt-in (requiere `--enable-spec-review` per command)?
+
+**Entrega v1.0.0**:
+
+- Field data summary en `docs/v1.0.0-field-data.md` (post-v0.2 dogfood
+  observations: how many spec-reviewer rejections were true-positive,
+  how many were noise, cumulative cost overhead, etc.).
+- Decision document en `docs/v1.0.0-spec-drift-decision.md` evaluando
+  cada Group B option contra field data, con recommendations:
+  - Option (1) `scenario_coverage_check.py` mechanical regex pre-filter
+    -- implementar como pre-filter de Feature B (skip reviewer si task
+    no toca scenarios) si field data muestra >30% noise.
+  - Option (2) Spec-snapshot diff check -- implementar (LOCKED for
+    v1.0.0 regardless of field data; cubre risk class option 8
+    cannot).
+  - Option (5) Auto-generated scenario stubs -- implementar (strong
+    candidate per v0.3 backlog).
+  - Options (3), (4), (6), (7) -- opt-in via flags, no shipped default.
+- INV-31 default decision: based on field data, one of:
+  - **Option A** (preserve default-on): keep current; `--skip-spec-review`
+    remains escape valve. Justified si reviewer catches >X true-positive
+    drifts per Y tasks.
+  - **Option B** (flip to opt-in): rename flag to `--enable-spec-review`
+    on `close-task`/`auto`; default skip. Justified si overhead >>
+    benefit empiricamente.
+  - **Option C** (config-driven): new field `spec_review_default` en
+    `plugin.local.md` con `on|off|auto-detect-by-stack`.
+- Implementaciones concretas: opciones (2) + (5) shipped; otras
+  documentadas como opt-in flags adicionales (no shipped en v1.0.0).
+- INV-31 decision adoptada en SKILL.md operational impact + README
+  matrix.
+
+**Invariantes obligatorios**:
+
+- Cualquier flip de default INV-31 = BREAKING bump (v1.0.0 absorbe
+  multiple BREAKINGs por la graduacion stable).
+- Group B options shipped (option 2 spec-snapshot + option 5 auto-gen
+  stubs) preservan INV-29 gate sin cambio.
 
 ---
 
 ## 3. Restricciones y constraints duros
 
-Todos los invariantes INV-0 a INV-30 del contrato `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 aplican. Critical durante implementacion v0.2:
+Todos los invariantes INV-0 a INV-31 del contrato preservados. v1.0.0
+introduce propuestas:
 
-- **INV-0 (autoridad maxima)**: `~/.claude/CLAUDE.md` siempre prevalece. Feature A override commands respetan esto — INV-0 es el rationale del escape valve.
-- **INV-2 (no-mezcla fases)**: los mini-cycles de Feature B spec-reviewer mantienen atomicidad per-commit.
-- **INV-11 (safety valves)**: Feature B reviewer loop respeta 3-iter cap. Feature A se dispara cuando safety valve se agota, no lo extiende.
-- **INV-22 (sequential only)**: Feature A nunca corre dentro de `auto_cmd`.
-- **INV-23 (TDD-Guard inviolable)**: Feature B reviewer no toggea TDD-Guard.
-- **INV-26 (audit trail)**: Features A + B ambas producen audit artifacts en `.claude/`.
-- **INV-27 (spec-base no placeholders)**: este documento cumple. v0.2 scope no introduce nuevos placeholders.
-- **INV-28 (MAGI degraded)**: Feature A dispara en degraded verdicts per INV-28.
-- **INV-29 (/receiving-code-review gate)**: Feature B extiende INV-29 a spec-review findings, no solo MAGI.
-- **INV-30 (resumibilidad)**: Feature A resume_cmd integration cubre Ctrl+C mid-prompt.
+- **INV-32 (propuesta)**: MAGI cross-check via `/requesting-code-review`
+  obligatorio antes de INV-29 gate (Feature G), salvo opt-out explicit.
+- **INV-31 contract evolution** (preserva o flippea segun decision
+  Feature H).
 
-Nuevo invariante propuesto:
+Critical durante implementacion v1.0.0:
 
-- **INV-31 (spec-reviewer gate)**: cada task close en `auto_cmd` y `close_task_cmd` (interactive) DEBE pasar spec-reviewer approval antes de `mark_and_advance` advance state, excepto cuando `--skip-spec-review` flag set o stub fixture injected.
+- INV-0 (autoridad maxima `~/.claude/CLAUDE.md`) + Feature E model
+  flag interaction: pinned model en CLAUDE.md gana siempre.
+- INV-22 (sequential auto) + Feature D streaming: streaming es
+  write-only, no introduce parallelism.
+- INV-26 (audit trail) + Features D, E, G: nuevos artifacts en
+  `.claude/auto-run.json` (live), `.claude/magi-cross-check/<...>.json`.
+- INV-27 (spec-base placeholder): este documento cumple.
+- INV-28, INV-29: preservados sin cambio.
 
 ### Stack y runtime
 
-Sin cambios vs v0.1:
+Sin cambios vs v0.2:
 
-- Python 3.9+ estricto, `mypy --strict` sin warnings, cross-platform (Windows/Linux/macOS), stdlib-only en hot paths.
-- Dependencias externas obligatorias identicas (git, tdd-guard, superpowers plugin, magi plugin, claude CLI).
+- Python 3.9+, mypy --strict, cross-platform, stdlib-only en hot paths.
+- Dependencias externas: git, tdd-guard, superpowers, magi (>= 2.1.3
+  per backward compat de Feature F), claude CLI.
 - Dependencias dev: pytest, pytest-asyncio, ruff, mypy, pyyaml.
-- Licencia dual: MIT OR Apache-2.0.
+- Licencia dual MIT OR Apache-2.0.
 
 ### Arquitectura obligatoria
 
-Preservada de v0.1. v0.2 agrega:
+v0.2 architecture preserved. v1.0.0 changes:
 
-- Un modulo nuevo por Feature A (`escalation_prompt.py`) + por Feature B (`spec_review_dispatch.py`).
-- Zero modificacion a modulos frozen de v0.1 excepto:
-  - `errors.py`: agregar `SpecReviewError` subclass + entry en `EXIT_CODES` (si se adopta exit 12).
-  - `auto_cmd.py`: extender `_phase2_task_loop` con spec-reviewer dispatch.
-  - `close_task_cmd.py`: agregar `--skip-spec-review` flag handling.
-  - `spec_cmd.py`, `pre_merge_cmd.py`, `finalize_cmd.py`: extender con `--override-checkpoint --reason` CLI flag + integration con escalation_prompt.
-  - `resume_cmd.py`: detectar `.claude/magi-escalation-pending.md` + integrar.
-  - `run_sbtdd.py`: registrar nueva subcomando `review-spec-compliance`.
-  - `tests/fixtures/skill_stubs.py`: agregar `StubSpecReviewer`.
-  - `tests/test_distribution_coherence.py`: rewrite `_resolve_magi_plugin_json()` + nuevo test `_semver_key`.
+- `auto_cmd.py`: extender phase loop con streaming (Feature D).
+- `superpowers_dispatch.py`, `spec_review_dispatch.py`,
+  `magi_dispatch.py`: agregar `--model` argv passing (Feature E).
+- `magi_dispatch.py`: marker-based discovery rewrite + retried_agents
+  field (Feature F).
+- `pre_merge_cmd.py`, `auto_cmd.py`: Loop 2 cross-check sub-fase
+  (Feature G).
+- `models.py`: agregar `ALLOWED_CLAUDE_MODEL_IDS`, marker schema.
+- `config.py`: parsear cuatro nuevos campos plugin.local.md +
+  `schema_version` + `magi_cross_check`.
+- `dependency_check.py`: validacion de model IDs.
+- `templates/plugin.local.md.template`: agregar campos nuevos con
+  recommended baseline (Sonnet+Haiku mix).
+- Nuevo modulo: `scripts/scenario_coverage_check.py` (Group B
+  option 1 mechanical pre-filter -- only if field data justifies).
+- Nuevo modulo: `scripts/spec_snapshot.py` (Group B option 2 spec
+  diff check, LOCKED).
+- Extension a `/writing-plans` invocation: auto-generate scenario
+  stubs (Group B option 5, LOCKED).
 
 ### Exit code taxonomy
 
-Preservada de v0.1 (sec.S.11.1). v0.2 propone extension:
+Preservada de v0.2. v1.0.0 propone:
 
-- **Exit 12**: `SPEC_REVIEW_ISSUES` (SpecReviewError). Se adopta solo si SpecReviewError se introduce como nueva exception; alternativa es mapear via ValidationError (exit 1). Decision del planner durante writing-plans.
-
-### Reglas duras no-eludibles (sin `--force` ni override)
-
-Todas las v0.1 se preservan:
-
-- INV-0 autoridad global.
-- INV-27 spec-base sin los tres marcadores uppercase que el regex del plugin rechaza (lista en sec.S.10 del contrato autoritativo).
-- INV-28 MAGI degraded no-salida.
-- INV-29 /receiving-code-review gate.
-- Commits en ingles + sin Co-Authored-By + sin IA refs.
-- No force push a ramas compartidas (INV-13).
-- No commitear archivos con patrones de secretos (INV-14).
-
-Nuevo (v0.2):
-
-- INV-31 (propuesto): spec-reviewer gate en task close.
+- **Exit 13**: `MODEL_VALIDATION_FAILED` (Feature E
+  `dependency_check` rejects unknown model ID en runtime). Adopt si
+  el equipo decide expandir taxonomy; alternativa = ValidationError
+  exit 1.
 
 ---
 
 ## 4. Funcionalidad requerida (SDD)
 
-Requerimientos funcionales v0.2 (F serie continuando desde v0.1 sec.S.12.1):
+Continua F-series desde v0.2 (F27 fue el ultimo). v1.0.0:
 
-**F15**. `escalation_prompt.build_escalation_context(iterations, plan_path, context)` acepta lista de `MAGIVerdict`s + path del plan + contexto (literal `"checkpoint2"` | `"pre-merge"` | `"auto"`) y retorna `EscalationContext` inmutable con iter history + per-agent verdicts + severity-classified findings + root-cause inference classification.
+**F28**. `auto_cmd._stream_subprocess(proc)` lee stdout/stderr line-by-line
+y reescribe con prefijo `[sbtdd task-N phase] `. `bufsize=1`,
+`subprocess.PIPE`, `python -u` en el invocation argv.
 
-**F16**. `escalation_prompt.format_escalation_message(ctx)` renderiza el template canonical documentado en CLAUDE.md seccion "v0.2 requirement (LOCKED) — interactive escalation prompt on MAGI exhaustion", usando datos runtime. Output es string <=40 lineas. Incluye root-cause hint, per-agent verdict lines, severity-classified findings, 4 opciones dinamicas, y prompt question "Cual?".
+**F29**. `auto_cmd._update_progress(phase, task_idx, task_total, sub_phase)`
+reescribe `auto-run.json` `progress` field via tmp + `os.replace`.
 
-**F17**. `escalation_prompt.prompt_user(ctx, options)` emite mensaje formatted + `input()` TTY-guarded + valida choice contra `options` (letra de `a` a `d`, case-insensitive) + retorna `UserDecision` estructurada. Si `sys.stdin.isatty()` False o `--non-interactive` flag set, aplica headless policy de `.claude/magi-auto-policy.json` (default `abort`).
+**F30**. `status_cmd --watch` poll loop sobre `auto-run.json` mtime con
+intervalo 1s, render TTY o JSON.
 
-**F18**. `escalation_prompt.apply_decision(decision)` ejecuta accion correspondiente: override (extiende flow, marca audit), retry (extiende safety valve +1, marca audit), abandon (exit 8 + artefactos), alternative (path context-specific: replan, split, abandon). En todos los casos escribe audit artifact `.claude/magi-escalations/<timestamp>-<plan_id>.json`.
+**F31**. `config.PluginConfig` gana cuatro campos opcionales (`Optional[str]`
+default None): `implementer_model`, `spec_reviewer_model`,
+`code_review_model`, `magi_dispatch_model`. + `schema_version: int = 1`.
++ `magi_cross_check: bool = True`.
 
-**F19**. Feature A integra en `spec_cmd`, `pre_merge_cmd`, `resume_cmd` via `_handle_safety_valve_exhaustion(ctx)` helper. `finalize_cmd` gana `--override-checkpoint --reason "<text>"` CLI flag con reason mandatory.
+**F32**. `superpowers_dispatch.dispatch_skill(skill_name, args, model=None)`
+agrega `--model` al argv si `model is not None`. INV-0 check: si
+`~/.claude/CLAUDE.md` pinned model detected, ignore `model` arg + emit
+breadcrumb.
 
-**F20**. `spec_review_dispatch.dispatch_spec_reviewer(task_id, plan_path, repo_root)` despacha subagent superpowers via subprocess `claude -p /subagent-driven-development/spec-reviewer-prompt.md`. Input = task text extraido del plan + diff de ultimos commits del task. Timeout 900s (configurable). Quota-detector integrado. Retorna `SpecReviewResult` (`approved: bool`, `issues: tuple[SpecIssue, ...]`, `reviewer_iter: int`, `artifact_path: Path`).
+**F33**. Mismo pattern para `spec_review_dispatch.dispatch_spec_reviewer`
+(consume `code_review_model` + `spec_reviewer_model`) y
+`magi_dispatch.dispatch_magi` (consume `magi_dispatch_model`).
 
-**F21**. Feature B integra en `auto_cmd._phase2_task_loop` post-implementer / pre-`mark_and_advance`. Si `approved`, continua. Si `issues`, rutea via `/receiving-code-review` (acepta/rechaza findings), mini-cycle TDD fix per accepted, re-dispatch reviewer, safety valve 3 iter. Exhaustion lanza `SpecReviewError` (exit 12 propuesto, o exit 1 via ValidationError mapping).
+**F34**. CLI flag `--model-override <skill>:<model>` parser + validation
+en `auto_cmd`, `pre_merge_cmd`, `close_task_cmd`,
+`review_spec_compliance_cmd`. Multi-flag accumulator. Skill name
+validation contra cuatro nombres canonicos.
 
-**F22**. `close_task_cmd` gana flag `--skip-spec-review` (default False). Cuando True, skip reviewer dispatch.
+**F35**. `dependency_check.check_model_ids(config)` valida que cada
+non-null model field este en `models.ALLOWED_CLAUDE_MODEL_IDS`.
 
-**F23**. Nuevo subcomando `/sbtdd review-spec-compliance <task-id>` para `executing-plans` + manual flows. Implementado en `review_spec_compliance_cmd.py` modulo nuevo O extension de `close_task_cmd.py`. Wired en `run_sbtdd.py` dispatch.
+**F36**. `magi_dispatch._discover_verdict_marker(output_dir)`
+enumera `MAGI_VERDICT_MARKER.json` files, picks max mtime. Replace
+path-based discovery.
 
-**F24**. `_resolve_magi_plugin_json()` en `tests/test_distribution_coherence.py` enumera MAGI cache versions, ordena por semver, retorna path a latest. `_semver_key(v)` helper tuple order.
+**F37**. `MAGIVerdict.retried_agents: tuple[str, ...]` field. Parser
+tolera ausencia.
 
-**F25**. `MAGI_PLUGIN_ROOT` env var override preservado identico a v0.1.
+**F38**. `pre_merge_cmd._loop2_cross_check(diff, magi_verdict)` invoke
+`/requesting-code-review` con prompt instructivo de meta-review.
+Output = filtered findings set. Audit artifact escrito.
 
-**F26**. `StubSpecReviewer` en `tests/fixtures/skill_stubs.py` con knobs `approved: bool` + `issues: list[str]` + `iter_count: int`. Mirroring `StubMAGI` patron.
+**F39**. `auto_cmd._phase4_pre_merge_loop2` adopta cross-check.
 
-**F27**. Audit artifacts v0.2:
-- `.claude/magi-escalations/<timestamp>-<plan_id>.json` (Feature A).
-- `.claude/spec-reviews/<task-id>-<timestamp>.json` (Feature B).
-- `.claude/magi-auto-policy.json` (optional, usuario configura; default `abort`).
-- `.claude/magi-escalation-pending.md` (effimero, para Ctrl+C recovery).
+**F40**. `scenario_coverage_check.py` (condicional, solo si Feature H
+field data justifica).
+
+**F41**. `spec_snapshot.py` + `pre_merge_cmd` integration (LOCKED Group B
+option 2).
+
+**F42**. `/writing-plans` invocation extiende prompt para auto-generate
+scenario stubs per task (LOCKED Group B option 5).
 
 ### Requerimientos no-funcionales (NF)
 
-**NF8**. `make verify` continua limpio (pytest + ruff check + ruff format + mypy --strict). Runtime <=60s budget del Milestone D preservado.
+**NF13**. Streaming subprocess output adds < 5% wall-time overhead
+en autos benchmark (medible via `tests/test_auto_cmd_streaming.py`).
 
-**NF9**. Features A + B cruzan plataforma Windows/Linux/macOS. TTY detection via `sys.stdin.isatty()`. EOFError handling en `input()` pattern match con `resume_cmd` existing.
+**NF14**. Cross-platform: streaming buffer/line endings funciona
+identicamente Windows + POSIX.
 
-**NF10**. Registros fijos nuevos (si aplica): `AutoPolicy` literal set `{"abort", "override_strong_go_only", "retry_once"}` como `tuple[str, ...]`.
-
-**NF11**. Subprocess calls en `spec_review_dispatch` usan `subprocess_utils.run_with_timeout` per NF5 de v0.1. `shell=False`. Quota-detector integrado.
-
-**NF12**. Nuevos `.py` files con header `# Author: Julian Bolivar / # Version: 1.0.0 / # Date: YYYY-MM-DD` per sec.S.8.1.
+**NF15**. `make verify` runtime <= 90s budget (era 60s en v0.2;
+v1.0.0 absorbe regression de tests adicionales).
 
 ---
 
 ## 5. Scope exclusions
 
-Explicitamente out-of-scope para v0.2 (ALL deferred a v0.3):
+Out-of-scope para v1.0.0:
 
-**Operational / infra** (originalmente en v0.2 backlog, movidos por directiva 2026-04-23):
-
-- GitHub Actions CI workflow (habilita tests-passing badge).
-- `schema_version` field en `plugin.local.md` (sec.S.13 item 5).
-- GoogleTest / Catch2 / bazel / meson adapters para C++ stack (sec.S.13 item 7).
-- `marketplace.json` `$schema` URL post-push verification.
-
-**Complementary spec-drift detection options** (siete opciones evaluadas alongside Feature B pero deferred):
-
-- **(1)** `scenario_coverage_check.py` mechanical regex pre-filter.
-- **(2)** Spec-snapshot diff check (proposed LOCKED para v0.3 regardless).
-- **(3)** Inverted traceability matrix (`Scenario coverage:` line per task).
-- **(4)** Per-phase MAGI-lite (3-perspective analysis).
-- **(5)** Auto-generated scenario stubs desde `/writing-plans` (strong candidate LOCK para v0.3).
-- **(6)** Watermark comments + lint rule.
-- **(7)** Bespoke LLM drift detector.
-
-Full rationale + decision matrix en local `CLAUDE.md` seccion "v0.3 backlog — complementary spec-drift detection options".
+- GitHub Actions CI workflow (deferred to v1.1).
+- C++ stack adapters adicionales (Catch2, GoogleTest) -- solo ctest
+  preserved (deferred to v1.1).
+- Marketplace `$schema` URL post-push verification (deferred to v1.1).
+- MAGI sub-agent model control (out of SBTDD scope; MAGI plugin
+  responsability).
+- Streaming UI / TUI dashboard (CLI status --watch suficiente para
+  v1.0.0; dashboard deferred to v1.1+).
 
 ---
 
 ## 6. Criterios de aceptacion finales
 
-v0.2.0 se considera shipeable cuando los siguientes items sec.S.12 se cumplen:
+### 6.1 Functional (Feature D -- auto streaming)
 
-### 6.1 Functional (Feature A — escalation prompt)
+- **D1**. `auto_cmd` subprocess invocation usa `python -u` + line buffering.
+- **D2**. Stderr breadcrumbs prefijados `[sbtdd task-N phase]` cada
+  state transition.
+- **D3**. `auto-run.json progress` field reescrito atomicamente cada
+  transition.
+- **D4**. `/sbtdd status --watch` funcional TTY + JSON.
+- **D5**. NF13 cumplido (< 5% overhead).
 
-- **A1**. `escalation_prompt.py` modulo presente con 4 funciones publicas documentadas (`build_escalation_context`, `format_escalation_message`, `prompt_user`, `apply_decision`).
-- **A2**. Template canonical render byte-for-byte matching el ejemplo verbatim de CLAUDE.md (Plan D Checkpoint 2 iter 3 escalation).
-- **A3**. 4 opciones context-aware (a/b/c/d) composed dinamicamente del root-cause classification.
-- **A4**. `--override-checkpoint --reason "<text>"` CLI flag implementado en `finalize_cmd`, `spec_cmd`, `pre_merge_cmd`. Reason mandatory.
-- **A5**. Audit artifact `.claude/magi-escalations/<timestamp>-<plan_id>.json` emitido en cada override o headless fallback.
-- **A6**. `resume_cmd` detecta `.claude/magi-escalation-pending.md` y continua prompt.
-- **A7**. Non-TTY / CI contextos usan `.claude/magi-auto-policy.json` o default `abort`; nunca cuelgan.
-- **A8**. Feature A nunca ejecuta dentro de `auto_cmd` (verified by test).
-- **A9**. Golden-output unit tests per root-cause class x context pasan.
+### 6.2 Functional (Feature E -- model flag)
 
-### 6.2 Functional (Feature B — spec-reviewer integration)
+- **E1**. Cuatro campos optional en `plugin.local.md` parseados.
+- **E2**. CLI `--model-override` funcional con multi-flag + validation.
+- **E3**. INV-0 precedence enforced + stderr breadcrumb.
+- **E4**. `dependency_check` valida model IDs.
+- **E5**. Default null = byte-identical argv a v0.x (regression test).
+- **E6**. `schema_version: 2` documentado.
 
-- **B1**. `spec_review_dispatch.py` modulo presente con `dispatch_spec_reviewer` + `SpecReviewResult` dataclass.
-- **B2**. Integracion con `auto_cmd._phase2_task_loop`: reviewer despachado post-implementer, pre-`mark_and_advance`.
-- **B3**. `close_task_cmd --skip-spec-review` flag funcional.
-- **B4**. Subcomando `/sbtdd review-spec-compliance <task-id>` dispatched correctamente por `run_sbtdd.py`.
-- **B5**. Audit artifact `.claude/spec-reviews/<task-id>-<timestamp>.json` emitido en cada reviewer run.
-- **B6**. Issues rutean via `/receiving-code-review` (extension INV-29).
-- **B7**. Safety valve 3 iter; exhaustion lanza `SpecReviewError` (o mapped exit code).
-- **B8**. Quota-detector integrado (exit 11 en quota).
-- **B9**. `StubSpecReviewer` en `skill_stubs.py`.
-- **B10**. INV-31 documentado (si adoptado) en CLAUDE.md + spec-base extension.
+### 6.3 Functional (Feature F -- MAGI hardening)
 
-### 6.3 Functional (Feature C — MAGI auto-resolver)
+- **F1**. Marker-based discovery reemplaza path-based.
+- **F2**. `retried_agents` parsed + propagado a `auto-run.json` + escalation.
+- **F3**. Backward-compat MAGI 2.1.x + 2.2.x+ tests pasan.
 
-- **C1**. `_resolve_magi_plugin_json()` enumera cache versions + picks latest semver.
-- **C2**. `_semver_key()` helper con test coverage para mixed version strings.
-- **C3**. Env var `MAGI_PLUGIN_ROOT` override preservado.
-- **C4**. Skipif graceful cuando cache vacio o no existe.
-- **C5**. Tests existentes de parity (required-keys subset + `repository` field-form) continuan passing sin cambios.
+### 6.4 Functional (Feature G -- cross-check)
 
-### 6.4 No-functional
+- **G1**. Loop 2 cross-check sub-fase implementada.
+- **G2**. Audit artifact `.claude/magi-cross-check/...` escrito.
+- **G3**. INV-32 (propuesta) documentado + adoptado o rejected.
+- **G4**. Default `magi_cross_check: true`; opt-out via plugin.local.md.
 
-- **NF-A**. `make verify` clean: pytest + ruff check + ruff format + mypy --strict, todos verdes, runtime <=60s.
-- **NF-B**. Tests totales v0.2 >= 597 baseline + nuevos tests (proyeccion 40-80 extras).
-- **NF-C**. Cross-platform: TTY detection + subprocess wrapping funciona en Windows + POSIX.
-- **NF-D**. Nuevos `.py` files con header Author/Version/Date.
-- **NF-E**. Zero modificacion a modulos frozen de v0.1 excepto los enumerados explicitamente en seccion 3 "Arquitectura obligatoria".
+### 6.5 Functional (Feature H -- re-eval)
 
-### 6.5 Process
+- **H1**. Field data documento escrito.
+- **H2**. INV-31 default decision adoptada (one of: preserve / flip /
+  config-driven).
+- **H3**. Group B options (2) + (5) implementadas; (1), (3), (4),
+  (6), (7) opt-in flags or rejected with rationale.
 
-- **P1**. MAGI Checkpoint 2 del plan v0.2 retorna verdict >= `GO_WITH_CAVEATS` full (no degraded) per INV-28. Iter budget 3 + INV-0 override precedent disponible para degraded-only contexts.
-- **P2**. Pre-merge Loop 1 clean-to-go + Loop 2 MAGI verdict >= `GO_WITH_CAVEATS` full.
-- **P3**. CHANGELOG.md Unreleased section updated con entries Added/Changed/BREAKING per Features A/B/C.
-- **P4**. Version bump: `plugin.json` + `marketplace.json` 0.1.0 -> 0.2.0, synced.
-- **P5**. Tag `v0.2.0` creado + pushed (user-driven, per INV-0 commit authorization rules).
+### 6.6 No-functional
 
-### 6.6 Distribution (sec.S.12.5 extended)
+- **NF-A**. `make verify` clean: pytest + ruff check + ruff format
+  + mypy --strict, runtime <= 90s.
+- **NF-B**. Tests totales >= 735 baseline + nuevos (proyeccion 80-150
+  extras).
+- **NF-C**. Cross-platform.
+- **NF-D**. Author/Version/Date headers en nuevos `.py` files.
+- **NF-E**. Zero modificacion a modulos frozen excepto los enumerados
+  explicitamente.
 
-- **D1**. Plugin instalable via `/plugin marketplace add BolivarTech/sbtdd-workflow` + `/plugin install sbtdd-workflow@bolivartech-sbtdd` (marketplace rename de v0.1.0 hotfix preservado).
-- **D2**. Tests de cross-artifact coherence (SKILL.md + README + CHANGELOG + manifests) actualizados para version 0.2.0.
-- **D3**. Nuevos subcomandos y flags documentados en README.md + SKILL.md + CLAUDE.md.
+### 6.7 Process
+
+- **P1**. MAGI Checkpoint 2 verdict >= `GO_WITH_CAVEATS` full per
+  INV-28. Iter budget 3 + INV-0 override available.
+- **P2**. Pre-merge Loop 1 clean-to-go + Loop 2 MAGI verdict >=
+  `GO_WITH_CAVEATS` full. Cross-check (Feature G) self-validates
+  durante el ciclo.
+- **P3**. CHANGELOG.md `[1.0.0]` entry con BREAKING / Added / Changed.
+- **P4**. Version bump 0.2.2 -> 1.0.0 sync `plugin.json` +
+  `marketplace.json`.
+- **P5**. Tag `v1.0.0` + push.
+
+### 6.8 Distribution
+
+- **D1**. Plugin instalable via `/plugin marketplace add ...` +
+  `/plugin install ...`.
+- **D2**. Cross-artifact coherence tests actualizados.
+- **D3**. Nuevos subcomandos / flags documentados en
+  README + SKILL + CLAUDE.md.
 
 ---
 
 ## 7. Dependencias externas nuevas
 
-Ninguna. v0.2 usa todas las dependencias existentes de v0.1:
-
-- `superpowers:subagent-driven-development` (ya presente, Feature B lo consume).
-- `magi` plugin (ya presente, Feature A reacciona a su output).
-- `claude` CLI (ya presente, Feature B lo usa via subprocess).
-
-Zero nuevas dependencias Python runtime. Zero nuevas dev deps.
+Ninguna runtime nueva. Dev: ninguna nueva. Feature F asume MAGI 2.1.x+
+(ya presente).
 
 ---
 
-## 8. Risk register v0.2
+## 8. Risk register v1.0.0
 
-- **R1**. Feature B cost overhead: 36 extra `claude -p` calls per Milestone-A-sized plan. Mitigacion: audit artifacts permiten medir cost real post-v0.2; si excede envelope, considerar Group A opcion (1) `scenario_coverage_check.py` en v0.3 como pre-filter para reducir invocaciones.
-- **R2**. Feature A template rendering cross-platform: golden-output tests en Windows line-endings vs POSIX. Mitigacion: normalize line endings en comparaciones de test.
-- **R3**. Feature C assumes clean semver en MAGI version strings. Si MAGI introduce alpha/beta suffix futuro, `_semver_key` ordena non-numeric last — documentar supuesto en comment + CHANGELOG.
-- **R4**. INV-31 adoption: si el planner decide NO extender invariant set, Feature B default-invocation deja de estar enforzado. Mitigacion: documentar explicitamente durante Checkpoint 2 si INV-31 adoptado o deferido, update CLAUDE.md seccion accordingly.
-- **R5**. Resume integration con escalation pending: edge case si usuario interrumpe durante `input()` en el prompt + cache del state el Ctrl+C. Mitigacion: `.claude/magi-escalation-pending.md` marker file creado antes del input; `resume_cmd` detecta y restaura.
+- **R1**. Streaming overhead > NF13 5% budget -- mitigation: optimizar
+  read-line loop, considerar no-blocking I/O si excede budget.
+- **R2**. Marker-based MAGI discovery rompe si MAGI 2.2.x cambia
+  marker schema -- mitigation: SBTDD tolera ausencia de campos
+  opcionales en marker, requiere mantener test contra MAGI versions
+  cacheadas.
+- **R3**. Cross-check (Feature G) introduce false-negative risk
+  (downgrades CRITICAL real a INFO) -- mitigation: audit artifact
+  permite post-mortem; INV-32 caveat documentado.
+- **R4**. INV-31 flip decision sin field data sufficient -- mitigation:
+  bundle Feature H ultimo en el ciclo, despues de v0.2.x dogfood data
+  acumulada.
+- **R5**. Schema bump v1 -> v2 sin migration tool -- mitigation: parser
+  defaulta `schema_version: 1` cuando ausente; warning at load if old.
+- **R6**. Bundle 5 features en un solo cycle = MAGI Checkpoint 2 verdict
+  difficult -- mitigation: prepared INV-0 override path; alternativamente
+  split en sub-ciclos (decision durante brainstorming).
 
 ---
 
 ## 9. Referencias
 
-- Contrato autoritativo v0.1: `sbtdd/sbtdd-workflow-plugin-spec-base.md` (2860 lineas).
-- BDD overlay v0.1: `sbtdd/spec-behavior.md` (468 lineas, frozen post-v0.1.0 ship).
-- v0.2 LOCKED specs detalladas: `CLAUDE.md` secciones:
-  - "v0.2 requirement (LOCKED) — interactive escalation prompt on MAGI exhaustion"
-  - "v0.2 requirement (LOCKED) — superpowers spec-reviewer integration per task"
-  - "v0.2 requirement (LOCKED) — MAGI version-agnostic parity tests"
-- v0.3 backlog: `CLAUDE.md` seccion "v0.3 backlog — complementary spec-drift detection options" + `CHANGELOG.md` Deferred v0.3 section.
-- Historical precedent: commit `5d7bfc4` (Milestone D iter 3 override), commit `14ac8e5` (README CLAUDE.md reference fix).
-- Hotfix v0.1.0 post-ship: marketplace rename `bolivartech-plugins` -> `bolivartech-sbtdd` (commit `dee81aa`).
+- Contrato autoritativo: `sbtdd/sbtdd-workflow-plugin-spec-base.md`.
+- Frozen v0.2 BDD overlay: previous `sbtdd/spec-behavior.md` (will be
+  archived once v1.0.0 spec written).
+- v1.0.0 LOCKED specs detalladas: memory files
+  - `project_v100_progress_streaming.md`
+  - `project_v100_per_skill_model_flag.md`
+  - `project_v100_magi_dispatch_hardening.md`
+  - `project_v100_magi_cross_check.md` (PRIORITY)
+  - Re-eval: backlog notes en CLAUDE.md "v1.0.0 backlog" section.
+- Field data input: `.claude/auto-run.json` archives + spec-reviews
+  artifacts from v0.2/v0.2.1/v0.2.2 dogfood.
+- Historical precedent: v0.2.0 INV-0 override commit `5d7bfc4`,
+  v0.2.1 lightweight pattern (commits `9622a55`..`cfb39ee`),
+  v0.2.2 docs hotfix (commit `337aba2`).
 
 ---
 
 ## Nota sobre siguiente paso
 
-Este archivo cumple INV-27 (scan: 0 matches uppercase). Listo como input para `/brainstorming` — proxima ejecucion `/sbtdd spec` desde este repo arranca el ciclo SBTDD v0.2:
-
-1. `/brainstorming sbtdd/spec-behavior-base.md` -> genera `sbtdd/spec-behavior.md` (BDD overlay con escenarios Given/When/Then per feature).
-2. `/writing-plans sbtdd/spec-behavior.md` -> genera `planning/claude-plan-tdd-org.md` (plan TDD por fases).
-3. Checkpoint 2 MAGI review del plan contra spec; safety valve INV-11 3 iter.
-4. Plan aprobado -> ejecucion via `/subagent-driven-development` (o `/sbtdd auto` cuando Feature B pueda auto-despachar spec-reviewer, lo cual es la entrega misma del v0.2).
-5. Pre-merge Loop 1 + Loop 2 MAGI.
-6. Tag v0.2.0 + push a GitHub (user-driven, per INV-0 commit rules).
+Este archivo cumple INV-27 (scan: 0 matches uppercase placeholder).
+Listo como input para `/brainstorming`. Decision pendiente clave para
+brainstorming: bundle 5 features in one cycle, o split en sub-ciclos
+(p.ej. v0.3.0 = D+E operational; v0.4.0 = F+G MAGI; v1.0.0 = H + tag
+estable). Brainstorming refinara esta decision basado en complejidad
+estimada y MAGI Checkpoint 2 risk.
