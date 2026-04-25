@@ -258,3 +258,69 @@ def test_apply_decision_abandon_returns_exit_8(tmp_path) -> None:
     decision = UserDecision(chosen_option="d", action="abandon", reason="headless policy")
     code = apply_decision(decision, ctx, project_root=tmp_path)
     assert code == 8
+
+
+def test_prompt_user_tty_writes_pending_marker_atomically_no_tmp_leak(
+    tmp_path, monkeypatch
+) -> None:
+    """TTY path must persist the pending marker via tmp + os.replace.
+
+    Regression for MAGI Loop 2 v0.2 pre-merge WARNING #17 (2026-04-24):
+    ``prompt_user`` previously did ``pending.write_text(...)`` directly,
+    leaving a window where a Ctrl+C between the partial write and the
+    blocking ``input()`` call could land a half-written marker on disk.
+    ``resume_cmd`` then loaded corrupted JSON. The fix mirrors
+    ``state_file.save``: write to ``<path>.tmp.<pid>``, then
+    ``os.replace`` (atomic on Windows + POSIX).
+
+    This test asserts:
+      (a) after a successful ``prompt_user`` invocation, no
+          ``magi-escalation-pending.md.tmp.<pid>`` files remain in
+          ``.claude/`` (the rename consumed the tmp); and
+      (b) when ``os.replace`` fails (simulated via monkeypatch), the
+          tmp file is unlinked so we never leak ``.tmp.*`` artifacts on
+          disk.
+    """
+    import os
+
+    from escalation_prompt import _compose_options, prompt_user
+
+    iters = [_mkv("HOLD", degraded=True)] * 3
+    ctx = build_escalation_context(iters, plan_id="X", context="checkpoint2")
+    opts = _compose_options(ctx)
+
+    # (a) Successful TTY run: marker written + cleaned up via _finish.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    inputs = iter(["d"])  # abandon -> no reason prompt
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+    prompt_user(ctx, opts, non_interactive=False, project_root=tmp_path)
+
+    claude_dir = tmp_path / ".claude"
+    leftovers = list(claude_dir.glob("magi-escalation-pending.md.tmp.*"))
+    assert leftovers == [], (
+        f"tmp marker files leaked after successful prompt_user: {leftovers}"
+    )
+    # The pending marker itself should also be gone (cleaned up by _finish).
+    assert not (claude_dir / "magi-escalation-pending.md").exists()
+
+    # (b) os.replace failure path: tmp must be unlinked, not leaked.
+    real_replace = os.replace
+
+    def boom(src, dst):  # type: ignore[no-untyped-def]
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr("escalation_prompt.os.replace", boom)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    inputs2 = iter(["d"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs2))
+
+    with pytest.raises(OSError, match="simulated replace failure"):
+        prompt_user(ctx, opts, non_interactive=False, project_root=tmp_path)
+
+    # Restore replace so any subsequent test logic is unaffected.
+    monkeypatch.setattr("escalation_prompt.os.replace", real_replace)
+
+    leftovers_after_failure = list(claude_dir.glob("magi-escalation-pending.md.tmp.*"))
+    assert leftovers_after_failure == [], (
+        f"tmp marker leaked when os.replace failed: {leftovers_after_failure}"
+    )
