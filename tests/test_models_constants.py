@@ -113,7 +113,5 @@ def test_inv0_regex_does_not_match_documentation_example() -> None:
 
 def test_inv0_regex_does_not_match_might_use_some_cases() -> None:
     """Iter 2 finding #3/#8: "you might use claude-X in some cases" must NOT match."""
-    m = models.INV_0_PINNED_MODEL_RE.search(
-        "You might use claude-sonnet-4-6 in some cases."
-    )
+    m = models.INV_0_PINNED_MODEL_RE.search("You might use claude-sonnet-4-6 in some cases.")
     assert m is None
