@@ -11,6 +11,7 @@ MappingProxyType or tuple to prevent runtime mutation (sec.S.8.5).
 
 from __future__ import annotations
 
+import re
 from types import MappingProxyType
 from typing import Mapping
 
@@ -73,3 +74,29 @@ VALID_SUBCOMMANDS: tuple[str, ...] = (
 #: Allowed values for the headless `on_exhausted` policy in
 #: `.claude/magi-auto-policy.json` (Feature A, v0.2 NF10).
 AUTO_POLICIES: tuple[str, ...] = ("abort", "override_strong_go_only", "retry_once")
+
+
+#: Claude model IDs the plugin recognizes as valid for ``--model`` arg
+#: passing in dispatch wrappers. v0.3.0 ships the 4.x family snapshot
+#: (Opus 4.7, Sonnet 4.6, Haiku 4.5). Bump this tuple when Anthropic
+#: ships a new family; update SKILL.md operational impact accordingly.
+ALLOWED_CLAUDE_MODEL_IDS: tuple[str, ...] = (
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+)
+
+
+#: Regex used by superpowers_dispatch / magi_dispatch to detect when the
+#: developer's global ``~/.claude/CLAUDE.md`` pins a Claude model
+#: explicitly. INV-0 cascade: if the global file pins, plugin.local.md
+#: model fields are ignored and a stderr breadcrumb is emitted. The
+#: regex matches phrases like ``use claude-X-Y for``, ``pin claude-X-Y``,
+#: or ``always claude-X-Y``. Word-boundary anchored to avoid false
+#: positives in narrative prose.
+INV_0_PINNED_MODEL_RE: "re.Pattern[str]" = re.compile(
+    r"\b(?:use|pin|pinned|always|stick to|enforce)\s+"
+    r"(claude-(?:opus|sonnet|haiku)-\d+(?:-\d+)?(?:-\d{8})?)\b",
+    re.IGNORECASE,
+)
