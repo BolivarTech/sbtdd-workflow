@@ -728,7 +728,7 @@ def test_write_magi_findings_file_persists_severity_tagged_details(tmp_path: Pat
     import pre_merge_cmd
     from magi_dispatch import MAGIVerdict
 
-    findings = (
+    findings: tuple[dict[str, object], ...] = (
         {
             "severity": "critical",
             "title": "unterminated regex in foo.py",

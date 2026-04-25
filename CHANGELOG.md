@@ -8,46 +8,7 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
-## Unreleased (Deferred — tracked for v0.2.1)
-
-### B6 auto-feedback loop — LOCKED v0.2.1 release blocker
-
-Flagged by MAGI Loop 2 v0.2 pre-merge 2026-04-24 (CRITICAL #4/#14,
-WARNING #13). Spec-base §2.2 of v0.2 promised that on spec-reviewer
-`issues` the loop routes through `/receiving-code-review` + mini-cycle
-TDD fix + re-dispatch up to the safety valve. v0.2 shipped the
-scope-relaxed version: `dispatch_spec_reviewer` raises
-`SpecReviewError` (exit 12) on non-approval and the caller aborts.
-Consequences: on a 36-task `/sbtdd auto` run, one reviewer
-false-positive at task 15 kills the whole autonomous execution; the
-3-iter safety valve is dead code because nothing mutates the
-reviewer input between iterations (default was pinned to 1 in v0.2
-to reflect this — see CHANGELOG §0.2.0 → Fixed).
-
-**v0.2.1 locked deliverables**:
-
-- Extend `auto_cmd._phase2_task_loop` + `close_task_cmd` with the
-  `/receiving-code-review` INV-29 route: reviewer `issues` map to
-  accepted/rejected list via the existing
-  `_RECEIVING_REVIEW_FORMAT_CONTRACT` pattern from `pre_merge_cmd`.
-- On accepted findings, run a mini-cycle TDD fix (`test:` → `fix:` →
-  `refactor:`) per finding, then re-dispatch the reviewer.
-- Restore `dispatch_spec_reviewer` default `max_iterations=3` so the
-  loop can exercise the newly-mutated diff across iterations.
-- Tighten the INV-31 docstring in `CLAUDE.md` to "MUST pass reviewer
-  approval OR reach safety valve with documented rejections".
-- Add a mini-cycle-per-finding regression test mirroring
-  `test_auto_phase2_recovers_when_implementer_precommitted_phase`.
-
-Estimated scope: ~200 LOC + ~6 regression tests. Target: ship before
-any v1.0.0 scope is opened so INV-31 honors its original contract.
-
-### Other items deferred from v0.2 pre-merge findings
-
-WARNING #11 (cost/latency guardrail): add
-`auto_max_spec_review_seconds` config (default 3600) with graceful
-`--skip-spec-review` fallback when exceeded. Small (~30 LOC); tracked
-for v0.2.1 alongside B6.
+## Unreleased (Deferred — tracked for v0.2.2 / v1.0.0)
 
 WARNING #12 (INV-31 default-on surprise risk): v0.2 ships with
 spec-review default-on per the original INV-31 wording; field data
@@ -55,9 +16,72 @@ from v0.2/v0.2.1 will drive whether v1.0.0 flips to opt-in or keeps
 the default. Operational impact documented in `## [0.2.0] BREAKING`
 (INV-31 hard-block entry).
 
-WARNING #17 (pending-marker race): atomic rename pattern for
-`.claude/magi-escalation-pending.md` write. ~20 LOC in
-`escalation_prompt.prompt_user`. Low-severity; v0.2.1 polish.
+## [0.2.1] - 2026-04-25
+
+### Added
+
+- B6 auto-feedback loop in `auto_cmd._phase2_task_loop`. When the
+  spec-reviewer raises `SpecReviewError`, the new helper
+  `_apply_spec_review_findings_via_mini_cycle` routes the reviewer's
+  `issues` through `/receiving-code-review` (extending INV-29 to
+  spec-review findings, not just MAGI conditions), runs a mini-cycle
+  TDD fix (`test:` → `fix:` → `refactor:`) per accepted finding via
+  `commits.create` (so prefix + English-only + no-AI guards fire), and
+  re-dispatches the reviewer on the now-mutated diff. Outer safety
+  valve `_B6_MAX_FEEDBACK_ITERATIONS=3` mirrors the INV-11 cadence
+  used by Checkpoint 2 / pre-merge Loop 2; exhaustion re-raises
+  `SpecReviewError` carrying the cumulative rejection history so
+  operators see the trail without grepping logs. Spec-review budget
+  (`auto_max_spec_review_seconds`) is charged per dispatch inside the
+  feedback loop too, so a long mini-cycle still respects the cost
+  guardrail.
+- `receiving_review_dispatch.py` shared module promoting
+  `RECEIVING_REVIEW_FORMAT_CONTRACT`, `parse_receiving_review`, and
+  `conditions_to_skill_args` from their previous private names in
+  `pre_merge_cmd`. Both `pre_merge_cmd._loop2` (Loop 2 MAGI
+  conditions) and `auto_cmd._apply_spec_review_findings_via_mini_cycle`
+  (B6) now consume the same single-sourced helpers. `pre_merge_cmd`
+  retains the legacy private-name re-exports
+  (`_RECEIVING_REVIEW_FORMAT_CONTRACT`, `_parse_receiving_review`,
+  `_conditions_to_skill_args`) for backward compatibility with v0.2
+  tests.
+- 13 new regression tests across `tests/test_receiving_review_dispatch.py`
+  (8 tests covering helper promotion + backward-compat re-exports) and
+  `tests/test_auto_cmd_b6_feedback_loop.py` (5 tests covering
+  accepted-finding mini-cycle, all-rejected re-dispatch, outer safety
+  valve exhaustion, the `_B6_MAX_FEEDBACK_ITERATIONS=3` constant, and
+  mini-cycle prefix-validation through `commits.create`).
+
+### Changed
+
+- `dispatch_spec_reviewer` default `max_iterations` reverted to `3`
+  (was `1` in v0.2.0). v0.2.0 pinned this to 1 because the loop
+  re-invoked the reviewer on byte-identical inputs (no feedback path
+  mutated the diff between iterations), so iter 2+ burned quota for
+  zero semantic benefit. v0.2.1 ships the auto-feedback loop above:
+  accepted findings drive a mini-cycle TDD fix per outer iteration,
+  giving the safety valve real work to do. The v0.2.0 regression test
+  `test_dispatch_default_max_iterations_is_one_per_b6_defer` is renamed
+  to `test_dispatch_default_max_iterations_is_three_per_b6_shipped`
+  and asserts `default == 3`.
+
+### Fixed
+
+- INV-31 hard-block contract now honors the original spec-base §2.2
+  promise: spec-reviewer issues no longer kill the whole autonomous
+  execution at the first false positive. The contract widens to "MUST
+  pass reviewer approval OR reach safety valve with documented
+  rejections", with `--skip-spec-review` remaining available as the
+  manual escape valve. On a 36-task `/sbtdd auto` run, a single
+  reviewer issue at task 15 now triggers the feedback loop instead of
+  aborting the run.
+
+### Deferred (rolled to v0.2.2 or v1.0.0)
+
+WARNING #11 (cost/latency guardrail) shipped in v0.2.0 hotfix
+`70b8602` (`auto_max_spec_review_seconds` config + breadcrumb).
+WARNING #17 (pending-marker race) shipped in v0.2.0 hotfix
+`22b7e7d` (atomic write via tmp + os.replace).
 
 ## 0.1.7 - 2026-04-24
 
