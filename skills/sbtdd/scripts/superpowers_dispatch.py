@@ -24,11 +24,13 @@ from __future__ import annotations
 import subprocess
 import sys as _sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import quota_detector
 import subprocess_utils
 from errors import QuotaExhaustedError, ValidationError
+from models import INV_0_PINNED_MODEL_RE
 
 
 @dataclass(frozen=True)
@@ -46,7 +48,11 @@ class SkillResult:
     stderr: str
 
 
-def _build_skill_cmd(skill: str, args: list[str] | None) -> list[str]:
+def _build_skill_cmd(
+    skill: str,
+    args: list[str] | None,
+    model: str | None = None,
+) -> list[str]:
     """Build the argv list for ``claude -p`` invoking ``skill``.
 
     The slash command and its args MUST be packed into the single prompt
@@ -57,13 +63,73 @@ def _build_skill_cmd(skill: str, args: list[str] | None) -> list[str]:
     tokens after ``-p <skill>`` causes ``claude`` to reject them with
     ``error: unknown option '<flag>'``.
 
+    When ``model`` is provided (v0.3.0 Feature E), ``--model <id>`` is
+    inserted BEFORE the ``-p`` flag (claude CLI flag ordering convention).
+    When ``model`` is None (default), argv is byte-identical to v0.2.x.
+
     Same pattern as :func:`magi_dispatch._build_magi_cmd` (sec.S.0.2
     cross-plugin dispatch contract).
     """
     prompt_parts = [f"/{skill}"]
     if args:
         prompt_parts.extend(args)
-    return ["claude", "-p", " ".join(prompt_parts)]
+    cmd: list[str] = ["claude"]
+    if model is not None:
+        cmd.extend(["--model", model])
+    cmd.extend(["-p", " ".join(prompt_parts)])
+    return cmd
+
+
+def _apply_inv0_model_check(
+    configured_model: str | None,
+    skill_field_name: str,
+) -> str | None:
+    """Apply INV-0 cascade: if ~/.claude/CLAUDE.md pins a model, ignore config.
+
+    INV-0 (sec.S.10.0) makes ``~/.claude/CLAUDE.md`` the top authority over
+    project-level configuration. v0.3.0 Feature E surfaces this for the
+    per-skill model selection: when the developer's global file pins a
+    model (``Use claude-opus-4-7 for all sessions``, ``Pin claude-sonnet-4-6``,
+    etc.) the plugin MUST ignore any plugin.local.md / CLI override and let
+    the session's default model take effect.
+
+    Returns the *effective* model to pass to ``--model``, which is None
+    when INV-0 fires (CLAUDE.md pinned a global model) and otherwise
+    equals ``configured_model``. Emits a stderr breadcrumb on the rare
+    INV-0 path so operators see the cost implication.
+
+    Args:
+        configured_model: Model ID resolved by the upstream cascade
+            (CLI override > plugin.local.md > None). When ``None`` no
+            scan is performed (cheap short-circuit).
+        skill_field_name: Name of the plugin.local.md field whose value
+            became ``configured_model`` (for the breadcrumb message).
+
+    Returns:
+        ``None`` when INV-0 fires (plugin must omit ``--model`` and
+        inherit the session default); ``configured_model`` otherwise.
+    """
+    if configured_model is None:
+        return None
+    claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    if not claude_md.exists():
+        return configured_model
+    try:
+        text = claude_md.read_text(encoding="utf-8")
+    except OSError:
+        return configured_model
+    match = INV_0_PINNED_MODEL_RE.search(text)
+    if match is None:
+        return configured_model
+    pinned = match.group(1)
+    _sys.stderr.write(
+        f"[sbtdd inv-0] CLAUDE.md pins {pinned} globally; ignoring "
+        f"plugin.local.md {skill_field_name}={configured_model} to "
+        f"respect global authority. Cost implication may differ from "
+        f"configured baseline.\n"
+    )
+    _sys.stderr.flush()
+    return None
 
 
 def invoke_skill(
@@ -71,6 +137,9 @@ def invoke_skill(
     args: list[str] | None = None,
     timeout: int = 600,
     cwd: str | None = None,
+    *,
+    model: str | None = None,
+    skill_field_name: str = "implementer_model",
 ) -> SkillResult:
     """Invoke a superpowers skill via ``claude -p`` subprocess.
 
@@ -81,6 +150,16 @@ def invoke_skill(
         timeout: Wall-clock seconds before SIGTERM (sec.S.8.6 -- explicit
             timeout mandatory).
         cwd: Working directory; ``None`` uses current.
+        model: Optional Claude model ID for the v0.3.0 Feature E
+            per-skill model selection. ``None`` (default) preserves the
+            v0.2.x argv shape exactly. When set, the INV-0 cascade fires
+            against ``~/.claude/CLAUDE.md`` first; if the global file
+            pins a different model the kwarg is suppressed and a stderr
+            breadcrumb is emitted.
+        skill_field_name: Name of the plugin.local.md field whose value
+            became ``model`` -- surfaces in the INV-0 breadcrumb. Defaults
+            to ``"implementer_model"`` so callers that pass ``model=``
+            without explicitly tagging it still get a sensible message.
 
     Returns:
         :class:`SkillResult` with returncode, stdout, stderr.
@@ -90,7 +169,8 @@ def invoke_skill(
         ValidationError: If the subprocess timed out OR exited non-zero without
             matching a quota pattern. Mapped to exit 1 by run_sbtdd.py.
     """
-    cmd = _build_skill_cmd(skill, args)
+    effective_model = _apply_inv0_model_check(model, skill_field_name)
+    cmd = _build_skill_cmd(skill, args, model=effective_model)
     try:
         result = subprocess_utils.run_with_timeout(cmd, timeout=timeout, capture=True, cwd=cwd)
     except subprocess.TimeoutExpired as exc:

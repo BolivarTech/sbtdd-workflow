@@ -358,6 +358,8 @@ def dispatch_spec_reviewer(
     repo_root: Path,
     max_iterations: int = 3,
     timeout: int = 900,
+    model: str | None = None,
+    skill_field_name: str = "spec_reviewer_model",
 ) -> SpecReviewResult:
     """Run the spec-reviewer for ONE task with a bounded retry budget.
 
@@ -412,7 +414,16 @@ def dispatch_spec_reviewer(
     task_text = _extract_task_text(plan_text, task_id)
     diff_text = _collect_task_diff(repo_root, task_id)
     prompt = _build_reviewer_prompt(task_id, task_text, diff_text)
-    cmd = ["claude", "-p", _REVIEWER_SKILL_REF, prompt]
+    # v0.3.0 Feature E: apply INV-0 cascade then optionally inject
+    # ``--model <id>`` BEFORE the ``-p`` flag (mirrors superpowers_dispatch
+    # convention). With model=None (default) argv is byte-identical to v0.2.x.
+    from superpowers_dispatch import _apply_inv0_model_check
+
+    effective_model = _apply_inv0_model_check(model, skill_field_name)
+    cmd: list[str] = ["claude"]
+    if effective_model is not None:
+        cmd.extend(["--model", effective_model])
+    cmd.extend(["-p", _REVIEWER_SKILL_REF, prompt])
     iter_history: list[dict[str, Any]] = []
     for iteration in range(1, max_iterations + 1):
         try:

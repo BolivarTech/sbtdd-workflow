@@ -292,26 +292,44 @@ def parse_magi_report(report: dict[str, Any], raw_output: str = "") -> MAGIVerdi
     )
 
 
-def _build_magi_cmd(context_paths: list[str], output_dir: str | None = None) -> list[str]:
+def _build_magi_cmd(
+    context_paths: list[str],
+    output_dir: str | None = None,
+    model: str | None = None,
+) -> list[str]:
     """Build the argv list for ``claude -p /magi:magi`` with @file refs.
 
     The slash command and its flags MUST be packed into the single prompt
     string passed to ``claude -p``. ``claude`` itself does NOT accept
     ``--output-dir`` -- that flag belongs to MAGI's ``run_magi.py`` and has
     to travel through the prompt so the sub-session forwards it.
+
+    When ``model`` is provided (v0.3.0 Feature E), ``--model <id>`` is
+    inserted BEFORE the ``-p`` flag so claude routes the outer dispatcher
+    process to the chosen model. The 3 sub-agents Melchior/Balthasar/Caspar
+    pick their own model internally per MAGI plugin contract -- that is
+    NOT controlled here. With ``model=None`` argv is byte-identical to
+    v0.2.x.
     """
     prompt_parts = ["/magi:magi"]
     for path in context_paths:
         prompt_parts.append(f"@{path}")
     if output_dir is not None:
         prompt_parts.extend(["--output-dir", output_dir])
-    return ["claude", "-p", " ".join(prompt_parts)]
+    cmd: list[str] = ["claude"]
+    if model is not None:
+        cmd.extend(["--model", model])
+    cmd.extend(["-p", " ".join(prompt_parts)])
+    return cmd
 
 
 def invoke_magi(
     context_paths: list[str],
     timeout: int = 1800,
     cwd: str | None = None,
+    *,
+    model: str | None = None,
+    skill_field_name: str = "magi_dispatch_model",
 ) -> MAGIVerdict:
     """Invoke /magi:magi and return a parsed MAGIVerdict.
 
@@ -343,8 +361,12 @@ def invoke_magi(
             unknown verdict label (raised by :func:`parse_magi_report`,
             mapped to exit 1).
     """
+    # v0.3.0 Feature E: INV-0 cascade then optional --model injection.
+    from superpowers_dispatch import _apply_inv0_model_check
+
+    effective_model = _apply_inv0_model_check(model, skill_field_name)
     with tempfile.TemporaryDirectory(prefix="sbtdd-magi-") as tmpdir:
-        cmd = _build_magi_cmd(context_paths, output_dir=tmpdir)
+        cmd = _build_magi_cmd(context_paths, output_dir=tmpdir, model=effective_model)
         try:
             result = subprocess_utils.run_with_timeout(cmd, timeout=timeout, capture=True, cwd=cwd)
         except subprocess.TimeoutExpired as exc:
