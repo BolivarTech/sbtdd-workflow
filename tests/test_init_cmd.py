@@ -623,3 +623,44 @@ def test_rollback_leaves_no_empty_subdirectories(
     # No subdirectories freshly created by the copy.
     surviving_dirs = [p for p in dest.rglob("*") if p.is_dir()]
     assert surviving_dirs == [], f"rollback left empty subdirectories behind: {surviving_dirs}"
+
+
+def test_template_ships_sonnet_haiku_baseline_commented() -> None:
+    """E7.1: template contains commented Sonnet+Haiku baseline block."""
+    template = (
+        Path(__file__).parent.parent / "templates" / "plugin.local.md.template"
+    ).read_text(encoding="utf-8")
+    assert "# Recommended cost-optimized baseline" in template
+    assert "# implementer_model: claude-sonnet-4-6" in template
+    assert "# spec_reviewer_model: claude-haiku-4-5" in template
+    assert "# code_review_model: claude-sonnet-4-6" in template
+    assert "# magi_dispatch_model: null" in template
+
+
+def test_init_python_stack_preserves_template_baseline_comments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E7.2: init --stack python output preserves the 4 commented model lines."""
+    import init_cmd
+
+    dest = _setup_dest_root(tmp_path)
+    monkeypatch.setattr(init_cmd, "check_environment", lambda *a, **kw: _make_ok_report())
+    rc = init_cmd.main(
+        [
+            "--stack",
+            "python",
+            "--author",
+            "Julian Tester",
+            "--project-root",
+            str(dest),
+            "--plugins-root",
+            str(tmp_path / "plugins"),
+        ]
+    )
+    assert rc == 0
+    plugin_local = dest / ".claude" / "plugin.local.md"
+    text = plugin_local.read_text(encoding="utf-8")
+    assert "# implementer_model: claude-sonnet-4-6" in text
+    assert "# spec_reviewer_model: claude-haiku-4-5" in text
+    assert "# code_review_model: claude-sonnet-4-6" in text
+    assert "# magi_dispatch_model: null" in text
