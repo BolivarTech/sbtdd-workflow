@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import enum
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -214,6 +215,41 @@ def format_escalation_message(ctx: EscalationContext) -> str:
 _DEFAULT_POLICY = "abort"
 
 
+def _write_pending_marker_atomically(path: Path, content: str) -> None:
+    """Persist the pending-escalation marker via tmp + ``os.replace``.
+
+    Mirrors the idiom from ``state_file.save``: write to
+    ``<path>.tmp.<pid>`` first, then ``os.replace(tmp, path)`` (atomic
+    on Windows + POSIX). If ``os.replace`` raises, the tmp is unlinked
+    before the error propagates so no ``*.tmp.*`` files leak on disk.
+
+    Per MAGI Loop 2 v0.2 pre-merge WARNING #17 (2026-04-24): a Ctrl+C
+    between the previous direct ``write_text`` call and the blocking
+    ``input()`` could leave a half-written marker on disk, which then
+    surfaced as corrupted JSON when ``resume_cmd`` loaded it. The
+    atomic rename closes that window: either the full content is on
+    disk under ``path``, or nothing is.
+
+    Args:
+        path: Destination marker file. Parent directory must exist.
+        content: Full marker payload (UTF-8 text).
+
+    Raises:
+        OSError: If the rename fails (permission denied, cross-device,
+            read-only target). The tmp is cleaned up first.
+    """
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(content, encoding="utf-8")
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _read_headless_policy(root: Path) -> str:
     """Return the configured policy or 'abort' (default)."""
     p = root / _HEADLESS_POLICY_FILE
@@ -306,10 +342,17 @@ def prompt_user(
     # for resume_cmd. KeyboardInterrupt bypasses the normal-exit cleanup
     # (no try/finally) so the marker survives process kill; EOFError and
     # successful decisions both exit through _finish which removes the marker.
+    #
+    # Per MAGI Loop 2 v0.2 pre-merge WARNING #17 (2026-04-24): the marker
+    # write is atomic (tmp + os.replace) so a Ctrl+C cannot leave a
+    # half-written file that ``resume_cmd`` would later load as corrupt
+    # JSON. Helper mirrors ``state_file.save`` for cross-module idiom
+    # consistency.
     root = project_root or Path.cwd()
     pending = root / _PENDING_MARKER
     pending.parent.mkdir(parents=True, exist_ok=True)
-    pending.write_text(
+    _write_pending_marker_atomically(
+        pending,
         json.dumps(
             {
                 "plan_id": ctx.plan_id,
@@ -319,7 +362,6 @@ def prompt_user(
             },
             indent=2,
         ),
-        encoding="utf-8",
     )
 
     def _finish(decision: UserDecision) -> UserDecision:

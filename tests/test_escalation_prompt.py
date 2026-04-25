@@ -297,9 +297,7 @@ def test_prompt_user_tty_writes_pending_marker_atomically_no_tmp_leak(
 
     claude_dir = tmp_path / ".claude"
     leftovers = list(claude_dir.glob("magi-escalation-pending.md.tmp.*"))
-    assert leftovers == [], (
-        f"tmp marker files leaked after successful prompt_user: {leftovers}"
-    )
+    assert leftovers == [], f"tmp marker files leaked after successful prompt_user: {leftovers}"
     # The pending marker itself should also be gone (cleaned up by _finish).
     assert not (claude_dir / "magi-escalation-pending.md").exists()
 
