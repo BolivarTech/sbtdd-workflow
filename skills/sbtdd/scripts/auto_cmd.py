@@ -152,6 +152,34 @@ def _stream_subprocess(
     return ("".join(stdout_buf), "".join(stderr_buf))
 
 
+def _build_run_sbtdd_argv(
+    subcommand: str,
+    extra_args: list[str] | None = None,
+) -> list[str]:
+    """Build subprocess argv for invoking ``run_sbtdd.py`` with ``python -u``.
+
+    The ``-u`` flag disables Python output buffering at the dispatcher
+    level so :func:`_stream_subprocess` reads complete lines as the
+    sub-process emits them (Feature D2 / spec-behavior sec.2 D2.1).
+    Centralising argv construction in a single helper means future
+    callers can never forget the ``-u`` flag and break streaming.
+
+    Args:
+        subcommand: SBTDD subcommand name (``close-phase``, ``status``,
+            etc.).
+        extra_args: Optional list of additional CLI args appended after
+            the subcommand.
+
+    Returns:
+        ``[sys.executable, "-u", "<run_sbtdd.py>", subcommand, *extra_args]``.
+    """
+    run_sbtdd = (Path(__file__).resolve().parent / "run_sbtdd.py").as_posix()
+    argv: list[str] = [sys.executable, "-u", run_sbtdd, subcommand]
+    if extra_args:
+        argv.extend(extra_args)
+    return argv
+
+
 @dataclass(frozen=True)
 class AutoRunAudit:
     """Frozen schema for ``.claude/auto-run.json`` (INV-26 audit trail).
