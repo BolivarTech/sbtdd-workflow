@@ -45,6 +45,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -455,6 +456,16 @@ def _phase2_task_loop(
         except (json.JSONDecodeError, OSError):
             pass
     tasks_completed = 0
+    # Cost guardrail (v0.2.1, MAGI Loop 2 v0.2 pre-merge WARNING #11):
+    # cumulative spec-reviewer wall-time across the run is capped by
+    # ``cfg.auto_max_spec_review_seconds`` (default 3600s = 1h). When the
+    # budget is exhausted before a task's reviewer call, that task proceeds
+    # with ``--skip-spec-review`` semantics (no dispatch) and a stderr
+    # breadcrumb is emitted exactly once. Subsequent tasks continue to
+    # skip; ``mark_and_advance`` still runs so the plan progresses.
+    spec_review_budget_seconds = cfg.auto_max_spec_review_seconds
+    spec_review_elapsed = 0.0
+    spec_review_breadcrumb_emitted = False
     try:
         while current.current_task_id is not None:
             phase_idx = (
@@ -539,7 +550,21 @@ def _phase2_task_loop(
                 else:
                     # H6 (INV-31): spec-reviewer gate BEFORE mark_and_advance.
                     assert current.current_task_id is not None
-                    _run_spec_review_gate(current.current_task_id, plan_path, root)
+                    if spec_review_elapsed >= spec_review_budget_seconds:
+                        if not spec_review_breadcrumb_emitted:
+                            sys.stderr.write(
+                                f"[auto] spec-review budget "
+                                f"{spec_review_budget_seconds}s exceeded; "
+                                f"remaining tasks proceed with "
+                                f"--skip-spec-review\n"
+                            )
+                            spec_review_breadcrumb_emitted = True
+                    else:
+                        review_started = time.monotonic()
+                        try:
+                            _run_spec_review_gate(current.current_task_id, plan_path, root)
+                        finally:
+                            spec_review_elapsed += time.monotonic() - review_started
                     # W1: delegate to public helper in close_task_cmd instead
                     # of duplicating the entire flip / commit chore / advance
                     # sequence.

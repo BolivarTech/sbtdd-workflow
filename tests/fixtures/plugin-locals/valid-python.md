@@ -16,6 +16,7 @@ magi_threshold: "GO_WITH_CAVEATS"
 magi_max_iterations: 3
 auto_magi_max_iterations: 5
 auto_verification_retries: 1
+auto_max_spec_review_seconds: 3600
 tdd_guard_enabled: true
 worktree_policy: "optional"
 ---

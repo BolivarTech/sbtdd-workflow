@@ -23,6 +23,7 @@ def test_plugin_config_is_frozen():
         magi_max_iterations=3,
         auto_magi_max_iterations=5,
         auto_verification_retries=1,
+        auto_max_spec_review_seconds=3600,
         tdd_guard_enabled=True,
         worktree_policy="optional",
     )
@@ -47,6 +48,7 @@ def test_plugin_config_verification_commands_is_tuple():
         magi_max_iterations=3,
         auto_magi_max_iterations=5,
         auto_verification_retries=1,
+        auto_max_spec_review_seconds=3600,
         tdd_guard_enabled=True,
         worktree_policy="optional",
     )

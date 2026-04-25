@@ -44,6 +44,7 @@ class PluginConfig:
     magi_max_iterations: int
     auto_magi_max_iterations: int
     auto_verification_retries: int
+    auto_max_spec_review_seconds: int
     tdd_guard_enabled: bool
     worktree_policy: Literal["optional", "required"]
 
@@ -105,6 +106,15 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     retries = data.get("auto_verification_retries")
     if not isinstance(retries, int) or retries < 0:
         raise ValidationError(f"auto_verification_retries must be int >= 0, got {retries!r}")
+    # auto_max_spec_review_seconds: cumulative wall-time budget for the
+    # spec-reviewer in /sbtdd auto. Default 3600s (1h) per v0.2.1 brief
+    # so plugin.local.md files written by older inits still load. Once
+    # the budget is exhausted, _phase2_task_loop skips dispatch_spec_reviewer
+    # for the remaining tasks (cost guardrail; INV-22 / INV-26).
+    budget = data.get("auto_max_spec_review_seconds", 3600)
+    if not isinstance(budget, int) or budget < 0:
+        raise ValidationError(f"auto_max_spec_review_seconds must be int >= 0, got {budget!r}")
+    data["auto_max_spec_review_seconds"] = budget
     if not isinstance(data.get("verification_commands"), tuple):
         raise ValidationError("verification_commands must be a non-empty list")
     if len(data["verification_commands"]) == 0:
