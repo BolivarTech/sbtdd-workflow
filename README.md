@@ -125,6 +125,8 @@ Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase
 - `--non-interactive` (on `spec`, `pre-merge`) -- force the headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
 - `--skip-spec-review` (on `close-task`) -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
 
+> **BREAKING — INV-31 hard block (v0.2.0).** `close-task` and `auto` now invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts and the operator must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The v0.2 promise of routing reviewer issues through a `/receiving-code-review` + mini-cycle TDD feedback loop with up to 3 retry iterations is **deferred to v0.2.1** -- in v0.2.0 a single reviewer issue mid-`/sbtdd auto` aborts the whole run. Operators running quota-constrained or non-superpowers-enabled environments should set `--skip-spec-review` explicitly until v0.2.1 ships.
+
 ### Typical end-to-end flow
 
 ```bash

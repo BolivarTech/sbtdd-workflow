@@ -64,6 +64,8 @@ subcommand routes through `run_sbtdd.py` (see `## Execution pipeline` below).
 - `--non-interactive` (on `spec`, `pre-merge`) -- force headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
 - `--skip-spec-review` (on `close-task`) -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
 
+> **BREAKING -- INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts. Operators must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The reviewer-feedback mini-cycle (`/receiving-code-review` + mini-cycle TDD fix + re-dispatch up to 3 iter) promised in spec-base §2.2 is deferred to v0.2.1; until then, INV-31 is enforced as a fail-fast gate. Quota-constrained or non-superpowers-enabled environments should set `--skip-spec-review` explicitly until v0.2.1 lands.
+
 ## Complexity gate
 
 Before delegating to Python, assess whether the user's request actually needs
