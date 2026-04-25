@@ -1,2297 +1,1799 @@
-# sbtdd-workflow v0.2.0 Implementation Plan
+# sbtdd-workflow v0.3.0 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver v0.2.0 of the `sbtdd-workflow` plugin by landing three LOCKED release blockers: (A) interactive MAGI escalation prompt, (B) superpowers spec-reviewer integration per task, (C) MAGI version-agnostic parity tests. Preserve all v0.1 invariants and zero-regression test baseline (≥597 passing).
+**Goal:** Ship v0.3.0 (operational hardening MINOR bump) with two additive feature surfaces — auto progress streaming (Feature D) + per-skill model selection flag (Feature E). Non-BREAKING: default null preserves v0.2.x argv byte-identical.
 
-**Architecture:** Two new self-contained modules under `skills/sbtdd/scripts/` (`escalation_prompt.py`, `spec_review_dispatch.py`) + targeted extensions to five existing modules (`errors.py`, `spec_cmd.py`, `pre_merge_cmd.py`, `finalize_cmd.py`, `resume_cmd.py`, `auto_cmd.py`, `close_task_cmd.py`, `run_sbtdd.py`, `models.py`) + one test file rewrite (`tests/test_distribution_coherence.py`). New subcommand `review-spec-compliance` registered in the 9→10 dispatch map. New exit code 12 for `SpecReviewError`.
+**Architecture:** Two independent feature surfaces dispatched to two parallel subagents. D touches `auto_cmd.py` only (streaming primitives + progress field). E touches `config.py`, `models.py`, three `*_dispatch.py` modules, `dependency_check.py`, `auto_cmd.py` (CLI parser only), and `templates/plugin.local.md.template`. Surfaces in `auto_cmd.py` are disjoint functions (D defines `_stream_subprocess` / `_update_progress`; E defines `_parse_model_overrides` / `_apply_inv0_model_check`) so parallel subagents do not clash. After both subagents land, the orchestrator drives a final review loop (MAGI → /receiving-code-review, cap 5 iter, exit when verdict ≥ GO_WITH_CAVEATS full with zero CRITICAL + zero WARNING + zero Conditions for Approval).
 
-**Tech Stack:** Python 3.9+ stdlib-only hot paths, `argparse`, `subprocess` via `subprocess_utils.run_with_timeout`, `quota_detector`, `dataclasses(frozen=True)`, `MappingProxyType`, `claude -p` subprocess transport, pytest, ruff, mypy --strict.
-
----
-
-## Source of truth
-
-- **Spec input:** `sbtdd/spec-behavior-base.md` (v0.2 base, untracked), CLAUDE.md LOCKED sections ("v0.2 requirement (LOCKED) — ..."), v0.1 frozen contract `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 (invariants) + sec.S.11 (exit codes).
-- **SBTDD methodology:** `CLAUDE.local.md` §3 (Red-Green-Refactor protocol), §5 (commit prefixes), §6 (pre-merge Loops 1+2).
-- **Global precedence:** `~/.claude/CLAUDE.md` (INV-0: absolute top authority).
-
-## File Structure (new + modified)
-
-### New files
-
-| Path | Responsibility |
-|------|----------------|
-| `skills/sbtdd/scripts/escalation_prompt.py` | Feature A — interactive MAGI escalation prompt module (dataclasses + 4 public fns + audit artifact writer) |
-| `skills/sbtdd/scripts/spec_review_dispatch.py` | Feature B — per-task spec-reviewer dispatcher (dataclass + `dispatch_spec_reviewer` + artifact writer) |
-| `skills/sbtdd/scripts/review_spec_compliance_cmd.py` | Feature B — `/sbtdd review-spec-compliance <task-id>` subcommand handler |
-| `tests/test_escalation_prompt.py` | Feature A unit tests (root-cause inference, message rendering, headless fallback, audit artifact) |
-| `tests/test_spec_review_dispatch.py` | Feature B unit tests (dispatcher, safety valve, quota integration, audit artifact) |
-| `tests/test_review_spec_compliance_cmd.py` | Feature B subcommand CLI tests |
-| `tests/test_auto_cmd_spec_review.py` | Feature B integration tests into `auto_cmd._phase2_task_loop` |
-| `tests/test_close_task_cmd_spec_review.py` | Feature B integration tests into `close_task_cmd` (`--skip-spec-review`) |
-| `tests/fixtures/magi-escalations/` | Feature A golden-output fixtures per root-cause × context |
-| `tests/fixtures/spec-reviews/` | Feature B synthetic reviewer output fixtures |
-
-### Modified files
-
-| Path | Nature of change |
-|------|------------------|
-| `skills/sbtdd/scripts/errors.py` | Add `SpecReviewError` + register in `EXIT_CODES` → 12 |
-| `skills/sbtdd/scripts/models.py` | Add `"review-spec-compliance"` to `VALID_SUBCOMMANDS` |
-| `skills/sbtdd/scripts/run_sbtdd.py` | Add dispatch entry for `review-spec-compliance` |
-| `skills/sbtdd/scripts/spec_cmd.py` | Wire `--override-checkpoint`, `--reason`, `--non-interactive` + safety-valve escalation hook |
-| `skills/sbtdd/scripts/pre_merge_cmd.py` | Same as `spec_cmd.py` |
-| `skills/sbtdd/scripts/finalize_cmd.py` | Add `--override-checkpoint --reason` CLI flag with audit trail |
-| `skills/sbtdd/scripts/resume_cmd.py` | Detect `.claude/magi-escalation-pending.md` + re-enter prompt |
-| `skills/sbtdd/scripts/auto_cmd.py` | Extend `_phase2_task_loop` with spec-reviewer dispatch before `mark_and_advance`; honor headless policy for Feature A |
-| `skills/sbtdd/scripts/close_task_cmd.py` | Add `--skip-spec-review` flag; invoke reviewer by default |
-| `tests/fixtures/skill_stubs.py` | Add `StubSpecReviewer` mirroring `StubMAGI` pattern |
-| `tests/test_distribution_coherence.py` | Rewrite `_resolve_magi_plugin_json()` + add `_semver_key` helper + test |
-| `tests/test_errors.py` | Cover `SpecReviewError` + exit-code 12 mapping |
-| `tests/test_run_sbtdd.py` | Cover new subcommand dispatch |
-| `tests/test_models.py` | Cover expanded `VALID_SUBCOMMANDS` tuple |
-| `CHANGELOG.md` | Under `## [Unreleased]`: Added (Features A/B/C), Changed (`bump plugin.json + marketplace.json to 0.2.0`), BREAKING (new exit 12 taxonomy entry) |
-| `.claude-plugin/plugin.json` | `version` bump 0.1.0 → 0.2.0 |
-| `.claude-plugin/marketplace.json` | `version` bump 0.1.0 → 0.2.0 (both top-level + plugin entry) |
-| `CLAUDE.md` | Add INV-31 to "Invariants Summary" + remove shipped blockers from "v0.2 requirement (LOCKED)" sections |
-| `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 | Register INV-31 (if adopted) |
-
-## Invariants active during v0.2 (reminder)
-
-- **INV-0** (`~/.claude/CLAUDE.md` top authority) — `--override-checkpoint` is the INV-0 escape valve, requires `--reason`.
-- **INV-11** (safety valves) — Feature A fires when valve exhausts; Feature B loop caps at 3.
-- **INV-22** (auto sequential + headless) — Feature A NEVER runs inside `auto_cmd`; policy file drives headless decision.
-- **INV-26** (audit trail) — Features A + B both emit JSON artifacts in `.claude/`.
-- **INV-28** (MAGI degraded no-exit) — Feature A fires on degraded exhaustion.
-- **INV-29** (`/receiving-code-review` gate) — honored for Loop 1 (`requesting-code-review`) and Loop 2 (`magi`) findings as in v0.1. Feature B spec-reviewer findings are NOT routed through `/receiving-code-review` in v0.2 (see "v0.2 scope boundary — Feature B B6 relaxation" immediately below).
-- **INV-30** (resumibility) — Feature A integrates with `resume_cmd` via pending marker.
-- **INV-31 (new, proposed)** — Every task close in `auto_cmd` + `close_task_cmd` passes spec-reviewer unless `--skip-spec-review` or stub injected.
-
-## v0.2 scope boundary — Feature B B6 relaxation
-
-Spec-base §2.2 ("Entrega v0.2") describes a full reviewer-feedback loop: on `issues`, "treat as MAGI-like findings: feed to `/receiving-code-review`, mini-cycle TDD fix per accepted finding, re-dispatch reviewer, repeat up to a safety valve." Acceptance criterion B6 summarizes this as "Issues rutean via `/receiving-code-review` (extension INV-29)."
-
-**v0.2 lands the dispatcher + integration halves of B6; the automated reviewer-feedback mini-cycle is deferred to v0.2.1 or v0.3.** Concretely:
-
-- `spec_review_dispatch.dispatch_spec_reviewer` invokes the reviewer once per task, parses the result, writes the audit artifact, and returns `SpecReviewResult`.
-- On `approved=False`, the dispatcher returns with `issues` populated. Its caller (`auto_cmd._phase2_task_loop`, `close_task_cmd`, `review_spec_compliance_cmd`) raises `SpecReviewError` (exit 12) and aborts the run — same failure shape as `MAGIGateError`.
-- The user can (a) manually invoke `/receiving-code-review` on the findings, apply fixes via mini-cycle TDD, then resume via `/sbtdd resume`, or (b) pass `--skip-spec-review` on the re-run after investigating.
-- Automating the `/receiving-code-review` → mini-cycle → re-dispatch loop requires a headless `claude -p` reviewing interaction pattern not yet exercised in the codebase; shipping it in v0.2 would expand scope materially and risks an INV-29-style sterile loop if the auto-accept/auto-reject heuristic is wrong. Deferring the automation preserves INV-29's spirit (a human evaluates findings before applying) while still delivering v0.2's primary value: the per-task drift detection itself, which is the Milestone-A-Scenario-4-class defect prevention the feature exists to solve.
-
-**Decision record for MAGI:** when the Checkpoint 2 reviewer evaluates this plan, treat B6 as partially delivered and scoped accordingly. If MAGI classifies the deferral as CRITICAL, escalate to user per INV-11 safety-valve path; the user may (per INV-0) accept the deferral with `--reason "B6 scope split — dispatcher v0.2, auto-feedback v0.2.1"` or instruct that the full loop land in v0.2 before merge. This plan implements the dispatcher half; the second half is a single task addition (auto-accept lowest-risk findings, mini-cycle TDD, re-dispatch) if the user lands it here.
+**Tech Stack:** Python 3.9+ stdlib only on hot paths, PyYAML at config-load, pytest + ruff + mypy --strict for verification. Cross-platform Windows + POSIX.
 
 ---
 
-## MILESTONE F — Feature C: MAGI version-agnostic parity tests
+## Reference materials
 
-**Rationale:** MAGI 2.1.4 shipped (patch bump, zero schema change). The hardcoded `2.1.3` in `tests/test_distribution_coherence.py:91` will silently skip on fresh caches. Replace with semver-sorted auto-resolver.
+Before starting any task, read:
 
-### Task F1: `_semver_key` helper + tests
-
-**Files:**
-- Modify: `tests/test_distribution_coherence.py:78-97`
-
-- [ ] **Step 1 (Red): add failing tests for `_semver_key`**
-
-Append to `tests/test_distribution_coherence.py`:
-
-```python
-def test_semver_key_orders_patch_bump() -> None:
-    from tests.test_distribution_coherence import _semver_key
-    assert _semver_key("2.1.4") > _semver_key("2.1.3")
-    assert _semver_key("2.2.0") > _semver_key("2.1.99")
-    assert _semver_key("3.0.0") > _semver_key("2.99.99")
-
-
-def test_semver_key_handles_mixed_version_strings() -> None:
-    from tests.test_distribution_coherence import _semver_key
-    # non-numeric segment sorts BELOW numeric (we use -1 as the sentinel)
-    assert _semver_key("2.1.3") > _semver_key("2.1.beta")
-    assert _semver_key("2.1.0") > _semver_key("garbage")
-    # ties resolve deterministically
-    assert _semver_key("2.1.3") == _semver_key("2.1.3")
-```
-
-- [ ] **Step 2: run tests, confirm ImportError on `_semver_key`**
-
-```bash
-python -m pytest tests/test_distribution_coherence.py::test_semver_key_orders_patch_bump -v
-```
-Expected: FAIL — `ImportError: cannot import name '_semver_key'`.
-
-- [ ] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_distribution_coherence.py
-git commit -m "test: add failing _semver_key ordering tests"
-```
-
-- [ ] **Step 4 (Green): implement `_semver_key`**
-
-Insert BEFORE `_resolve_magi_plugin_json` in `tests/test_distribution_coherence.py`:
-
-```python
-def _semver_key(v: str) -> tuple[int, ...]:
-    """Convert '2.1.4' -> (2, 1, 4); non-numeric segments sort last (-1)."""
-    parts: list[int] = []
-    for seg in v.split("."):
-        try:
-            parts.append(int(seg))
-        except ValueError:
-            parts.append(-1)
-    return tuple(parts)
-```
-
-- [ ] **Step 5: run the two new tests, confirm PASS**
-
-```bash
-python -m pytest tests/test_distribution_coherence.py -k semver_key -v
-```
-Expected: 2 PASSED.
-
-- [ ] **Step 6 (Green commit)**
-
-```bash
-git add tests/test_distribution_coherence.py
-git commit -m "feat: add _semver_key helper for MAGI version resolution"
-```
-
-- [ ] **Step 7 (Refactor + verify)**
-
-```bash
-make verify
-```
-Expected: pytest 0 fail, ruff clean, mypy 0 errors. If any, fix before commit.
-
-- [ ] **Step 8 (Refactor commit if any cleanup landed)**
-
-```bash
-git commit --allow-empty -m "refactor: no-op; _semver_key reviewed, clean"
-```
-
-### Task F2: auto-resolver `_resolve_magi_plugin_json`
-
-**Files:**
-- Modify: `tests/test_distribution_coherence.py:78-97`
-
-- [ ] **Step 1 (Red): add test asserting latest-version selection**
-
-Append:
-
-```python
-def test_resolve_magi_plugin_json_picks_latest_semver(tmp_path, monkeypatch) -> None:
-    from tests.test_distribution_coherence import _resolve_magi_plugin_json
-    # Build synthetic cache with 2.1.3 and 2.1.4
-    for v in ("2.1.3", "2.1.4"):
-        d = tmp_path / "bolivartech-plugins" / "magi" / v / ".claude-plugin"
-        d.mkdir(parents=True)
-        (d / "plugin.json").write_text("{}", encoding="utf-8")
-    monkeypatch.delenv("MAGI_PLUGIN_ROOT", raising=False)
-    monkeypatch.setattr(
-        "pathlib.Path.home",
-        lambda: tmp_path.parent,  # home()/.claude/plugins/cache -> tmp_path
-    )
-    # Compose the expected base the resolver walks to
-    monkeypatch.setattr(
-        "tests.test_distribution_coherence._magi_cache_base",
-        lambda: tmp_path / "bolivartech-plugins" / "magi",
-    )
-    resolved = _resolve_magi_plugin_json()
-    assert resolved.parent.parent.name == "2.1.4"
-
-
-def test_resolve_magi_plugin_json_honors_env_override(tmp_path, monkeypatch) -> None:
-    from tests.test_distribution_coherence import _resolve_magi_plugin_json
-    monkeypatch.setenv("MAGI_PLUGIN_ROOT", str(tmp_path))
-    result = _resolve_magi_plugin_json()
-    assert result == tmp_path / ".claude-plugin" / "plugin.json"
-
-
-def test_resolve_magi_plugin_json_graceful_when_cache_missing(tmp_path, monkeypatch) -> None:
-    from tests.test_distribution_coherence import _resolve_magi_plugin_json
-    monkeypatch.delenv("MAGI_PLUGIN_ROOT", raising=False)
-    monkeypatch.setattr(
-        "tests.test_distribution_coherence._magi_cache_base",
-        lambda: tmp_path / "does-not-exist",
-    )
-    result = _resolve_magi_plugin_json()
-    assert not result.is_file()  # triggers existing skipif gate
-```
-
-- [ ] **Step 2: run tests, confirm FAIL (resolver still hardcodes 2.1.3, no `_magi_cache_base` symbol)**
-
-```bash
-python -m pytest tests/test_distribution_coherence.py -k "resolve_magi" -v
-```
-Expected: FAIL.
-
-- [ ] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_distribution_coherence.py
-git commit -m "test: add failing tests for MAGI auto-resolver"
-```
-
-- [ ] **Step 4 (Green): rewrite `_resolve_magi_plugin_json`**
-
-Replace the existing function in `tests/test_distribution_coherence.py` (current lines 78-97):
-
-```python
-def _magi_cache_base() -> Path:
-    """Return the Claude Code cache base for MAGI. Extracted for test monkeypatch."""
-    return (
-        Path.home()
-        / ".claude"
-        / "plugins"
-        / "cache"
-        / "bolivartech-plugins"
-        / "magi"
-    )
-
-
-def _resolve_magi_plugin_json() -> Path:
-    """Resolve the latest cached MAGI's plugin.json, honoring MAGI_PLUGIN_ROOT override.
-
-    Enumerates version subdirs under the cache base and picks the highest
-    semver. Non-numeric segments sort last. Graceful skip when cache is
-    absent (returns a non-existent path that `is_file()` rejects, triggering
-    the existing `@pytest.mark.skipif` gate).
-    """
-    env_override = os.environ.get("MAGI_PLUGIN_ROOT")
-    if env_override:
-        return Path(env_override) / ".claude-plugin" / "plugin.json"
-    cache_base = _magi_cache_base()
-    if not cache_base.is_dir():
-        return cache_base / "missing" / ".claude-plugin" / "plugin.json"
-    versions = [p.name for p in cache_base.iterdir() if p.is_dir()]
-    if not versions:
-        return cache_base / "missing" / ".claude-plugin" / "plugin.json"
-    latest = max(versions, key=_semver_key)
-    return cache_base / latest / ".claude-plugin" / "plugin.json"
-```
-
-- [ ] **Step 5: run new + existing tests, confirm PASS**
-
-```bash
-python -m pytest tests/test_distribution_coherence.py -v
-```
-Expected: all PASS (or skip when cache absent, which is the graceful path).
-
-- [ ] **Step 6 (Green commit)**
-
-```bash
-git add tests/test_distribution_coherence.py
-git commit -m "feat: auto-resolve MAGI cache to latest semver version"
-```
-
-- [ ] **Step 7 (Refactor): verify + ensure `MAGI_PLUGIN_JSON` module-level still computes correctly**
-
-```bash
-make verify
-```
-If `MAGI_PLUGIN_JSON` at module top-level now points to a real path on your dev machine (2.1.4 installed), the two `@pytest.mark.skipif` parity tests should run, not skip.
-
-- [ ] **Step 8 (Refactor commit)**
-
-```bash
-git commit --allow-empty -m "refactor: keep _resolve_magi_plugin_json pure; cache base extracted for test patching"
-```
-
-### Task F3: close-task bookkeeping
-
-- [ ] **Step 1: update plan checkbox for Milestone F**
-
-(Handled by `/sbtdd close-task` or manual edit.)
-
-- [ ] **Step 2: close-task commit**
-
-```bash
-git commit --allow-empty -m "chore: mark task F complete"
-```
+- **Spec**: `sbtdd/spec-behavior.md` (BDD overlay v0.3.0 — escenarios D1.1..R1.7).
+- **Spec base**: `sbtdd/spec-behavior-base.md` (raw input v1.0.0; defines deferred items D5/E2/F/G/H).
+- **Authoritative contract**: `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 (invariants INV-0..INV-31).
+- **Project rules**: `CLAUDE.local.md` (TDD discipline, commit prefixes, plan-approved contract).
+- **Global rules**: `~/.claude/CLAUDE.md` (INV-0 absolute precedence: English commits, no AI refs, no Co-Authored-By, atomic commits).
 
 ---
 
-## MILESTONE G — Feature A: Interactive MAGI escalation prompt
-
-**Rationale:** v0.1 exits 8 with artefacts when MAGI safety valve exhausts. v0.2 adds an interactive prompt emulating the assistant-in-chat interaction observed during Milestones A-E (see commit `5d7bfc4`, session 2026-04-20). INV-22 forbids running inside `auto_cmd`; headless policy file drives non-TTY fallback.
-
-### Task G1: skeleton module + dataclasses
-
-**Files:**
-- Create: `skills/sbtdd/scripts/escalation_prompt.py`
-- Create: `tests/test_escalation_prompt.py`
-
-- [ ] **Step 1 (Red): write failing test for `EscalationContext` + `UserDecision` + `EscalationOption` dataclasses**
-
-`tests/test_escalation_prompt.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-23
-"""Unit tests for escalation_prompt module (Feature A)."""
-
-from __future__ import annotations
-
-import pytest
-
-from escalation_prompt import (
-    EscalationContext,
-    EscalationOption,
-    UserDecision,
-    _RootCause,
-)
-
-
-def test_escalation_context_is_frozen() -> None:
-    ctx = EscalationContext(
-        iterations=(),
-        plan_id="A",
-        context="checkpoint2",
-        per_agent_verdicts=(),
-        findings=(),
-        root_cause=_RootCause.INFRA_TRANSIENT,
-    )
-    with pytest.raises((AttributeError, Exception)):
-        ctx.plan_id = "B"  # frozen
-
-
-def test_user_decision_is_frozen_and_carries_reason() -> None:
-    d = UserDecision(chosen_option="a", action="override", reason="caspar JSON bug again")
-    assert d.chosen_option == "a"
-    assert d.reason == "caspar JSON bug again"
-    with pytest.raises((AttributeError, Exception)):
-        d.reason = "changed"
-
-
-def test_escalation_option_has_letter_action_rationale() -> None:
-    opt = EscalationOption(letter="a", action="override", rationale="INV-0 user authority")
-    assert opt.letter == "a"
-    assert opt.action == "override"
-```
-
-- [ ] **Step 2: run, confirm `ModuleNotFoundError: escalation_prompt`**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [ ] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_escalation_prompt.py
-git commit -m "test: add failing tests for escalation_prompt dataclasses"
-```
-
-- [ ] **Step 4 (Green): implement module skeleton**
-
-`skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-23
-"""Interactive MAGI escalation prompt (Feature A, v0.2.0).
-
-Fires when INV-11 safety valve exhausts in `/sbtdd spec` (Checkpoint 2) or
-`/sbtdd pre-merge` (Loop 2). INV-22 forbids running inside `/sbtdd auto`:
-auto invocations consult `.claude/magi-auto-policy.json` instead.
-
-Public API:
-    build_escalation_context(iterations, plan_id, context) -> EscalationContext
-    format_escalation_message(ctx) -> str
-    prompt_user(ctx, options) -> UserDecision
-    apply_decision(decision, ctx, root) -> int  # writes audit artifact
-
-Precedent: Milestone D Checkpoint 2 iter 3 chat escalation (commit 5d7bfc4).
-"""
-
-from __future__ import annotations
-
-import enum
-from dataclasses import dataclass
-from typing import Any, Literal
-
-
-class _RootCause(enum.Enum):
-    INFRA_TRANSIENT = "infra_transient"       # same agent fails across iters
-    PLAN_VS_SPEC = "plan_vs_spec"             # CRITICAL findings persist
-    STRUCTURAL_DEFECT = "structural_defect"   # STRONG_NO_GO from >=1 agent
-    SPEC_AMBIGUITY = "spec_ambiguity"         # confidence trending down
-
-
-_ContextLit = Literal["checkpoint2", "pre-merge", "auto"]
-_ActionLit = Literal["override", "retry", "abandon", "alternative"]
-
-
-@dataclass(frozen=True)
-class EscalationOption:
-    letter: str       # 'a' | 'b' | 'c' | 'd'
-    action: _ActionLit
-    rationale: str    # shown in the menu after the action verb
-    caveat: str = ""  # optional consequence / tradeoff line
-
-
-@dataclass(frozen=True)
-class EscalationContext:
-    iterations: tuple[dict[str, Any], ...]     # per-iter verdict snapshots
-    plan_id: str
-    context: _ContextLit
-    per_agent_verdicts: tuple[tuple[str, str], ...]  # (agent_name, verdict)
-    findings: tuple[tuple[str, str], ...]            # (severity, text)
-    root_cause: _RootCause
-
-
-@dataclass(frozen=True)
-class UserDecision:
-    chosen_option: str
-    action: _ActionLit
-    reason: str
-```
-
-- [ ] **Step 5: run tests, confirm PASS**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [ ] **Step 6 (Green commit)**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py tests/test_escalation_prompt.py
-git commit -m "feat: add escalation_prompt skeleton with typed dataclasses"
-```
-
-- [ ] **Step 7 (Refactor + verify)**
-
-```bash
-make verify
-```
-
-- [ ] **Step 8 (Refactor commit)**
-
-```bash
-git commit --allow-empty -m "refactor: escalation_prompt skeleton reviewed, clean"
-```
-
-### Task G2: root-cause classifier + `build_escalation_context`
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-
-- [ ] **Step 1 (Red): tests for classifier**
-
-Append to `tests/test_escalation_prompt.py`:
-
-```python
-from escalation_prompt import (
-    build_escalation_context,
-    _classify_root_cause,
-)
-from magi_dispatch import MAGIVerdict
-
-
-def _mkv(verdict: str, degraded: bool = False, findings: tuple = (), conds: tuple = ()) -> MAGIVerdict:
-    return MAGIVerdict(verdict=verdict, degraded=degraded, conditions=conds, findings=findings, raw_output="")
-
-
-def test_classify_infra_transient_when_degraded_repeats() -> None:
-    iters = [
-        _mkv("HOLD", degraded=True),
-        _mkv("GO", degraded=False),
-        _mkv("HOLD", degraded=True),
-    ]
-    assert _classify_root_cause(iters) == _RootCause.INFRA_TRANSIENT
-
-
-def test_classify_structural_defect_when_strong_no_go_present() -> None:
-    iters = [_mkv("STRONG_NO_GO")]
-    assert _classify_root_cause(iters) == _RootCause.STRUCTURAL_DEFECT
-
-
-def test_classify_plan_vs_spec_when_critical_findings_persist() -> None:
-    critical = ({"severity": "CRITICAL", "text": "f"},)
-    iters = [_mkv("HOLD", findings=critical), _mkv("HOLD", findings=critical)]
-    assert _classify_root_cause(iters) == _RootCause.PLAN_VS_SPEC
-
-
-def test_build_escalation_context_checkpoint2_returns_frozen_struct() -> None:
-    iters = [_mkv("HOLD_TIE"), _mkv("HOLD"), _mkv("HOLD_TIE")]
-    ctx = build_escalation_context(iterations=iters, plan_id="A", context="checkpoint2")
-    assert ctx.plan_id == "A"
-    assert ctx.context == "checkpoint2"
-    assert len(ctx.iterations) == 3
-    assert ctx.root_cause in set(_RootCause)
-```
-
-- [ ] **Step 2: run, confirm FAIL**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [ ] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_escalation_prompt.py
-git commit -m "test: add classifier + build_escalation_context tests"
-```
-
-- [ ] **Step 4 (Green): implement classifier + builder**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-from magi_dispatch import MAGIVerdict
-
-
-def _classify_root_cause(iterations: list[MAGIVerdict]) -> _RootCause:
-    """Infer the dominant failure mode across iterations."""
-    if any(v.verdict == "STRONG_NO_GO" for v in iterations):
-        return _RootCause.STRUCTURAL_DEFECT
-    degraded_count = sum(1 for v in iterations if v.degraded)
-    if degraded_count >= 2 and degraded_count >= len(iterations) / 2:
-        return _RootCause.INFRA_TRANSIENT
-    critical_across = [
-        any(str(f.get("severity", "")).upper() == "CRITICAL" for f in v.findings)
-        for v in iterations
-    ]
-    if sum(critical_across) >= 2:
-        return _RootCause.PLAN_VS_SPEC
-    return _RootCause.SPEC_AMBIGUITY
-
-
-def build_escalation_context(
-    iterations: list[MAGIVerdict],
-    plan_id: str,
-    context: _ContextLit,
-) -> EscalationContext:
-    """Collect iter history + classify root cause."""
-    snapshots = tuple(
-        {
-            "verdict": v.verdict,
-            "degraded": v.degraded,
-            "n_conditions": len(v.conditions),
-            "n_findings": len(v.findings),
-        }
-        for v in iterations
-    )
-    per_agent: tuple[tuple[str, str], ...] = ()  # v0.2: MAGI does not expose per-agent breakdown
-    findings = tuple(
-        (str(f.get("severity", "INFO")).upper(), str(f.get("text", f)))
-        for v in iterations
-        for f in v.findings
-    )
-    return EscalationContext(
-        iterations=snapshots,
-        plan_id=plan_id,
-        context=context,
-        per_agent_verdicts=per_agent,
-        findings=findings,
-        root_cause=_classify_root_cause(iterations),
-    )
-```
-
-- [ ] **Step 5: run tests, PASS**
-
-- [ ] **Step 6 (Green commit)**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py tests/test_escalation_prompt.py
-git commit -m "feat: implement root-cause classifier + build_escalation_context"
-```
-
-- [ ] **Step 7-8 (Refactor + verify + commit)**
-
-```bash
-make verify && git commit --allow-empty -m "refactor: classifier reviewed, clean"
-```
-
-### Task G3: `format_escalation_message` (golden-output render)
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-- Create: `tests/fixtures/magi-escalations/checkpoint2-infra-transient.txt`
-
-- [ ] **Step 1 (Red): golden-output test**
-
-Create `tests/fixtures/magi-escalations/checkpoint2-infra-transient.txt` with the full template from CLAUDE.md "canonical output template" section, adapted to synthetic inputs. Then append to `tests/test_escalation_prompt.py`:
-
-```python
-from pathlib import Path
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "magi-escalations"
-
-
-def test_format_escalation_message_matches_golden_checkpoint2_infra() -> None:
-    from escalation_prompt import format_escalation_message
-    iters = [
-        _mkv("HOLD", degraded=True),
-        _mkv("GO", degraded=False),
-        _mkv("HOLD", degraded=True),
-    ]
-    ctx = build_escalation_context(iters, plan_id="D", context="checkpoint2")
-    msg = format_escalation_message(ctx)
-    # Render must be <=40 lines and include the four expected markers
-    assert msg.count("\n") <= 40
-    assert "Escalando al usuario" in msg
-    assert "Opciones per INV-0" in msg
-    assert "(a)" in msg and "(b)" in msg and "(c)" in msg and "(d)" in msg
-    assert "Cual?" in msg or "¿Cuál?" in msg
-
-
-def test_format_escalation_message_structural_defect_omits_retry() -> None:
-    from escalation_prompt import format_escalation_message
-    iters = [_mkv("STRONG_NO_GO")]
-    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
-    msg = format_escalation_message(ctx)
-    # option (b) retry should be absent when STRONG_NO_GO present
-    assert "retry" not in msg.lower() or "abandonar" in msg.lower()
-```
-
-- [ ] **Step 2-3 (Red commit)**
-
-```bash
-git add tests/test_escalation_prompt.py tests/fixtures/magi-escalations/
-git commit -m "test: add golden-output tests for format_escalation_message"
-```
-
-- [ ] **Step 4 (Green): implement `format_escalation_message` + dynamic option composer**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-def _compose_options(ctx: EscalationContext) -> tuple[EscalationOption, ...]:
-    """Build context-aware menu per root cause."""
-    opts: list[EscalationOption] = []
-    # (a) override — always available unless STRONG_NO_GO
-    if ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
-        opts.append(EscalationOption(
-            letter="a",
-            action="override",
-            rationale="Override INV-0 (user authority)",
-            caveat="requires --reason; audit artifact written.",
-        ))
-    # (b) retry one iter — only for infra transient
-    if ctx.root_cause == _RootCause.INFRA_TRANSIENT:
-        opts.append(EscalationOption(
-            letter="b",
-            action="retry",
-            rationale="Re-invocar MAGI una iter mas (safety valve +1)",
-            caveat="consume iter extra; INV-0 override del INV-11.",
-        ))
-    # (c) replan / split — for plan-vs-spec or ambiguity
-    if ctx.root_cause in (_RootCause.PLAN_VS_SPEC, _RootCause.SPEC_AMBIGUITY):
-        opts.append(EscalationOption(
-            letter="c",
-            action="alternative",
-            rationale="Replan: split spec o ajustar scope",
-            caveat="reinicia flujo desde sec.1.",
-        ))
-    # (d) v0.1 behavior — always available, default in non-TTY
-    opts.append(EscalationOption(
-        letter="d",
-        action="abandon",
-        rationale="Exit 8 (v0.1 behavior) + artefactos para review manual",
-        caveat="default en non-TTY.",
-    ))
-    # Reassign letters a/b/c/d sequentially so the menu is contiguous
-    letters = ("a", "b", "c", "d")
-    return tuple(
-        EscalationOption(letter=letters[i], action=o.action, rationale=o.rationale, caveat=o.caveat)
-        for i, o in enumerate(opts[:4])
-    )
-
-
-def format_escalation_message(ctx: EscalationContext) -> str:
-    """Render the canonical escalation template (<=40 lines)."""
-    n = len(ctx.iterations)
-    last = ctx.iterations[-1] if ctx.iterations else {"verdict": "?", "degraded": False}
-    root_label = {
-        _RootCause.INFRA_TRANSIENT: "transient-infra (agent degraded repite)",
-        _RootCause.PLAN_VS_SPEC: "plan-vs-spec gap (CRITICAL findings persisten)",
-        _RootCause.STRUCTURAL_DEFECT: "defecto estructural (STRONG_NO_GO)",
-        _RootCause.SPEC_AMBIGUITY: "spec ambiguity (confidence trending down)",
-    }[ctx.root_cause]
-    opts = _compose_options(ctx)
-    lines = [
-        f"MAGI iter {n} FINAL ({ctx.context}): veredicto '{last['verdict']}' degraded={last['degraded']}.",
-        f"Causa raiz inferida: {root_label}.",
-        f"Safety valve INV-11 exhausted tras {n} iter.",
-        "",
-        "Escalando al usuario per INV-11 + INV-18:",
-        "",
-        f"Estado plan {ctx.plan_id}:",
-        f"- Iteraciones: {n}",
-        f"- Findings residuales: {len(ctx.findings)}",
-        "",
-        "Opciones per INV-0 (user authority):",
-    ]
-    for o in opts:
-        line = f"- ({o.letter}) {o.action}: {o.rationale}."
-        if o.caveat:
-            line += f" {o.caveat}"
-        lines.append(line)
-    lines.append("")
-    lines.append("¿Cuál?")
-    return "\n".join(lines)
-```
-
-- [ ] **Step 5 (verify tests PASS)**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [ ] **Step 6-8 (Green + Refactor commits)**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py
-git commit -m "feat: implement format_escalation_message with dynamic option menu"
-make verify
-git commit --allow-empty -m "refactor: template render reviewed, ≤40 lines"
-```
-
-### Task G4: `prompt_user` TTY-guarded + headless fallback
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-
-- [ ] **Step 1 (Red): TTY + headless tests**
-
-Append to `tests/test_escalation_prompt.py`:
-
-```python
-def test_prompt_user_non_tty_defaults_to_abandon(monkeypatch, capsys) -> None:
-    from escalation_prompt import prompt_user, _compose_options
-    iters = [_mkv("HOLD", degraded=True), _mkv("HOLD", degraded=True)]
-    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
-    opts = _compose_options(ctx)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    decision = prompt_user(ctx, opts, non_interactive=True)
-    assert decision.action == "abandon"
-    assert decision.chosen_option == "d"
-
-
-def test_prompt_user_tty_accepts_letter(monkeypatch) -> None:
-    from escalation_prompt import prompt_user, _compose_options
-    iters = [_mkv("HOLD", degraded=True)] * 3
-    ctx = build_escalation_context(iters, plan_id="X", context="checkpoint2")
-    opts = _compose_options(ctx)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    inputs = iter(["a", "caspar JSON bug"])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    decision = prompt_user(ctx, opts, non_interactive=False)
-    assert decision.action == "override"
-    assert decision.reason == "caspar JSON bug"
-
-
-def test_prompt_user_invalid_letter_reprompts(monkeypatch) -> None:
-    from escalation_prompt import prompt_user, _compose_options
-    iters = [_mkv("HOLD", degraded=True)] * 3
-    ctx = build_escalation_context(iters, plan_id="X", context="checkpoint2")
-    opts = _compose_options(ctx)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    inputs = iter(["z", "A", "reason text"])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    decision = prompt_user(ctx, opts, non_interactive=False)
-    assert decision.chosen_option == "a"
-```
-
-- [ ] **Step 2-3 (Red commit)**
-
-```bash
-git add tests/test_escalation_prompt.py
-git commit -m "test: add prompt_user TTY + headless + re-prompt tests"
-```
-
-- [ ] **Step 4 (Green): implement `prompt_user`**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-import json
-import sys
-from pathlib import Path
-
-
-_HEADLESS_POLICY_FILE = ".claude/magi-auto-policy.json"
-# Canonical registry of allowed `on_exhausted` policy values. Lives in
-# models.py per NF10 (fixed registries are centralized in models.py).
-# Imported here to avoid a second source of truth.
-from models import AUTO_POLICIES  # tuple[str, ...] of allowed policy names
-
-
-def _read_headless_policy(root: Path) -> str:
-    """Return the configured policy or 'abort' (default)."""
-    p = root / _HEADLESS_POLICY_FILE
-    if not p.is_file():
-        return "abort"
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return "abort"
-    policy = str(data.get("on_exhausted", "abort"))
-    return policy if policy in AUTO_POLICIES else "abort"
-
-
-def prompt_user(
-    ctx: EscalationContext,
-    options: tuple[EscalationOption, ...],
-    *,
-    non_interactive: bool = False,
-    project_root: Path | None = None,
-) -> UserDecision:
-    """Print the formatted escalation message + prompt user for choice.
-
-    Non-TTY / --non-interactive / auto path: apply headless policy from
-    .claude/magi-auto-policy.json (default 'abort' = option d).
-
-    TTY path: loop input() until user enters a valid letter; then collect
-    a one-line reason (mandatory for override action).
-    """
-    sys.stderr.write(format_escalation_message(ctx) + "\n")
-    tty = sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
-    if non_interactive or not tty:
-        policy = _read_headless_policy(project_root or Path.cwd())
-        if policy == "override_strong_go_only" and ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
-            match = next((o for o in options if o.action == "override"), options[-1])
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="headless policy: override_strong_go_only")
-        if policy == "retry_once" and any(o.action == "retry" for o in options):
-            match = next(o for o in options if o.action == "retry")
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="headless policy: retry_once")
-        # default 'abort' -> option d (abandon)
-        match = next((o for o in options if o.action == "abandon"), options[-1])
-        return UserDecision(chosen_option=match.letter, action=match.action,
-                            reason="headless policy: abort (default)")
-    valid = {o.letter: o for o in options}
-    while True:
-        try:
-            choice = input("Option (a/b/c/d): ").strip().lower()
-        except EOFError:
-            match = next((o for o in options if o.action == "abandon"), options[-1])
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="EOFError during prompt; headless default")
-        if choice in valid:
-            break
-        sys.stderr.write(f"Invalid choice '{choice}'; expected one of {sorted(valid)}.\n")
-    opt = valid[choice]
-    if opt.action == "override":
-        try:
-            reason = input("Reason (mandatory for override): ").strip()
-        except EOFError:
-            reason = ""
-        if not reason:
-            sys.stderr.write("Override requires non-empty --reason; falling back to abandon.\n")
-            match = next((o for o in options if o.action == "abandon"), options[-1])
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="override requested without reason")
-        return UserDecision(chosen_option=choice, action="override", reason=reason)
-    return UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
-```
-
-- [ ] **Step 5: tests PASS**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [ ] **Step 6-8**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py
-git commit -m "feat: add prompt_user with TTY + headless fallback paths"
-make verify
-git commit --allow-empty -m "refactor: prompt_user reviewed for EOFError safety"
-```
-
-### Task G5: `apply_decision` + audit artifact writer
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-
-- [ ] **Step 1 (Red): audit artifact test**
-
-Append:
-
-```python
-def test_apply_decision_writes_audit_artifact(tmp_path) -> None:
-    from escalation_prompt import apply_decision, _compose_options
-    iters = [_mkv("HOLD", degraded=True)] * 3
-    ctx = build_escalation_context(iters, plan_id="D", context="checkpoint2")
-    opts = _compose_options(ctx)
-    decision = UserDecision(chosen_option="a", action="override", reason="caspar bug")
-    code = apply_decision(decision, ctx, project_root=tmp_path)
-    assert code == 0
-    # artifact written
-    audits = list((tmp_path / ".claude" / "magi-escalations").glob("*.json"))
-    assert len(audits) == 1
-    import json
-    data = json.loads(audits[0].read_text(encoding="utf-8"))
-    assert data["decision"] == "override"
-    assert data["chosen_option"] == "a"
-    assert data["reason"] == "caspar bug"
-    assert data["plan_id"] == "D"
-    assert data["magi_context"] == "checkpoint2"
-
-
-def test_apply_decision_abandon_returns_exit_8(tmp_path) -> None:
-    from escalation_prompt import apply_decision
-    iters = [_mkv("HOLD_TIE")] * 3
-    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
-    decision = UserDecision(chosen_option="d", action="abandon",
-                            reason="headless policy")
-    code = apply_decision(decision, ctx, project_root=tmp_path)
-    assert code == 8
-```
-
-- [ ] **Step 2-3 (Red commit)**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-git add tests/test_escalation_prompt.py
-git commit -m "test: add apply_decision audit artifact + exit-code tests"
-```
-
-- [ ] **Step 4 (Green)**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-from datetime import datetime, timezone
-
-
-def apply_decision(decision: UserDecision, ctx: EscalationContext, project_root: Path) -> int:
-    """Write audit artifact + return process exit code.
-
-    Returns:
-        0 if decision is override/retry/alternative (caller continues);
-        8 if abandon (exit 8 matches v0.1 behavior so wrappers can propagate).
-    """
-    artifact_dir = project_root / ".claude" / "magi-escalations"
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    safe_ts = ts.replace(":", "-")
-    artifact = artifact_dir / f"{safe_ts}-{ctx.plan_id}.json"
-    payload = {
-        "decision": decision.action,
-        "chosen_option": decision.chosen_option,
-        "reason": decision.reason,
-        "escalation_context": {
-            "iterations": list(ctx.iterations),
-            "plan_id": ctx.plan_id,
-            "root_cause": ctx.root_cause.value,
-            "n_findings": len(ctx.findings),
-        },
-        "timestamp": ts,
-        "plan_id": ctx.plan_id,
-        "magi_context": ctx.context,
-    }
-    artifact.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return 8 if decision.action == "abandon" else 0
-```
-
-- [ ] **Step 5: tests PASS**
-
-- [ ] **Step 6-8**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py
-git commit -m "feat: add apply_decision with audit artifact + exit-code mapping"
-make verify
-git commit --allow-empty -m "refactor: apply_decision reviewed"
-```
-
-### Task G6: wire into `spec_cmd.py` safety-valve exhaustion path
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/spec_cmd.py`
-- Create: `tests/test_spec_cmd_escalation.py`
-
-- [ ] **Step 1 (Red): test escalation fires on exhaustion**
-
-`tests/test_spec_cmd_escalation.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-23
-"""spec_cmd -> escalation_prompt wiring tests (Feature A)."""
-
-from __future__ import annotations
-
-import pytest
-from pathlib import Path
-from unittest.mock import patch
-
-import spec_cmd
-from errors import MAGIGateError
-from tests.fixtures.skill_stubs import StubMAGI, make_verdict
-
-
-def test_spec_cmd_escalates_on_safety_valve_exhaustion(tmp_path, monkeypatch) -> None:
-    # synthesize a full project root with spec-behavior-base.md etc
-    # (use existing fixtures helper if one exists; otherwise create minimal)
-    ...  # skeleton; concretize using test_spec_cmd.py fixtures
-
-
-def test_spec_cmd_override_flag_skips_prompt_and_writes_audit(tmp_path) -> None:
-    ...  # `--override-checkpoint --reason "..."` path bypasses prompt
-```
-
-Replace the `...` placeholders by lifting fixture setup from existing `tests/test_spec_cmd.py`. (Do NOT ship literal `...` — that would be a placeholder per skill rules.) The exact fixture setup uses `_make_project_fixture(tmp_path)` analogous to what test_spec_cmd already does.
-
-- [ ] **Step 2-3 (Red commit)**
-
-```bash
-git add tests/test_spec_cmd_escalation.py
-git commit -m "test: add spec_cmd safety-valve escalation wiring tests"
-```
-
-- [ ] **Step 4 (Green): wire escalation into `spec_cmd`**
-
-In `skills/sbtdd/scripts/spec_cmd.py`:
-
-1. Extend `_build_parser()` to accept `--override-checkpoint`, `--reason`, and `--non-interactive`:
-
-```python
-def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="sbtdd spec")
-    p.add_argument("--project-root", type=Path, default=Path.cwd())
-    p.add_argument("--override-checkpoint", action="store_true",
-                   help="Override MAGI gate per INV-0; requires --reason")
-    p.add_argument("--reason", type=str, default=None,
-                   help="Mandatory when --override-checkpoint is set")
-    p.add_argument("--non-interactive", action="store_true",
-                   help="Force headless path on safety-valve exhaustion")
-    return p
-```
-
-2. Modify `_run_magi_checkpoint2` to catch exhaustion and route to `escalation_prompt`:
-
-```python
-import escalation_prompt
-
-
-def _run_magi_checkpoint2(root: Path, cfg: object, ns: argparse.Namespace) -> magi_dispatch.MAGIVerdict:
-    ...  # existing body (unchanged until final raise)
-    # replace `raise MAGIGateError(f"... did not converge ...")` with:
-    # Build escalation context from the iterations the loop tracked; wire
-    # apply_decision to either raise (abandon/exit 8), override (accept
-    # last verdict), or retry (one more iter). Plan_id derived from the
-    # plan path name suffix ('A' in claude-plan-tdd-A.md).
-```
-
-Concretely replace the final `raise MAGIGateError(...)` with:
-
-```python
-    # Exhaustion path: build context + escalate
-    ctx = escalation_prompt.build_escalation_context(
-        iterations=list(_verdict_history),
-        plan_id=_plan_id_from_path(plan.name),
-        context="checkpoint2",
-    )
-    options = escalation_prompt._compose_options(ctx)
-    if ns.override_checkpoint:
-        if not ns.reason:
-            raise MAGIGateError("--override-checkpoint requires --reason")
-        decision = UserDecision(chosen_option="a", action="override", reason=ns.reason)
-    else:
-        decision = escalation_prompt.prompt_user(
-            ctx, options, non_interactive=ns.non_interactive, project_root=root
-        )
-    code = escalation_prompt.apply_decision(decision, ctx, project_root=root)
-    if code == 0 and decision.action == "override":
-        return _verdict_history[-1]  # accept last verdict
-    if code == 0 and decision.action == "retry":
-        # One extra iter — re-enter the loop body once more
-        verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
-        _write_plan_tdd(root, verdict, plan_org, plan)
-        if magi_dispatch.verdict_passes_gate(verdict, threshold):
-            return verdict
-        raise MAGIGateError("retry iter also failed gate")
-    raise MAGIGateError(f"user chose '{decision.action}' on safety-valve exhaustion")
-```
-
-Track iterations via `_verdict_history: list[MAGIVerdict]` accumulated inside the for loop (refactor the existing loop to append each `verdict` observed). Add module-level `_plan_id_from_path` helper:
-
-```python
-def _plan_id_from_path(name: str) -> str:
-    """Extract plan id suffix from filename (claude-plan-tdd-A.md -> 'A')."""
-    import re
-    m = re.search(r"-([A-Z0-9]+)\.md$", name)
-    return m.group(1) if m else "X"
-```
-
-Pass `ns` to `_run_magi_checkpoint2(root, cfg, ns)` from `main(argv)`.
-
-- [ ] **Step 5: tests PASS**
-
-- [ ] **Step 6-8 (Green + Refactor commits)**
-
-```bash
-git add skills/sbtdd/scripts/spec_cmd.py tests/test_spec_cmd_escalation.py
-git commit -m "feat: wire escalation_prompt into spec_cmd safety-valve exhaustion"
-make verify
-git commit --allow-empty -m "refactor: spec_cmd wiring reviewed"
-```
-
-### Task G7: wire into `pre_merge_cmd.py`
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/pre_merge_cmd.py`
-- Create: `tests/test_pre_merge_cmd_escalation.py`
-
-Mirror Task G6 for `pre_merge_cmd._loop2`. The non-convergence raise at `pre_merge_cmd.py:540-546` becomes the escalation entry. Pass `context="pre-merge"` and `plan_id` derived analogously. The `MAGIGateError` constructor already carries `accepted_conditions` / `rejected_conditions` / `verdict` / `iteration` — preserve them on re-raise paths when the user picks abandon.
-
-- [ ] **Step 1-3 (Red commit)**
-
-Same structure as G6 step 1-3.
-
-- [ ] **Step 4 (Green)**
-
-Add `import escalation_prompt` and modify the final raise in `_loop2`:
-
-```python
-# replace the final raise MAGIGateError(...) block with:
-from escalation_prompt import build_escalation_context, _compose_options, prompt_user, apply_decision
-ctx = build_escalation_context(
-    iterations=_verdict_history,
-    plan_id=_plan_id_from_path(cfg.plan_path),
-    context="pre-merge",
-)
-opts = _compose_options(ctx)
-if ns.override_checkpoint:
-    if not ns.reason:
-        raise MAGIGateError("--override-checkpoint requires --reason")
-    decision = UserDecision(chosen_option="a", action="override", reason=ns.reason)
-else:
-    decision = prompt_user(ctx, opts, non_interactive=ns.non_interactive, project_root=root)
-apply_decision(decision, ctx, project_root=root)
-if decision.action == "override" and last_verdict is not None:
-    return last_verdict
-raise MAGIGateError(
-    f"user chose '{decision.action}' on pre-merge Loop 2 exhaustion",
-    verdict=last_verdict.verdict if last_verdict else None,
-    iteration=cfg.magi_max_iterations,
-)
-```
-
-Accumulate `_verdict_history` inside the existing `for iteration in range(...)` loop and add the same three flags to `_build_parser()`. Pass `ns` into `_loop2`.
-
-- [ ] **Step 5-8**: verify + commits.
-
-### Task G8: `finalize_cmd --override-checkpoint --reason`
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/finalize_cmd.py`
-- Create: `tests/test_finalize_cmd_override.py`
-
-- [ ] **Step 1-3 (Red)**: test asserting override flag produces audit artifact + bypasses `degraded: true` reject.
-
-- [ ] **Step 4 (Green)**: add `--override-checkpoint --reason` to `finalize_cmd._build_parser`. In `main()`, before rejecting a degraded verdict, check `ns.override_checkpoint`. When set, build an abbreviated `EscalationContext` (synthesize a single-iter history from `.claude/magi-verdict.json`), call `apply_decision` with the user's reason, and permit the gate to pass. The audit artifact is the record.
-
-- [ ] **Step 5-8**: tests + commits.
-
-### Task G9: `resume_cmd` detects pending escalation
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/resume_cmd.py`
-- Create: `tests/test_resume_cmd_escalation_recovery.py`
-
-- [ ] **Step 1-3 (Red)**: test that `resume_cmd` detects `.claude/magi-escalation-pending.md` and re-enters the prompt.
-
-- [ ] **Step 4 (Green)**: in `resume_cmd._preflight_diagnose` (or equivalent entry point), check for `.claude/magi-escalation-pending.md`. When present, read the serialized `EscalationContext` JSON inside it, compose options, call `prompt_user`, `apply_decision`, delete the pending marker, then delegate to the original subcommand (`spec` or `pre-merge`) based on the stored context. In parallel, modify `prompt_user` to write the pending marker BEFORE the first `input()` call so Ctrl+C recovery works:
-
-```python
-# inside prompt_user, right before input():
-pending = (project_root or Path.cwd()) / ".claude" / "magi-escalation-pending.md"
-pending.parent.mkdir(parents=True, exist_ok=True)
-pending.write_text(json.dumps({
-    "plan_id": ctx.plan_id,
-    "context": ctx.context,
-    "root_cause": ctx.root_cause.value,
-    "iterations": list(ctx.iterations),
-}, indent=2), encoding="utf-8")
-# ... after decision made (success or EOF), remove:
-if pending.is_file():
-    pending.unlink()
-```
-
-- [ ] **Step 5-8**: tests + commits.
-
-### Task G9b: A8 invariant — Feature A never invoked from `auto_cmd`
-
-**Files:**
-- Create: `tests/test_auto_cmd_escalation_headless.py`
-
-Acceptance criterion A8 (`spec-behavior-base.md:282`) and INV-22 both require that Feature A's interactive prompt NEVER runs inside `/sbtdd auto`. This task proves the invariant with two orthogonal checks: a static import check (`auto_cmd.py` does not import `prompt_user`) and a behavioral check (stubbing `prompt_user` to count calls, then driving `auto_cmd` through a MAGI-exhaustion path and asserting zero calls).
-
-- [ ] **Step 1 (Red): create `tests/test_auto_cmd_escalation_headless.py`**
-
-```python
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-23
-
-from __future__ import annotations
-
-import ast
-import sys
-from pathlib import Path
-from unittest.mock import patch
-
-import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = REPO_ROOT / "skills" / "sbtdd" / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-
-def _names_imported_by(module_path: Path, from_module: str) -> set[str]:
-    """Return the set of names imported from `from_module` by the given .py file."""
-    tree = ast.parse(module_path.read_text(encoding="utf-8"))
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == from_module:
-            names.update(alias.name for alias in node.names)
-    return names
-
-
-def test_auto_cmd_does_not_import_prompt_user() -> None:
-    """A8 static guarantee: auto_cmd.py must not import any TTY-driven entry
-    point from escalation_prompt. Importing build_escalation_context /
-    apply_decision is permitted (headless-safe); prompt_user is not."""
-    imported = _names_imported_by(SCRIPTS_DIR / "auto_cmd.py", "escalation_prompt")
-    assert "prompt_user" not in imported, (
-        "INV-22 / A8 violation: auto_cmd imports escalation_prompt.prompt_user. "
-        "auto_cmd must remain headless; use apply_decision with a headless "
-        "UserDecision synthesized from .claude/magi-auto-policy.json instead."
-    )
-
-
-def test_auto_cmd_magi_exhaustion_never_calls_prompt_user(tmp_path: Path) -> None:
-    """A8 behavioral guarantee: drive auto_cmd through a MAGI non-convergence
-    path with a StubMAGI that returns HOLD on every iter. prompt_user is patched
-    to raise on invocation. The run must abort with MAGIGateError (or the
-    headless policy verdict) without ever calling prompt_user."""
-    from tests.fixtures.skill_stubs import StubMAGI  # existing fixture
-    import auto_cmd
-    import escalation_prompt
-
-    # Stage a minimal project: state file done-with-plan, plan approved, one
-    # pre-merge Loop 2 non-convergence path. Reuse existing tests/fixtures/auto-runs
-    # staging helpers (lifted from tests/test_auto_cmd.py setup).
-    ...  # concretize: reuse _stage_auto_run(tmp_path) helper, approved plan, all tasks [x]
-
-    def _boom(*a: object, **kw: object) -> None:
-        raise AssertionError("prompt_user invoked inside auto_cmd — INV-22 violated")
-
-    with patch.object(escalation_prompt, "prompt_user", _boom):
-        with pytest.raises(Exception):  # MAGIGateError or SystemExit
-            auto_cmd.main(["--dry-run=false"])
-```
-
-- [ ] **Step 2: run tests to confirm Red**
-
-```bash
-python -m pytest tests/test_auto_cmd_escalation_headless.py -v
-```
-Expected: `test_auto_cmd_does_not_import_prompt_user` FAILS if Task G6/G7 accidentally leaked the import into `auto_cmd.py`; `test_auto_cmd_magi_exhaustion_never_calls_prompt_user` FAILS with `NotImplementedError` on the `...` placeholder until the stage helper is concretized.
-
-- [ ] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_auto_cmd_escalation_headless.py
-git commit -m "test: add A8 invariant — prompt_user never called inside auto_cmd"
-```
-
-- [ ] **Step 4 (Green): concretize the stage helper**
-
-Replace the `...` line with the real staging code lifted from `tests/test_auto_cmd.py::_stage_auto_run` (or equivalent fixture helper). Ensure the test run uses a stub pre-merge Loop 2 that exhausts iterations with HOLD verdicts.
-
-> **Do NOT ship literal `...`**: any `...` left in committed test code is a landing-time failure. Replace every `...` placeholder with real code before the Green commit, and re-run `pytest` + `ruff check` to confirm zero warnings.
-
-- [ ] **Step 5: run tests, confirm PASS**
-
-```bash
-python -m pytest tests/test_auto_cmd_escalation_headless.py -v
-```
-Expected: both tests PASS. If the behavioral test passes vacuously (auto_cmd raises before reaching the Loop 2 exhaustion at all), add an explicit `assert verdict_exhausted_code_was_hit` breadcrumb inside the stage helper to detect the vacuous case.
-
-- [ ] **Step 6 (Green commit)**
-
-```bash
-make verify
-git add tests/test_auto_cmd_escalation_headless.py
-git commit -m "feat: concretize A8 headless invariant test"
-```
-
-- [ ] **Step 7 (Refactor)**
-
-```bash
-git commit --allow-empty -m "refactor: A8 test reviewed, clean"
-```
-
-### Task G10: close-task Milestone G
-
-- [ ] **Step 1**: mark Milestone G checkbox [x] in the plan.
-- [ ] **Step 2**: commit.
-
-```bash
-git commit --allow-empty -m "chore: mark task G complete"
-```
+## File structure
+
+| File | Track | Responsibility | Status |
+|------|-------|----------------|--------|
+| `skills/sbtdd/scripts/auto_cmd.py` | D + E | D: `_stream_subprocess`, `_update_progress`, breadcrumbs hooks. E: `_parse_model_overrides`, `_apply_inv0_model_check`, propagate model kwargs through dispatch calls | Modify |
+| `skills/sbtdd/scripts/config.py` | E | `PluginConfig` adds 4 Optional[str] model fields; loader tolerates absence | Modify |
+| `skills/sbtdd/scripts/superpowers_dispatch.py` | E | `invoke_skill` accepts `model: str \| None = None`; `_build_skill_cmd` injects `--model <id>` before `-p` when set; INV-0 check ignores model when CLAUDE.md pinned | Modify |
+| `skills/sbtdd/scripts/spec_review_dispatch.py` | E | `dispatch_spec_reviewer` accepts model kwargs (uses `code_review_model` + `spec_reviewer_model` fields); propagates to `invoke_skill` | Modify |
+| `skills/sbtdd/scripts/magi_dispatch.py` | E | `dispatch_magi` accepts `model` kwarg (uses `magi_dispatch_model`); injects `--model` in `_build_magi_cmd` argv | Modify |
+| `skills/sbtdd/scripts/models.py` | E | Add `ALLOWED_CLAUDE_MODEL_IDS: tuple[str, ...]` + `INV_0_PINNED_MODEL_RE` regex constant | Modify |
+| `skills/sbtdd/scripts/dependency_check.py` | E | Add `check_model_ids(config) -> DependencyCheck` returning warning (init) or hard fail (runtime via raise) | Modify |
+| `templates/plugin.local.md.template` | E | Append commented Sonnet+Haiku baseline block (4 fields commented) | Modify |
+| `tests/test_auto_streaming.py` | D | Cover D1.1, D1.2, D1.3, D2.1, D3.1, D3.2 | Create |
+| `tests/test_auto_progress.py` | D | Cover D4.1, D4.2, D4.3 | Create |
+| `tests/test_config_model_fields.py` | E | Cover E1.1, E1.2, E1.3 | Create |
+| `tests/test_dispatch_model_arg.py` | E | Cover E3.1, E3.2, E3.3, E3.4 (across 3 dispatch modules) | Create |
+| `tests/test_cli_model_override.py` | E | Cover E4.1, E4.2, E4.3, E4.4, E4.5 | Create |
+| `tests/test_dependency_check_models.py` | E | Cover E5.1, E5.2 | Create |
+| `tests/test_models_constants.py` | E | Cover E6.1, E6.2 | Create |
+| `tests/test_init_cmd.py` | E | Extend with E7.1 + E7.2 (template baseline assertions) | Modify (existing) |
+| `CHANGELOG.md` | Final | Add `[0.3.0]` section | Modify |
+| `README.md` | Final | Add Cost optimization section + matrix | Modify |
+| `skills/sbtdd/SKILL.md` | Final | Add `## v0.3 flags` section + INV-0 cascade docs | Modify |
+| `.claude-plugin/plugin.json` | Final | 0.2.2 → 0.3.0 | Modify |
+| `.claude-plugin/marketplace.json` | Final | 0.2.2 → 0.3.0 (two occurrences) | Modify |
 
 ---
 
-## MILESTONE H — Feature B: Superpowers spec-reviewer integration per task
+## Subagent dispatch contracts
 
-**Rationale:** Per-task semantic drift detection. Runs a superpowers spec-reviewer subagent after implementer DONE but before `mark_and_advance`. Reviewer operates on task diff + task text (NOT full spec) to bound cost. Findings route via `/receiving-code-review` (INV-29 extension → INV-31 new).
+### Subagent #1 — Track D (auto streaming)
 
-### Task H1: new `SpecReviewError` + exit 12
+- **Reads**: `sbtdd/spec-behavior.md` sec.2 (Feature D). `skills/sbtdd/scripts/auto_cmd.py` (current state). `skills/sbtdd/scripts/state_file.py` (atomic write pattern reference).
+- **Writes**: `skills/sbtdd/scripts/auto_cmd.py` (extension). `tests/test_auto_streaming.py` (new). `tests/test_auto_progress.py` (new).
+- **Forbidden**: any file in track E above.
+- **TDD-Guard**: ON.
+- **Tasks**: D1, D2, D3, D4 (in any order; recommended order below).
+- **Done**: 4 deliverables landed + tests pass + `make verify` clean.
 
-**Files:**
-- Modify: `skills/sbtdd/scripts/errors.py`
-- Modify: `tests/test_errors.py`
+### Subagent #2 — Track E (per-skill model flag)
 
-- [ ] **Step 1 (Red)**:
+- **Reads**: `sbtdd/spec-behavior.md` sec.3. `skills/sbtdd/scripts/config.py`. `skills/sbtdd/scripts/superpowers_dispatch.py`. `skills/sbtdd/scripts/magi_dispatch.py`. `skills/sbtdd/scripts/spec_review_dispatch.py`. `skills/sbtdd/scripts/models.py`. `skills/sbtdd/scripts/dependency_check.py`. `templates/plugin.local.md.template`.
+- **Writes**: 7 production modules + 6 test modules (1 modified, 5 new) + 1 template.
+- **Forbidden**: `_stream_subprocess` / `_update_progress` / breadcrumb logic in `auto_cmd.py` (track D).
+- **TDD-Guard**: ON.
+- **Tasks**: E6 → E1 → E3 → E4 → E5 → E7 (recommended order: constants first, then config, then dispatch wiring, then CLI, then validation, then template).
+- **Done**: 6 deliverables landed + tests pass + `make verify` clean.
 
-Append to `tests/test_errors.py`:
+### Coordination
 
-```python
-def test_spec_review_error_maps_to_exit_12() -> None:
-    from errors import EXIT_CODES, SpecReviewError
-    assert EXIT_CODES[SpecReviewError] == 12
+- Both subagents commit to `main`. If a commit conflict occurs in `auto_cmd.py`, subagent #2 rebases onto subagent #1's HEAD (D code lands first by convention).
+- Each subagent invokes `make verify` before its final commit.
+- Each subagent reports DONE to the orchestrator with the commit SHA range.
 
+---
 
-def test_spec_review_error_is_sbtdd_error() -> None:
-    from errors import SBTDDError, SpecReviewError
-    assert issubclass(SpecReviewError, SBTDDError)
-```
+# Track D — Auto progress streaming (Subagent #1)
 
-- [ ] **Step 2-3**: run, fail, commit `test:`.
-
-- [ ] **Step 4 (Green)**: in `skills/sbtdd/scripts/errors.py`:
-
-```python
-class SpecReviewError(SBTDDError):
-    """Spec-reviewer safety valve exhausted — exit 12 (SPEC_REVIEW_ISSUES).
-
-    Introduced in v0.2 (Feature B). Carries the last-iteration issues
-    list as a typed attribute so dispatchers can enrich audit artifacts.
-    """
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        task_id: str | None = None,
-        iteration: int | None = None,
-        issues: tuple[str, ...] = (),
-    ) -> None:
-        super().__init__(message)
-        self.task_id = task_id
-        self.iteration = iteration
-        self.issues = issues
-```
-
-Add to `_EXIT_CODES_MUTABLE`:
-
-```python
-    SpecReviewError: 12,
-```
-
-- [ ] **Step 5-8**: tests pass, `feat:`, verify, `refactor:` commits.
-
-### Task H2: `SpecReviewResult` + `SpecIssue` dataclasses
+## Task D1: Subprocess streaming primitive
 
 **Files:**
-- Create: `skills/sbtdd/scripts/spec_review_dispatch.py`
-- Create: `tests/test_spec_review_dispatch.py`
+- Create: `tests/test_auto_streaming.py`
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add `_stream_subprocess` helper)
 
-- [ ] **Step 1 (Red)**: dataclass shape tests mirroring Task G1 pattern.
-
-```python
-def test_spec_review_result_is_frozen() -> None:
-    from spec_review_dispatch import SpecReviewResult, SpecIssue
-    r = SpecReviewResult(approved=True, issues=(), reviewer_iter=1, artifact_path=None)
-    with pytest.raises((AttributeError, Exception)):
-        r.approved = False
-
-
-def test_spec_issue_carries_severity_and_text() -> None:
-    from spec_review_dispatch import SpecIssue
-    i = SpecIssue(severity="MISSING", text="Scenario 4 not covered")
-    assert i.severity == "MISSING"
-```
-
-- [ ] **Step 2-3**: commit `test:`.
-
-- [ ] **Step 4 (Green)**: create `skills/sbtdd/scripts/spec_review_dispatch.py`:
+- [ ] **Step 1: Write failing test for D1.1 (line-by-line flush)**
 
 ```python
+# tests/test_auto_streaming.py (new file)
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
-# Date: 2026-04-23
-"""Superpowers spec-reviewer dispatcher (Feature B, v0.2.0).
-
-Wraps `superpowers:subagent-driven-development/spec-reviewer-prompt.md` as
-a per-task spec-compliance check. Invoked by `auto_cmd._phase2_task_loop`
-after implementer DONE / before `close_task_cmd.mark_and_advance`, and by
-`close_task_cmd` interactively (unless --skip-spec-review set).
-
-Reviewer contract (three defect classes):
-  - MISSING: requirement claimed but not built
-  - EXTRA: work outside spec scope (over-engineering)
-  - MISUNDERSTANDING: right problem solved wrong way
-
-Directive embedded in reviewer prompt (per superpowers): 'Verify by reading
-code, NOT by trusting report.'
-
-Cost envelope: task diff + task text (~1-5 KB per call). For a 36-task
-plan this adds 36 `claude -p` invocations. Quota-aware via quota_detector.
-"""
+# Date: 2026-04-25
+"""Tests for v0.3.0 Feature D auto streaming primitives."""
 
 from __future__ import annotations
 
-import json
 import subprocess
-from dataclasses import dataclass
-from datetime import datetime, timezone
+import sys
+import time
 from pathlib import Path
-from typing import Literal
 
-import quota_detector
-import subprocess_utils
-from errors import QuotaExhaustedError, SpecReviewError, ValidationError
+import pytest
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
 
-_SeverityLit = Literal["MISSING", "EXTRA", "MISUNDERSTANDING", "INFO"]
+import auto_cmd
 
 
-@dataclass(frozen=True)
-class SpecIssue:
-    severity: _SeverityLit
-    text: str
-
-
-@dataclass(frozen=True)
-class SpecReviewResult:
-    approved: bool
-    issues: tuple[SpecIssue, ...]
-    reviewer_iter: int
-    artifact_path: Path | None
-
-
-def _extract_task_text(plan_text: str, task_id: str) -> str:
-    """Return the task section from plan markdown (### Task N: title body)."""
-    import re
-    # Find heading line for this task; take until the next ### heading
-    pattern = re.compile(
-        rf"^### Task {re.escape(task_id)}[:\s].*?(?=^### Task |\Z)",
-        re.MULTILINE | re.DOTALL,
+def test_stream_subprocess_flushes_lines_individually(tmp_path, capfd):
+    """D1.1: streaming flushes subprocess output line-by-line within 250ms."""
+    script = tmp_path / "emit5.py"
+    script.write_text(
+        "import sys, time\n"
+        "for i in range(5):\n"
+        "    print(f'line{i}', flush=True)\n"
+        "    time.sleep(0.05)\n"
     )
-    m = pattern.search(plan_text)
-    return m.group(0) if m else ""
-
-
-def _collect_task_diff(repo_root: Path, task_id: str, n_commits: int = 4) -> str:
-    """Return combined diff of last N commits tagged for this task."""
-    # Best effort: pull HEAD~N..HEAD; caller can refine via commit-message grep
-    result = subprocess_utils.run_with_timeout(
-        ["git", "log", f"-{n_commits}", "--pretty=format:%H %s", "--no-merges"],
-        timeout=10,
-        cwd=str(repo_root),
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+        text=True,
     )
-    # Filter commit lines referencing the task id
-    shas: list[str] = []
-    for line in result.stdout.splitlines():
-        parts = line.split(" ", 1)
-        if len(parts) == 2 and task_id in parts[1]:
-            shas.append(parts[0])
-    if not shas:
-        return ""
-    diff = subprocess_utils.run_with_timeout(
-        ["git", "show", "--stat", *shas],
-        timeout=30,
-        cwd=str(repo_root),
-    )
-    return diff.stdout
+    start = time.monotonic()
+    auto_cmd._stream_subprocess(proc, prefix="[sbtdd test phase]")
+    elapsed = time.monotonic() - start
+    proc.wait(timeout=2)
+    captured = capfd.readouterr()
+    assert "line0" in captured.err
+    assert "line4" in captured.err
+    assert elapsed < 1.0  # 5 lines * 50ms + slack, not blocking till end
 ```
 
-- [ ] **Step 5-8**: tests pass, commits.
+- [ ] **Step 2: Run test, verify it fails**
 
-### Task H3: `dispatch_spec_reviewer` core
-
-- [ ] **Step 1 (Red)**: tests using a stubbed `subprocess.run` that returns scripted reviewer outputs.
-
-```python
-def test_dispatch_approved_path(tmp_path, monkeypatch) -> None:
-    from spec_review_dispatch import dispatch_spec_reviewer
-    # craft minimal plan + fake subprocess
-    plan = tmp_path / "plan.md"
-    plan.write_text("### Task 1: foo\n- [ ] stuff\n", encoding="utf-8")
-    def fake_run(*a, **k):
-        class R: returncode = 0; stdout = '{"approved": true, "issues": []}'; stderr = ""
-        return R()
-    monkeypatch.setattr("spec_review_dispatch.subprocess_utils.run_with_timeout", fake_run)
-    result = dispatch_spec_reviewer(task_id="1", plan_path=plan, repo_root=tmp_path)
-    assert result.approved is True
-    assert result.issues == ()
-
-
-def test_dispatch_safety_valve_raises_spec_review_error(tmp_path, monkeypatch) -> None:
-    from spec_review_dispatch import dispatch_spec_reviewer
-    plan = tmp_path / "plan.md"
-    plan.write_text("### Task 1: foo\n- [ ] stuff\n", encoding="utf-8")
-    def fake_run(*a, **k):
-        class R:
-            returncode = 0
-            stdout = '{"approved": false, "issues": [{"severity": "MISSING", "text": "scenario N"}]}'
-            stderr = ""
-        return R()
-    monkeypatch.setattr("spec_review_dispatch.subprocess_utils.run_with_timeout", fake_run)
-    with pytest.raises(SpecReviewError):
-        dispatch_spec_reviewer(task_id="1", plan_path=plan, repo_root=tmp_path,
-                               max_iterations=3)
+```bash
+cd D:/jbolivarg/PythonProjects/SBTDD
+python -m pytest tests/test_auto_streaming.py::test_stream_subprocess_flushes_lines_individually -v
 ```
+Expected: FAIL with `AttributeError: module 'auto_cmd' has no attribute '_stream_subprocess'`.
 
-- [ ] **Step 2-3**: commit `test:`.
+- [ ] **Step 3: Implement `_stream_subprocess` in auto_cmd.py**
 
-- [ ] **Step 4 (Green)**: append to `spec_review_dispatch.py`:
+Add near the top of `auto_cmd.py` (after existing imports), function:
 
 ```python
-_REVIEWER_SKILL_REF = "/superpowers:subagent-driven-development/spec-reviewer-prompt.md"
+def _stream_subprocess(
+    proc: subprocess.Popen[str],
+    prefix: str,
+) -> tuple[str, str]:
+    """Read subprocess stdout/stderr line-by-line, rewrite to orchestrator stderr.
 
+    Reads pipes via select-based polling so neither stream starves. Each
+    line is prefixed with ``prefix`` and emitted to ``sys.stderr`` of the
+    orchestrator. Returns the accumulated (stdout, stderr) for the caller's
+    diagnostic / commit-error recovery paths (CommitError v0.1.6 expects
+    captured strings).
 
-def _parse_reviewer_output(raw: str) -> tuple[bool, tuple[SpecIssue, ...]]:
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValidationError(f"spec-reviewer output is not valid JSON: {exc}") from exc
-    approved = bool(payload.get("approved", False))
-    issues_raw = payload.get("issues", []) or []
-    if not isinstance(issues_raw, list):
-        raise ValidationError("spec-reviewer 'issues' must be a list")
-    issues = tuple(
-        SpecIssue(
-            severity=str(i.get("severity", "INFO")).upper(),  # type: ignore[arg-type]
-            text=str(i.get("text", "")),
-        )
-        for i in issues_raw
-    )
-    return approved, issues
-
-
-def _write_artifact(
-    result_payload: dict,
-    repo_root: Path,
-    task_id: str,
-) -> Path:
-    d = repo_root / ".claude" / "spec-reviews"
-    d.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z").replace(":", "-")
-    artifact = d / f"{task_id}-{ts}.json"
-    artifact.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
-    return artifact
-
-
-def dispatch_spec_reviewer(
-    *,
-    task_id: str,
-    plan_path: Path,
-    repo_root: Path,
-    max_iterations: int = 3,
-    timeout: int = 900,
-) -> SpecReviewResult:
-    """Run the spec-reviewer for ONE task; retry on issues up to `max_iterations`.
-
-    Raises:
-        SpecReviewError: Safety valve exhausted (issues remain after last iter).
-        QuotaExhaustedError: Claude API quota detected in stderr.
-        ValidationError: Reviewer output malformed.
+    Cross-platform: uses :func:`select.select` on POSIX and a thread-pair
+    fallback on Windows where ``select`` does not work on pipes (PEP 446).
     """
-    plan_text = plan_path.read_text(encoding="utf-8")
-    task_text = _extract_task_text(plan_text, task_id)
-    diff_text = _collect_task_diff(repo_root, task_id)
-    iter_history: list[dict] = []
-    for iteration in range(1, max_iterations + 1):
-        prompt = (
-            f"Task: {task_id}\n\n"
-            f"Task text:\n{task_text}\n\n"
-            f"Diff:\n{diff_text}\n\n"
-            "Verify by reading code, NOT by trusting implementer report."
-        )
-        cmd = ["claude", "-p", _REVIEWER_SKILL_REF, prompt]
-        try:
-            r = subprocess_utils.run_with_timeout(cmd, timeout=timeout, capture=True,
-                                                   cwd=str(repo_root))
-        except subprocess.TimeoutExpired as exc:
-            raise SpecReviewError(
-                f"spec-reviewer timed out at iter {iteration} for task {task_id}",
-                task_id=task_id, iteration=iteration,
-            ) from exc
-        if r.returncode != 0:
-            exh = quota_detector.detect(r.stderr)
-            if exh is not None:
-                raise QuotaExhaustedError(f"{exh.kind}: {exh.raw_message}")
-            raise SpecReviewError(
-                f"spec-reviewer exited {r.returncode} at iter {iteration}",
-                task_id=task_id, iteration=iteration,
-            )
-        approved, issues = _parse_reviewer_output(r.stdout)
-        iter_history.append({"iter": iteration, "approved": approved,
-                             "n_issues": len(issues)})
-        if approved:
-            artifact = _write_artifact({
-                "task_id": task_id,
-                "approved": True,
-                "iter_history": iter_history,
-                "final_issues": [],
-            }, repo_root, task_id)
-            return SpecReviewResult(approved=True, issues=(),
-                                    reviewer_iter=iteration, artifact_path=artifact)
-        # Not approved: exhaust budget first, then raise.
-        if iteration == max_iterations:
-            artifact = _write_artifact({
-                "task_id": task_id,
-                "approved": False,
-                "iter_history": iter_history,
-                "final_issues": [{"severity": i.severity, "text": i.text} for i in issues],
-            }, repo_root, task_id)
-            raise SpecReviewError(
-                f"spec-reviewer safety valve exhausted for task {task_id} "
-                f"after {iteration} iterations ({len(issues)} issues)",
-                task_id=task_id, iteration=iteration,
-                issues=tuple(i.text for i in issues),
-            )
-        # Otherwise: next iteration re-dispatches. v0.2 keeps it simple —
-        # caller (auto_cmd) is responsible for landing mini-cycle TDD fixes
-        # between reviewer iterations via /receiving-code-review. The
-        # dispatcher itself does not mutate code; it only decides approval.
-    # unreachable
-    raise SpecReviewError(f"unreachable: max_iterations must be >= 1 for task {task_id}",
-                          task_id=task_id, iteration=0)
+    import io
+    import threading
+
+    stdout_buf: list[str] = []
+    stderr_buf: list[str] = []
+
+    def _pump(stream: io.TextIOBase, sink: list[str], is_err: bool) -> None:
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            sys.stderr.write(f"{prefix} {line}")
+            sys.stderr.flush()
+        stream.close()
+
+    t_out = threading.Thread(target=_pump, args=(proc.stdout, stdout_buf, False), daemon=True)
+    t_err = threading.Thread(target=_pump, args=(proc.stderr, stderr_buf, True), daemon=True)
+    t_out.start()
+    t_err.start()
+    t_out.join()
+    t_err.join()
+    return ("".join(stdout_buf), "".join(stderr_buf))
 ```
 
-- [ ] **Step 5-8**: tests pass, commits.
+- [ ] **Step 4: Run test, verify it passes**
 
-### Task H4: `StubSpecReviewer` fixture
-
-**Files:**
-- Modify: `tests/fixtures/skill_stubs.py`
-- Modify: `tests/test_skill_stubs.py`
-
-- [ ] **Step 1 (Red)**: tests for the stub.
-
-```python
-def test_stub_spec_reviewer_sequence_consumed_fifo() -> None:
-    from tests.fixtures.skill_stubs import StubSpecReviewer
-    stub = StubSpecReviewer(sequence=[True, False, True])
-    assert stub.dispatch_spec_reviewer(task_id="1", plan_path=None, repo_root=None).approved is True
-    assert stub.dispatch_spec_reviewer(task_id="2", plan_path=None, repo_root=None).approved is False
-    assert stub.dispatch_spec_reviewer(task_id="3", plan_path=None, repo_root=None).approved is True
-
-
-def test_stub_spec_reviewer_empty_raises() -> None:
-    from tests.fixtures.skill_stubs import StubSpecReviewer
-    stub = StubSpecReviewer(sequence=[])
-    with pytest.raises(IndexError):
-        stub.dispatch_spec_reviewer(task_id="1", plan_path=None, repo_root=None)
+```bash
+python -m pytest tests/test_auto_streaming.py::test_stream_subprocess_flushes_lines_individually -v
 ```
+Expected: PASS.
 
-- [ ] **Step 2-3**: commit `test:`.
-
-- [ ] **Step 4 (Green)**: append to `tests/fixtures/skill_stubs.py`:
-
-```python
-from spec_review_dispatch import SpecIssue, SpecReviewResult
-
-
-@dataclass
-class StubSpecReviewer:
-    """Stub for spec_review_dispatch.dispatch_spec_reviewer (Feature B)."""
-
-    sequence: list[bool]   # True -> approved; False -> 1 MISSING issue returned
-    calls: list[dict[str, Any]] = field(default_factory=list)
-    iter_count: int = 1
-
-    def dispatch_spec_reviewer(
-        self,
-        *,
-        task_id: str,
-        plan_path: Any,
-        repo_root: Any,
-        max_iterations: int = 3,
-        timeout: int = 900,
-    ) -> SpecReviewResult:
-        self.calls.append({"task_id": task_id, "max_iterations": max_iterations})
-        approved = self.sequence.pop(0)
-        issues: tuple[SpecIssue, ...] = ()
-        if not approved:
-            issues = (SpecIssue(severity="MISSING", text=f"stub issue for task {task_id}"),)
-        return SpecReviewResult(
-            approved=approved, issues=issues,
-            reviewer_iter=self.iter_count, artifact_path=None,
-        )
-```
-
-- [ ] **Step 5-8**: tests pass, commits.
-
-### Task H5: `close_task_cmd --skip-spec-review` flag
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py`
-- Create: `tests/test_close_task_cmd_spec_review.py`
-
-- [ ] **Step 1 (Red)**: tests asserting default-invoke + `--skip-spec-review` bypass + reviewer-issues abort.
-
-- [ ] **Step 2-3**: commit `test:`.
-
-- [ ] **Step 4 (Green)**: modify `close_task_cmd._build_parser`:
+- [ ] **Step 5: Add D1.2 test (prefix consistency)**
 
 ```python
-def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="sbtdd close-task")
-    p.add_argument("--project-root", type=Path, default=Path.cwd())
-    p.add_argument("--skip-spec-review", action="store_true",
-                   help="Skip spec-reviewer dispatch (INV-31 escape valve)")
-    return p
-```
-
-Modify `main()` to call the reviewer before `mark_and_advance`:
-
-```python
-def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    ns = parser.parse_args(argv)
-    root: Path = ns.project_root
-    state = _preflight(root)
-    closed_task_id = state.current_task_id
-    if not ns.skip_spec_review:
-        import spec_review_dispatch
-        result = spec_review_dispatch.dispatch_spec_reviewer(
-            task_id=closed_task_id or "",
-            plan_path=root / state.plan_path,
-            repo_root=root,
-        )
-        if not result.approved:
-            # Unreachable in practice — dispatch_spec_reviewer raises on
-            # non-approved exhaustion — but keep the guard for safety.
-            raise SpecReviewError(f"spec-reviewer did not approve task {closed_task_id}")
-    new_state = mark_and_advance(state, root)
-    next_msg = (
-        f"Next: task {new_state.current_task_id}" if new_state.current_task_id else "Plan complete."
+def test_stream_subprocess_applies_prefix(tmp_path, capfd):
+    """D1.2: stderr lines carry the supplied prefix."""
+    script = tmp_path / "emit_to_stderr.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stderr.write('[skill] starting red phase\\n')\n"
+        "sys.stderr.flush()\n"
     )
-    sys.stdout.write(f"Task {closed_task_id} closed. {next_msg}\n")
-    return 0
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+        text=True,
+    )
+    auto_cmd._stream_subprocess(proc, prefix="[sbtdd task-7 green]")
+    proc.wait(timeout=2)
+    captured = capfd.readouterr()
+    assert "[sbtdd task-7 green] [skill] starting red phase" in captured.err
 ```
 
-Add the import:
+- [ ] **Step 6: Run test, expect PASS**
+
+```bash
+python -m pytest tests/test_auto_streaming.py::test_stream_subprocess_applies_prefix -v
+```
+Already passes given the prefix-aware implementation in step 3.
+
+- [ ] **Step 7: Add D1.3 test (SIGTERM flush)**
 
 ```python
-from errors import DriftError, PreconditionError, SpecReviewError
+def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
+    """D1.3: streaming flushes pending buffers on subprocess termination."""
+    script = tmp_path / "emit_then_hang.py"
+    script.write_text(
+        "import sys, time\n"
+        "print('first', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+        text=True,
+    )
+    time.sleep(0.5)
+    proc.terminate()
+    proc.wait(timeout=5)
+    auto_cmd._stream_subprocess(proc, prefix="[sbtdd]")
+    captured = capfd.readouterr()
+    assert "first" in captured.err
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [ ] **Step 8: Verify all D1 tests pass + run full suite**
 
-### Task H6: `auto_cmd._phase2_task_loop` integration
+```bash
+python -m pytest tests/test_auto_streaming.py -v
+make verify
+```
+Expected: 3 D1 tests PASS, 735+ baseline tests pass, ruff + mypy clean.
+
+- [ ] **Step 9: Commit (Red→Green collapsed since helper is new)**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_streaming.py
+git commit -m "feat: add _stream_subprocess line-buffered output for auto runs"
+```
+
+---
+
+## Task D2: python -u flag in subprocess invocation
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (subprocess argv construction site)
+- Modify: `tests/test_auto_streaming.py`
+
+- [ ] **Step 1: Write failing test D2.1**
+
+```python
+# Append to tests/test_auto_streaming.py
+def test_subprocess_argv_includes_dash_u():
+    """D2.1: auto_cmd subprocess argv is prefixed with python -u."""
+    argv = auto_cmd._build_run_sbtdd_argv(subcommand="close-phase", extra_args=["--variant", "fix"])
+    assert argv[0:2] == [sys.executable, "-u"]
+    assert "run_sbtdd.py" in argv[2]
+    assert "close-phase" in argv
+```
+
+- [ ] **Step 2: Run, verify FAIL**
+
+```bash
+python -m pytest tests/test_auto_streaming.py::test_subprocess_argv_includes_dash_u -v
+```
+Expected: FAIL — `_build_run_sbtdd_argv` not defined OR existing argv lacks `-u`.
+
+- [ ] **Step 3: Implement / refactor**
+
+Locate the existing site in `auto_cmd.py` where the subprocess argv is built (search for `subprocess.run(...)` invocation that targets `run_sbtdd.py`). Extract it into:
+
+```python
+def _build_run_sbtdd_argv(subcommand: str, extra_args: list[str] | None = None) -> list[str]:
+    """Build subprocess argv for invoking run_sbtdd.py with python -u.
+
+    The ``-u`` flag disables Python output buffering at the dispatcher
+    level so :func:`_stream_subprocess` reads complete lines as the
+    sub-process emits them (sec.S.6.D).
+    """
+    run_sbtdd = (Path(__file__).resolve().parent / "run_sbtdd.py").as_posix()
+    argv = [sys.executable, "-u", run_sbtdd, subcommand]
+    if extra_args:
+        argv.extend(extra_args)
+    return argv
+```
+
+Then replace each existing argv construction site with a call to this helper. Preserve any environment variables / cwd kwargs from the original call sites.
+
+- [ ] **Step 4: Run test, verify PASS**
+
+```bash
+python -m pytest tests/test_auto_streaming.py::test_subprocess_argv_includes_dash_u -v
+make verify
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_streaming.py
+git commit -m "feat: prefix run_sbtdd subprocess invocation with python -u"
+```
+
+---
+
+## Task D3: State-machine breadcrumbs per phase transition
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/auto_cmd.py`
-- Create: `tests/test_auto_cmd_spec_review.py`
+- Modify: `tests/test_auto_streaming.py`
 
-- [ ] **Step 1 (Red)**: integration tests using `StubSpecReviewer` — auto loop with 3 tasks where task 2 returns issues that route via `/receiving-code-review` + mini-cycle.
-
-For v0.2 simplification: `auto_cmd` invokes the dispatcher which is already wrapped with its own safety-valve loop. On `SpecReviewError` the loop aborts with exit 12.
-
-- [ ] **Step 2-3**: commit `test:`.
-
-- [ ] **Step 4 (Green)**: in `auto_cmd.py`, import `spec_review_dispatch`. In `_phase2_task_loop`, right before the `current = close_task_cmd.mark_and_advance(current, root)` line (currently at auto_cmd.py:441):
+- [ ] **Step 1: Failing test D3.1 (red→green breadcrumb)**
 
 ```python
-            else:
-                # Feature B (v0.2, INV-31): spec-reviewer gate before task close.
-                # Wrap in try/except so the audit trail captures the abort.
-                try:
-                    spec_review_dispatch.dispatch_spec_reviewer(
-                        task_id=current.current_task_id or "",
-                        plan_path=root / current.plan_path,
-                        repo_root=root,
-                    )
-                except SpecReviewError:
-                    _write_auto_run_audit(
-                        auto_run,
-                        AutoRunAudit(
-                            schema_version=_AUTO_RUN_SCHEMA_VERSION,
-                            auto_started_at=started_at,
-                            auto_finished_at=_now_iso(),
-                            status="failed",
-                            verdict=None,
-                            degraded=None,
-                            accepted_conditions=0,
-                            rejected_conditions=0,
-                            tasks_completed=tasks_completed,
-                            error="SpecReviewError",
-                        ),
-                    )
-                    raise
-                # W1: delegate to public helper in close_task_cmd
-                current = close_task_cmd.mark_and_advance(current, root)
-                ...  # existing body below — replace `...` with the actual remainder of _phase2_task_loop before committing
+def test_breadcrumb_on_red_to_green_transition(capfd):
+    """D3.1: state-machine emits breadcrumb before phase advance dispatch."""
+    auto_cmd._emit_phase_breadcrumb(phase=2, total_phases=5, task_index=14, task_total=36, sub_phase="green")
+    captured = capfd.readouterr()
+    assert "[sbtdd] phase 2/5: task loop -- task 14/36 (green)" in captured.err
 ```
 
-> **Do NOT ship literal `...`:** the `...` above is a structural marker for "paste the existing body here unchanged." Before the Green commit, open `skills/sbtdd/scripts/auto_cmd.py` at `_phase2_task_loop`, copy the loop body that follows the current `mark_and_advance` call, and substitute it in. A literal `...` left in production code is a landing-time failure — run `python -c "from auto_cmd import _phase2_task_loop; _phase2_task_loop(...)"` against a staged fixture before committing to force-execute the diff path and prove no `Ellipsis` slipped through.
+- [ ] **Step 2: Run, verify FAIL**
 
-Add import:
+```bash
+python -m pytest tests/test_auto_streaming.py::test_breadcrumb_on_red_to_green_transition -v
+```
+Expected: FAIL — `_emit_phase_breadcrumb` not defined.
+
+- [ ] **Step 3: Implement `_emit_phase_breadcrumb`**
 
 ```python
-import spec_review_dispatch
-from errors import (
-    ChecklistError,
-    DriftError,
-    Loop1DivergentError,
-    MAGIGateError,
-    PreconditionError,
-    QuotaExhaustedError,
-    SpecReviewError,        # NEW
-    ValidationError,
-    VerificationIrremediableError,
+_PHASE_NAMES: tuple[str, ...] = (
+    "pre-flight",
+    "spec",
+    "task loop",
+    "pre-merge",
+    "checklist",
 )
+
+
+def _emit_phase_breadcrumb(
+    phase: int,
+    total_phases: int,
+    *,
+    task_index: int | None = None,
+    task_total: int | None = None,
+    sub_phase: str | None = None,
+) -> None:
+    """Emit a one-line state-machine breadcrumb to orchestrator stderr.
+
+    Format: ``[sbtdd] phase {p}/{t}: {phase_name} -- task {i}/{n} ({sub_phase})``.
+    Task-index and sub-phase are optional for non-task-loop phases.
+    """
+    name = _PHASE_NAMES[phase] if 0 <= phase < len(_PHASE_NAMES) else f"phase-{phase}"
+    line = f"[sbtdd] phase {phase}/{total_phases}: {name}"
+    if task_index is not None and task_total is not None:
+        suffix = f" ({sub_phase})" if sub_phase else ""
+        line += f" -- task {task_index}/{task_total}{suffix}"
+    sys.stderr.write(line + "\n")
+    sys.stderr.flush()
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [ ] **Step 4: Verify D3.1 passes**
 
-### Task H7: new subcommand `review-spec-compliance`
+```bash
+python -m pytest tests/test_auto_streaming.py::test_breadcrumb_on_red_to_green_transition -v
+```
+
+- [ ] **Step 5: Add D3.2 test (task close advance)**
+
+```python
+def test_breadcrumb_on_task_close_advance(capfd):
+    """D3.2: state machine emits breadcrumb when advancing task index."""
+    auto_cmd._emit_phase_breadcrumb(phase=2, total_phases=5, task_index=15, task_total=36, sub_phase="red")
+    captured = capfd.readouterr()
+    assert "[sbtdd] phase 2/5: task loop -- task 15/36 (red)" in captured.err
+```
+
+- [ ] **Step 6: Wire breadcrumb invocation into `_phase2_task_loop`**
+
+Locate `_phase2_task_loop` in `auto_cmd.py`. Insert `_emit_phase_breadcrumb(...)` calls at:
+- Phase entry (top of loop body — `phase=2`).
+- Each Red/Green/Refactor sub-phase advance (immediately AFTER state file save, BEFORE next subagent dispatch).
+- Each task close (immediately after `mark_and_advance` returns, BEFORE first dispatch on the new task).
+
+Pass current `task_index` and `task_total` from the loop counters; `sub_phase` from `current_phase` field.
+
+- [ ] **Step 7: make verify clean**
+
+```bash
+make verify
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_streaming.py
+git commit -m "feat: emit state-machine breadcrumbs per auto phase transition"
+```
+
+---
+
+## Task D4: auto-run.json progress field with atomic writes
 
 **Files:**
-- Create: `skills/sbtdd/scripts/review_spec_compliance_cmd.py`
-- Modify: `skills/sbtdd/scripts/models.py`
-- Modify: `skills/sbtdd/scripts/run_sbtdd.py`
-- Modify: `tests/test_models.py`
-- Modify: `tests/test_run_sbtdd.py`
-- Create: `tests/test_review_spec_compliance_cmd.py`
+- Create: `tests/test_auto_progress.py`
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add `_update_progress`)
 
-- [ ] **Step 1 (Red)**: tests:
+- [ ] **Step 1: Failing test D4.2 (progress field schema)**
 
 ```python
-# tests/test_models.py — extend
-def test_valid_subcommands_includes_review_spec_compliance() -> None:
-    from models import VALID_SUBCOMMANDS
-    assert "review-spec-compliance" in VALID_SUBCOMMANDS
-
-
-# tests/test_run_sbtdd.py — extend
-def test_dispatch_review_spec_compliance_routes_to_cmd(monkeypatch) -> None:
-    import run_sbtdd
-    called: list = []
-    def fake(argv): called.append(argv); return 0
-    monkeypatch.setitem(run_sbtdd.SUBCOMMAND_DISPATCH, "review-spec-compliance", fake)
-    assert run_sbtdd.main(["review-spec-compliance", "3"]) == 0
-    assert called == [["3"]]
-
-
-# tests/test_review_spec_compliance_cmd.py
-def test_review_spec_compliance_approved_exits_0(tmp_path, monkeypatch):
-    ...  # using StubSpecReviewer + fixture plan
-def test_review_spec_compliance_issues_exits_12(tmp_path, monkeypatch):
-    ...
-```
-
-- [ ] **Step 2-3**: commit `test:`.
-
-- [ ] **Step 4 (Green)**: 
-
-In `models.py`:
-
-```python
-VALID_SUBCOMMANDS: tuple[str, ...] = (
-    "init",
-    "spec",
-    "close-phase",
-    "close-task",
-    "status",
-    "pre-merge",
-    "finalize",
-    "auto",
-    "resume",
-    "review-spec-compliance",   # Feature B, v0.2
-)
-```
-
-Create `skills/sbtdd/scripts/review_spec_compliance_cmd.py`:
-
-```python
+# tests/test_auto_progress.py (new file)
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
-# Date: 2026-04-23
-"""/sbtdd review-spec-compliance <task-id> — manual spec-reviewer dispatch.
-
-Exposes dispatch_spec_reviewer as a subcommand for flows outside auto_cmd
-(executing-plans, manual close-task after --skip-spec-review was used).
-"""
+# Date: 2026-04-25
+"""Tests for v0.3.0 Feature D auto-run.json progress field."""
 
 from __future__ import annotations
 
-import argparse
+import json
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+import auto_cmd
+
+
+def test_update_progress_writes_correct_schema(tmp_path):
+    """D4.2: progress field has shape {phase, task_index, task_total, sub_phase}."""
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text(json.dumps({"started_at": "2026-04-25T10:00:00Z"}))
+    auto_cmd._update_progress(
+        auto_run,
+        phase=2,
+        task_index=14,
+        task_total=36,
+        sub_phase="green",
+    )
+    data = json.loads(auto_run.read_text())
+    assert data["progress"] == {
+        "phase": 2,
+        "task_index": 14,
+        "task_total": 36,
+        "sub_phase": "green",
+    }
+    assert data["started_at"] == "2026-04-25T10:00:00Z"  # preserved
+```
+
+- [ ] **Step 2: Run, verify FAIL**
+
+```bash
+python -m pytest tests/test_auto_progress.py::test_update_progress_writes_correct_schema -v
+```
+Expected: FAIL — `_update_progress` not defined.
+
+- [ ] **Step 3: Implement `_update_progress`**
+
+```python
+def _update_progress(
+    auto_run_path: Path,
+    *,
+    phase: int,
+    task_index: int | None,
+    task_total: int | None,
+    sub_phase: str | None,
+) -> None:
+    """Write the progress field of auto-run.json atomically (tmp + os.replace).
+
+    Mirrors the atomic-write pattern of state_file.save and
+    escalation_prompt._write_pending_marker_atomically (v0.2.1). A
+    concurrent reader sees either the prior progress payload or the
+    new one, never a torn JSON document.
+    """
+    if auto_run_path.exists():
+        existing = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    else:
+        existing = {}
+    progress: dict[str, object] = {"phase": phase}
+    if task_index is not None:
+        progress["task_index"] = task_index
+    if task_total is not None:
+        progress["task_total"] = task_total
+    if sub_phase is not None:
+        progress["sub_phase"] = sub_phase
+    existing["progress"] = progress
+    tmp = auto_run_path.with_suffix(auto_run_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    os.replace(str(tmp), str(auto_run_path))
+```
+
+(Add `import os, json` at top of `auto_cmd.py` if not already present.)
+
+- [ ] **Step 4: Verify D4.2 passes**
+
+- [ ] **Step 5: Add D4.1 test (atomicity under concurrent reads)**
+
+```python
+def test_update_progress_is_atomic_under_concurrent_reads(tmp_path):
+    """D4.1: concurrent readers never observe torn JSON."""
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text(json.dumps({"progress": {"phase": 2, "task_index": 13, "task_total": 36, "sub_phase": "refactor"}}))
+    failures: list[str] = []
+    stop = threading.Event()
+
+    def reader() -> None:
+        while not stop.is_set():
+            try:
+                json.loads(auto_run.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as e:
+                failures.append(str(e))
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    for i in range(50):
+        auto_cmd._update_progress(
+            auto_run, phase=2, task_index=14 + i, task_total=36, sub_phase="green"
+        )
+    stop.set()
+    t.join(timeout=2)
+    assert failures == [], f"reader saw torn JSON: {failures}"
+```
+
+- [ ] **Step 6: Run + expect PASS** (atomic write via os.replace ensures no torn JSON)
+
+- [ ] **Step 7: Add D4.3 test (absent progress is tolerated)**
+
+```python
+def test_progress_field_absent_is_tolerated(tmp_path):
+    """D4.3: parser tolerates auto-run.json without progress field."""
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text(json.dumps({"started_at": "2026-04-25T10:00:00Z"}))
+    data = json.loads(auto_run.read_text())
+    assert data.get("progress") is None  # absent is fine
+```
+
+- [ ] **Step 8: Wire `_update_progress` into `_phase2_task_loop` (and other phases)**
+
+Same hooks as D3 breadcrumbs — at every state machine transition, call `_update_progress` AFTER `state_file.save` succeeds and BEFORE the next dispatch. The `auto_run_path` is constructed from `Path(".claude") / "auto-run.json"` (already used elsewhere in the file).
+
+- [ ] **Step 9: make verify**
+
+```bash
+make verify
+```
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "feat: write auto-run.json progress field atomically per phase transition"
+```
+
+---
+
+## Track D — done criteria
+
+- [ ] All 3 test files (`test_auto_streaming.py`, `test_auto_progress.py`) pass.
+- [ ] 4 atomic commits landed: streaming primitive, python -u, breadcrumbs, progress field.
+- [ ] `make verify` clean.
+- [ ] Cross-platform sanity: tests pass on Windows (current dev env) AND POSIX (CI deferred to v1.1; manual verification on WSL or local Linux container if available).
+- [ ] Subagent #1 reports DONE with commit SHA range to orchestrator.
+
+---
+
+# Track E — Per-skill model selection flag (Subagent #2)
+
+## Task E6: ALLOWED_CLAUDE_MODEL_IDS + INV_0_PINNED_MODEL_RE constants
+
+**Files:**
+- Create: `tests/test_models_constants.py`
+- Modify: `skills/sbtdd/scripts/models.py`
+
+- [ ] **Step 1: Failing test E6.1 (immutability)**
+
+```python
+# tests/test_models_constants.py (new file)
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-25
+"""Tests for v0.3.0 Feature E model registry constants."""
+
+from __future__ import annotations
+
+import re
 import sys
 from pathlib import Path
 
-import spec_review_dispatch
-from errors import PreconditionError
-from state_file import load as load_state
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+import models
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="sbtdd review-spec-compliance")
-    p.add_argument("task_id", type=str, help="Plan task id to review")
-    p.add_argument("--project-root", type=Path, default=Path.cwd())
-    p.add_argument("--max-iterations", type=int, default=3)
+def test_allowed_claude_model_ids_is_tuple():
+    """E6.1: ALLOWED_CLAUDE_MODEL_IDS is immutable (tuple, not list)."""
+    assert isinstance(models.ALLOWED_CLAUDE_MODEL_IDS, tuple)
+    with pytest.raises((AttributeError, TypeError)):
+        models.ALLOWED_CLAUDE_MODEL_IDS.append("foo")  # type: ignore[attr-defined]
+
+
+def test_allowed_claude_model_ids_contains_current_4x_families():
+    """E6.2: tuple contains at least Opus 4.7, Sonnet 4.6, Haiku 4.5."""
+    ids = set(models.ALLOWED_CLAUDE_MODEL_IDS)
+    assert "claude-opus-4-7" in ids
+    assert "claude-sonnet-4-6" in ids
+    assert "claude-haiku-4-5-20251001" in ids
+```
+
+- [ ] **Step 2: Run, verify FAIL**
+
+```bash
+python -m pytest tests/test_models_constants.py -v
+```
+Expected: FAIL — `ALLOWED_CLAUDE_MODEL_IDS` not defined.
+
+- [ ] **Step 3: Add constants to models.py**
+
+Append at the end of `models.py`:
+
+```python
+#: Claude model IDs the plugin recognizes as valid for ``--model`` arg
+#: passing in dispatch wrappers. v0.3.0 ships the 4.x family snapshot
+#: (Opus 4.7, Sonnet 4.6, Haiku 4.5). Bump this tuple when Anthropic
+#: ships a new family; update SKILL.md operational impact accordingly.
+ALLOWED_CLAUDE_MODEL_IDS: tuple[str, ...] = (
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+)
+
+
+#: Regex used by superpowers_dispatch / magi_dispatch to detect when the
+#: developer's global ``~/.claude/CLAUDE.md`` pins a Claude model
+#: explicitly. INV-0 cascade: if the global file pins, plugin.local.md
+#: model fields are ignored and a stderr breadcrumb is emitted. The
+#: regex matches phrases like ``use claude-X-Y for``, ``pin claude-X-Y``,
+#: or ``always claude-X-Y``. Word-boundary anchored to avoid false
+#: positives in narrative prose.
+INV_0_PINNED_MODEL_RE: "re.Pattern[str]" = re.compile(
+    r"\b(?:use|pin|pinned|always|stick to|enforce)\s+(claude-(?:opus|sonnet|haiku)-\d+(?:-\d+)?(?:-\d{8})?)\b",
+    re.IGNORECASE,
+)
+```
+
+(Add `import re` at top of `models.py` if missing.)
+
+- [ ] **Step 4: Verify tests pass + make verify**
+
+```bash
+python -m pytest tests/test_models_constants.py -v
+make verify
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/models.py tests/test_models_constants.py
+git commit -m "feat: add ALLOWED_CLAUDE_MODEL_IDS + INV_0_PINNED_MODEL_RE constants"
+```
+
+---
+
+## Task E1: PluginConfig adds 4 model fields
+
+**Files:**
+- Create: `tests/test_config_model_fields.py`
+- Modify: `skills/sbtdd/scripts/config.py`
+
+- [ ] **Step 1: Failing test E1.2 (backward compat — fields default None)**
+
+```python
+# tests/test_config_model_fields.py (new file)
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-25
+"""Tests for v0.3.0 Feature E PluginConfig model field extension."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+from config import load_plugin_local
+
+
+def _write_minimal_plugin_local(tmp_path: Path, extra: str = "") -> Path:
+    p = tmp_path / "plugin.local.md"
+    p.write_text(
+        "---\n"
+        "stack: python\n"
+        "author: Test\n"
+        "error_type: TestError\n"
+        "verification_commands:\n"
+        "  - pytest\n"
+        "plan_path: planning/claude-plan-tdd.md\n"
+        "plan_org_path: planning/claude-plan-tdd-org.md\n"
+        "spec_base_path: sbtdd/spec-behavior-base.md\n"
+        "spec_path: sbtdd/spec-behavior.md\n"
+        "state_file_path: .claude/session-state.json\n"
+        "magi_threshold: GO_WITH_CAVEATS\n"
+        "magi_max_iterations: 3\n"
+        "auto_magi_max_iterations: 5\n"
+        "auto_verification_retries: 2\n"
+        "auto_max_spec_review_seconds: 3600\n"
+        "tdd_guard_enabled: true\n"
+        "worktree_policy: optional\n"
+        f"{extra}"
+        "---\n# rules\n",
+        encoding="utf-8",
+    )
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
-    ns = _build_parser().parse_args(argv)
-    root: Path = ns.project_root
-    state_path = root / ".claude" / "session-state.json"
-    if not state_path.is_file():
-        raise PreconditionError(f"state file not found: {state_path}")
-    state = load_state(state_path)
-    plan_path = root / state.plan_path
-    if not plan_path.is_file():
-        raise PreconditionError(f"plan file not found: {plan_path}")
-    result = spec_review_dispatch.dispatch_spec_reviewer(
-        task_id=ns.task_id,
-        plan_path=plan_path,
-        repo_root=root,
-        max_iterations=ns.max_iterations,
-    )
-    if result.approved:
-        sys.stdout.write(f"Task {ns.task_id}: spec-review APPROVED (iter {result.reviewer_iter}).\n")
-        return 0
-    # dispatch_spec_reviewer raises on non-approved exhaustion; this path is
-    # only reached when max_iterations=1 and issues returned without retry.
-    sys.stderr.write(f"Task {ns.task_id}: {len(result.issues)} issue(s) found.\n")
-    for i in result.issues:
-        sys.stderr.write(f"  [{i.severity}] {i.text}\n")
-    return 12
-
-
-run = main
+def test_v02_plugin_local_loads_with_model_fields_default_none(tmp_path):
+    """E1.2: v0.2 plugin.local.md (no model fields) loads with defaults."""
+    p = _write_minimal_plugin_local(tmp_path)
+    cfg = load_plugin_local(p)
+    assert cfg.implementer_model is None
+    assert cfg.spec_reviewer_model is None
+    assert cfg.code_review_model is None
+    assert cfg.magi_dispatch_model is None
 ```
 
-In `run_sbtdd.py`:
-
-```python
-import review_spec_compliance_cmd  # with the other imports
-
-SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
-    "init": init_cmd.main,
-    "spec": spec_cmd.main,
-    "close-phase": close_phase_cmd.main,
-    "close-task": close_task_cmd.main,
-    "status": status_cmd.main,
-    "pre-merge": pre_merge_cmd.main,
-    "finalize": finalize_cmd.main,
-    "auto": auto_cmd.main,
-    "resume": resume_cmd.main,
-    "review-spec-compliance": review_spec_compliance_cmd.main,
-}
-```
-
-- [ ] **Step 5-8**: verify + commits.
-
-### Task H8: close-task Milestone H
-
-- [ ] **Step 1**: mark Milestone H complete.
-- [ ] **Step 2**: `git commit --allow-empty -m "chore: mark task H complete"`.
-
----
-
-## MILESTONE I — Meta: documentation + version bump + INV-31
-
-### Task I1: INV-31 documentation
-
-**Files:**
-- Modify: `CLAUDE.md` (Invariants Summary section)
-- Modify: `sbtdd/sbtdd-workflow-plugin-spec-base.md` (sec.S.10)
-- Modify: `tests/test_inv_documentation.py`
-
-- [ ] **Step 1 (Red)**: test asserting INV-31 appears in both artifacts.
-
-```python
-def test_inv31_documented_in_claude_md() -> None:
-    t = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "INV-31" in t
-    assert "spec-reviewer" in t
-```
-
-- [ ] **Step 2-4**: commit `test:`, add the INV-31 bullet to both docs, commit `feat:`.
-
-In `CLAUDE.md` under "Invariants Summary":
-
-```markdown
-- **INV-31** Every task close in `auto_cmd` and `close_task_cmd` (interactive) MUST pass spec-reviewer approval before `mark_and_advance` advances state, unless `--skip-spec-review` flag set (manual workflows) or stub fixture injected (tests). Introduced in v0.2 (Feature B).
-```
-
-- [ ] **Step 5-8**: verify + commits.
-
-### Task I1b: D2/D3 — update SKILL.md dispatch + README usage
-
-Spec-base §6.6 acceptance criteria D2 (cross-artifact coherence tests updated for 0.2.0) and D3 (new subcommand `review-spec-compliance` + four new flags `--override-checkpoint`, `--reason`, `--non-interactive`, `--skip-spec-review` documented in README + SKILL.md + CLAUDE.md) require user-visible documentation updates. CLAUDE.md is covered by I1 (INV-31) and I4 (strip shipped blockers); this task covers SKILL.md + README.md and the matching coherence test deltas.
-
-**Files:**
-- Modify: `skills/sbtdd/SKILL.md`
-- Modify: `README.md`
-- Modify: `tests/test_distribution_coherence.py`
-- Modify: `tests/test_skill_md.py`
-- Modify: `tests/test_readme.py`
-
-- [ ] **Step 1 (Red): extend coherence tests for the new subcommand + flags**
-
-Append to `tests/test_distribution_coherence.py`:
-
-```python
-def test_skill_md_lists_review_spec_compliance_subcommand() -> None:
-    skill = (REPO_ROOT / "skills" / "sbtdd" / "SKILL.md").read_text(encoding="utf-8")
-    assert "review-spec-compliance" in skill, (
-        "D3: SKILL.md must document new v0.2 subcommand review-spec-compliance"
-    )
-
-
-def test_readme_documents_v02_flags() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    for flag in ("--override-checkpoint", "--reason", "--non-interactive", "--skip-spec-review"):
-        assert flag in readme, f"D3: README.md must document {flag}"
-```
-
-Extend `tests/test_skill_md.py` contract: the subcommand dispatch table must have 10 rows (was 9 in v0.1); add a row for `review-spec-compliance`.
-
-Extend `tests/test_readme.py` contract: the usage section must reference `review-spec-compliance` and the four new flags.
-
-- [ ] **Step 2: run tests, confirm Red**
+- [ ] **Step 2: Run, verify FAIL**
 
 ```bash
-python -m pytest tests/test_distribution_coherence.py tests/test_skill_md.py tests/test_readme.py -v
+python -m pytest tests/test_config_model_fields.py::test_v02_plugin_local_loads_with_model_fields_default_none -v
 ```
-Expected: three new test cases FAIL with assertion errors on missing strings.
+Expected: FAIL — `PluginConfig` lacks the 4 fields.
 
-- [ ] **Step 3 (Red commit)**
+- [ ] **Step 3: Add 4 fields to PluginConfig dataclass**
+
+Modify `skills/sbtdd/scripts/config.py` PluginConfig declaration:
+
+```python
+@dataclass(frozen=True)
+class PluginConfig:
+    """Parsed configuration from .claude/plugin.local.md (sec.S.4.2)."""
+
+    stack: Literal["rust", "python", "cpp"]
+    author: str
+    error_type: str | None
+    verification_commands: tuple[str, ...]
+    plan_path: str
+    plan_org_path: str
+    spec_base_path: str
+    spec_path: str
+    state_file_path: str
+    magi_threshold: Literal["STRONG_GO", "GO", "GO_WITH_CAVEATS"]
+    magi_max_iterations: int
+    auto_magi_max_iterations: int
+    auto_verification_retries: int
+    auto_max_spec_review_seconds: int
+    tdd_guard_enabled: bool
+    worktree_policy: Literal["optional", "required"]
+    # v0.3.0 Feature E -- per-skill model selection (default None = inherit
+    # session model, byte-identical argv to v0.2.x).
+    implementer_model: str | None = None
+    spec_reviewer_model: str | None = None
+    code_review_model: str | None = None
+    magi_dispatch_model: str | None = None
+```
+
+In `load_plugin_local`, after the existing validation, BEFORE building the dataclass instance, add:
+
+```python
+# v0.3.0 Feature E -- per-skill model fields (optional).
+for field_name in (
+    "implementer_model",
+    "spec_reviewer_model",
+    "code_review_model",
+    "magi_dispatch_model",
+):
+    val = data.get(field_name)
+    if val is not None and not isinstance(val, str):
+        raise ValidationError(
+            f"{field_name} must be a string or null, got {type(val).__name__}"
+        )
+```
+
+Then ensure the `PluginConfig(...)` constructor at the bottom of the function passes these fields (or relies on the default None when missing). Use `data.get(field_name)` to default to None.
+
+- [ ] **Step 4: Run test, verify PASS**
 
 ```bash
-git add tests/test_distribution_coherence.py tests/test_skill_md.py tests/test_readme.py
-git commit -m "test: add D2/D3 coherence tests for v0.2 subcommand + flags"
+python -m pytest tests/test_config_model_fields.py -v
 ```
 
-- [ ] **Step 4 (Green): update SKILL.md**
+- [ ] **Step 5: Add E1.1 test (4 fields parsed when present)**
 
-Locate the subcommand dispatch table in `skills/sbtdd/SKILL.md` (section "Subcommand dispatch", sec.S.6.3). Add a new row between `finalize` and `auto` (keeping alphabetical-free v0.1 order + new subcommand grouped with its conceptual neighbor `close-task`):
-
-```markdown
-| `review-spec-compliance` | `review_spec_compliance_cmd.py` | Per-task spec-reviewer dispatch for manual flows (`/executing-plans`, ad-hoc). Dispatches `superpowers:subagent-driven-development/spec-reviewer-prompt.md`, returns exit 0 on approve, exit 12 on issues. New in v0.2. |
+```python
+def test_4_model_fields_parsed_from_plugin_local(tmp_path):
+    """E1.1: all 4 model fields parsed when present in YAML."""
+    extra = (
+        "implementer_model: claude-sonnet-4-6\n"
+        "spec_reviewer_model: claude-haiku-4-5\n"
+        "code_review_model: claude-sonnet-4-6\n"
+        "magi_dispatch_model: null\n"
+    )
+    p = _write_minimal_plugin_local(tmp_path, extra=extra)
+    cfg = load_plugin_local(p)
+    assert cfg.implementer_model == "claude-sonnet-4-6"
+    assert cfg.spec_reviewer_model == "claude-haiku-4-5"
+    assert cfg.code_review_model == "claude-sonnet-4-6"
+    assert cfg.magi_dispatch_model is None
 ```
 
-In the same SKILL.md, under the "Fallback" section (or equivalent flag-summary section), append the four new v0.2 flags with one-line descriptions:
+- [ ] **Step 6: Add E1.3 test (typo warning)**
 
-```markdown
-**v0.2 flags:**
-
-- `--override-checkpoint --reason "<text>"` (on `spec`, `pre-merge`, `finalize`) — INV-0 escape valve when MAGI safety valve exhausts. `--reason` is mandatory; reason + verdict persisted to `.claude/magi-escalations/`.
-- `--non-interactive` (on `spec`, `pre-merge`) — force headless policy even on a TTY; applies `.claude/magi-auto-policy.json`.
-- `--skip-spec-review` (on `close-task`) — bypass Feature B reviewer for manual flows where compliance is verified by hand.
+```python
+def test_typo_in_model_field_emits_warning(tmp_path, capfd):
+    """E1.3: dash-typo'd YAML key triggers warning, defaults None."""
+    extra = "implementer-model: claude-sonnet-4-6\n"
+    p = _write_minimal_plugin_local(tmp_path, extra=extra)
+    cfg = load_plugin_local(p)
+    captured = capfd.readouterr()
+    assert cfg.implementer_model is None
+    assert "did you mean implementer_model" in captured.err
 ```
 
-- [ ] **Step 5 (Green): update README.md**
+To make this pass, in `load_plugin_local` add a typo-detection pass after parsing YAML:
 
-In `README.md` under the "Usage" section (subcommands table), add a row for `/sbtdd review-spec-compliance <task-id>` with one-line purpose. Below the table, in the "New in v0.2" (or equivalent) subsection, list the four flags with the same one-line descriptions as SKILL.md.
+```python
+_MODEL_FIELDS = (
+    "implementer_model",
+    "spec_reviewer_model",
+    "code_review_model",
+    "magi_dispatch_model",
+)
+for key in list(data.keys()):
+    if "-" in key and key.replace("-", "_") in _MODEL_FIELDS:
+        sys.stderr.write(
+            f"[sbtdd] unknown plugin.local.md key: {key} -- did you mean "
+            f"{key.replace('-', '_')}?\n"
+        )
+```
 
-- [ ] **Step 6: run tests, confirm PASS**
+(Add `import sys` if missing.)
+
+- [ ] **Step 7: make verify**
 
 ```bash
 make verify
 ```
-Expected: all coherence tests PASS; mypy clean; ruff clean.
 
-- [ ] **Step 7 (Green commit)**
-
-```bash
-git add skills/sbtdd/SKILL.md README.md
-git commit -m "docs: document review-spec-compliance subcommand and v0.2 flags"
-```
-
-- [ ] **Step 8 (Refactor)**
+- [ ] **Step 8: Commit**
 
 ```bash
-git commit --allow-empty -m "refactor: SKILL.md + README v0.2 docs reviewed"
+git add skills/sbtdd/scripts/config.py tests/test_config_model_fields.py
+git commit -m "feat: add 4 optional model fields to PluginConfig"
 ```
 
-### Task I2: CHANGELOG Unreleased → v0.2.0
+---
+
+## Task E3: Dispatch wiring + INV-0 precedence
 
 **Files:**
-- Modify: `CHANGELOG.md`
+- Create: `tests/test_dispatch_model_arg.py`
+- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py`
+- Modify: `skills/sbtdd/scripts/spec_review_dispatch.py`
+- Modify: `skills/sbtdd/scripts/magi_dispatch.py`
 
-- [ ] **Step 1 (Red)**: new test asserting 0.2.0 entry exists AND references the three features:
+- [ ] **Step 1: Failing test E3.1 (default null = byte-identical argv)**
 
 ```python
-def test_changelog_v02_section_references_features() -> None:
-    t = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "0.2.0" in t
-    assert "escalation" in t.lower()
-    assert "spec-reviewer" in t.lower() or "spec reviewer" in t.lower()
-    assert "semver" in t.lower() or "auto-resolve" in t.lower()
+# tests/test_dispatch_model_arg.py (new file)
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-25
+"""Tests for v0.3.0 Feature E dispatch model arg propagation + INV-0."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+import superpowers_dispatch
+
+
+def test_dispatch_with_model_none_byte_identical_to_v02():
+    """E3.1: default model=None preserves v0.2.x argv shape."""
+    argv = superpowers_dispatch._build_skill_cmd(
+        "test-driven-development", ["--phase=red"], model=None
+    )
+    assert argv == ["claude", "-p", "/test-driven-development --phase=red"]
+    assert "--model" not in argv
 ```
 
-- [ ] **Step 2-3**: commit `test:`.
+- [ ] **Step 2: Run, verify FAIL**
 
-- [ ] **Step 4 (Green)**: in `CHANGELOG.md`, promote `[Unreleased]` to `[0.2.0] - 2026-04-XX`:
+```bash
+python -m pytest tests/test_dispatch_model_arg.py::test_dispatch_with_model_none_byte_identical_to_v02 -v
+```
+Expected: FAIL — `_build_skill_cmd` does not accept `model` kwarg.
 
-```markdown
-## [0.2.0] - 2026-04-XX
+- [ ] **Step 3: Extend `_build_skill_cmd` with model kwarg**
 
-### Added
-- Interactive MAGI escalation prompt (`escalation_prompt.py`) — fires on
-  INV-11 safety valve exhaustion in `spec` / `pre-merge` / `finalize`. New
-  CLI flags `--override-checkpoint --reason` (mandatory reason); audit
-  artifacts at `.claude/magi-escalations/`. Headless fallback via
-  `.claude/magi-auto-policy.json` (default `abort` preserves v0.1 exit 8).
-- Superpowers spec-reviewer integration per task
-  (`spec_review_dispatch.py`, `review_spec_compliance_cmd.py`) — new
-  subcommand `/sbtdd review-spec-compliance <task-id>`; default-invoke in
-  `close_task_cmd` + `auto_cmd._phase2_task_loop`; opt-out via
-  `--skip-spec-review`. Audit artifacts at `.claude/spec-reviews/`.
-- `SpecReviewError` exception + exit code 12 (`SPEC_REVIEW_ISSUES`).
-- `StubSpecReviewer` fixture for test suites.
-- INV-31: spec-reviewer gate on task close.
+Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
 
-### Changed
-- MAGI parity tests auto-detect latest cached version instead of pinning
-  to v2.1.3 (`_resolve_magi_plugin_json` + `_semver_key` in
-  `tests/test_distribution_coherence.py`). `MAGI_PLUGIN_ROOT` env var
-  override preserved.
-- `close_task_cmd.main` now invokes spec-reviewer by default before
-  `mark_and_advance` (behavior change under INV-31).
-- `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`
-  `version` bumped 0.1.0 → 0.2.0.
+```python
+def _build_skill_cmd(
+    skill: str,
+    args: list[str] | None,
+    model: str | None = None,
+) -> list[str]:
+    """Build argv for ``claude -p`` invoking ``skill``, optionally with --model.
 
-### BREAKING
-- New exit code 12 (`SPEC_REVIEW_ISSUES`). Scripts grepping exit codes
-  should update their taxonomy. v0.1 exit 8 semantics preserved for the
-  default headless policy.
+    When ``model`` is provided, ``--model <id>`` is inserted before the
+    ``-p`` flag (claude CLI flag ordering convention). When ``model`` is
+    None (default), argv is byte-identical to v0.2.x.
+    """
+    prompt_parts = [f"/{skill}"]
+    if args:
+        prompt_parts.extend(args)
+    cmd = ["claude"]
+    if model is not None:
+        cmd.extend(["--model", model])
+    cmd.extend(["-p", " ".join(prompt_parts)])
+    return cmd
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [ ] **Step 4: Verify E3.1 passes**
 
-### Task I3: version bump 0.1.0 → 0.2.0
+- [ ] **Step 5: Add E3.2 test (--model injection)**
+
+```python
+def test_dispatch_with_model_injects_flag():
+    """E3.2: model=claude-haiku-4-5 inserts --model BEFORE -p."""
+    argv = superpowers_dispatch._build_skill_cmd(
+        "test-driven-development", ["--phase=red"], model="claude-haiku-4-5"
+    )
+    assert argv == [
+        "claude",
+        "--model",
+        "claude-haiku-4-5",
+        "-p",
+        "/test-driven-development --phase=red",
+    ]
+```
+
+- [ ] **Step 6: Add E3.3 + E3.4 tests (INV-0 cascade)**
+
+```python
+def test_inv0_precedence_pinned_model_wins(tmp_path, capfd, monkeypatch):
+    """E3.3: CLAUDE.md pinned model wins, breadcrumb emitted."""
+    fake_home = tmp_path
+    (fake_home / ".claude").mkdir()
+    (fake_home / ".claude" / "CLAUDE.md").write_text(
+        "Use claude-opus-4-7 for all sessions.\n"
+    )
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    effective = superpowers_dispatch._apply_inv0_model_check(
+        configured_model="claude-sonnet-4-6", skill_field_name="implementer_model"
+    )
+    captured = capfd.readouterr()
+    assert effective is None  # config ignored
+    assert "[sbtdd inv-0]" in captured.err
+    assert "claude-opus-4-7" in captured.err
+    assert "implementer_model=claude-sonnet-4-6" in captured.err
+
+
+def test_inv0_no_pinned_model_config_respected(tmp_path, monkeypatch, capfd):
+    """E3.4: when CLAUDE.md does not pin, configured model passes through."""
+    fake_home = tmp_path
+    (fake_home / ".claude").mkdir()
+    (fake_home / ".claude" / "CLAUDE.md").write_text(
+        "Code Standards. Prefer OOP. Use snake_case.\n"
+    )
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    effective = superpowers_dispatch._apply_inv0_model_check(
+        configured_model="claude-sonnet-4-6", skill_field_name="implementer_model"
+    )
+    captured = capfd.readouterr()
+    assert effective == "claude-sonnet-4-6"
+    assert "[sbtdd inv-0]" not in captured.err
+```
+
+- [ ] **Step 7: Implement `_apply_inv0_model_check`**
+
+Add to `superpowers_dispatch.py`:
+
+```python
+from pathlib import Path
+from models import INV_0_PINNED_MODEL_RE
+
+
+def _apply_inv0_model_check(
+    configured_model: str | None,
+    skill_field_name: str,
+) -> str | None:
+    """Apply INV-0 cascade: if ~/.claude/CLAUDE.md pins a model, ignore config.
+
+    Returns the *effective* model to pass to ``--model``, which is None
+    when INV-0 fires (CLAUDE.md pinned a global model) and otherwise
+    equals ``configured_model``. Emits stderr breadcrumb on the rare
+    INV-0 path so operators see the cost implication.
+    """
+    if configured_model is None:
+        return None
+    claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    if not claude_md.exists():
+        return configured_model
+    try:
+        text = claude_md.read_text(encoding="utf-8")
+    except OSError:
+        return configured_model
+    match = INV_0_PINNED_MODEL_RE.search(text)
+    if match is None:
+        return configured_model
+    pinned = match.group(1)
+    sys.stderr.write(
+        f"[sbtdd inv-0] CLAUDE.md pins {pinned} globally; ignoring "
+        f"plugin.local.md {skill_field_name}={configured_model} to "
+        f"respect global authority. Cost implication may differ from "
+        f"configured baseline.\n"
+    )
+    return None
+```
+
+- [ ] **Step 8: Wire `model` kwarg into `invoke_skill`**
+
+Update `invoke_skill` signature to accept `model: str | None = None`, applying the INV-0 check before `_build_skill_cmd`:
+
+```python
+def invoke_skill(
+    skill: str,
+    args: list[str] | None = None,
+    timeout: int = 600,
+    cwd: str | None = None,
+    *,
+    model: str | None = None,
+    skill_field_name: str = "implementer_model",
+) -> SkillResult:
+    """Invoke a superpowers skill via ``claude -p`` subprocess.
+    ...
+    """
+    effective_model = _apply_inv0_model_check(model, skill_field_name)
+    cmd = _build_skill_cmd(skill, args, model=effective_model)
+    # ... rest of existing implementation
+```
+
+- [ ] **Step 9: Mirror in spec_review_dispatch.py + magi_dispatch.py**
+
+`spec_review_dispatch.dispatch_spec_reviewer` -- add `model: str | None = None` kwarg, apply same INV-0 check (with `skill_field_name="spec_reviewer_model"`), pass to underlying invoke_skill / claude argv build.
+
+`magi_dispatch.dispatch_magi` -- add `model: str | None = None` kwarg with `skill_field_name="magi_dispatch_model"`, mirror logic in `_build_magi_cmd`.
+
+- [ ] **Step 10: make verify**
+
+```bash
+make verify
+```
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add skills/sbtdd/scripts/superpowers_dispatch.py skills/sbtdd/scripts/spec_review_dispatch.py skills/sbtdd/scripts/magi_dispatch.py tests/test_dispatch_model_arg.py
+git commit -m "feat: thread model kwarg through dispatch modules with INV-0 cascade"
+```
+
+---
+
+## Task E4: --model-override CLI flag on auto
 
 **Files:**
-- Modify: `.claude-plugin/plugin.json`
-- Modify: `.claude-plugin/marketplace.json`
+- Create: `tests/test_cli_model_override.py`
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (CLI parser only — disjoint from track D)
 
-- [ ] **Step 1**: existing test `test_plugin_and_marketplace_versions_match` will fail immediately once either file changes without the other. Use that as the red signal:
+- [ ] **Step 1: Failing tests E4.1, E4.2, E4.3, E4.5**
+
+```python
+# tests/test_cli_model_override.py (new file)
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-25
+"""Tests for v0.3.0 Feature E --model-override CLI flag on auto."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+import auto_cmd
+from errors import ValidationError
+
+
+def test_model_override_valid_skill_accepts():
+    """E4.1: implementer:claude-haiku-4-5 parses to {implementer: ...}."""
+    result = auto_cmd._parse_model_overrides(["implementer:claude-haiku-4-5"])
+    assert result == {"implementer": "claude-haiku-4-5"}
+
+
+def test_model_override_invalid_skill_rejects():
+    """E4.2: foo:claude-haiku-4-5 raises ValidationError exit 1."""
+    with pytest.raises(ValidationError) as ei:
+        auto_cmd._parse_model_overrides(["foo:claude-haiku-4-5"])
+    assert "invalid --model-override skill name 'foo'" in str(ei.value)
+    assert "implementer" in str(ei.value)
+    assert "spec_reviewer" in str(ei.value)
+
+
+def test_model_override_multi_flag_accumulates():
+    """E4.3: multiple --model-override flags merge into one dict."""
+    result = auto_cmd._parse_model_overrides([
+        "implementer:claude-haiku-4-5",
+        "spec_reviewer:claude-sonnet-4-6",
+    ])
+    assert result == {
+        "implementer": "claude-haiku-4-5",
+        "spec_reviewer": "claude-sonnet-4-6",
+    }
+
+
+def test_model_override_missing_separator_rejects():
+    """E4.5: implementerhaiku4-5 (no colon) raises ValidationError."""
+    with pytest.raises(ValidationError) as ei:
+        auto_cmd._parse_model_overrides(["implementerhaiku4-5"])
+    assert "expects '<skill>:<model>'" in str(ei.value)
+```
+
+- [ ] **Step 2: Run, verify FAIL**
 
 ```bash
-# Edit plugin.json only first
-python -m pytest tests/test_distribution_coherence.py::test_plugin_and_marketplace_versions_match -v
+python -m pytest tests/test_cli_model_override.py -v
 ```
-Expected: FAIL with version mismatch.
 
-- [ ] **Step 2 (Green)**: edit both files in one commit:
+- [ ] **Step 3: Implement `_parse_model_overrides` in auto_cmd.py**
 
-`.claude-plugin/plugin.json`: change `"version": "0.1.0"` → `"version": "0.2.0"`.
+```python
+_VALID_MODEL_OVERRIDE_SKILLS: frozenset[str] = frozenset(
+    {"implementer", "spec_reviewer", "code_review", "magi_dispatch"}
+)
 
-`.claude-plugin/marketplace.json`: change BOTH the top-level `"version"` AND the plugin entry `"version"` to `"0.2.0"`.
 
-- [ ] **Step 3 (verify)**:
+def _parse_model_overrides(raw_values: list[str]) -> dict[str, str]:
+    """Parse repeated --model-override <skill>:<model> CLI tokens.
+
+    Returns a dict mapping skill name (one of the four canonical names)
+    to model ID. Raises ValidationError on missing separator or unknown
+    skill name; the dispatcher converts ValidationError to exit code 1.
+    """
+    out: dict[str, str] = {}
+    for raw in raw_values:
+        if ":" not in raw:
+            raise ValidationError(
+                f"--model-override expects '<skill>:<model>'; got {raw!r}"
+            )
+        skill, _, model = raw.partition(":")
+        if skill not in _VALID_MODEL_OVERRIDE_SKILLS:
+            raise ValidationError(
+                f"invalid --model-override skill name {skill!r}. Valid: "
+                f"{', '.join(sorted(_VALID_MODEL_OVERRIDE_SKILLS))}"
+            )
+        out[skill] = model
+    return out
+```
+
+- [ ] **Step 4: Wire into `auto_cmd` argparse**
+
+Locate the auto_cmd argparse setup (`build_parser` or equivalent). Add:
+
+```python
+parser.add_argument(
+    "--model-override",
+    action="append",
+    default=[],
+    metavar="<skill>:<model>",
+    help=(
+        "Override the per-skill model for this run only. Repeatable. "
+        "Valid skill names: implementer, spec_reviewer, code_review, "
+        "magi_dispatch. Cascade: CLAUDE.md > CLI override > "
+        "plugin.local.md > None (inherit session)."
+    ),
+)
+```
+
+Then in the auto_cmd run function, immediately after parsing args:
+
+```python
+cli_overrides = _parse_model_overrides(args.model_override or [])
+```
+
+Threading the resulting dict through to the dispatch sites is left to track-E coordination — for v0.3.0 ship, populating the dict and passing it to a new helper `_resolve_model(skill, config, cli_overrides)` is sufficient. The helper picks CLI > config > None and is consumed at every dispatch site.
+
+```python
+def _resolve_model(
+    skill: str,
+    config: PluginConfig,
+    cli_overrides: dict[str, str],
+) -> str | None:
+    """Resolve the effective configured model for a skill at dispatch time.
+
+    Cascade: CLI override > plugin.local.md field > None. INV-0 (CLAUDE.md)
+    is enforced downstream by the dispatch module's _apply_inv0_model_check.
+    """
+    if skill in cli_overrides:
+        return cli_overrides[skill]
+    field_map = {
+        "implementer": config.implementer_model,
+        "spec_reviewer": config.spec_reviewer_model,
+        "code_review": config.code_review_model,
+        "magi_dispatch": config.magi_dispatch_model,
+    }
+    return field_map.get(skill)
+```
+
+Apply at each dispatch site in `auto_cmd` (implementer subagent dispatch, spec_review dispatch, magi dispatch — already extended in E3 to accept the kwarg).
+
+- [ ] **Step 5: make verify**
+
+- [ ] **Step 6: Commit**
 
 ```bash
-python -m pytest tests/test_distribution_coherence.py -v
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_cli_model_override.py
+git commit -m "feat: --model-override CLI flag on auto with cascade resolver"
 ```
-Expected: all PASS.
 
-- [ ] **Step 4 (Green commit)**:
+---
+
+## Task E5: dependency_check.check_model_ids
+
+**Files:**
+- Create: `tests/test_dependency_check_models.py`
+- Modify: `skills/sbtdd/scripts/dependency_check.py`
+
+- [ ] **Step 1: Failing tests**
+
+```python
+# tests/test_dependency_check_models.py (new file)
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-25
+"""Tests for v0.3.0 Feature E dependency_check.check_model_ids."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+import dependency_check
+from config import PluginConfig
+from errors import ValidationError
+
+
+def _cfg_with(implementer: str | None = None) -> PluginConfig:
+    return PluginConfig(
+        stack="python", author="t", error_type=None,
+        verification_commands=("pytest",),
+        plan_path="planning/claude-plan-tdd.md",
+        plan_org_path="planning/claude-plan-tdd-org.md",
+        spec_base_path="sbtdd/spec-behavior-base.md",
+        spec_path="sbtdd/spec-behavior.md",
+        state_file_path=".claude/session-state.json",
+        magi_threshold="GO_WITH_CAVEATS",
+        magi_max_iterations=3, auto_magi_max_iterations=5,
+        auto_verification_retries=2, auto_max_spec_review_seconds=3600,
+        tdd_guard_enabled=True, worktree_policy="optional",
+        implementer_model=implementer,
+    )
+
+
+def test_check_model_ids_warns_on_unknown_at_init():
+    """E5.1: unknown model in PluginConfig returns DependencyCheck warning."""
+    cfg = _cfg_with(implementer="claude-sonnet-9-9")
+    result = dependency_check.check_model_ids(cfg)
+    assert result.ok is True  # warning, not failure
+    assert "claude-sonnet-9-9" in result.message
+    assert "implementer_model" in result.message
+    assert "verify spelling" in result.message.lower()
+
+
+def test_check_model_ids_passes_on_known():
+    """E5.1 inverse: known model returns ok DependencyCheck."""
+    cfg = _cfg_with(implementer="claude-sonnet-4-6")
+    result = dependency_check.check_model_ids(cfg)
+    assert result.ok is True
+
+
+def test_check_model_ids_passes_on_all_none():
+    """E5.1 inverse: default-none config returns ok (no fields to check)."""
+    cfg = _cfg_with(implementer=None)
+    result = dependency_check.check_model_ids(cfg)
+    assert result.ok is True
+```
+
+- [ ] **Step 2: Run, verify FAIL** (`check_model_ids` not defined).
+
+- [ ] **Step 3: Implement `check_model_ids`**
+
+In `dependency_check.py`, add:
+
+```python
+from models import ALLOWED_CLAUDE_MODEL_IDS
+
+
+def check_model_ids(config: PluginConfig) -> DependencyCheck:
+    """Validate non-null model fields against ALLOWED_CLAUDE_MODEL_IDS.
+
+    v0.3.0 returns a non-fatal DependencyCheck with ``ok=True`` and a
+    warning message when fields contain unknown IDs (so init does not
+    abort -- field may legitimately be a freshly-released model the
+    plugin's tuple does not yet recognize). Runtime dispatch is the
+    hard-fail path: ``claude --model <unknown>`` errors and the
+    surrounding subprocess wrapper raises ValidationError.
+    """
+    field_pairs: list[tuple[str, str | None]] = [
+        ("implementer_model", config.implementer_model),
+        ("spec_reviewer_model", config.spec_reviewer_model),
+        ("code_review_model", config.code_review_model),
+        ("magi_dispatch_model", config.magi_dispatch_model),
+    ]
+    unknown: list[str] = []
+    for field, value in field_pairs:
+        if value is not None and value not in ALLOWED_CLAUDE_MODEL_IDS:
+            unknown.append(f"{field}={value}")
+    if not unknown:
+        return DependencyCheck(name="model_ids", ok=True, message="all model IDs recognized")
+    msg = (
+        f"[sbtdd init] unknown model IDs in plugin.local.md: "
+        f"{'; '.join(unknown)}. Will hard-fail at runtime if Anthropic "
+        f"does not recognize this ID. Verify spelling against the family "
+        f"snapshot in models.ALLOWED_CLAUDE_MODEL_IDS."
+    )
+    return DependencyCheck(name="model_ids", ok=True, message=msg)
+```
+
+(Adapt to the actual `DependencyCheck` dataclass shape used by the existing code.)
+
+- [ ] **Step 4: Wire into existing dependency-check aggregator**
+
+Locate the function that runs all checks for `init` (the v0.2 enumerator that returns the consolidated report). Append `checks.append(check_model_ids(config))` after the existing checks.
+
+- [ ] **Step 5: make verify + commit**
+
+```bash
+make verify
+git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check_models.py
+git commit -m "feat: dependency_check.check_model_ids validates model field IDs"
+```
+
+---
+
+## Task E7: Template ships Sonnet+Haiku baseline
+
+**Files:**
+- Modify: `templates/plugin.local.md.template`
+- Modify: `tests/test_init_cmd.py` (existing — extend)
+
+- [ ] **Step 1: Failing test E7.1**
+
+In `tests/test_init_cmd.py`, add (after existing helper fixtures):
+
+```python
+def test_template_ships_sonnet_haiku_baseline_commented():
+    """E7.1: template contains commented Sonnet+Haiku baseline block."""
+    template = (
+        Path(__file__).parent.parent / "templates" / "plugin.local.md.template"
+    ).read_text(encoding="utf-8")
+    assert "# Recommended cost-optimized baseline" in template
+    assert "# implementer_model: claude-sonnet-4-6" in template
+    assert "# spec_reviewer_model: claude-haiku-4-5" in template
+    assert "# code_review_model: claude-sonnet-4-6" in template
+    assert "# magi_dispatch_model: null" in template
+```
+
+- [ ] **Step 2: Run, verify FAIL**
+
+```bash
+python -m pytest tests/test_init_cmd.py::test_template_ships_sonnet_haiku_baseline_commented -v
+```
+
+- [ ] **Step 3: Append commented baseline to template**
+
+In `templates/plugin.local.md.template`, append (inside the YAML frontmatter, after `worktree_policy:` line):
+
+```yaml
+# Recommended cost-optimized baseline (uncomment to opt in; v0.3.0+).
+# Default null preserves session-model inheritance (v0.2.x behavior).
+# Cost ratio: Opus 4.7 ~= 5x Sonnet 4.6 ~= 15-20x Haiku 4.5.
+# implementer_model: claude-sonnet-4-6
+# spec_reviewer_model: claude-haiku-4-5
+# code_review_model: claude-sonnet-4-6
+# magi_dispatch_model: null   # outer dispatcher; sub-agents pick own
+```
+
+- [ ] **Step 4: Run, verify PASS**
+
+- [ ] **Step 5: Add E7.2 test (template renders preserving comments)**
+
+```python
+def test_init_python_stack_preserves_template_baseline_comments(tmp_path, monkeypatch):
+    """E7.2: init --stack python output preserves the 4 commented model lines."""
+    # ... existing init invocation pattern ...
+    # After running init, read the generated plugin.local.md and assert all 4
+    # commented lines present.
+    plugin_local = tmp_path / ".claude" / "plugin.local.md"
+    text = plugin_local.read_text(encoding="utf-8")
+    assert "# implementer_model: claude-sonnet-4-6" in text
+    assert "# spec_reviewer_model: claude-haiku-4-5" in text
+    assert "# code_review_model: claude-sonnet-4-6" in text
+    assert "# magi_dispatch_model: null" in text
+```
+
+(Adapt to the existing init test fixture pattern.)
+
+- [ ] **Step 6: Verify the existing template-expansion path preserves comments**
+
+`templates.py` substitution must NOT strip YAML comments. If the existing implementation already preserves them (likely — template is mostly verbatim), no code change needed; if it strips, fix the substitution to be line-preserving.
+
+- [ ] **Step 7: make verify + commit**
+
+```bash
+make verify
+git add templates/plugin.local.md.template tests/test_init_cmd.py
+git commit -m "feat: ship commented Sonnet+Haiku baseline in plugin.local.md template"
+```
+
+---
+
+## Track E — done criteria
+
+- [ ] All 6 test files pass (test_models_constants, test_config_model_fields, test_dispatch_model_arg, test_cli_model_override, test_dependency_check_models, test_init_cmd extension).
+- [ ] 6 atomic commits landed: E6 → E1 → E3 → E4 → E5 → E7.
+- [ ] `make verify` clean.
+- [ ] Default null = byte-identical argv regression preserved (E3.1 pinned).
+- [ ] INV-0 cascade: CLAUDE.md scan + breadcrumb verified.
+- [ ] Subagent #2 reports DONE with commit SHA range to orchestrator.
+
+---
+
+# Final review phase (orchestrator-driven)
+
+After both subagents report DONE:
+
+## Task F1: Pre-loop hygiene
+
+- [ ] **Step 1: Verify working tree clean**
+
+```bash
+cd D:/jbolivarg/PythonProjects/SBTDD
+git status
+```
+Expected: `working tree clean`. If not, identify untracked / unstaged changes and either commit or discard before proceeding.
+
+- [ ] **Step 2: Run make verify (Loop 1 surrogate per spec sec.4.4)**
+
+```bash
+make verify
+```
+Expected: 4 checks PASS — pytest (785-805 tests), ruff check, ruff format --check, mypy --strict. If any check fails, identify which subagent's commits caused the regression and dispatch a fix subagent before proceeding.
+
+- [ ] **Step 3: Compute the diff range for MAGI input**
+
+```bash
+git log --oneline cfb39ee..HEAD
+git diff cfb39ee..HEAD --stat
+```
+Expected: ~10 commits (4 from track D + 6 from track E), ~10 files changed.
+
+## Task F2: MAGI ↔ /receiving-code-review loop (cap 5 iter)
+
+For each iteration `iter ∈ {1..5}`:
+
+- [ ] **Step 1: Invoke MAGI on the diff**
+
+Invoke `/magi:magi` with prompt: `revisa el diff v0.2.2..HEAD del plugin sbtdd-workflow contra @sbtdd/spec-behavior.md y @planning/claude-plan-tdd-org.md. Foco: regression risk, INV-0/INV-22/INV-29 compliance, atomic-write correctness, default-null backward compat.`
+
+- [ ] **Step 2: Parse verdict + findings**
+
+Read MAGI's verdict JSON. Extract:
+- `verdict` ∈ {STRONG_NO_GO, HOLD, HOLD_TIE, GO_WITH_CAVEATS, GO, STRONG_GO}.
+- `degraded: bool`.
+- Findings list with severity {CRITICAL, WARNING, INFO}.
+- Conditions for Approval list.
+
+- [ ] **Step 3: Evaluate exit criterion**
+
+Exit IF and ONLY IF (all true):
+- `verdict ≥ GO_WITH_CAVEATS` (in VERDICT_RANK ordering).
+- `degraded == False` (per INV-28).
+- 0 findings with severity CRITICAL.
+- 0 findings with severity WARNING.
+- 0 Conditions for Approval pending.
+
+Otherwise: continue loop (step 4).
+
+- [ ] **Step 4: Route findings via /receiving-code-review (INV-29 gate)**
+
+For EACH finding (CRITICAL + WARNING) and EACH Condition for Approval:
+- Invoke `/receiving-code-review` with the finding text + diff + project context.
+- It returns ACCEPT or REJECT with rationale.
+- ACCEPT → proceed to mini-cycle TDD fix (step 5) for that finding.
+- REJECT → log the rejection rationale to `.claude/magi-rejections-iterN.md` and feed it as context into the NEXT MAGI invocation (sterile-loop prevention per scenario R1.6).
+
+- [ ] **Step 5: Mini-cycle TDD per accepted finding**
+
+Dispatch a subagent (#3-iter1, #3-iter2, ...) per accepted finding. Each subagent:
+- **Red**: write a regression test reproducing the finding. Commit `test: regression for [finding summary]`.
+- **Green**: implement the fix. Commit `fix: [finding summary]`.
+- **Refactor**: pulir if needed. Commit `refactor: [finding summary]` (skip if no cleanup).
+- Each commit verified by `make verify`.
+
+- [ ] **Step 6: Verify post-fix**
+
+```bash
+make verify
+```
+Expected: PASS. If FAIL, the mini-cycle subagent did not converge — inspect its commits, re-dispatch or escalate.
+
+- [ ] **Step 7: Increment iter counter; loop to step 1**
+
+If `iter == 5` and exit criterion still not met: trigger escalation_prompt (Task F3 below).
+
+## Task F3: Escalation on cap exhaustion (only if F2 cap hit)
+
+- [ ] **Step 1: Invoke escalation_prompt**
+
+Manually run:
+```bash
+python skills/sbtdd/scripts/escalation_prompt.py --context pre-merge --iter 5 --plan planning/claude-plan-tdd-org.md
+```
+(Or call the function from a Python REPL with an `EscalationContext` constructed from the iter-5 MAGI verdict.)
+
+- [ ] **Step 2: Choose option a/b/c/d**
+
+Per Feature A v0.2.0 contract:
+- (a) override INV-0 with `--reason "<text>"` mandatory → audit artifact written, ship proceeds.
+- (b) retry +1 iter (extends cap to 6).
+- (c) replan: revisit spec or task decomposition (worst case; would mean v0.3.0 scope was wrong).
+- (d) abort (default headless).
+
+- [ ] **Step 3: Apply chosen action**
+
+- (a): write `.claude/magi-escalations/<timestamp>-v030.json` with reason + verdict + findings, then ship.
+- (b): re-enter F2 loop with `iter=6`.
+- (c): hard-stop, return to brainstorming.
+- (d): exit 8 (MAGI_GATE_BLOCKED), v0.3.0 not shipped this session.
+
+## Task F4: Ship (only after F2 exit OR F3 option a)
+
+- [ ] **Step 1: Bump version 0.2.2 → 0.3.0**
+
+In `.claude-plugin/plugin.json`:
+```json
+  "version": "0.3.0",
+```
+
+In `.claude-plugin/marketplace.json` (TWO occurrences — top-level and inside the plugins array):
+```json
+  "version": "0.3.0",
+```
+
+- [ ] **Step 2: Write CHANGELOG.md `[0.3.0]` entry**
+
+Insert above `[0.2.2]`:
+
+```markdown
+## [0.3.0] - 2026-04-25
+
+### Added
+
+- Feature D — Auto progress streaming. `auto_cmd._stream_subprocess`
+  reads subprocess pipes line-by-line via thread-pair pump and
+  rewrites to orchestrator stderr with `[sbtdd task-N phase] `
+  prefix. Subprocess argv prefixed with `python -u` to disable
+  buffering at the dispatcher level. State-machine breadcrumbs
+  emitted at every phase / sub-phase / task transition. New
+  `progress` field in `auto-run.json` reflects current `{phase,
+  task_index, task_total, sub_phase}` and is rewritten atomically
+  via tmp + os.replace (mirrors state_file.save and
+  magi-escalation-pending.md atomic-write patterns). 7 new tests
+  across `tests/test_auto_streaming.py` + `tests/test_auto_progress.py`.
+
+- Feature E — Per-skill model selection flag. `PluginConfig` gains
+  four optional fields (`implementer_model`, `spec_reviewer_model`,
+  `code_review_model`, `magi_dispatch_model`), all defaulting null
+  (= inherit session model, byte-identical to v0.2.x argv). When
+  non-null, dispatch modules append `--model <id>` to the argv. CLI
+  flag `--model-override <skill>:<model>` on `/sbtdd auto` provides
+  per-run overrides; cascade is CLAUDE.md > CLI > plugin.local.md
+  > None. INV-0 enforced via regex scan of `~/.claude/CLAUDE.md`;
+  pinned model globally always wins, with stderr breadcrumb.
+  `dependency_check.check_model_ids` validates against
+  `models.ALLOWED_CLAUDE_MODEL_IDS` (Opus 4.7, Sonnet 4.6, Haiku
+  4.5 family). `templates/plugin.local.md.template` ships commented
+  Sonnet+Haiku baseline as recommended cost-optimized opt-in.
+
+### Process notes
+
+- Loop 1 (`/requesting-code-review`) skipped for v0.3.0 ship in
+  favor of `make verify` surrogate -- pytest + ruff check + ruff
+  format + mypy --strict served as the mechanical-findings detector
+  in this lightweight cycle. INV-9 honored via interpretive
+  shortcut (clean linting = clean Loop 1). Final review loop ran
+  MAGI -> /receiving-code-review until verdict GO_WITH_CAVEATS
+  full with zero CRITICAL + zero WARNING + zero Conditions
+  pending, capped at 5 iterations per user directive 2026-04-25.
+
+### Deferred (rolled to v0.4.0 / v1.0.0)
+
+- D5 `/sbtdd status --watch` subcommand (deferred to v0.4.0).
+- E2 `schema_version: 2` field in `plugin.local.md` (deferred to v1.0.0).
+- Features F (MAGI marker discovery + `retried_agents`), G (MAGI
+  cross-check via /requesting-code-review), H (Group B spec-drift
+  re-eval + INV-31 default-on opt-in re-eval) (all v1.0.0).
+```
+
+- [ ] **Step 3: Update README.md**
+
+Add new section after `### New in v0.2`:
+
+```markdown
+### Cost optimization (v0.3.0+)
+
+`plugin.local.md` accepts four optional model fields letting you
+downgrade per-skill subprocess models without changing your session
+default. Recommended baseline (commented in the template; uncomment
+to opt in):
+
+| Field | Recommended | Why |
+|-------|-------------|-----|
+| `implementer_model` | `claude-sonnet-4-6` | TDD code-gen + multi-file refactors. Haiku breaks invariants. |
+| `spec_reviewer_model` | `claude-haiku-4-5` | Pattern-match task; cheapest tier where capability suffices. |
+| `code_review_model` | `claude-sonnet-4-6` | Bug/security/style detection needs depth. |
+| `magi_dispatch_model` | `null` (inherit) | Outer dispatcher; sub-agents pick their own model. |
+
+Per-run override: `/sbtdd auto --model-override implementer:claude-haiku-4-5`.
+
+INV-0 cascade: `~/.claude/CLAUDE.md` pinned model always wins. Stderr
+breadcrumb fires when override is suppressed.
+
+Cost projection: 36-task `auto` run on default-Opus session vs
+Sonnet+Haiku mix = ~70-80% reduction in total bill, preserving Opus
+only in MAGI Loop 2 iterations.
+```
+
+- [ ] **Step 4: Update SKILL.md**
+
+After `### v0.2 flags` section, add `### v0.3 flags`:
+
+```markdown
+### v0.3 flags
+
+- `--model-override <skill>:<model>` (on `auto`) -- per-run model override
+  for one of the four canonical skills (`implementer`, `spec_reviewer`,
+  `code_review`, `magi_dispatch`). Repeatable. Cascade: CLAUDE.md >
+  CLI override > plugin.local.md > None (inherit session). INV-0
+  pinned model in `~/.claude/CLAUDE.md` always wins; stderr breadcrumb
+  fires when the override is suppressed.
+- Four optional fields in `plugin.local.md` (`implementer_model`,
+  `spec_reviewer_model`, `code_review_model`, `magi_dispatch_model`)
+  with default `null` (= inherit session). Recommended baseline
+  shipped commented in the template for cost optimization.
+```
+
+- [ ] **Step 5: Run final make verify**
+
+```bash
+make verify
+```
+
+- [ ] **Step 6: Stage docs + commit**
+
+```bash
+git add README.md skills/sbtdd/SKILL.md CHANGELOG.md
+git commit -m "docs: v0.3.0 changelog + cost-optimization README + SKILL flags"
+```
+
+- [ ] **Step 7: Bump version commit**
 
 ```bash
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
-git commit -m "chore: bump plugin + marketplace to v0.2.0"
+git commit -m "chore: bump to 0.3.0"
 ```
 
-### Task I4: strip shipped blockers from CLAUDE.md
-
-**Files:**
-- Modify: `CLAUDE.md`
-
-- [ ] **Step 1**: remove the three `## v0.2 requirement (LOCKED) — ...` sections from `CLAUDE.md` now that they shipped. Replace with a single `## v0.2 release notes` pointer to `CHANGELOG.md [0.2.0]`.
-
-- [ ] **Step 2 (commit)**:
+- [ ] **Step 8: Tag**
 
 ```bash
-git add CLAUDE.md
-git commit -m "docs: archive shipped v0.2 blockers to CHANGELOG"
+git tag v0.3.0
+git log --oneline -15
 ```
+Expected: clean linear history with the 10 feature commits + docs commit + chore bump + tag.
 
-### Task I5: final full test sweep + close plan
+- [ ] **Step 9: Push (REQUIRES EXPLICIT USER AUTHORIZATION)**
 
-- [ ] **Step 1**: run full `make verify` at repo root.
+DO NOT auto-execute. Surface to user: "v0.3.0 ready to push. Authorize `git push origin main && git push origin v0.3.0`?"
 
-```bash
-make verify
-```
-Expected: pytest ≥ 597 baseline + ~40-80 new tests all PASS; ruff clean; mypy clean.
+- [ ] **Step 10: Memory update**
 
-- [ ] **Step 2**: mark Milestone I complete; plan [x] all.
+Write `C:/Users/jbolivarg/.claude/projects/D--jbolivarg-PythonProjects-SBTDD/memory/project_v030_shipped.md` covering: 10 deliverables landed, lightweight pattern wall time, MAGI loop iter count, any INV-0 override, ship commit + tag SHAs.
 
-- [ ] **Step 3**: close-plan:
-
-```bash
-git commit --allow-empty -m "chore: mark task I complete"
-```
+Update `MEMORY.md` index with one-line v0.3.0 hook entry.
 
 ---
 
-## Pre-merge gate (after all tasks closed)
+## Self-review
 
-Follow `CLAUDE.local.md` §6 pre-merge protocol strictly:
+After writing the plan above, the following spec coverage map verifies every spec.S.12 / sec.6 acceptance criterion has at least one task:
 
-1. Confirm state: `.claude/session-state.json` has `current_phase: "done"`, all plan boxes `[x]`, `git status` clean.
-2. Run `/sbtdd pre-merge` — Loop 1 (`/requesting-code-review` clean-to-go, safety valve 10 iter) then Loop 2 (`/magi:magi` verdict ≥ `GO_WITH_CAVEATS` full + non-degraded, INV-28 honored).
-3. MAGI findings route through `/receiving-code-review` (INV-29) + mini-cycle TDD fixes per accepted finding. With Feature A live, exhausted safety valve now prompts interactively (or writes pending marker + exit 8 headless per `.claude/magi-auto-policy.json`).
-4. Run `/sbtdd finalize` — validates sec.M.7 checklist and invokes `/finishing-a-development-branch`. Merge + tag `v0.2.0` happens here under explicit user authorization (INV-0 / `~/.claude/CLAUDE.md` Git section — NEVER autonomous).
+| Spec criterion | Task | Coverage |
+|----------------|------|----------|
+| D1 | Task D1 | Steps 1-9 (3 streaming tests + impl) |
+| D2 | Task D2 | Steps 1-5 (argv test + impl) |
+| D3 | Task D3 | Steps 1-8 (2 breadcrumb tests + impl + wiring) |
+| D4 | Task D4 | Steps 1-10 (3 progress tests + impl + wiring) |
+| E1 | Task E1 | Steps 1-8 (3 config tests + dataclass extension) |
+| E3 | Task E3 | Steps 1-11 (4 dispatch tests + 3 modules wired + INV-0) |
+| E4 | Task E4 | Steps 1-6 (4 CLI tests + parser + cascade resolver) |
+| E5 | Task E5 | Steps 1-5 (3 dependency_check tests + impl) |
+| E6 | Task E6 | Steps 1-5 (2 immutability/contents tests + constants) |
+| E7 | Task E7 | Steps 1-7 (2 template tests + edit) |
+| R1.1 | Task F2 step 3 | Exit criterion check |
+| R1.2 | Task F2 step 4-5 | INV-29 routing + mini-cycle |
+| R1.3 | Task F2 step 4-5 | Same path for WARNING/Conditions |
+| R1.4 | Task F2 step 3 (degraded sub-condition) | INV-28 honored |
+| R1.5 | Task F3 | Escalation prompt invocation |
+| R1.6 | Task F2 step 4 | Rejected findings logged + fed back |
+| R1.7 | Task F1 step 2 + Task F2 step 1 | make verify Loop 1 surrogate |
+| Version bump | Task F4 step 1 | plugin.json + marketplace.json sync |
+| CHANGELOG | Task F4 step 2 | [0.3.0] section template |
+| README + SKILL | Task F4 steps 3-4 | Cost optimization + v0.3 flags |
+| Tag + push | Task F4 steps 8-9 | Manual user-authorized push |
+| Memory | Task F4 step 10 | project_v030_shipped.md |
 
-## Self-review notes
+**Placeholder scan**: zero `TODO`, `TBD`, `implement later`, `add appropriate error handling`, `similar to Task N` matches.
 
-**Spec coverage check:** every F15-F27 + NF8-NF12 + A1-A9 + B1-B10 + C1-C5 + NF-A-E + P1-P5 + D1-D3 acceptance criterion maps to a task above. The only spec item deliberately deferred is Feature B safety-valve MID-cycle `/receiving-code-review` + mini-cycle TDD fix automation — v0.2 dispatcher raises `SpecReviewError` on issues and the caller (`auto_cmd` / `close_task_cmd`) aborts. Full mini-cycle automation between reviewer iterations lands in v0.3 or a v0.2.1 patch. This matches the spec-base §2.2 "entrega v0.2" which says "si `issues`, treat as MAGI-like findings: feed to `/receiving-code-review`, mini-cycle TDD fix per accepted finding, re-dispatch reviewer, repeat up to a safety valve" — but keeping automation strictly inside `auto_cmd` (not the dispatcher) is a defensible design boundary; document this split in the Task H6 commit message.
+**Type consistency**: function names verified across tasks — `_stream_subprocess` (D1), `_build_run_sbtdd_argv` (D2), `_emit_phase_breadcrumb` (D3), `_update_progress` (D4), `PluginConfig` field names match across E1/E3/E4/E5, `_apply_inv0_model_check` consistent across superpowers/spec_review/magi dispatch, `_parse_model_overrides` + `_resolve_model` + `_VALID_MODEL_OVERRIDE_SKILLS` consistent within track E.
 
-**Placeholder scan:** searched for `TODO`, `TBD`, `implement later`, `...`. The three `...` occurrences in Tasks G6, H3, H6, H7 test skeletons (marked with `...  # skeleton; concretize ...`) are intentional pointers to lift fixtures from existing test modules. The implementer MUST replace each one with concrete code before landing the red commit — per the per-task instruction. This is not a shipping-time placeholder.
-
-**Type consistency:** `SpecReviewResult.issues: tuple[SpecIssue, ...]`, `SpecReviewError.issues: tuple[str, ...]` — different shapes by design. The `Error.issues` is flat text (for stderr printing) while `Result.issues` carries severity. Call sites need only one or the other.
-
-**Sequencing:** Feature C first (isolated test rewrite, zero risk). Feature A before Feature B because `apply_decision`'s audit artifact pattern informs `_write_artifact` in `spec_review_dispatch.py`. Meta (I1-I5) last because CHANGELOG + version bump must reflect landed features.
+**Scope check**: plan focused on D + E for v0.3.0. F+G+H + D5/E2 explicitly deferred and not referenced in tasks.
 
 ---
 
-## Execution Handoff
+## Execution handoff
 
-**Plan complete and saved to `planning/claude-plan-tdd-org.md`.**
+Plan complete and saved to `planning/claude-plan-tdd-org.md`.
 
-Per CLAUDE.md §1 Flujo de especificacion step 4-6: this is `claude-plan-tdd-org.md` (pre-MAGI review). Next steps belong to the USER:
+Two execution options:
 
-1. Manual review (Checkpoint 1). If the user rejects, re-run `/writing-plans` (or `/sbtdd spec`) with feedback.
-2. Checkpoint 2 MAGI review: `/magi:magi revisa @sbtdd/spec-behavior-base.md y @planning/claude-plan-tdd-org.md`.
-3. Apply Conditions for Approval and write `planning/claude-plan-tdd.md` (safety valve 3 iter per INV-11; INV-28 degraded handling).
-4. Execute via `/subagent-driven-development` or `/executing-plans`.
+**1. Subagent-Driven (recommended)** — orchestrator dispatches subagent #1 + subagent #2 in parallel for tracks D+E, then drives the final review loop sequentially. Two-stage review between tasks. Fresh subagent per finding mini-cycle.
 
-**Plugin's own auto path:** once `planning/claude-plan-tdd.md` exists and `plan_approved_at` is set in `.claude/session-state.json`, `/sbtdd auto` can ship v0.2 end-to-end (with Feature B dogfooded — `auto_cmd` will invoke spec-reviewer per task using `StubSpecReviewer` in test environments, real `dispatch_spec_reviewer` in production).
+**2. Inline Execution** — execute tasks D1-D4, E6-E7 inline in this session via executing-plans skill. Slower (~6-8h vs 4-5h parallel) but every step auditable in conversation. Loses parallelism advantage of lightweight pattern.
 
-The merge + `v0.2.0` tag are explicit user actions per INV-0 / `~/.claude/CLAUDE.md` Git rules — not autonomous even under `/sbtdd auto`.
+Recommended: **option 1**. Tracks D and E are file-disjoint by design and the lightweight pattern v0.2.1 precedent validated parallel-subagent dispatch for similar scope.
+
+Which approach?
