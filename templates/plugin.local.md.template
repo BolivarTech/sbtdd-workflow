@@ -22,6 +22,13 @@ auto_verification_retries: 1
 auto_max_spec_review_seconds: 3600
 tdd_guard_enabled: true
 worktree_policy: "optional"
+# Recommended cost-optimized baseline (uncomment to opt in; v0.3.0+).
+# Default null preserves session-model inheritance (v0.2.x behavior).
+# Cost ratio: Opus 4.7 ~= 5x Sonnet 4.6 ~= 15-20x Haiku 4.5.
+# implementer_model: claude-sonnet-4-6
+# spec_reviewer_model: claude-haiku-4-5
+# code_review_model: claude-sonnet-4-6
+# magi_dispatch_model: null   # outer dispatcher; sub-agents pick own
 ---
 
 # Local configuration for the sbtdd-workflow plugin
