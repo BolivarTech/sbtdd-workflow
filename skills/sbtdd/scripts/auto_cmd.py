@@ -254,6 +254,34 @@ def _update_progress(
     file does not exist, an empty dict is the starting point so the
     helper is safe to call even before :func:`_write_auto_run_audit`.
 
+    .. note:: **Single-writer assumption (intentional, MAGI iter 1
+       finding #5).**
+
+       The read-modify-write between :func:`pathlib.Path.read_text` and
+       :func:`os.replace` is NOT lock-protected. If any other writer
+       (signal handler, future ``/sbtdd status --watch`` companion,
+       OS-level backup tool) updates ``auto-run.json`` between the read
+       and the replace, that writer's payload is silently overwritten
+       (last-writer-wins, no conflict detection).
+
+       INV-22 (sequential-only execution) currently rules out concurrent
+       SBTDD writers in production: the auto orchestrator is the only
+       process that mutates ``.claude/auto-run.json`` during a run, and
+       :mod:`resume_cmd` runs only after the orchestrator has exited.
+       File-level locking is therefore intentionally NOT implemented in
+       v0.3.0 -- it would add cross-platform complexity (``fcntl`` vs
+       ``msvcrt``) for zero present benefit.
+
+       Any future feature that introduces a second writer (parallel
+       monitor, recovery hook, the v0.4.0 ``status --watch`` poller)
+       MUST either remain strictly read-only on this path OR introduce
+       a sentinel-file CAS protocol (e.g. write a ``.lock`` file with
+       the current revision number, retry on mismatch). Updating this
+       function alone is insufficient -- the contract belongs to all
+       writers of ``auto-run.json``. Document the second writer in the
+       spec, bump ``_AUTO_RUN_SCHEMA_VERSION``, and revisit this
+       docstring before merging.
+
     Args:
         auto_run_path: Path to ``.claude/auto-run.json``.
         phase: 0-indexed phase number.
