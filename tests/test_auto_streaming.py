@@ -61,6 +61,18 @@ def test_stream_subprocess_applies_prefix(tmp_path, capfd):
     assert "[sbtdd task-7 green] [skill] starting red phase" in captured.err
 
 
+def test_subprocess_argv_includes_dash_u():
+    """D2.1: auto_cmd subprocess argv is prefixed with python -u."""
+    argv = auto_cmd._build_run_sbtdd_argv(
+        subcommand="close-phase", extra_args=["--variant", "fix"]
+    )
+    assert argv[0:2] == [sys.executable, "-u"]
+    assert "run_sbtdd.py" in argv[2]
+    assert "close-phase" in argv
+    assert "--variant" in argv
+    assert "fix" in argv
+
+
 def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
     """D1.3: streaming flushes pending buffers on subprocess termination."""
     script = tmp_path / "emit_then_hang.py"
