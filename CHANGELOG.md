@@ -40,7 +40,7 @@ to reflect this — see CHANGELOG §0.2.0 → Fixed).
   `test_auto_phase2_recovers_when_implementer_precommitted_phase`.
 
 Estimated scope: ~200 LOC + ~6 regression tests. Target: ship before
-any v0.3 scope is opened so INV-31 honors its original contract.
+any v1.0.0 scope is opened so INV-31 honors its original contract.
 
 ### Other items deferred from v0.2 pre-merge findings
 
@@ -51,7 +51,7 @@ for v0.2.1 alongside B6.
 
 WARNING #12 (INV-31 default-on surprise risk): v0.2 ships with
 spec-review default-on per the original INV-31 wording; field data
-from v0.2/v0.2.1 will drive whether v0.3 flips to opt-in or keeps
+from v0.2/v0.2.1 will drive whether v1.0.0 flips to opt-in or keeps
 the default. Operational impact documented in `## [0.2.0] BREAKING`
 (INV-31 hard-block entry).
 
@@ -474,13 +474,121 @@ User directive session 2026-04-23: "solo vamos con lo lock a v0.2 todo lo demas 
   language preserves Spanish + English mix matching session-observed
   convention, template ≤40 lines emitted. See CLAUDE.md for full spec.
 
-### Deferred (tracked for v0.3.0)
+### Deferred (tracked for v1.0.0)
 
-v0.3 backlog consolidates everything that is NOT a v0.2 LOCKED blocker per user directive session 2026-04-23. Two groupings: (A) operational/infra items originally in v0.2 backlog, now moved; (B) seven complementary spec-drift detection options layered on top of the v0.2 (8) primary integration.
+> **v0.3 → v1.0.0 rename (user directive session 2026-04-25).** What was previously labelled the "v0.3.0" deferred backlog is now tracked under v1.0.0 -- the LOCKED items below (auto progress streaming, MAGI dispatch hardening + retried_agents, MAGI → /requesting-code-review cross-check) collectively raise the project past pre-1.0 status: stable Plugin manifest, stable session-state schema, ship-quality observability, and the validated MAGI cross-check pattern remove the "schema may change between minor versions" v0.1.x caveat. Historical references to "v0.3" inside the [0.2.0] release section above are kept verbatim (frozen historical record).
+
+v1.0.0 backlog consolidates everything that is NOT a v0.2 LOCKED blocker per user directive session 2026-04-23. Two groupings: (A) operational/infra items originally in v0.2 backlog, now moved; (B) seven complementary spec-drift detection options layered on top of the v0.2 (8) primary integration.
 
 #### Group A — operational / infra items (moved from v0.2)
 
-- **Auto progress streaming — v0.3 LOCKED PRIORITY** (user directive
+- **MAGI → /requesting-code-review cross-check — v1.0.0 LOCKED PRIORITY**
+  (user directive session 2026-04-25, validated empirically by user in
+  unrelated projects). MAGI Loop 2 occasionally produces false-positive
+  CRITICAL findings: it flags plan-described designs as if they were
+  shipped code defects, or misreads existing safe patterns (e.g., the
+  v0.2 pre-merge iter-3 `StopIteration` claim against
+  `prompt_user`'s headless retry path -- disprovable by reading
+  ``escalation_prompt.py`` line 241's ``next((... for ...), options[-1])``
+  default + line 300's ``any(...)`` guard). Today the operator catches
+  these manually via direct code inspection + ``magi-feedback.md``
+  rejection rationale. The pattern that's been validated in adjacent
+  projects: pipe MAGI's report through ``/requesting-code-review`` as a
+  meta-reviewer that cross-checks each MAGI finding against actual
+  code, then routes the cross-checked findings through INV-29's
+  accept/reject gate. Findings both reviewers confirm get applied;
+  findings MAGI flagged but ``/requesting-code-review`` disproves get
+  auto-rejected with the disproving evidence captured in the audit
+  trail. Findings ``/requesting-code-review`` discovers that MAGI
+  missed get applied with high confidence.
+
+  **Locked v1.0.0 deliverables:**
+
+  1. New helper in ``magi_dispatch`` (or new ``magi_cross_check.py``
+     module) -- ``cross_check_magi_findings(verdict, diff_paths) ->
+     CrossCheckResult`` invoking ``claude -p /requesting-code-review``
+     with the MAGI report + diff bundled, parsing accept/reject/new
+     output from the meta-reviewer.
+  2. ``pre_merge_cmd._loop2`` calls the cross-checker AFTER MAGI
+     verdict + BEFORE ``/receiving-code-review`` INV-29 routing. The
+     INV-29 gate now consumes the cross-checked finding list, not the
+     raw MAGI list.
+  3. Audit trail extends ``.claude/magi-verdict.json`` (or new
+     ``.claude/magi-cross-check.json``) with the disproved findings +
+     their disproving evidence.
+  4. Documented as the ordering inversion of the legacy
+     ``/requesting-code-review`` (Loop 1) → ``/magi:magi`` (Loop 2)
+     pre-merge pipeline -- in the cross-check pattern, MAGI runs first
+     for breadth, ``/requesting-code-review`` runs second for depth.
+     CHANGELOG entry calls out the distinction so users of the existing
+     ``pre-merge`` flow understand it's additive, not a replacement.
+
+  **Why locked**: removes the most expensive failure mode of the v0.2
+  pre-merge cycle -- sterile loops on MAGI false-positives where each
+  re-iter burns ~30 min of MAGI quota for no semantic gain. User has
+  used the pattern manually in adjacent projects with reported success.
+
+- **MAGI dispatch hardening + retried_agents telemetry — v1.0.0 LOCKED**
+  (user directive session 2026-04-25 post-v0.2.0 ship). Two related
+  improvements over the v0.1.2 + v0.1.4 disk-read fix:
+
+  **(a) Marker-based discovery as defensive fallback.** v0.1.2
+  (`cdcdac9`) + v0.1.4 (`c9e8d55`) shipped a working pattern: pass
+  ``--output-dir <tmpdir>`` packed inside the ``claude -p`` prompt,
+  read ``<tmpdir>/magi-report.json`` from disk after the subprocess
+  exits. This works but depends on the ``--output-dir`` flag
+  travelling through the prompt-string contract intact -- if Claude
+  Code's slash-command argument-passing semantics change, the temp
+  dir is created but MAGI ignores it and writes to its own default
+  location, leaving auto's reader looking at the wrong path.
+
+  MAGI guarantees a stable contract since 2.0.0: ``run_magi.py`` line
+  539 prints ``"\nFull report saved to: <path>"`` as its last stdout
+  line, and the SKILL.md "MANDATORY FINAL OUTPUT CONTRACT" forces
+  copy-verbatim into ``claude -p`` stdout. v1.0.0 should add a marker
+  parser as fallback when the explicit ``--output-dir`` path is
+  empty (or even as the primary strategy with ``--output-dir`` as
+  belt-and-suspenders override).
+
+  **(b) ``retried_agents`` field extraction (MAGI 2.2.1+).** New
+  telemetry MAGI emits when an agent retries: ``"retried_agents":
+  ["caspar"]`` at the report-top-level. ``MAGIVerdict`` should grow a
+  ``retried_agents: tuple[str, ...]`` field (default empty tuple for
+  MAGI 2.0.x-2.1.x compatibility). Surfaces signal that's currently
+  invisible to the gate logic -- a verdict that needed a retry is
+  not the same risk profile as a clean first-pass verdict, even when
+  the label is identical.
+
+  **Locked v1.0.0 deliverables (all six TDD steps, single mini-cycle
+  is fine since the parser change is small):**
+
+  1. Add ``MAGIVerdict.retried_agents: tuple[str, ...]`` (default
+     ``()``); existing constructors / tests keep working because the
+     field is keyword-only with a default.
+  2. Add ``_REPORT_PATH_RE = re.compile(r"^Full report saved to:
+     \s*(.+?)\s*$", re.MULTILINE)`` module-level constant.
+  3. Add ``_load_magi_report_from_marker(stdout: str) -> dict`` helper
+     that scans stdout for the marker, validates the path exists,
+     reads + json.loads the file. Raises ``ValidationError`` on each
+     of: marker absent, file missing, JSON malformed.
+  4. ``invoke_magi`` keeps ``--output-dir`` for now but reads via the
+     marker (single source of truth). Falls back to the
+     ``--output-dir`` path only if the marker is absent (defensive).
+  5. ``parse_magi_report`` extracts ``retried_agents`` alongside the
+     existing ``degraded`` / ``failed_agents``.
+  6. Six regression tests: marker present + valid file (happy path),
+     marker absent (ValidationError), file missing, JSON malformed,
+     ``retried_agents`` present (extracts list), ``retried_agents``
+     absent (empty tuple, not error).
+
+  **Why locked, not deferred:** v0.2 dogfood shipped the disk-read
+  fix under quota pressure (4 patches v0.1.2 → v0.1.7 inside a single
+  multi-hour cycle). The marker-based approach removes the fragile
+  prompt-string flag-passing dependency entirely; combined with
+  ``retried_agents`` telemetry, the dispatcher gains both robustness
+  and observability the v0.2 baseline lacks.
+
+- **Auto progress streaming — v1.0.0 LOCKED PRIORITY** (user directive
   session 2026-04-24 after observing v0.2 auto runs). **UX problem**:
   the subprocess stdout is pipe-buffered (Python stdio + ``tee``) so a
   multi-hour run of ``/sbtdd auto`` shows an empty log file while ~60
@@ -491,7 +599,7 @@ v0.3 backlog consolidates everything that is NOT a v0.2 LOCKED blocker per user 
   mode: users will Ctrl+C a working process because they assume it
   stalled, losing hours of autonomous execution.
 
-  **Locked v0.3 deliverables** (all four land together; individually
+  **Locked v1.0.0 deliverables** (all four land together; individually
   insufficient):
 
   1. **Unbuffered dispatcher invocation.** ``run_sbtdd.py`` must call
@@ -549,19 +657,22 @@ v0.3 backlog consolidates everything that is NOT a v0.2 LOCKED blocker per user 
 #### Group B — complementary spec-drift detection options (full matrix in local CLAUDE.md)
 
 - **(1) `scenario_coverage_check.py`** — mechanical regex pre-filter parsing `sbtdd/spec-behavior.md §4` + grep'ing `tests/` for scenario references. Runs at `close-task` before invoking v0.2 reviewer to skip tasks trivially covered. Cost: zero (stdlib).
-- **(2) Spec-snapshot diff** — `planning/spec-snapshot.json` captured at plan approval; pre-merge entry diffs current spec-behavior.md against snapshot; silent spec edits fail gate. Orthogonal audit layer catching a risk class (8) cannot. **Proposed LOCKED for v0.3 regardless of v0.2 empirical data.**
+- **(2) Spec-snapshot diff** — `planning/spec-snapshot.json` captured at plan approval; pre-merge entry diffs current spec-behavior.md against snapshot; silent spec edits fail gate. Orthogonal audit layer catching a risk class (8) cannot. **Proposed LOCKED for v1.0.0 regardless of v0.2 empirical data.**
 - **(3) Inverted traceability matrix** — per-task `Scenario coverage:` line in plan; `close-task` validates the task's diff references scenarios listed. Plan-writer accountability.
 - **(4) Per-phase MAGI-lite** — `/magi:magi analysis` on task diff + task scenarios (not full spec) at each `close-phase refactor`. 3-perspective semantic check (higher fidelity than (8)'s 1-perspective). Opt-in via flag; cost-expensive.
-- **(5) Auto-generated scenario stubs** — extend `/writing-plans` to emit `test_<scenario_N>_<slug>()` skeletons; missing = Checkpoint 2 failure. Plan-time enforcement upstream of any runtime check. **Strong candidate for v0.3 LOCKED** if v0.2 shows planners forgetting scenarios.
+- **(5) Auto-generated scenario stubs** — extend `/writing-plans` to emit `test_<scenario_N>_<slug>()` skeletons; missing = Checkpoint 2 failure. Plan-time enforcement upstream of any runtime check. **Strong candidate for v1.0.0 LOCKED** if v0.2 shows planners forgetting scenarios.
 - **(6) Watermark comments** — `# Implements: spec-behavior.md §4.X` + lint rule. Human-readable traceability surviving refactors.
 - **(7) LLM drift detector** — dedicated `spec_drift_detector.py` invoking `claude -p` full spec + diff at `close-phase`. Mostly redundant with (8); keep as opt-in for cross-task semantic drift.
 
-**Tentative v0.3 minimum viable** (subject to v0.2 empirical data): Group A items per operational need + Group B (2) + (5). Optional: (1) as pre-filter if (8) cost proves problematic. (3), (4), (6), (7) opt-in via flags.
+**Tentative v1.0.0 minimum viable** (subject to v0.2 empirical data): Group A items per operational need + Group B (2) + (5). Optional: (1) as pre-filter if (8) cost proves problematic. (3), (4), (6), (7) opt-in via flags.
 
 (Milestones A-C changelog is implied from the git log; post-v0.1
 releases will carry fully human-curated entries. Milestone E is the last
 milestone before the `v0.1.0` public ship tag. v0.2 release blockers:
 interactive MAGI escalation prompt + superpowers spec-reviewer integration
-ONLY. v0.3 scope: all operational items originally in v0.2 backlog +
-complementary spec-drift options (1)-(7), re-evaluated with v0.2 field
-data.)
+ONLY. Originally tracked as v0.3; renamed to v1.0.0 per user directive
+session 2026-04-25 because the scope (auto progress streaming + MAGI
+dispatch hardening + MAGI cross-check pattern + spec-drift options)
+collectively pushes the project past pre-1.0 caveats. Group A
+operational items + complementary spec-drift options (1)-(7),
+re-evaluated with v0.2 field data.)
