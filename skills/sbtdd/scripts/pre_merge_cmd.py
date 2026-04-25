@@ -28,6 +28,7 @@ from pathlib import Path
 
 import escalation_prompt
 import magi_dispatch
+import receiving_review_dispatch
 import subprocess_utils
 import superpowers_dispatch
 from config import PluginConfig, load_plugin_local
@@ -171,64 +172,14 @@ def _loop1(root: Path) -> None:
     raise Loop1DivergentError(f"Loop 1 did not converge in {_LOOP1_MAX} iterations")
 
 
-#: Regex matching ``## Accepted`` / ``## Rejected`` section headers.
-#:
-#: MAGI Loop 2 iter 1 Finding 7: the prior ``.startswith("## accepted")``
-#: check required a literal single space and broke on ``##Accepted`` /
-#: ``##  Accepted``. The regex accepts zero-or-more whitespace after the
-#: hashes and is case-insensitive, covering every emitted form of the
-#: superpowers skill header (hyphenated, spaced, upper-case, mixed).
-_SECTION_HEADER_RE: re.Pattern[str] = re.compile(
-    r"^##\s*(Accepted|Rejected)\b",
-    re.IGNORECASE,
-)
-
-
-def _parse_receiving_review(
-    skill_result: superpowers_dispatch.SkillResult,
-) -> tuple[list[str], list[str]]:
-    """Parse /receiving-code-review stdout into (accepted, rejected) lists.
-
-    Expected stdout format (markdown bullet lists under two headers)::
-
-        ## Accepted
-        - condition text 1
-        - condition text 2
-
-        ## Rejected
-        - condition text 3 (rationale: ...)
-
-    Heading recognition (MAGI Loop 2 iter 1 Finding 7): the parser uses
-    :data:`_SECTION_HEADER_RE` to accept every observed spelling of the
-    section header -- ``##Accepted`` (no space), ``## Accepted``
-    (canonical), ``##   Accepted`` (multi-space), ``## ACCEPTED``
-    (upper-case), ``## aCCepteD`` (mixed case). All forms are mapped
-    onto the ``accepted`` / ``rejected`` section buckets regardless of
-    capitalisation.
-
-    Returns ``([accepted_texts], [rejected_texts])`` with leading bullet /
-    dash / whitespace stripped. Either section may be absent (empty list).
-    A completely empty stdout returns ``([], [])`` -- the caller (``_loop2``)
-    treats this as "no decisions produced, re-raise" via a dedicated
-    :class:`errors.ValidationError` path.
-    """
-    accepted: list[str] = []
-    rejected: list[str] = []
-    # Map canonical section name (lower-cased header group) -> target
-    # list. Using a dict instead of an if-chain keeps the dispatch
-    # declarative and makes the set of recognised sections explicit.
-    dispatch: dict[str, list[str]] = {"accepted": accepted, "rejected": rejected}
-    section: list[str] | None = None
-    stdout = getattr(skill_result, "stdout", "") or ""
-    for line in stdout.splitlines():
-        s = line.strip()
-        match = _SECTION_HEADER_RE.match(s)
-        if match is not None:
-            section = dispatch[match.group(1).lower()]
-            continue
-        if section is not None and s.startswith(("-", "*")):
-            section.append(s.lstrip("-* ").strip())
-    return accepted, rejected
+# Backward-compat re-exports for the parser + section regex.
+#
+# v0.2.1 promoted ``_parse_receiving_review`` and the format contract to
+# ``receiving_review_dispatch`` so ``auto_cmd._apply_spec_review_findings_via_mini_cycle``
+# can share them. Tests written against the v0.2.0 private names continue
+# to import from this module unchanged.
+_SECTION_HEADER_RE: re.Pattern[str] = receiving_review_dispatch._SECTION_HEADER_RE
+_parse_receiving_review = receiving_review_dispatch.parse_receiving_review
 
 
 def _safe_threshold_rank(threshold: str) -> int:
@@ -462,40 +413,13 @@ def _write_magi_feedback_file(root: Path, rejections: list[str]) -> Path:
     return path
 
 
-#: Instruction prepended to every /receiving-code-review dispatch. The
-#: superpowers skill is prose-only -- it teaches how to RESPOND to
-#: feedback but does not define a machine-parseable output format. Without
-#: this instruction the subagent produces free-form analysis that
-#: :func:`_parse_receiving_review` cannot extract decisions from,
-#: triggering ``ValidationError: /receiving-code-review produced no
-#: decisions``. Observed v0.2 pre-merge Loop 2 2026-04-24. The instruction
-#: gives the subagent an explicit contract while still allowing the
-#: skill's technical-evaluation discipline (the forbidden-responses
-#: rules in the skill prevent lazy blanket-accept output).
-_RECEIVING_REVIEW_FORMAT_CONTRACT = (
-    "After technical evaluation of the MAGI findings below, your reply "
-    "MUST end with EXACTLY these two markdown sections (and nothing "
-    "else after them): ``## Accepted`` followed by ``- <verbatim "
-    "finding text>`` lines for findings you accept, and "
-    "``## Rejected`` followed by ``- <verbatim finding text> "
-    "(rationale: ...)`` lines for findings you reject. Every finding "
-    "MUST appear under exactly one section. Findings to evaluate:"
-)
-
-
-def _conditions_to_skill_args(conditions: tuple[str, ...]) -> list[str]:
-    """Serialise MAGI conditions as CLI args for /receiving-code-review.
-
-    The skill accepts findings as positional arguments embedded in the
-    ``claude -p`` prompt. A leading instruction (see
-    :data:`_RECEIVING_REVIEW_FORMAT_CONTRACT`) forces the subagent to
-    emit output in the ``## Accepted`` / ``## Rejected`` markdown shape
-    that :func:`_parse_receiving_review` parses -- the skill itself is
-    prose-only and would otherwise return free-form analysis the parser
-    cannot extract decisions from.
-    """
-    quoted = [f'"{c}"' for c in conditions]
-    return [_RECEIVING_REVIEW_FORMAT_CONTRACT, *quoted]
+# Backward-compat re-exports for the format contract + arg serialiser.
+#
+# v0.2.1 promoted these to ``receiving_review_dispatch``. Both
+# ``_RECEIVING_REVIEW_FORMAT_CONTRACT`` and ``_conditions_to_skill_args``
+# remain importable so v0.2.0-vintage tests continue to pass.
+_RECEIVING_REVIEW_FORMAT_CONTRACT = receiving_review_dispatch.RECEIVING_REVIEW_FORMAT_CONTRACT
+_conditions_to_skill_args = receiving_review_dispatch.conditions_to_skill_args
 
 
 def _handle_safety_valve_exhaustion(
