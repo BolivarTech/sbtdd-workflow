@@ -12,6 +12,7 @@ an instance; any schema violation raises ValidationError.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -47,6 +48,23 @@ class PluginConfig:
     auto_max_spec_review_seconds: int
     tdd_guard_enabled: bool
     worktree_policy: Literal["optional", "required"]
+    # v0.3.0 Feature E -- per-skill model selection (default None = inherit
+    # session model, byte-identical argv to v0.2.x).
+    implementer_model: str | None = None
+    spec_reviewer_model: str | None = None
+    code_review_model: str | None = None
+    magi_dispatch_model: str | None = None
+
+
+#: Canonical names of the v0.3.0 Feature E model fields. Used both by the
+#: typo-detection pass below and by the dispatch resolver in
+#: :mod:`auto_cmd` (CLI override -> config -> None cascade).
+_MODEL_FIELDS: tuple[str, ...] = (
+    "implementer_model",
+    "spec_reviewer_model",
+    "code_review_model",
+    "magi_dispatch_model",
+)
 
 
 def load_plugin_local(path: Path | str) -> PluginConfig:
@@ -119,6 +137,26 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
         raise ValidationError("verification_commands must be a non-empty list")
     if len(data["verification_commands"]) == 0:
         raise ValidationError("verification_commands must be non-empty")
+    # v0.3.0 Feature E -- typo detection on model fields. Common mistake:
+    # using ``implementer-model`` (YAML idiomatic dash) instead of
+    # ``implementer_model`` (Python attribute). Emit a warning and drop
+    # the bogus key so PluginConfig(**data) does not raise on unknown kw.
+    for key in list(data.keys()):
+        if "-" in key and key.replace("-", "_") in _MODEL_FIELDS:
+            sys.stderr.write(
+                f"[sbtdd] unknown plugin.local.md key: {key} -- did you mean "
+                f"{key.replace('-', '_')}?\n"
+            )
+            data.pop(key)
+    # v0.3.0 Feature E -- per-skill model fields (optional). Validate
+    # type when present so a malformed value (e.g. integer, list) does
+    # not propagate to the dispatcher.
+    for field_name in _MODEL_FIELDS:
+        val = data.get(field_name)
+        if val is not None and not isinstance(val, str):
+            raise ValidationError(
+                f"{field_name} must be a string or null, got {type(val).__name__}"
+            )
     try:
         return PluginConfig(**data)
     except TypeError as exc:
