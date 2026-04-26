@@ -497,7 +497,19 @@ def invoke_magi(
                 f"/magi:magi failed (returncode={result.returncode}): {result.stderr.strip()}"
             )
 
-        report_path = Path(tmpdir) / "magi-report.json"
+        # v0.4.0 Feature F (F43, iter 2 W1): prefer the forward-compat
+        # ``MAGI_VERDICT_MARKER.json`` discovered via recursive glob so
+        # future MAGI versions that move the artifact into per-run
+        # sub-directories continue to work without code changes. Falls
+        # back to the legacy ``magi-report.json`` lookup when no marker
+        # exists, which is the current MAGI 2.x contract -- without the
+        # fallback this integration would break every shipped MAGI
+        # version, so the safety net is mandatory until MAGI emits the
+        # marker schema natively.
+        try:
+            report_path = _discover_verdict_marker(tmpdir)
+        except ValidationError:
+            report_path = Path(tmpdir) / "magi-report.json"
         if not report_path.exists():
             raise MAGIGateError(
                 f"/magi:magi returned 0 but did not write 'magi-report.json' to "
