@@ -2,11 +2,18 @@
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-25
-"""Tests for v0.3.0 Feature D auto-run.json progress field."""
+"""Tests for v0.3.0 Feature D auto-run.json progress field.
+
+v0.4.0 J4 extensions:
+
+- ``test_update_progress_swallows_oserror_and_continues`` (J4.1).
+- ``test_update_progress_retry_exhaustion_preserves_original`` (J4.2).
+"""
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 from pathlib import Path
@@ -135,3 +142,86 @@ def test_update_progress_emits_four_keys_with_partial_unknowns(tmp_path):
         "task_total": None,
         "sub_phase": "green",
     }
+
+
+def test_update_progress_swallows_oserror_and_continues(tmp_path, monkeypatch, capfd):
+    """J4.1: OSError on tmp write does not kill the auto run.
+
+    Simulates a ``OSError(28, "No space left on device")`` raised by the
+    ``Path.write_text`` call that creates the tmp file. ``_update_progress``
+    must catch the OSError, emit a stderr breadcrumb starting ``[sbtdd]``,
+    and return without raising. The original ``auto-run.json`` is left
+    intact so resume / status readers see a consistent file rather than
+    a half-written one.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    pre_state = {"started_at": "2026-04-25T10:00:00Z"}
+    auto_run.write_text(json.dumps(pre_state))
+    real_write_text = Path.write_text
+
+    def boom(self, *args, **kwargs):
+        # Only the tmp side-write should fail; preserve the original.
+        if ".tmp." in str(self):
+            raise OSError(28, "No space left on device")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", boom)
+    # Should NOT raise.
+    auto_cmd._update_progress(
+        auto_run,
+        phase=2,
+        task_index=1,
+        task_total=10,
+        sub_phase="red",
+    )
+    captured = capfd.readouterr()
+    assert "[sbtdd]" in captured.err
+    assert "progress write failed" in captured.err
+    # Original auto-run.json preserved (not corrupted, no progress key
+    # written because write failed).
+    data = json.loads(auto_run.read_text())
+    assert data["started_at"] == "2026-04-25T10:00:00Z"
+
+
+def test_update_progress_retry_exhaustion_preserves_original(tmp_path, monkeypatch, capfd):
+    """J4.2: retry-loop exhaustion does not corrupt auto-run.json.
+
+    On Windows ``os.replace`` can fail with ``PermissionError`` when a
+    concurrent reader holds the destination open without
+    ``FILE_SHARE_DELETE``. The retry loop attempts up to 20 times; if
+    every attempt fails the helper must catch the resulting OSError,
+    clean up the tmp file, emit a breadcrumb, and leave the original
+    auto-run.json intact rather than re-raising.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    original = {
+        "progress": {
+            "phase": 1,
+            "task_index": 0,
+            "task_total": 5,
+            "sub_phase": "red",
+        }
+    }
+    auto_run.write_text(json.dumps(original))
+
+    def always_fail(src, dst):  # type: ignore[no-untyped-def]
+        raise PermissionError(13, "Locked")
+
+    monkeypatch.setattr(os, "replace", always_fail)
+    # Should NOT raise.
+    auto_cmd._update_progress(
+        auto_run,
+        phase=2,
+        task_index=1,
+        task_total=5,
+        sub_phase="green",
+    )
+    captured = capfd.readouterr()
+    assert "[sbtdd]" in captured.err
+    assert "progress write failed" in captured.err
+    # Original payload preserved.
+    data = json.loads(auto_run.read_text())
+    assert data["progress"]["phase"] == 1
+    assert data["progress"]["task_index"] == 0
+
+
