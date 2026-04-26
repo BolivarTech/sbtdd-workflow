@@ -326,3 +326,125 @@ def test_tolerant_agent_parse_accepts_synthesis_label(tmp_path: Path) -> None:
     parsed = magi_dispatch._tolerant_agent_parse(raw)
     assert parsed["agent"] == "caspar"
     assert parsed["verdict"] == "GO_WITH_CAVEATS"
+
+
+# ---------------------------------------------------------------------------
+# F43 (iter 2 W1) -- _discover_verdict_marker wired into invoke_magi
+# ---------------------------------------------------------------------------
+
+
+def _extract_output_dir_from_cmd(cmd: list[str]) -> str:
+    """Pull ``--output-dir <path>`` out of the claude ``-p`` prompt string.
+
+    Mirrors ``tests/test_magi_dispatch.py::_extract_output_dir`` -- duplicated
+    here so the W1 hardening tests stay localised to the hardening module
+    instead of cross-importing private helpers.
+    """
+    tokens = cmd[-1].split()
+    return tokens[tokens.index("--output-dir") + 1]
+
+
+def _minimal_magi_report_payload(consensus_label: str = "GO (2-0)") -> dict[str, object]:
+    """Minimal canonical magi-report.json shape for W1 wiring tests."""
+    return {
+        "agents": [],
+        "consensus": {
+            "consensus": consensus_label,
+            "consensus_verdict": "approve",
+            "conditions": [],
+            "findings": [],
+            "recommendations": {},
+            "dissent": [],
+        },
+    }
+
+
+def test_invoke_magi_discovers_verdict_marker_when_present(monkeypatch, tmp_path):
+    """F43.4 (iter 2 W1): invoke_magi prefers MAGI_VERDICT_MARKER.json over legacy report.
+
+    When MAGI emits the forward-compat marker file (future schema) only,
+    invoke_magi must locate it via :func:`_discover_verdict_marker` so
+    the dead-helper diagnosis from melchior iter 1 is closed. The fake
+    subprocess writes the marker exclusively (no magi-report.json) and
+    we expect parsing to succeed via the marker path.
+    """
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None, **kwargs):
+        output_dir = _extract_output_dir_from_cmd(cmd)
+        (Path(output_dir) / "MAGI_VERDICT_MARKER.json").write_text(
+            json.dumps(_minimal_magi_report_payload("GO (2-0)")),
+            encoding="utf-8",
+        )
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    verdict = invoke_magi(context_paths=["spec.md"])
+    assert verdict.verdict == "GO"
+
+
+def test_invoke_magi_falls_back_to_legacy_report(monkeypatch, tmp_path):
+    """F43.5 (iter 2 W1): invoke_magi falls back to magi-report.json when no marker.
+
+    MAGI 2.x writes ``magi-report.json`` and does NOT yet emit the
+    forward-compat ``MAGI_VERDICT_MARKER.json`` file. Iter 2's
+    integration must therefore preserve the legacy lookup as a
+    graceful fallback, otherwise current MAGI versions would break
+    immediately. The fake writes the legacy report only.
+    """
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None, **kwargs):
+        output_dir = _extract_output_dir_from_cmd(cmd)
+        (Path(output_dir) / "magi-report.json").write_text(
+            json.dumps(_minimal_magi_report_payload("GO_WITH_CAVEATS (2-1)")),
+            encoding="utf-8",
+        )
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    verdict = invoke_magi(context_paths=["spec.md"])
+    assert verdict.verdict == "GO_WITH_CAVEATS"
+
+
+def test_invoke_magi_prefers_marker_over_legacy_when_both_present(monkeypatch, tmp_path):
+    """F43.6 (iter 2 W1): when both files exist, marker wins (forward-compat).
+
+    Defensive against transitional MAGI versions that might emit both
+    artifacts during a schema bridge release. Marker-based discovery is
+    the forward contract; the legacy report is fallback-only.
+    """
+    from magi_dispatch import invoke_magi
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None, **kwargs):
+        output_dir = Path(_extract_output_dir_from_cmd(cmd))
+        # Legacy report has STRONG_GO; marker has GO_WITH_CAVEATS.
+        # If marker wins (correct behavior), verdict == GO_WITH_CAVEATS.
+        (output_dir / "magi-report.json").write_text(
+            json.dumps(_minimal_magi_report_payload("STRONG_GO (3-0)")),
+            encoding="utf-8",
+        )
+        (output_dir / "MAGI_VERDICT_MARKER.json").write_text(
+            json.dumps(_minimal_magi_report_payload("GO_WITH_CAVEATS (2-1)")),
+            encoding="utf-8",
+        )
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    verdict = invoke_magi(context_paths=["spec.md"])
+    assert verdict.verdict == "GO_WITH_CAVEATS"
