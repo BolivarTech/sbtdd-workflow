@@ -294,3 +294,43 @@ def test_skill_has_nontrivial_body() -> None:
         assert not first_line.startswith("## "), (
             f"section '{header}' is empty (immediately followed by another H2: '{first_line}')"
         )
+
+
+def test_v03_flags_section_documents_exit_1_for_invalid_model_override() -> None:
+    """J5.1: SKILL.md v0.3 flags section uses 'exit 1' not 'exit 2'.
+
+    The v0.3 flags section describes ``--model-override`` validation.
+    Invalid skill names or model IDs are rejected by
+    ``auto_cmd._parse_model_overrides`` which raises
+    :class:`ValidationError`. Per ``errors.EXIT_CODES`` that maps to
+    exit ``1`` (USER_ERROR), not exit ``2`` (PRECONDITION_FAILED).
+
+    This test guards against the docs drift originally flagged by
+    balthasar finding #1 in v0.3.0 final review iter 2.
+    """
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    # Find the v0.3 flags section
+    assert "### v0.3 flags" in skill, "missing '### v0.3 flags' section in SKILL.md"
+    section_start = skill.index("### v0.3 flags")
+    # Slice to next H2-or-H3 to bound the section
+    rest = skill[section_start + len("### v0.3 flags") :]
+    # Look for the next ``\n## `` or ``\n### `` boundary
+    next_h2 = rest.find("\n## ")
+    next_h3 = rest.find("\n### ")
+    candidates = [c for c in (next_h2, next_h3) if c >= 0]
+    section_end = (section_start + len("### v0.3 flags") + min(candidates)) if candidates else len(skill)
+    section = skill[section_start:section_end]
+    # Must say exit 1 (USER_ERROR), not exit 2 (PRECONDITION_FAILED)
+    assert "exit `1` (USER_ERROR)" in section or "exit 1 (USER_ERROR)" in section, (
+        "v0.3 flags section must document 'exit 1 (USER_ERROR)' for invalid "
+        "--model-override values; matches auto_cmd._parse_model_overrides "
+        "raising ValidationError -> errors.EXIT_CODES[ValidationError] == 1"
+    )
+    assert "exit `2`" not in section, (
+        "v0.3 flags section must NOT claim exit 2 for invalid "
+        "--model-override values; that is wrong"
+    )
+    assert "exit 2 (PRECONDITION_FAILED)" not in section, (
+        "v0.3 flags section must NOT claim exit 2 (PRECONDITION_FAILED) "
+        "for invalid --model-override values; the actual exit is 1"
+    )
