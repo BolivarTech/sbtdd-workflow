@@ -1635,6 +1635,19 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
     :func:`state_file.save` to keep the two state-on-disk writers
     consistent.
 
+    v0.4.0 J6 -- read-modify-write to preserve ``progress``. Before v0.4
+    the audit writer overwrote ``auto-run.json`` with the serialised
+    audit only, transiently dropping the ``progress`` field written by
+    :func:`_update_progress` until the next ``_update_progress`` fired.
+    Now the helper reads any pre-existing payload, splices the
+    ``progress`` key into the audit dict, and writes the merged result
+    atomically. Future top-level keys (e.g. ``magi_iter*_retried_agents``
+    once Feature F44.3 is wired into auto) can be added to the merge
+    list with a one-line change. If the on-disk payload is missing,
+    corrupt JSON, or fails to read for any reason, the writer falls
+    back to audit-only output so a previous run's filesystem damage
+    cannot block a fresh audit snapshot.
+
     Args:
         path: Absolute path to ``auto-run.json`` (parent is created).
         payload: :class:`AutoRunAudit` instance, validated before write.
@@ -1651,12 +1664,25 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
         )
     payload.validate_schema()
     path.parent.mkdir(parents=True, exist_ok=True)
+    # v0.4.0 J6: preserve the ``progress`` field (and only that field)
+    # from any pre-existing on-disk payload so audit refreshes do not
+    # transiently drop the live progress snapshot. Failures to read or
+    # parse the prior payload are swallowed -- a corrupted or missing
+    # file means we have nothing to preserve, which is acceptable.
+    audit_dict: dict[str, object] = dict(payload.to_dict())
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict) and "progress" in existing:
+                audit_dict["progress"] = existing["progress"]
+        except (OSError, json.JSONDecodeError):
+            pass
     # Atomic write via tmp + os.replace (MAGI Loop 2 D iter 1 Caspar):
     # mirrors state_file.save so a process killed mid-write never leaves
     # a corrupted auto-run.json. If os.replace fails the tmp file is
     # cleaned up before the error propagates so nothing leaks.
     tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(payload.to_dict(), indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
     try:
         os.replace(tmp, path)  # atomic on POSIX and Windows
     except OSError:
