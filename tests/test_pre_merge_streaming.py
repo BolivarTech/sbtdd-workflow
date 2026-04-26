@@ -82,12 +82,10 @@ def test_loop2_magi_dispatch_passes_stream_prefix(tmp_path, monkeypatch):
         f"stream_prefix kwarg must be a string, got {type(sp).__name__}: {sp!r}"
     )
     assert "magi-loop2" in sp, (
-        f"Loop 2 MAGI dispatch must thread a 'magi-loop2'-tagged stream_prefix, "
-        f"got {sp!r}"
+        f"Loop 2 MAGI dispatch must thread a 'magi-loop2'-tagged stream_prefix, got {sp!r}"
     )
     assert "iter-1" in sp, (
-        f"Loop 2 MAGI dispatch must include the iteration number in stream_prefix, "
-        f"got {sp!r}"
+        f"Loop 2 MAGI dispatch must include the iteration number in stream_prefix, got {sp!r}"
     )
 
 
@@ -106,8 +104,11 @@ def test_loop1_dispatches_pass_stream_prefix(tmp_path, monkeypatch):
 
     class FakeResult:
         def __init__(self, clean: bool) -> None:
-            # ``_is_clean_to_go`` reads ``.stdout``.
-            self.stdout = "clean-to-go" if clean else "not-clean-to-go"
+            # ``_is_clean_to_go`` does substring match for
+            # ``clean-to-go``; pick a non-clean payload that does NOT
+            # contain that substring (the literal ``not-clean-to-go``
+            # would still match because ``clean-to-go`` is embedded).
+            self.stdout = "clean-to-go" if clean else "findings outstanding"
 
     def fake_requesting(**kwargs):  # type: ignore[no-untyped-def]
         requesting_calls.append(dict(kwargs))
@@ -126,17 +127,14 @@ def test_loop1_dispatches_pass_stream_prefix(tmp_path, monkeypatch):
     # multiple times before clean-to-go. Every call should carry a
     # loop1-tagged prefix.
     assert all(
-        isinstance(call.get("stream_prefix"), str)
-        and "loop1" in (call["stream_prefix"] or "")
+        isinstance(call.get("stream_prefix"), str) and "loop1" in (call["stream_prefix"] or "")
         for call in requesting_calls
     ), (
         "every Loop 1 requesting_code_review call must thread a 'loop1'-tagged "
         f"stream_prefix; got {[c.get('stream_prefix') for c in requesting_calls]!r}"
     )
     # iter-1 must appear at least once (first iteration).
-    assert any(
-        "iter-1" in (call.get("stream_prefix") or "") for call in requesting_calls
-    ), (
+    assert any("iter-1" in (call.get("stream_prefix") or "") for call in requesting_calls), (
         "first Loop 1 requesting_code_review call must include 'iter-1' tag; "
         f"got {[c.get('stream_prefix') for c in requesting_calls]!r}"
     )
@@ -144,8 +142,7 @@ def test_loop1_dispatches_pass_stream_prefix(tmp_path, monkeypatch):
     # clean-to-go: check at least one call carries a loop1 prefix.
     assert receiving_calls, "receiving_code_review was never called in Loop 1"
     assert all(
-        isinstance(call.get("stream_prefix"), str)
-        and "loop1" in (call["stream_prefix"] or "")
+        isinstance(call.get("stream_prefix"), str) and "loop1" in (call["stream_prefix"] or "")
         for call in receiving_calls
     ), (
         "every Loop 1 receiving_code_review call must thread a 'loop1'-tagged "
@@ -189,11 +186,7 @@ def test_loop2_finding_dispatch_passes_phase_specific_stream_prefix(tmp_path, mo
         # "accepted -> exit 8" branch and continues iterating until the
         # next MAGI verdict (clean GO) returns success.
         class _R:
-            stdout = (
-                "## Accepted\n\n"
-                "## Rejected\n\n"
-                "- Add docstring to foo() -- noise.\n"
-            )
+            stdout = "## Accepted\n\n## Rejected\n\n- Add docstring to foo() -- noise.\n"
 
         return _R()
 

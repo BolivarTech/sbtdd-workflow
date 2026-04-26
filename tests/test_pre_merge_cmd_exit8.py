@@ -55,13 +55,13 @@ def test_loop2_writes_conditions_and_emits_stderr_summary(
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
-        lambda context_paths, cwd: _FakeVerdict(),
+        lambda context_paths, cwd, **_kw: _FakeVerdict(),
     )
     monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", lambda v: False)
     monkeypatch.setattr(
         superpowers_dispatch,
         "receiving_code_review",
-        lambda args, cwd: {"accepted": list(_FakeVerdict.conditions), "rejected": []},
+        lambda args, cwd, **_kw: {"accepted": list(_FakeVerdict.conditions), "rejected": []},
     )
     monkeypatch.setattr(
         pre_merge_cmd,
@@ -119,7 +119,7 @@ def test_loop2_unlinks_stale_conditions_on_successful_gate(
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
-        lambda context_paths, cwd: _CleanVerdict(),
+        lambda context_paths, cwd, **_kw: _CleanVerdict(),
     )
     monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", lambda v: False)
     monkeypatch.setattr(magi_dispatch, "verdict_passes_gate", lambda v, t: True)
@@ -155,13 +155,13 @@ def test_loop2_cleans_stale_before_new_write_on_conditions(
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
-        lambda context_paths, cwd: _FakeVerdict(),
+        lambda context_paths, cwd, **_kw: _FakeVerdict(),
     )
     monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", lambda v: False)
     monkeypatch.setattr(
         superpowers_dispatch,
         "receiving_code_review",
-        lambda args, cwd: {"accepted": list(_FakeVerdict.conditions), "rejected": []},
+        lambda args, cwd, **_kw: {"accepted": list(_FakeVerdict.conditions), "rejected": []},
     )
     monkeypatch.setattr(
         pre_merge_cmd,

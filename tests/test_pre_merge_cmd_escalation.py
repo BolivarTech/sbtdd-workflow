@@ -125,7 +125,10 @@ def _seed_pre_merge_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     _seed_plugin_local(tmp_path)
 
     def fake_requesting(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return SkillResult(skill="stub", returncode=0, stdout="Review: clean-to-go", stderr="")
 
@@ -179,7 +182,11 @@ def test_pre_merge_cmd_escalates_on_safety_valve_exhaustion(
 
     _seed_pre_merge_env(tmp_path, monkeypatch)
 
-    def fake_magi(context_paths: list[str], cwd: str | None = None) -> object:
+    def fake_magi(
+        context_paths: list[str],
+        cwd: str | None = None,
+        **_kwargs: object,
+    ) -> object:
         return _make_verdict("HOLD", degraded=False)
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
@@ -239,7 +246,11 @@ def test_pre_merge_cmd_override_flag_skips_prompt_and_writes_audit(
 
     _seed_pre_merge_env(tmp_path, monkeypatch)
 
-    def fake_magi(context_paths: list[str], cwd: str | None = None) -> object:
+    def fake_magi(
+        context_paths: list[str],
+        cwd: str | None = None,
+        **_kwargs: object,
+    ) -> object:
         return _make_verdict("HOLD", degraded=False)
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)

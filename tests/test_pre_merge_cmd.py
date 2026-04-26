@@ -150,13 +150,19 @@ def test_pre_merge_loop1_exits_on_clean_to_go(
     calls = {"req": 0, "rcv": 0}
 
     def fake_requesting(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["req"] += 1
         return _make_skill_result(stdout="Review: clean-to-go")
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["rcv"] += 1
         return _make_skill_result(stdout="")
@@ -209,13 +215,19 @@ def test_pre_merge_loop1_applies_fixes_until_clean(
     calls = {"req": 0, "rcv": 0}
 
     def fake_requesting(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["req"] += 1
         return next(sequence)
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["rcv"] += 1
         return _make_skill_result(stdout="")
@@ -250,12 +262,18 @@ def test_pre_merge_loop1_aborts_after_10_iterations_exit_7(
     _seed_plugin_local(tmp_path)
 
     def fake_requesting(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(stdout="[WARNING] still unresolved")
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(stdout="")
 
@@ -323,7 +341,10 @@ def test_pre_merge_loop2_exits_on_full_go(tmp_path: Path, monkeypatch: pytest.Mo
     calls = {"magi": 0}
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["magi"] += 1
         return _make_verdict("GO", degraded=False)
@@ -361,7 +382,10 @@ def test_pre_merge_loop2_retries_on_degraded(
     calls = {"magi": 0}
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["magi"] += 1
         return next(sequence)
@@ -388,7 +412,10 @@ def test_pre_merge_loop2_strong_no_go_aborts_immediately(
     calls = {"magi": 0}
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["magi"] += 1
         return _make_verdict("STRONG_NO_GO", degraded=False)
@@ -424,7 +451,10 @@ def test_pre_merge_loop2_go_with_caveats_blocks_gate_on_accepted_conditions(
     calls = {"magi": 0}
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["magi"] += 1
         return _make_verdict(
@@ -434,7 +464,10 @@ def test_pre_merge_loop2_go_with_caveats_blocks_gate_on_accepted_conditions(
         )
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(stdout="## Accepted\n- fix docstring naming\n")
 
@@ -463,13 +496,19 @@ def test_pre_merge_loop2_aborts_after_max_iterations(
     calls = {"magi": 0}
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         calls["magi"] += 1
         return _make_verdict("HOLD", degraded=False)
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(stdout="## Accepted\n")
 
@@ -493,7 +532,10 @@ def test_pre_merge_writes_magi_verdict_artifact(
     _patch_loop1_clean(monkeypatch)
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_verdict(
             "GO",
@@ -552,7 +594,10 @@ def test_pre_merge_loop2_accepted_condition_emits_no_commits_and_writes_conditio
     _patch_loop1_clean(monkeypatch)
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_verdict(
             "GO_WITH_CAVEATS",
@@ -561,7 +606,10 @@ def test_pre_merge_loop2_accepted_condition_emits_no_commits_and_writes_conditio
         )
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(stdout="## Accepted\n- refactor public API signature\n")
 
@@ -616,13 +664,19 @@ def test_pre_merge_loop2_rejected_condition_feeds_into_next_iteration(
     iter_paths_seen: list[list[str]] = []
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         iter_paths_seen.append(list(context_paths))
         return next(sequence)
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(
             stdout="## Rejected\n- unreasonable redesign ask (rationale: not in scope)\n"
@@ -696,7 +750,10 @@ def test_parse_receiving_review_empty_stdout_returns_empty_lists(
     assert rejected == []
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_verdict(
             "GO_WITH_CAVEATS",
@@ -705,7 +762,10 @@ def test_parse_receiving_review_empty_stdout_returns_empty_lists(
         )
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(stdout="")
 
@@ -847,12 +907,18 @@ def test_loop2_writes_magi_feedback_file_when_rejections_accumulate(
     )
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return next(sequence)
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(
             stdout="## Rejected\n- redo all tests (rationale: out of scope)\n"
@@ -878,7 +944,10 @@ def test_loop2_does_not_write_feedback_file_when_no_rejections(
     _patch_loop1_clean(monkeypatch)
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_verdict("GO", degraded=False)
 
@@ -915,7 +984,10 @@ def test_loop2_seeds_pre_existing_magi_feedback_md_in_iter_1_paths(
     iter_paths_seen: list[list[str]] = []
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         iter_paths_seen.append(list(context_paths))
         return _make_verdict("GO", degraded=False)
@@ -945,7 +1017,10 @@ def test_loop2_iter_1_does_not_include_feedback_path_when_file_absent(
     iter_paths_seen: list[list[str]] = []
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         iter_paths_seen.append(list(context_paths))
         return _make_verdict("GO", degraded=False)
@@ -994,13 +1069,19 @@ def test_loop2_iter_2_rejections_overwrite_pre_existing_seed_feedback(
     iter_paths_seen: list[list[str]] = []
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         iter_paths_seen.append(list(context_paths))
         return next(sequence)
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(
             stdout="## Rejected\n- redo all tests (rationale: out of scope)\n"
@@ -1039,7 +1120,10 @@ def test_loop2_writes_conditions_file_and_exits_8_when_accepted_conditions_exist
     _patch_loop1_clean(monkeypatch)
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_verdict(
             "GO_WITH_CAVEATS",
@@ -1048,7 +1132,10 @@ def test_loop2_writes_conditions_file_and_exits_8_when_accepted_conditions_exist
         )
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(
             stdout="## Accepted\n- tighten error message for timeout branch\n"
@@ -1078,7 +1165,10 @@ def test_loop2_returns_0_when_verdict_strong_go(
     _patch_loop1_clean(monkeypatch)
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_verdict("STRONG_GO", degraded=False)
 
@@ -1118,12 +1208,18 @@ def test_loop2_returns_0_when_no_conditions_accepted(
     )
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return next(sequence)
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(
             stdout="## Rejected\n- unjustified ask (rationale: out of scope)\n"
@@ -1161,12 +1257,18 @@ def test_loop2_still_writes_magi_feedback_md_for_rejected_conditions(
     )
 
     def fake_invoke(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+        context_paths: list[str],
+        timeout: int = 1800,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return next(sequence)
 
     def fake_receiving(
-        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+        args: list[str] | None = None,
+        timeout: int = 600,
+        cwd: str | None = None,
+        **_kwargs: object,
     ) -> object:
         return _make_skill_result(
             stdout="## Rejected\n- bogus condition (rationale: not applicable)\n"

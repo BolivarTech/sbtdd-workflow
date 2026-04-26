@@ -107,7 +107,7 @@ def test_pre_merge_exit8_then_resume_directs_to_close_phase(
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
-        lambda context_paths, cwd: V(),
+        lambda context_paths, cwd, **_kw: V(),
     )
     monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", lambda v: False)
     monkeypatch.setattr(
@@ -118,7 +118,7 @@ def test_pre_merge_exit8_then_resume_directs_to_close_phase(
     monkeypatch.setattr(
         superpowers_dispatch,
         "receiving_code_review",
-        lambda args, cwd: {},
+        lambda args, cwd, **_kw: {},
     )
     monkeypatch.setattr(
         pre_merge_cmd,

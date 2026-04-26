@@ -164,11 +164,22 @@ def _loop1(root: Path) -> None:
         Loop1DivergentError: If the loop exhausts :data:`_LOOP1_MAX`
             iterations without reaching ``clean-to-go``.
     """
-    for _ in range(1, _LOOP1_MAX + 1):
-        result = superpowers_dispatch.requesting_code_review(cwd=str(root))
+    for iteration in range(1, _LOOP1_MAX + 1):
+        # v0.4.0 J8.2: thread a per-iter stream_prefix so the operator
+        # can correlate streamed subprocess output with the Loop 1
+        # iteration that produced it. The iter number is 1-based to
+        # match the safety-valve diagnostics emitted on divergence.
+        loop1_prefix = f"[sbtdd pre-merge loop1 iter-{iteration}]"
+        result = superpowers_dispatch.requesting_code_review(
+            cwd=str(root),
+            stream_prefix=loop1_prefix,
+        )
         if _is_clean_to_go(result):
             return
-        superpowers_dispatch.receiving_code_review(cwd=str(root))
+        superpowers_dispatch.receiving_code_review(
+            cwd=str(root),
+            stream_prefix=loop1_prefix,
+        )
     raise Loop1DivergentError(f"Loop 1 did not converge in {_LOOP1_MAX} iterations")
 
 
@@ -591,7 +602,15 @@ def _loop2(
             iter_paths.append(str(_write_magi_feedback_file(root, rejections)))
         elif seed_feedback_path is not None and iteration == 1:
             iter_paths.append(seed_feedback_path)
-        verdict = magi_dispatch.invoke_magi(context_paths=iter_paths, cwd=str(root))
+        # v0.4.0 J8.1: thread a per-iter stream_prefix so the operator
+        # can correlate the (slow, multi-minute) MAGI subprocess output
+        # with which Loop 2 iteration is currently running.
+        loop2_magi_prefix = f"[sbtdd pre-merge magi-loop2 iter-{iteration}]"
+        verdict = magi_dispatch.invoke_magi(
+            context_paths=iter_paths,
+            cwd=str(root),
+            stream_prefix=loop2_magi_prefix,
+        )
         verdict_history.append(verdict)
         if magi_dispatch.verdict_is_strong_no_go(verdict):
             raise MAGIGateError(
@@ -600,9 +619,19 @@ def _loop2(
                 iteration=iteration,
             )
         if verdict.conditions:
+            # v0.4.0 J8.3: tag the finding-remediation dispatch with a
+            # ``fix-finding-iter-N`` prefix so the streamed output from
+            # ``/receiving-code-review`` is correlated with which Loop 2
+            # iteration's MAGI conditions are being processed. The
+            # iter-3 redesign moved the per-finding red/green/refactor
+            # mini-cycle out of pre_merge_cmd into ``sbtdd close-phase``;
+            # this dispatch is the closest surface in pre_merge for the
+            # operator-visibility intent of J8.3.
+            fix_findings_prefix = f"[sbtdd pre-merge fix-finding-iter-{iteration}]"
             review_result = superpowers_dispatch.receiving_code_review(
                 args=_conditions_to_skill_args(verdict.conditions),
                 cwd=str(root),
+                stream_prefix=fix_findings_prefix,
             )
             accepted, rejected = _parse_receiving_review(review_result)
             if not accepted and not rejected:
