@@ -559,6 +559,28 @@ _MARKER_FILENAME = "MAGI_VERDICT_MARKER.json"
 #: an agent's narrative ``result`` field.
 _VALID_AGENT_NAMES: frozenset[str] = frozenset({"melchior", "balthasar", "caspar"})
 
+#: Canonical set of verdict labels accepted by :func:`_tolerant_agent_parse`.
+#: Iter 2 W2 (MAGI Loop 2 v0.4.0 iter 1 melchior WARNING #2): per spec
+#: sec.2.4 the recovery parser must validate ``verdict`` is in a known
+#: set in addition to validating ``agent`` is in :data:`_VALID_AGENT_NAMES`.
+#: The union covers both axes:
+#:
+#: - Per-agent verdicts (``approve`` / ``conditional`` / ``reject``) emitted
+#:   by individual MAGI agents when their JSON contract is honored.
+#: - Synthesis labels (``STRONG_GO`` / ``GO`` / ``GO_WITH_CAVEATS`` /
+#:   ``HOLD_TIE`` / ``HOLD`` / ``STRONG_NO_GO``) which historically appear
+#:   in per-agent payloads when the synthesizer crashed mid-write or the
+#:   agent itself emits a synthesis-style label (observed in v0.3.0
+#:   recovery fixtures).
+#:
+#: A typo'd verdict (e.g. ``"GO_LATER"``, ``"maybe"``) is now rejected
+#: outright instead of silently weighing 0.0 in
+#: :func:`_manual_synthesis_recovery`. Mirrors the
+#: ``models.VERDICT_RANK`` keys plus the lowercase agent verbs.
+_VALID_AGENT_VERDICTS: frozenset[str] = frozenset(VERDICT_RANK) | frozenset(
+    {"approve", "conditional", "reject"}
+)
+
 
 def _extract_first_balanced_json(text: str) -> str | None:
     """Return the first balanced ``{...}`` JSON-looking substring, or ``None``.
@@ -652,8 +674,8 @@ def _tolerant_agent_parse(raw_json_path: Path | str) -> dict[str, Any]:
     # Fast path: pure-JSON result preserves strict-parser semantics.
     try:
         candidate = json.loads(result)
-        if isinstance(candidate, dict) and candidate.get("agent") in _VALID_AGENT_NAMES:
-            return candidate
+        if _is_valid_verdict_dict(candidate):
+            return candidate  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         pass
     # Preamble-tolerant path: extract balanced ``{...}`` substrings,
@@ -679,13 +701,45 @@ def _tolerant_agent_parse(raw_json_path: Path | str) -> dict[str, Any]:
         except json.JSONDecodeError:
             cursor = next_cursor
             continue
-        if isinstance(candidate, dict) and candidate.get("agent") in _VALID_AGENT_NAMES:
-            return candidate
+        if _is_valid_verdict_dict(candidate):
+            return candidate  # type: ignore[no-any-return]
         cursor = next_cursor
     preview = result[:200].replace("\n", " ")
     raise ValidationError(
         f"No JSON object recoverable from {raw_json_path}: result preview: {preview!r}"
     )
+
+
+def _is_valid_verdict_dict(candidate: Any) -> bool:
+    """Return True iff ``candidate`` is a verdict-shaped dict.
+
+    Iter 2 W2 (MAGI Loop 2 v0.4.0 iter 1 melchior WARNING #2):
+    centralises the two-axis validation that :func:`_tolerant_agent_parse`
+    applies before accepting a candidate dict:
+
+    1. ``agent`` field is one of :data:`_VALID_AGENT_NAMES`.
+    2. ``verdict`` field is one of :data:`_VALID_AGENT_VERDICTS` (the
+       union of ``models.VERDICT_RANK`` synthesis labels and the
+       lowercase agent verbs ``approve`` / ``conditional`` / ``reject``).
+
+    Both axes are required so a typo'd verdict (e.g. ``"GO_LATER"``)
+    cannot slip into :func:`_manual_synthesis_recovery` and silently
+    weigh 0.0 in the consensus arithmetic.
+
+    Args:
+        candidate: Arbitrary parsed JSON value to test.
+
+    Returns:
+        True when ``candidate`` is a dict whose ``agent`` and
+        ``verdict`` fields both pass the membership checks.
+    """
+    if not isinstance(candidate, dict):
+        return False
+    if candidate.get("agent") not in _VALID_AGENT_NAMES:
+        return False
+    if candidate.get("verdict") not in _VALID_AGENT_VERDICTS:
+        return False
+    return True
 
 
 #: Verdict-to-weight map mirroring ``run_magi.py:synthesize.py`` so the
