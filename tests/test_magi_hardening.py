@@ -227,3 +227,102 @@ def test_tolerant_agent_parse_skips_code_examples(tmp_path: Path) -> None:
     parsed = magi_dispatch._tolerant_agent_parse(raw)
     assert parsed["agent"] == "balthasar"
     assert parsed["verdict"] == "approve"
+
+
+def test_tolerant_agent_parse_rejects_unknown_verdict(tmp_path: Path) -> None:
+    """F45.5 (iter 2 W2): unknown verdict in candidate dict is not accepted.
+
+    Defense in depth against MAGI agents emitting verdict typos
+    (e.g. ``"GO_LATER"``) that would otherwise weigh 0.0 in
+    :func:`_manual_synthesis_recovery` and silently dilute consensus.
+    Per spec sec.2.4 the recovery path requires ``agent`` field in the
+    canonical name set AND ``verdict`` in the known verdict set; the
+    iter 1 implementation only enforced the agent half.
+    """
+    raw = tmp_path / "melchior.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "result": json.dumps(
+                    {
+                        "agent": "melchior",
+                        "verdict": "maybe",
+                        "confidence": 0.5,
+                        "summary": "Unsure.",
+                        "reasoning": "...",
+                        "findings": [],
+                        "recommendation": "Re-run.",
+                    }
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError) as ei:
+        magi_dispatch._tolerant_agent_parse(raw)
+    assert "No JSON object recoverable" in str(ei.value)
+
+
+def test_tolerant_agent_parse_skips_unknown_verdict_finds_valid(tmp_path: Path) -> None:
+    """F45.6 (iter 2 W2): unknown-verdict candidate is skipped, valid one wins.
+
+    When a result string carries multiple balanced JSON objects -- e.g.
+    a stale draft with ``verdict: "maybe"`` followed by the corrected
+    final verdict -- the parser must walk past the typo and accept the
+    valid candidate that follows. Mirrors the F45.4 code-example skip
+    pattern but for the verdict-set axis.
+    """
+    raw = tmp_path / "balthasar.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "result": (
+                    'Draft attempt: {"agent": "balthasar", "verdict": "perhaps"}.\n\n'
+                    'Final: {"agent": "balthasar", "verdict": "approve", '
+                    '"confidence": 0.8, "summary": "OK.", "reasoning": "...", '
+                    '"findings": [], "recommendation": "Ship."}'
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "balthasar"
+    assert parsed["verdict"] == "approve"
+
+
+def test_tolerant_agent_parse_accepts_synthesis_label(tmp_path: Path) -> None:
+    """F45.7 (iter 2 W2): synthesis labels (STRONG_GO/...) are valid verdicts.
+
+    Per-agent JSON sometimes carries a synthesis-style label rather than
+    the lowercase agent verdict (the canonical contract has agents emit
+    ``approve`` / ``conditional`` / ``reject`` but historical fixtures
+    show MAGI synthesizer crash recovery payloads carrying
+    ``GO_WITH_CAVEATS`` directly). The known-verdict set must include
+    both axes so legitimate recovery payloads are not rejected.
+    """
+    raw = tmp_path / "caspar.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "result": json.dumps(
+                    {
+                        "agent": "caspar",
+                        "verdict": "GO_WITH_CAVEATS",
+                        "confidence": 0.75,
+                        "summary": "Caveats.",
+                        "reasoning": "...",
+                        "findings": [],
+                        "recommendation": "Ship with caveats.",
+                    }
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "caspar"
+    assert parsed["verdict"] == "GO_WITH_CAVEATS"
