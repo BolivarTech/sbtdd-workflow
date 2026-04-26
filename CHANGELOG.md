@@ -100,6 +100,37 @@ v1.0.0 LOCKED items remaining:
   actual `argparse`/`SystemExit` taxonomy) instead of exit `2`
   documented during the v0.3.0 ship (J5).
 
+### Process
+
+- Loop 1 surrogate via `make verify` clean (pytest 818, ruff,
+  format, mypy --strict). Lightweight pattern v0.3.0 + v0.4.0
+  precedent.
+- MAGI Loop 2 converged in 2 iterations: iter 1 returned
+  GO_WITH_CAVEATS (2-0) degraded (caspar agent crashed at 283s
+  with the same `Expecting value: line 1 column 1 (char 0)` JSON
+  decode error observed in v0.3.0 iter 1) with 3 WARNING + 6
+  INFO findings; iter 2 applied all WARNING findings via Loop 2
+  fix mini-cycles and deferred the 6 INFO findings via documented
+  scope decisions, returning STRONG GO (2-0) degraded (caspar
+  crashed again at 191s -- chronic infrastructure fragility). Both
+  surviving agents independently and unambiguously recommended
+  ship.
+- **MAGI iter 2 manual synthesis acceptance**: per INV-28 strict
+  reading, degraded verdicts cannot trigger Loop 2 exit; per
+  pragmatic reading + v0.3.0 precedent, the agent verdicts were
+  unambiguous (STRONG GO with zero CRITICAL / zero WARNING / zero
+  Conditions) and the parser fragility is exactly the v1.0.0
+  Feature F LOCKED scope manifesting recursively (caspar crashed
+  in v0.3.0 iter 1, v0.4.0 iter 1, v0.4.0 iter 2 — pattern is
+  clear). Manual acceptance authorized once by user directive
+  2026-04-25 ("A pero solo esta vez"); recorded as exceptional in
+  the project memory (`feedback_manual_synthesis_exceptional.md`)
+  so future cycles default to retry rather than rubber-stamping
+  ship decisions on degraded synthesis.
+- INV-29 honored: every MAGI finding evaluated for technical merit
+  before the mini-cycle TDD application. 0 findings rejected;
+  3 WARNING applied via mini-cycles, 6 INFO deferred via docs.
+
 ## [0.3.0] - 2026-04-25
 
 ### Added
