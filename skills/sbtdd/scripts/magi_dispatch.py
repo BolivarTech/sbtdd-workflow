@@ -50,6 +50,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -385,6 +386,7 @@ def invoke_magi(
     model: str | None = None,
     skill_field_name: str = "magi_dispatch_model",
     stream_prefix: str | None = None,
+    allow_recovery: bool = True,
 ) -> MAGIVerdict:
     """Invoke /magi:magi and return a parsed MAGIVerdict.
 
@@ -395,6 +397,18 @@ def invoke_magi(
     returned :class:`MAGIVerdict.raw_output` for diagnostics but is never
     parsed as JSON.
 
+    v0.4.0 Feature F (F46): when the MAGI synthesizer crashes
+    (``returncode != 0`` plus stderr matching ``"Only N agent(s) succeeded"``)
+    but at least one per-agent ``*.raw.json`` was persisted, the wrapper
+    invokes :func:`_manual_synthesis_recovery` to rescue a verdict from
+    the surviving raw outputs. Recovery is governed by
+    ``allow_recovery``: when ``False`` the v0.3.x behavior of raising
+    :class:`MAGIGateError` is preserved verbatim. Quota detection always
+    runs first (sec.S.11.4) so credit-exhaustion never silently turns
+    into a recovered verdict. INV-28 stays orthogonal: a recovered
+    verdict with ``degraded=True`` (fewer than 3 agents recovered) still
+    cannot pass the Loop 2 gate at the caller.
+
     Args:
         context_paths: Files passed to MAGI as ``@file`` references
             (spec-behavior.md, planning/claude-plan-tdd.md, or the diff).
@@ -402,16 +416,31 @@ def invoke_magi(
             because MAGI runs 3 sub-agents sequentially and may need longer
             than superpowers skills.
         cwd: Working directory.
+        model: Optional Claude model id forwarded to the outer dispatcher
+            via ``claude --model`` (v0.3.0 Feature E).
+        skill_field_name: ``plugin.local.md`` key consulted by the INV-0
+            cascade (defaults to ``"magi_dispatch_model"``).
+        stream_prefix: When set, the subprocess is run with line-by-line
+            tee of stdout/stderr to the operator's stderr (v0.3.0 Feature D
+            iter 2 fix). When ``None`` the legacy capture path is used
+            byte-identically.
+        allow_recovery: When ``True`` (default, F46), the
+            ``_manual_synthesis_recovery`` branch fires on synthesizer
+            crashes. When ``False`` the original
+            :class:`MAGIGateError` is raised unchanged -- useful for
+            operators wanting strict ``run_magi.py``-only semantics.
 
     Returns:
-        :class:`MAGIVerdict` parsed from ``magi-report.json``.
+        :class:`MAGIVerdict` parsed from ``magi-report.json``, or
+        recovered via manual synthesis when the synthesizer crashed.
 
     Raises:
         QuotaExhaustedError: If stderr matches any quota pattern (sec.S.11.4).
         MAGIGateError: If the subprocess timed out, exited non-zero without
-            matching a quota pattern, or returned 0 but did not write the
-            expected ``magi-report.json``. Mapped to exit 8
-            (MAGI_GATE_BLOCKED) by run_sbtdd.py.
+            matching a quota pattern (and recovery is disabled or also
+            failed), or returned 0 but did not write the expected
+            ``magi-report.json``. Mapped to exit 8 (MAGI_GATE_BLOCKED) by
+            run_sbtdd.py.
         ValidationError: If the report JSON is malformed or carries an
             unknown verdict label (raised by :func:`parse_magi_report`,
             mapped to exit 1).
@@ -435,12 +464,35 @@ def invoke_magi(
             raise MAGIGateError(f"/magi:magi timed out after {exc.timeout}s") from exc
 
         if result.returncode != 0:
+            # Quota detection always runs first so credit exhaustion is
+            # never masked by recovery (sec.S.11.4).
             exhaustion = quota_detector.detect(result.stderr)
             if exhaustion is not None:
                 msg = f"{exhaustion.kind}: {exhaustion.raw_message}"
                 if exhaustion.reset_time:
                     msg += f" (reset: {exhaustion.reset_time})"
                 raise QuotaExhaustedError(msg)
+            # v0.4.0 Feature F (F46): rescue verdicts from per-agent
+            # raw outputs when the synthesizer specifically crashed
+            # but at least one agent persisted JSON. Skipped when the
+            # operator passed ``allow_recovery=False`` (F46.5).
+            if allow_recovery and _SYNTH_CRASH_RE.search(result.stderr or ""):
+                try:
+                    rescued = _manual_synthesis_recovery(Path(tmpdir))
+                except MAGIGateError:
+                    # Recovery itself failed (no recoverable agents).
+                    # Fall through to the original error so the caller
+                    # sees the synthesizer message instead of the
+                    # recovery one -- the synthesizer message is the
+                    # primary diagnostic.
+                    pass
+                else:
+                    sys.stderr.write(
+                        f"[sbtdd magi] synthesizer failed; manual synthesis "
+                        f"recovery applied ({len(rescued.findings)} findings)\n"
+                    )
+                    sys.stderr.flush()
+                    return rescued
             raise MAGIGateError(
                 f"/magi:magi failed (returncode={result.returncode}): {result.stderr.strip()}"
             )
@@ -633,6 +685,126 @@ def _tolerant_agent_parse(raw_json_path: Path | str) -> dict[str, Any]:
     preview = result[:200].replace("\n", " ")
     raise ValidationError(
         f"No JSON object recoverable from {raw_json_path}: result preview: {preview!r}"
+    )
+
+
+#: Verdict-to-weight map mirroring ``run_magi.py:synthesize.py`` so the
+#: recovery synthesis matches MAGI's own consensus arithmetic. ``approve``
+#: / ``GO`` / ``STRONG_GO`` weigh +1, ``conditional`` / ``GO_WITH_CAVEATS``
+#: weigh +0.5, ``reject`` / ``HOLD`` / ``STRONG_NO_GO`` weigh -1.
+_VERDICT_WEIGHT: dict[str, float] = {
+    "approve": 1.0,
+    "GO": 1.0,
+    "STRONG_GO": 1.0,
+    "GO_WITH_CAVEATS": 0.5,
+    "conditional": 0.5,
+    "reject": -1.0,
+    "HOLD": -1.0,
+    "STRONG_NO_GO": -1.0,
+}
+
+#: Stderr regex marking the ``run_magi.py`` synthesizer crash mode that
+#: F46 auto-recovery is allowed to rescue. The pattern intentionally
+#: matches "Only N agent(s) succeeded" anywhere in stderr -- MAGI emits
+#: it as part of the RuntimeError message when fewer than the required
+#: minimum of agents finished cleanly. See INV-28 + sec.S.5.6.b.
+_SYNTH_CRASH_RE = re.compile(r"Only\s+\d+\s+agent\(s\)\s+succeeded", re.IGNORECASE)
+
+
+def _manual_synthesis_recovery(run_dir: Path | str) -> MAGIVerdict:
+    """Recover a MAGI verdict when the synthesizer crashed.
+
+    v0.4.0 Feature F (F46): when ``run_magi.py`` aborts with a
+    ``RuntimeError`` (e.g. ``"Only N agent(s) succeeded -- fewer than
+    required"``) but at least one agent persisted a ``*.raw.json``
+    file, this helper:
+
+    1. Walks ``run_dir`` for ``*.raw.json`` files.
+    2. Applies :func:`_tolerant_agent_parse` (F45) to each, accepting
+       both pure-JSON and preamble-wrapped agent results.
+    3. Synthesises a verdict using the same weight scheme as
+       ``run_magi.py:synthesize.py`` (``approve`` +1,
+       ``GO_WITH_CAVEATS``/``conditional`` +0.5, ``reject``/``HOLD``
+       -1) and emits a ``manual-synthesis.json`` recovery report
+       flagged ``recovered: true`` /
+       ``recovery_reason: "synthesizer-failure"``.
+
+    Designed for use both standalone (operator runs it from a REPL on
+    a stale ``run_dir``) and as the auto-recovery branch inside
+    :func:`invoke_magi`.
+
+    Args:
+        run_dir: Directory containing per-agent ``*.raw.json`` files.
+
+    Returns:
+        :class:`MAGIVerdict` rescued from the raw outputs. ``degraded``
+        is ``True`` when fewer than 3 agents had recoverable JSON.
+
+    Raises:
+        MAGIGateError: If zero agents have recoverable JSON. The
+            recovery cannot proceed; the operator must investigate the
+            ``*.raw.json`` files manually or retry the MAGI iteration.
+    """
+    base = Path(run_dir)
+    raw_files = sorted(base.glob("*.raw.json"))
+    parsed: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for raw in raw_files:
+        try:
+            parsed.append(_tolerant_agent_parse(raw))
+        except ValidationError as exc:
+            failures.append(f"{raw.name}: {exc}")
+    if not parsed:
+        raise MAGIGateError(
+            f"No recoverable agent verdicts in {base}; manual synthesis impossible. "
+            f"Failures: {failures}"
+        )
+    score = sum(_VERDICT_WEIGHT.get(str(p.get("verdict", "")), 0.0) for p in parsed) / len(parsed)
+    has_conditional = any(
+        str(p.get("verdict", "")) in ("conditional", "GO_WITH_CAVEATS") for p in parsed
+    )
+    approves = sum(1 for p in parsed if _VERDICT_WEIGHT.get(str(p.get("verdict", "")), 0.0) > 0)
+    rejects = sum(1 for p in parsed if _VERDICT_WEIGHT.get(str(p.get("verdict", "")), 0.0) < 0)
+    if score == 1.0:
+        label = "STRONG_GO"
+    elif score == -1.0:
+        label = "STRONG_NO_GO"
+    elif score > 0:
+        label = "GO_WITH_CAVEATS" if has_conditional else "GO"
+    elif score < 0:
+        label = "HOLD"
+    else:
+        label = "HOLD_TIE"
+    findings: list[dict[str, Any]] = []
+    for p in parsed:
+        for f in p.get("findings", []) or []:
+            if isinstance(f, dict):
+                findings.append({**f, "from_agent": p.get("agent", "unknown")})
+            else:
+                findings.append({"message": str(f), "from_agent": p.get("agent", "unknown")})
+    degraded = len(parsed) < 3
+    report = {
+        "recovered": True,
+        "recovery_reason": "synthesizer-failure",
+        "consensus": {
+            "label": label,
+            "score": score,
+            "approves": approves,
+            "rejects": rejects,
+            "degraded": degraded,
+        },
+        "agents": [str(p.get("agent", "unknown")) for p in parsed],
+        "agents_failed": failures,
+        "findings": findings,
+    }
+    (base / "manual-synthesis.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return MAGIVerdict(
+        verdict=label,
+        degraded=degraded,
+        conditions=tuple(),
+        findings=tuple(findings),
+        raw_output=json.dumps(report),
+        retried_agents=(),
     )
 
 

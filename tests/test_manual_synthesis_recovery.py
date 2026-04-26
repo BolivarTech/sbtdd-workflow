@@ -35,9 +35,7 @@ def _write_raw_agent(path: Path, agent: str, verdict: str, *, preamble: bool = T
         "summary": f"{agent} verdict {verdict}",
         "reasoning": "...",
         "findings": [],
-        "recommendation": (
-            "Ship." if verdict in ("approve", "GO", "GO_WITH_CAVEATS") else "HOLD."
-        ),
+        "recommendation": ("Ship." if verdict in ("approve", "GO", "GO_WITH_CAVEATS") else "HOLD."),
     }
     if preamble:
         result = f"Based on my review...\n\n{json.dumps(body)}"
