@@ -1,183 +1,132 @@
-# Especificacion base — sbtdd-workflow v1.0.0
+# Especificacion base — sbtdd-workflow v1.0.0 (post-v0.3.0)
 
 > Raw input para `/brainstorming` (primera fase del ciclo SBTDD para
 > v1.0.0). `/brainstorming` consumira este archivo y generara
 > `sbtdd/spec-behavior.md` (BDD overlay con escenarios Given/When/Then
 > testables).
 >
-> Generado 2026-04-25, post-v0.2.2 ship. v0.2 cycle cerrado completo.
-> Source of truth autoritativo para v0.1+v0.2 frozen se mantiene en
-> `sbtdd/sbtdd-workflow-plugin-spec-base.md` (mega-contrato 2860+
-> lineas); este documento NO lo reemplaza — agrega el delta v1.0.0
-> y, al landing, se incorporan sus decisiones a la base.
+> Generado 2026-04-25, post-v0.3.0 ship (commit `2befb88`, tag
+> `v0.3.0`). v0.3.0 shipped el subset D+E del v1.0.0 backlog
+> original; este documento reescribe el alcance v1.0.0 reflejando lo
+> que queda + empirical findings del ciclo v0.3.0.
 >
-> Archivo cumple INV-27: no contiene los tres marcadores uppercase
-> enumerados en esa invariante (ver `sbtdd-workflow-plugin-spec-base.md`
-> sec.S.10 para la lista completa).
+> Source of truth autoritativo para v0.1+v0.2+v0.3 frozen se
+> mantiene en `sbtdd/sbtdd-workflow-plugin-spec-base.md` (mega-contrato
+> 2860+ lineas); este documento NO lo reemplaza — agrega el delta
+> v1.0.0 a la base.
+>
+> Archivo cumple INV-27: cero matches uppercase placeholder
+> (verificable con grep).
 
 ---
 
 ## 1. Objetivo
 
-Entregar **v1.0.0** (graduacion estable del plugin, salida del
-pre-1.0) consolidando cinco release blockers LOCKED derivados de gaps
-empiricos del dogfood v0.2 + items operacionales rolled forward del
-backlog v0.3 (renombrado a v1.0.0 en CHANGELOG forward sections el
-2026-04-25). El alcance v1.0.0 es deliberadamente focused en
-estabilidad operacional + control de costo + meta-review pattern; no
-introduce features de spec/plan ni cambia la semantica del ciclo TDD.
+**v1.0.0 es la graduacion estable** del plugin (salida del pre-1.0
+v0.x). Consolida los items LOCKED restantes del backlog post-v0.3.0
+ship + items operacionales rolled forward de v0.4.0 candidates +
+schema versioning formal + decision strategic sobre INV-31 default
+behavior. v1.0.0 es la version a la que el ecosistema externo
+(usuarios + plugins consumidores) puede commitear con backward-compat
+guarantees.
 
-Criterio de exito: el plugin sigue siendo instalable desde
-`BolivarTech/sbtdd-workflow` (marketplace `bolivartech-sbtdd`); todos
-los tests existentes (735 baseline post-v0.2.2) siguen pasando sin
-regresion; los cinco blockers nuevos suman cobertura de tests
-apropiada + acceptance criteria sec.S.12 extendidos para v1.0.0; y
-el plugin pasa su primer `/sbtdd auto` end-to-end usando la nueva
-config Sonnet+Haiku mix sin overrun de costo Opus-default.
+Criterio de exito:
+- Plugin sigue instalable desde `BolivarTech/sbtdd-workflow`
+  (marketplace `bolivartech-sbtdd`).
+- Tests existentes (789 baseline post-v0.3.0) pasan sin regresion.
+- Nuevos blockers suman cobertura apropiada.
+- MAGI Loop 2 reliability mejora dramaticamente (Feature F empirical
+  validation).
+- Schema versioning formal habilita migracion a v2.0.0 + futuras
+  iteraciones sin romper contratos.
+- INV-31 default decision adoptada con field data v0.2/v0.2.1/v0.2.2/
+  v0.3.0 detras.
 
-Decision pendiente al inicio del ciclo (refinable durante
-brainstorming): bundle de los 5 items en un solo `/sbtdd auto` cycle,
-o split en sub-ciclos secuenciales (p.ej. v0.3.0 = items operacionales
-1+2; v0.4.0 = MAGI hardening 3+4; v1.0.0 = re-eval 5 + tag estable).
+Decision pendiente clave para brainstorming:
+- **Monolithic v1.0.0** vs **v0.4.0 (operacional polish) + v1.0.0
+  (semantic features + tag estable)**.
+- Cual subset de v0.4.0 candidates entra en v1.0.0 vs queda en v1.x.
+- Pattern de ejecucion: lightweight (precedente v0.2.1, v0.2.2,
+  v0.3.0) vs full SBTDD `/sbtdd auto` (precedente v0.2.0, donde
+  nunca se shipo via auto end-to-end por las inestabilidades MAGI).
 
 ---
 
-## 2. Alcance v1.0.0 — cinco release blockers LOCKED
+## 2. Alcance v1.0.0 — items LOCKED post-v0.3.0
 
-### 2.1 Feature D — Auto progress streaming (UX)
+### 2.1 Feature F — MAGI dispatch hardening + tolerant parsing (TOP PRIORITY)
 
-**Problema v0.2**: durante `/sbtdd auto` runs multi-hora (Milestone-A
-size, 36+ tasks), el operador no ve progreso intermedio. El subprocess
-`claude -p` del implementer captura stdout/stderr; sin `python -u`
-flushing + per-phase stderr breadcrumbs + actualizaciones live a
-`auto-run.json`, el run "looks hung" durante minutos. Empirico v0.2
-dogfood: tee buffering atrapaba salidas hasta task completion. Operador
-sin senal = aborta prematuramente o asume crash.
+**Problema empirico v0.3.0**: en el final review loop del v0.3.0 cycle
+(commit `2befb88`), MAGI v2.2.2 sufrio dos fallas consecutivas:
 
-**Entrega v1.0.0**:
+- Iter 1: caspar agent crash a los 665s con JSON decode error;
+  veredicto degraded HOLD (1-1).
+- Iter 2: synthesizer abort con `RuntimeError: Only 1 agent(s)
+  succeeded` porque melchior + balthasar wrapped JSON en narrative
+  preamble defeating el strict parser. Los `.raw.json` files
+  contenian agent output completo y valid; solo el parser fallo.
 
-- `auto_cmd.py` invoca subprocess con `stdout=PIPE, stderr=PIPE,
-  bufsize=1` + read-line loop que reescribe a stderr del orquestador
-  con prefijo `[task-N phase] ` para distinguir fuentes en logs.
-- `python -u` agregado a la invocacion (`["python", "-u",
-  run_sbtdd.py, ...]`) para deshabilitar Python output buffering en
-  el dispatcher mismo.
-- Per-phase stderr breadcrumbs: `auto_cmd` emite `[phase 2/5: task
-  loop -- task 14/36 (red)]` cada vez que avanza la state machine.
-- `auto-run.json` actualizado live (no solo al final): nuevo campo
-  `progress` con `{phase, task_index, task_total, sub_phase}`
-  reescrito con `tmp + os.replace` (atomic) cada transicion.
-- Nuevo subcomando `/sbtdd status --watch` que tail-followea
-  `auto-run.json` en intervalos de 1s y renderiza progress en TTY
-  (humano-friendly) o JSON (machine-friendly). Default = TTY.
+Pattern: el strict JSON parser de MAGI no tolera preamble + el
+output discovery basado en path es fragil contra cambios de layout
+interno. Sin Feature F, MAGI Loop 2 reliability degrada cuanto mas
+iteraciones se necesitan — exactamente cuando mas se necesita
+robustness.
 
-**Invariantes obligatorios**:
-
-- INV-22 sequential preservado — streaming es write-only del
-  dispatcher; no introduce parallelism.
-- Atomic writes a `auto-run.json` (mismo patron que `state_file.save`
-  + `magi-escalation-pending.md` de v0.2.1).
-- Stderr breadcrumbs siempre prefijados con `[sbtdd]` para distinguir
-  de subprocess output.
-- Cross-platform: Windows + POSIX line-buffering identico (test
-  cubre ambos).
-
-### 2.2 Feature E — Per-skill model selection flag (cost)
-
-**Problema v0.2**: cero `--model` flags en los tres dispatch modules
-(`superpowers_dispatch.py`, `spec_review_dispatch.py`,
-`magi_dispatch.py`). Todo subagent hereda el modelo de la sesion del
-orquestador. Si el operador corre con Opus default, un `/sbtdd auto`
-sobre 36 tasks dispara 36+ implementer dispatches + 36+ spec-reviewer
-dispatches + 5-15 MAGI iterations todos en Opus. Bill domina el
-costo del proyecto.
+**Directiva implicita usuario**: el v0.3.0 cycle survived via manual
+synthesis recovery (read `.raw.json` files + interpret agent verdicts
+manually) + INV-0 override precedent. v1.0.0 debe absorbar este
+pattern en MAGI dispatch infra para que la rescata sea automatica
+cuando la sintetizadora crash y los agents tengan output valido.
 
 **Entrega v1.0.0**:
 
-- `plugin.local.md` schema extension: cuatro campos opcionales
-  default `null` (= inherit session, preserva v0.x behavior, fully
-  backward compat):
-  - `implementer_model: claude-sonnet-4-6` (recommended baseline)
-  - `spec_reviewer_model: claude-haiku-4-5` (recommended baseline)
-  - `code_review_model: claude-sonnet-4-6` (recommended baseline)
-  - `magi_dispatch_model: null` (recommended; outer dispatcher es
-    I/O; sub-agentes Melchior/Balthasar/Caspar pickn modelo
-    internamente per MAGI plugin contract).
-- `schema_version: 2` introducido en `plugin.local.md` (nuevo
-  campo, primera vez; bumpa de schema implicit v1 a explicit v2).
-- Wiring: cuando un campo es non-null, dispatch module agrega
-  `--model <id>` al argv. INV-0 honored: si `~/.claude/CLAUDE.md`
-  pina un modelo global, gana sobre `plugin.local.md` y emite
-  stderr breadcrumb explicando cost implication.
-- CLI override: `--model-override <skill>:<model>` en `auto`,
-  `pre-merge`, `close-task`, `review-spec-compliance`. Multi-flag.
-  Skill validation: solo cuatro nombres validos
-  (`implementer|spec_reviewer|code_review|magi_dispatch`).
-- `dependency_check.py` extension: valida que cada model string
-  configurado este en `models.ALLOWED_CLAUDE_MODEL_IDS` tuple
-  (Opus 4.x, Sonnet 4.x, Haiku 4.x families). Unknown ID = warning
-  en `init`, hard fail en runtime.
-- `models.py` agrega `ALLOWED_CLAUDE_MODEL_IDS` immutable tuple,
-  bumped cuando Anthropic shipea family nueva.
+- `magi_dispatch.py`: cambia de path-based discovery a
+  marker-based: cada invocacion MAGI escribe
+  `MAGI_VERDICT_MARKER.json` en directorio conocido; SBTDD enumera
+  markers post-subprocess y picks el mas reciente by mtime.
+  Defensivo contra cambios de layout interno (observado en v0.2/
+  v0.3 cycles).
+- `MAGIVerdict` parser: tolerant against preamble. Cuando
+  `agent.raw.json` contiene `"result": "<narrative preamble>\n\n{...
+  agent JSON ...}"`, el parser extrae el JSON object via regex de
+  primera `{...}` balanced + JSON-parse. Falla solo si NO hay JSON
+  object recoverable.
+- `MAGIVerdict.retried_agents: tuple[str, ...]` field. Parser tolera
+  ausencia (MAGI < 2.2.1 default a `()`). Propagado a `auto-run.json`
+  + escalation_prompt context.
+- Synthesizer-recovery flag: cuando run_magi.py synthesis falla con
+  RuntimeError pero >= 1 agent succeeded, SBTDD wrapper reads raw.json
+  files directamente, applies tolerant parser, emite manual
+  synthesis report a `.claude/magi-runs/<iter>/manual-synthesis.json`,
+  log warning a stderr, y proceeds. Operador can suppress via
+  `--no-magi-recovery` flag (default ON post-v1.0.0).
+- Tests parity: MAGI 2.1.x golden output + MAGI 2.2.x+ golden con +
+  sin retried_agents + agent JSON con preamble + agent JSON sin
+  preamble + synthesizer crash recovery.
 
 **Invariantes obligatorios**:
-
-- INV-0 (CLAUDE.md pinned model wins; stderr breadcrumb obligatorio).
-- Default null = byte-identical argv a v0.x. Regression test pina.
-- Schema v2 backward-compat: plugins.local.md sin `schema_version`
-  field tratado como v1 (todos los model fields = null implicit).
-- MAGI sub-agent models NO controlados por v1.0.0 (caveat
-  documentado en CHANGELOG + SKILL.md operational impact).
-
-**Cost-impact projection**: 36-task auto run con Sonnet+Haiku mix vs
-default-Opus session = ~70-80% reduccion total, preservando Opus solo
-en MAGI Loop 2 iterations donde multi-perspective consensus value
-es maximo.
-
-### 2.3 Feature F — MAGI dispatch hardening + retried_agents telemetry
-
-**Problema v0.2**: `magi_dispatch.py` localiza el output de MAGI
-buscando un archivo en una ruta esperada bajo `--output-dir`. Si MAGI
-cambia el layout (v2.2.x ya lo hizo parcialmente — observado en plan
-F del v0.2 cycle), la deteccion rompe. Adicionalmente, MAGI 2.2.1+
-introduce un nuevo campo `retried_agents` en su verdict JSON que el
-parser de SBTDD ignora silently.
-
-**Entrega v1.0.0**:
-
-- `magi_dispatch.py` cambia de path-based discovery a
-  marker-based discovery: cada invocacion MAGI escribe un
-  `MAGI_VERDICT_MARKER.json` en un directorio conocido; SBTDD
-  enumera markers despues del subprocess return y picks el mas
-  reciente by mtime. Defensivo contra cambios de layout interno
-  de MAGI.
-- Parser extension: `MAGIVerdict` dataclass gana campo
-  `retried_agents: tuple[str, ...]`. Parser tolera ausencia (MAGI
-  < 2.2.1) defaulting a `()`. Fed back to user output via
-  `auto-run.json` + escalation_prompt context.
-- Backward compat: SBTDD funciona con MAGI 2.1.x+ y 2.2.x+ sin
-  bumps de version requirement; retried_agents simplemente vacio
-  en versiones viejas.
-
-**Invariantes obligatorios**:
-
-- INV-28 (degraded MAGI no-exit) + INV-29 (receiving-code-review
-  gate) preservados sin cambio.
-- Tests parity: MAGI 2.1.x golden output + MAGI 2.2.x+ golden output
-  (con + sin retried_agents field) ambos pasan.
+- INV-28 (degraded MAGI no-exit) preservado.
+- INV-29 (/receiving-code-review gate) preservado sin cambio.
+- Recovery NO es backdoor para skip MAGI: requiere `>= 1 agent
+  succeeded` AND `agent verdict parses cleanly` AND `findings
+  classifiable`.
 - Marker file format: JSON con `verdict`, `iteration`, `agents`,
-  `retried_agents`, `timestamp`. Schema fixed in `models.py`.
+  `retried_agents`, `timestamp`, `synthesizer_status`. Schema fixed
+  in `models.py`.
 
-### 2.4 Feature G — MAGI -> /requesting-code-review cross-check (PRIORITY)
+### 2.2 Feature G — MAGI -> /requesting-code-review cross-check
 
-**Problema v0.2**: MAGI Loop 2 a veces emite findings CRITICAL que
-son falsos positivos (interpretacion erronea de la spec, asuncion
-incorrecta sobre el plan, contexto faltante). El user los validado
-empiricamente en proyectos adyacentes corriendo
-`/requesting-code-review` AFTER MAGI sobre el mismo diff + el output
-MAGI como contexto: el code-reviewer cataches false-positive
-CRITICALs y los downgradea a INFO/WARNING o los rechaza directo.
-Pattern: MAGI primero (breadth, 3 perspectivas),
+(Sin cambio del scope original v1.0.0; esta inalterado por v0.3.0
+ship porque pre_merge_cmd no fue tocado. Re-incluido aqui para
+completitud.)
+
+**Problema**: MAGI Loop 2 a veces emite findings CRITICAL false
+positives (interpretacion erronea de spec, asuncion incorrecta sobre
+plan, contexto faltante). User validated empiricamente en proyectos
+adyacentes corriendo `/requesting-code-review` AFTER MAGI sobre el
+mismo diff + el output MAGI como contexto: el code-reviewer cataches
+false-positive CRITICALs y los downgradea a INFO/WARNING o los
+rechaza directo. Pattern: MAGI primero (breadth, 3 perspectivas),
 `/requesting-code-review` segundo (depth meta-review).
 
 **Entrega v1.0.0**:
@@ -200,7 +149,6 @@ Pattern: MAGI primero (breadth, 3 perspectivas),
   `magi_cross_check: false` en `plugin.local.md` (nueva field).
 
 **Invariantes obligatorios**:
-
 - Nueva propuesta INV-32: "Loop 2 MAGI findings DEBEN pasar por
   cross-check via `/requesting-code-review` antes de routear via
   INV-29 gate, salvo que `magi_cross_check: false` este set."
@@ -208,196 +156,207 @@ Pattern: MAGI primero (breadth, 3 perspectivas),
   consenso MAGI con threshold y degraded handling). Solo afecta el
   set de findings a aplicar.
 - Adicional iteration count del cross-check no consume safety valve
-  INV-11 (es meta-review, no una iteracion del Loop 2 mismo).
+  INV-11.
 
-### 2.5 Feature H — Group B spec-drift re-eval + INV-31 default-on opt-in re-eval
+### 2.3 Feature H — Group B spec-drift re-eval + INV-31 default-on opt-in re-eval
 
-**Problema v0.2**: siete opciones de spec-drift detection (Group B
-options 1-7) deferred a v1.0.0 cuando v0.2 se enfoco en option 8
-(spec-reviewer integration via Feature B). Field data de v0.2/v0.2.1/
-v0.2.2 no esta complete pero sugiere que option 8 cubre la mayoria
-de drift cases per-task. Decision deferida: que subset de options 1-7
-se requiere vs opt-in?
+(Sin cambio scope original; field data ahora incluye v0.3.0 dogfood.)
 
-Adicionalmente, INV-31 default-on (spec-reviewer per task) introduce
-overhead 1-3 `claude -p` calls por task close. Combined con Feature E
-(model flag), el overhead se reduce significativamente, pero la
-decision strategic queda: el default sigue siendo on, o flips a
-opt-in (requiere `--enable-spec-review` per command)?
+Field data summary acumulada de v0.2.0 a v0.3.0 (5 ciclos):
+- v0.2.0: spec-reviewer hard-blocked en mid-cycle, INV-31 enforced
+  fail-fast — ratificado pero costoso.
+- v0.2.1: B6 auto-feedback loop maduro; reviewer findings ahora
+  routean via /receiving-code-review automaticamente.
+- v0.2.2: docs only, no field data.
+- v0.3.0: lightweight pattern (no /sbtdd auto), pero spec-reviewer
+  not invoked porque ciclo no usa close_task_cmd.
+
+**Decision Feature H**: based on field data, decide:
+- **Option A** (preserve default-on): keep current; `--skip-spec-review`
+  remains escape valve. Justified si reviewer catches >X true-positive
+  drifts per Y tasks.
+- **Option B** (flip to opt-in): rename flag to `--enable-spec-review`
+  on `close-task`/`auto`; default skip. Justified si overhead >>
+  benefit empiricamente.
+- **Option C** (config-driven): new field `spec_review_default` en
+  `plugin.local.md` con `on|off|auto-detect-by-stack`.
 
 **Entrega v1.0.0**:
 
-- Field data summary en `docs/v1.0.0-field-data.md` (post-v0.2 dogfood
-  observations: how many spec-reviewer rejections were true-positive,
-  how many were noise, cumulative cost overhead, etc.).
-- Decision document en `docs/v1.0.0-spec-drift-decision.md` evaluando
-  cada Group B option contra field data, con recommendations:
-  - Option (1) `scenario_coverage_check.py` mechanical regex pre-filter
-    -- implementar como pre-filter de Feature B (skip reviewer si task
-    no toca scenarios) si field data muestra >30% noise.
-  - Option (2) Spec-snapshot diff check -- implementar (LOCKED for
-    v1.0.0 regardless of field data; cubre risk class option 8
-    cannot).
-  - Option (5) Auto-generated scenario stubs -- implementar (strong
-    candidate per v0.3 backlog).
-  - Options (3), (4), (6), (7) -- opt-in via flags, no shipped default.
-- INV-31 default decision: based on field data, one of:
-  - **Option A** (preserve default-on): keep current; `--skip-spec-review`
-    remains escape valve. Justified si reviewer catches >X true-positive
-    drifts per Y tasks.
-  - **Option B** (flip to opt-in): rename flag to `--enable-spec-review`
-    on `close-task`/`auto`; default skip. Justified si overhead >>
-    benefit empiricamente.
-  - **Option C** (config-driven): new field `spec_review_default` en
-    `plugin.local.md` con `on|off|auto-detect-by-stack`.
-- Implementaciones concretas: opciones (2) + (5) shipped; otras
-  documentadas como opt-in flags adicionales (no shipped en v1.0.0).
+- Field data document: `docs/v1.0.0-field-data.md` con observations
+  de v0.2/v0.2.1/v0.3.0 cycles.
 - INV-31 decision adoptada en SKILL.md operational impact + README
   matrix.
+- Group B options evaluation:
+  - Option (1) `scenario_coverage_check.py` mechanical pre-filter —
+    implementar como Feature B pre-filter si field data muestra
+    >30% noise rate.
+  - Option (2) Spec-snapshot diff check — **LOCKED implementar**
+    (covers risk class option 8 cannot).
+  - Option (5) Auto-generated scenario stubs from /writing-plans —
+    **LOCKED implementar** (strong v0.3 backlog candidate).
+  - Options (3), (4), (6), (7) — opt-in via flags, no shipped default.
 
 **Invariantes obligatorios**:
+- Cualquier flip de default INV-31 = formal BREAKING bump (v1.0.0
+  absorbs multiple BREAKINGs por la graduacion).
+- Group B options shipped (option 2 + option 5) preservan INV-29
+  gate sin cambio.
 
-- Cualquier flip de default INV-31 = BREAKING bump (v1.0.0 absorbe
-  multiple BREAKINGs por la graduacion stable).
-- Group B options shipped (option 2 spec-snapshot + option 5 auto-gen
-  stubs) preservan INV-29 gate sin cambio.
+### 2.4 Feature I — schema_version: 2 formal versioning
+
+(Item E2 deferred de v0.3.0 + nuevo schema_version field como
+graduacion formal pre-1.0.)
+
+**Problema**: `plugin.local.md` schema crecio en v0.2.x (model
+fields, auto_max_spec_review_seconds, etc.) sin formal version
+field. Future migrations across breaking schema bumps require
+identificable schema version per file.
+
+**Entrega v1.0.0**:
+
+- `plugin.local.md` schema gain `schema_version: 2` field.
+  Default `1` cuando absent (backward compat con v0.2.x files).
+  Parser tolera ambos.
+- Migration tool stub: `scripts/migrate_plugin_local.py` (no-op
+  for v1 -> v2 transition; future-proof skeleton).
+- Tests: parity entre v1 (no schema_version) y v2 (explicit
+  schema_version: 2) parsing.
+
+### 2.5 Feature J — v0.4.0 candidates re-evaluation
+
+7 INFO-class items emergieron del MAGI iter 1+2 review de v0.3.0
+(memorias `project_v030_shipped.md` Open items section). Decision:
+cual subset entra en v1.0.0 vs deferred a v1.x.
+
+Items candidatos:
+1. **D5 `/sbtdd status --watch` companion subcommand** — orthogonal
+   al D streaming; podria entrar v1.0.0 o v1.1.0.
+2. **INFO #10 ResolvedModels dataclass** — one preflight CLAUDE.md
+   scan instead of per-dispatch (~70-150 disk reads per 36-task
+   auto run actualmente).
+3. **INFO #11 streaming pump per-stream timeout** — wall-clock
+   timeout currently unreachable si subprocess writes sin newlines.
+4. **INFO #12 _update_progress OSError handling** — observability
+   failure could kill auto run.
+5. **balthasar iter-2 INFO #1**: SKILL.md line 78 documents
+   `--model-override invalid skill -> exit 2` but impl raises
+   ValidationError -> exit 1. Docs vs code align.
+6. **balthasar iter-2 INFO #2**: `_write_auto_run_audit` transiently
+   drops `progress` field. Cleanest fix alongside D5
+   (`status --watch`).
+7. **caspar iter-2 INFO #1**: two-pump stdout/stderr origin
+   ambiguity in streamed output.
+8. **caspar iter-2 INFO #3**: pre-merge dispatches don't pass
+   `stream_prefix`. v0.4.0 follow-up to extend streaming consciously.
+
+**Decision Feature J**: which subset goes into v1.0.0 vs v1.1.0
+(post-1.0 hardening). Brainstorming refinara basandose en complejidad
+estimada y alineacion semantic con feature F+G+H+I.
 
 ---
 
 ## 3. Restricciones y constraints duros
 
-Todos los invariantes INV-0 a INV-31 del contrato preservados. v1.0.0
-introduce propuestas:
+Todos los invariantes INV-0 a INV-31 preservados. Propuestas
+v1.0.0:
 
 - **INV-32 (propuesta)**: MAGI cross-check via `/requesting-code-review`
-  obligatorio antes de INV-29 gate (Feature G), salvo opt-out explicit.
-- **INV-31 contract evolution** (preserva o flippea segun decision
-  Feature H).
+  obligatorio antes de INV-29 gate (Feature G), salvo opt-out
+  explicit.
+- **INV-33 (propuesta, contingent on Feature F shipping)**: MAGI
+  synthesizer recovery via tolerant parser is non-optional for
+  v1.0.0+; raw.json files MUST be persisted en `.claude/magi-runs/`
+  para post-mortem auditability.
+- INV-31 contract evolution segun decision Feature H.
 
 Critical durante implementacion v1.0.0:
 
-- INV-0 (autoridad maxima `~/.claude/CLAUDE.md`) + Feature E model
-  flag interaction: pinned model en CLAUDE.md gana siempre.
-- INV-22 (sequential auto) + Feature D streaming: streaming es
-  write-only, no introduce parallelism.
-- INV-26 (audit trail) + Features D, E, G: nuevos artifacts en
-  `.claude/auto-run.json` (live), `.claude/magi-cross-check/<...>.json`.
+- INV-0 (autoridad maxima `~/.claude/CLAUDE.md`).
+- INV-22 (sequential auto) preservado en cualquier path nuevo.
+- INV-26 (audit trail) extendido con MAGI markers + cross-check
+  artifacts + manual synthesis reports.
 - INV-27 (spec-base placeholder): este documento cumple.
 - INV-28, INV-29: preservados sin cambio.
 
 ### Stack y runtime
 
-Sin cambios vs v0.2:
-
-- Python 3.9+, mypy --strict, cross-platform, stdlib-only en hot paths.
-- Dependencias externas: git, tdd-guard, superpowers, magi (>= 2.1.3
+Sin cambios vs v0.3:
+- Python 3.9+, mypy --strict, cross-platform, stdlib-only en hot
+  paths.
+- Dependencias externas: git, tdd-guard, superpowers, magi (>= 2.1.x
   per backward compat de Feature F), claude CLI.
 - Dependencias dev: pytest, pytest-asyncio, ruff, mypy, pyyaml.
 - Licencia dual MIT OR Apache-2.0.
 
-### Arquitectura obligatoria
+### Reglas duras no-eludibles (sin override)
 
-v0.2 architecture preserved. v1.0.0 changes:
-
-- `auto_cmd.py`: extender phase loop con streaming (Feature D).
-- `superpowers_dispatch.py`, `spec_review_dispatch.py`,
-  `magi_dispatch.py`: agregar `--model` argv passing (Feature E).
-- `magi_dispatch.py`: marker-based discovery rewrite + retried_agents
-  field (Feature F).
-- `pre_merge_cmd.py`, `auto_cmd.py`: Loop 2 cross-check sub-fase
-  (Feature G).
-- `models.py`: agregar `ALLOWED_CLAUDE_MODEL_IDS`, marker schema.
-- `config.py`: parsear cuatro nuevos campos plugin.local.md +
-  `schema_version` + `magi_cross_check`.
-- `dependency_check.py`: validacion de model IDs.
-- `templates/plugin.local.md.template`: agregar campos nuevos con
-  recommended baseline (Sonnet+Haiku mix).
-- Nuevo modulo: `scripts/scenario_coverage_check.py` (Group B
-  option 1 mechanical pre-filter -- only if field data justifies).
-- Nuevo modulo: `scripts/spec_snapshot.py` (Group B option 2 spec
-  diff check, LOCKED).
-- Extension a `/writing-plans` invocation: auto-generate scenario
-  stubs (Group B option 5, LOCKED).
-
-### Exit code taxonomy
-
-Preservada de v0.2. v1.0.0 propone:
-
-- **Exit 13**: `MODEL_VALIDATION_FAILED` (Feature E
-  `dependency_check` rejects unknown model ID en runtime). Adopt si
-  el equipo decide expandir taxonomy; alternativa = ValidationError
-  exit 1.
+- INV-0 autoridad global.
+- INV-27 spec-base sin uppercase placeholder markers.
+- Commits en ingles + sin Co-Authored-By + sin IA refs.
+- No force push a ramas compartidas (INV-13).
+- No commitear archivos con patrones de secretos (INV-14).
 
 ---
 
 ## 4. Funcionalidad requerida (SDD)
 
-Continua F-series desde v0.2 (F27 fue el ultimo). v1.0.0:
+(F-series continua desde F42; v0.3.0 shipped F28-F35 implicitly.
+v1.0.0 starts at F43.)
 
-**F28**. `auto_cmd._stream_subprocess(proc)` lee stdout/stderr line-by-line
-y reescribe con prefijo `[sbtdd task-N phase] `. `bufsize=1`,
-`subprocess.PIPE`, `python -u` en el invocation argv.
+**F43**. `magi_dispatch._discover_verdict_marker(output_dir)` enumera
+`MAGI_VERDICT_MARKER.json` files, picks max mtime. Replace path-based
+discovery.
 
-**F29**. `auto_cmd._update_progress(phase, task_idx, task_total, sub_phase)`
-reescribe `auto-run.json` `progress` field via tmp + `os.replace`.
-
-**F30**. `status_cmd --watch` poll loop sobre `auto-run.json` mtime con
-intervalo 1s, render TTY o JSON.
-
-**F31**. `config.PluginConfig` gana cuatro campos opcionales (`Optional[str]`
-default None): `implementer_model`, `spec_reviewer_model`,
-`code_review_model`, `magi_dispatch_model`. + `schema_version: int = 1`.
-+ `magi_cross_check: bool = True`.
-
-**F32**. `superpowers_dispatch.dispatch_skill(skill_name, args, model=None)`
-agrega `--model` al argv si `model is not None`. INV-0 check: si
-`~/.claude/CLAUDE.md` pinned model detected, ignore `model` arg + emit
-breadcrumb.
-
-**F33**. Mismo pattern para `spec_review_dispatch.dispatch_spec_reviewer`
-(consume `code_review_model` + `spec_reviewer_model`) y
-`magi_dispatch.dispatch_magi` (consume `magi_dispatch_model`).
-
-**F34**. CLI flag `--model-override <skill>:<model>` parser + validation
-en `auto_cmd`, `pre_merge_cmd`, `close_task_cmd`,
-`review_spec_compliance_cmd`. Multi-flag accumulator. Skill name
-validation contra cuatro nombres canonicos.
-
-**F35**. `dependency_check.check_model_ids(config)` valida que cada
-non-null model field este en `models.ALLOWED_CLAUDE_MODEL_IDS`.
-
-**F36**. `magi_dispatch._discover_verdict_marker(output_dir)`
-enumera `MAGI_VERDICT_MARKER.json` files, picks max mtime. Replace
-path-based discovery.
-
-**F37**. `MAGIVerdict.retried_agents: tuple[str, ...]` field. Parser
+**F44**. `MAGIVerdict.retried_agents: tuple[str, ...]` field. Parser
 tolera ausencia.
 
-**F38**. `pre_merge_cmd._loop2_cross_check(diff, magi_verdict)` invoke
+**F45**. `magi_dispatch._tolerant_agent_parse(raw_json_path)` extracts
+JSON object from agent `result` field via regex when wrapped in
+narrative preamble. Returns parsed agent verdict OR raises
+ValidationError if no recoverable JSON.
+
+**F46**. `magi_dispatch._manual_synthesis_recovery(run_dir)` reads
+all `*.raw.json` in run_dir, applies tolerant parser, emits manual
+synthesis to `manual-synthesis.json`, returns synthesized verdict.
+
+**F47**. `pre_merge_cmd._loop2_cross_check(diff, magi_verdict)` invoke
 `/requesting-code-review` con prompt instructivo de meta-review.
-Output = filtered findings set. Audit artifact escrito.
+Output = filtered findings set. Audit artifact escrito a
+`.claude/magi-cross-check/<iter>-<timestamp>.json`.
 
-**F39**. `auto_cmd._phase4_pre_merge_loop2` adopta cross-check.
+**F48**. `auto_cmd._phase4_pre_merge_loop2` adopta cross-check.
 
-**F40**. `scenario_coverage_check.py` (condicional, solo si Feature H
-field data justifica).
+**F49**. `config.PluginConfig` gana `magi_cross_check: bool = True`
+field + `schema_version: int = 1` field.
 
-**F41**. `spec_snapshot.py` + `pre_merge_cmd` integration (LOCKED Group B
-option 2).
+**F50**. `scripts/migrate_plugin_local.py` skeleton (no-op v1 -> v2).
 
-**F42**. `/writing-plans` invocation extiende prompt para auto-generate
+**F51**. `scripts/spec_snapshot.py` (LOCKED Group B option 2).
+
+**F52**. `/writing-plans` invocation extiende prompt para auto-generate
 scenario stubs per task (LOCKED Group B option 5).
+
+**F53**. (Si Feature J item D5 incluido en v1.0.0)
+`status_cmd --watch` poll loop sobre `auto-run.json` mtime con
+intervalo 1s, render TTY o JSON.
+
+**F54**. (Si Feature J item INFO #10 incluido)
+`models.ResolvedModels` dataclass + `_resolve_all_models_once(config)`
+helper invoked at task-loop entry instead of per-dispatch.
+
+**F55**. INV-31 decision adoption en SKILL.md + README + plugin.local.md.
 
 ### Requerimientos no-funcionales (NF)
 
-**NF13**. Streaming subprocess output adds < 5% wall-time overhead
-en autos benchmark (medible via `tests/test_auto_cmd_streaming.py`).
+**NF16**. MAGI Loop 2 reliability target: >= 90% successful syntheses
+on first attempt with full 3-agent consensus (current empirical
+v0.3.0: 0/2 = 0%).
 
-**NF14**. Cross-platform: streaming buffer/line endings funciona
-identicamente Windows + POSIX.
+**NF17**. `make verify` runtime <= 90s budget preservado.
 
-**NF15**. `make verify` runtime <= 90s budget (era 60s en v0.2;
-v1.0.0 absorbe regression de tests adicionales).
+**NF18**. v0.3.0 plugin.local.md files (sin schema_version) cargan
+en v1.0.0 sin error.
 
 ---
 
@@ -405,79 +364,76 @@ v1.0.0 absorbe regression de tests adicionales).
 
 Out-of-scope para v1.0.0:
 
-- GitHub Actions CI workflow (deferred to v1.1).
-- C++ stack adapters adicionales (Catch2, GoogleTest) -- solo ctest
-  preserved (deferred to v1.1).
-- Marketplace `$schema` URL post-push verification (deferred to v1.1).
-- MAGI sub-agent model control (out of SBTDD scope; MAGI plugin
-  responsability).
-- Streaming UI / TUI dashboard (CLI status --watch suficiente para
-  v1.0.0; dashboard deferred to v1.1+).
+- GitHub Actions CI workflow (deferred v1.1).
+- C++ stack adapters adicionales (deferred v1.1).
+- Marketplace `$schema` URL post-push verification (v1.1).
+- MAGI sub-agent model control (out of SBTDD scope).
+- TUI dashboard (CLI status --watch suficiente).
 
 ---
 
 ## 6. Criterios de aceptacion finales
 
-### 6.1 Functional (Feature D -- auto streaming)
+v1.0.0 ship-ready cuando:
 
-- **D1**. `auto_cmd` subprocess invocation usa `python -u` + line buffering.
-- **D2**. Stderr breadcrumbs prefijados `[sbtdd task-N phase]` cada
-  state transition.
-- **D3**. `auto-run.json progress` field reescrito atomicamente cada
-  transition.
-- **D4**. `/sbtdd status --watch` funcional TTY + JSON.
-- **D5**. NF13 cumplido (< 5% overhead).
-
-### 6.2 Functional (Feature E -- model flag)
-
-- **E1**. Cuatro campos optional en `plugin.local.md` parseados.
-- **E2**. CLI `--model-override` funcional con multi-flag + validation.
-- **E3**. INV-0 precedence enforced + stderr breadcrumb.
-- **E4**. `dependency_check` valida model IDs.
-- **E5**. Default null = byte-identical argv a v0.x (regression test).
-- **E6**. `schema_version: 2` documentado.
-
-### 6.3 Functional (Feature F -- MAGI hardening)
+### 6.1 Functional (Feature F — MAGI hardening)
 
 - **F1**. Marker-based discovery reemplaza path-based.
-- **F2**. `retried_agents` parsed + propagado a `auto-run.json` + escalation.
-- **F3**. Backward-compat MAGI 2.1.x + 2.2.x+ tests pasan.
+- **F2**. `retried_agents` parsed + propagado.
+- **F3**. Tolerant agent JSON parsing (preamble-wrapped).
+- **F4**. Manual synthesis recovery automatic on synthesizer crash
+  with >= 1 agent succeeded.
+- **F5**. Backward-compat MAGI 2.1.x + 2.2.x+ tests pasan.
+- **F6**. NF16 reliability target met empirically en v1.0.0 dogfood
+  pre-merge.
 
-### 6.4 Functional (Feature G -- cross-check)
+### 6.2 Functional (Feature G — cross-check)
 
 - **G1**. Loop 2 cross-check sub-fase implementada.
 - **G2**. Audit artifact `.claude/magi-cross-check/...` escrito.
-- **G3**. INV-32 (propuesta) documentado + adoptado o rejected.
-- **G4**. Default `magi_cross_check: true`; opt-out via plugin.local.md.
+- **G3**. INV-32 documentado + adoptado.
+- **G4**. Default `magi_cross_check: true`; opt-out via
+  plugin.local.md.
 
-### 6.5 Functional (Feature H -- re-eval)
+### 6.3 Functional (Feature H — re-eval)
 
 - **H1**. Field data documento escrito.
-- **H2**. INV-31 default decision adoptada (one of: preserve / flip /
-  config-driven).
+- **H2**. INV-31 default decision adoptada.
 - **H3**. Group B options (2) + (5) implementadas; (1), (3), (4),
   (6), (7) opt-in flags or rejected with rationale.
+
+### 6.4 Functional (Feature I — schema_version)
+
+- **I1**. `schema_version` field added to PluginConfig.
+- **I2**. Backward-compat: v1 (no field) loads as schema_version=1.
+- **I3**. Migration script skeleton present.
+
+### 6.5 Functional (Feature J — v0.4.0 candidates)
+
+- **J1**. Subset decision documented (which items in v1.0.0 vs v1.1).
+- **J2**. Items in v1.0.0 implemented + tested.
 
 ### 6.6 No-functional
 
 - **NF-A**. `make verify` clean: pytest + ruff check + ruff format
   + mypy --strict, runtime <= 90s.
-- **NF-B**. Tests totales >= 735 baseline + nuevos (proyeccion 80-150
-  extras).
+- **NF-B**. Tests totales >= 789 baseline + nuevos.
 - **NF-C**. Cross-platform.
 - **NF-D**. Author/Version/Date headers en nuevos `.py` files.
 - **NF-E**. Zero modificacion a modulos frozen excepto los enumerados
   explicitamente.
+- **NF-F**. NF16 MAGI reliability target met.
 
 ### 6.7 Process
 
 - **P1**. MAGI Checkpoint 2 verdict >= `GO_WITH_CAVEATS` full per
   INV-28. Iter budget 3 + INV-0 override available.
 - **P2**. Pre-merge Loop 1 clean-to-go + Loop 2 MAGI verdict >=
-  `GO_WITH_CAVEATS` full. Cross-check (Feature G) self-validates
-  durante el ciclo.
-- **P3**. CHANGELOG.md `[1.0.0]` entry con BREAKING / Added / Changed.
-- **P4**. Version bump 0.2.2 -> 1.0.0 sync `plugin.json` +
+  `GO_WITH_CAVEATS` full. **NEW**: cross-check (Feature G)
+  self-validates durante el ciclo.
+- **P3**. CHANGELOG.md `[1.0.0]` entry con BREAKING / Added / Changed
+  / Process notes.
+- **P4**. Version bump 0.3.0 -> 1.0.0 sync `plugin.json` +
   `marketplace.json`.
 - **P5**. Tag `v1.0.0` + push.
 
@@ -494,56 +450,81 @@ Out-of-scope para v1.0.0:
 ## 7. Dependencias externas nuevas
 
 Ninguna runtime nueva. Dev: ninguna nueva. Feature F asume MAGI 2.1.x+
-(ya presente).
+ya presente; testing requiere acceso a MAGI 2.2.x+ goldens (cached
+locally).
 
 ---
 
 ## 8. Risk register v1.0.0
 
-- **R1**. Streaming overhead > NF13 5% budget -- mitigation: optimizar
-  read-line loop, considerar no-blocking I/O si excede budget.
-- **R2**. Marker-based MAGI discovery rompe si MAGI 2.2.x cambia
-  marker schema -- mitigation: SBTDD tolera ausencia de campos
-  opcionales en marker, requiere mantener test contra MAGI versions
-  cacheadas.
-- **R3**. Cross-check (Feature G) introduce false-negative risk
-  (downgrades CRITICAL real a INFO) -- mitigation: audit artifact
-  permite post-mortem; INV-32 caveat documentado.
-- **R4**. INV-31 flip decision sin field data sufficient -- mitigation:
-  bundle Feature H ultimo en el ciclo, despues de v0.2.x dogfood data
-  acumulada.
-- **R5**. Schema bump v1 -> v2 sin migration tool -- mitigation: parser
-  defaulta `schema_version: 1` cuando ausente; warning at load if old.
-- **R6**. Bundle 5 features en un solo cycle = MAGI Checkpoint 2 verdict
-  difficult -- mitigation: prepared INV-0 override path; alternativamente
-  split en sub-ciclos (decision durante brainstorming).
+- **R1**. Tolerant agent JSON parsing introduces false-positive
+  recovery — mitigation: regex requires balanced `{...}` AND valid
+  JSON-parse AND verdict in known set; manual synthesis report
+  flags recovery clearly.
+- **R2**. Marker-based MAGI discovery breaks if MAGI changes marker
+  schema — mitigation: SBTDD tolera ausencia de campos opcionales en
+  marker; mantener test contra MAGI versions cacheadas.
+- **R3**. Cross-check (Feature G) introduces false-negative risk
+  (downgrades CRITICAL real to INFO) — mitigation: audit artifact
+  permite post-mortem.
+- **R4**. INV-31 flip decision: breaking change in default behavior —
+  mitigation: v1.0.0 BREAKING bump absorbs; clear migration docs.
+- **R5**. Schema bump v1 -> v2 sin migration tool prematuro —
+  mitigation: v1.0.0 ships skeleton + no-op for v1 -> v2; future
+  migrations populate.
+- **R6**. Bundle 5 features in one cycle = MAGI Checkpoint 2 verdict
+  difficult — mitigation: Feature F itself improves MAGI reliability,
+  recursive gain. Alternativamente split: v0.4.0 (operational polish)
+  + v1.0.0 (semantic features + tag estable).
+- **R7**. Lightweight vs full SBTDD pattern — v0.3.0 lightweight worked
+  but iter-2 mini-cycle costed +14 tests + 11 commits. Full SBTDD
+  has not been validated end-to-end via /sbtdd auto. Iter cap +
+  manual MAGI recovery may need refinement before /sbtdd auto can
+  run unsupervised long cycles.
 
 ---
 
 ## 9. Referencias
 
 - Contrato autoritativo: `sbtdd/sbtdd-workflow-plugin-spec-base.md`.
-- Frozen v0.2 BDD overlay: previous `sbtdd/spec-behavior.md` (will be
-  archived once v1.0.0 spec written).
-- v1.0.0 LOCKED specs detalladas: memory files
-  - `project_v100_progress_streaming.md`
-  - `project_v100_per_skill_model_flag.md`
-  - `project_v100_magi_dispatch_hardening.md`
-  - `project_v100_magi_cross_check.md` (PRIORITY)
-  - Re-eval: backlog notes en CLAUDE.md "v1.0.0 backlog" section.
-- Field data input: `.claude/auto-run.json` archives + spec-reviews
-  artifacts from v0.2/v0.2.1/v0.2.2 dogfood.
-- Historical precedent: v0.2.0 INV-0 override commit `5d7bfc4`,
-  v0.2.1 lightweight pattern (commits `9622a55`..`cfb39ee`),
-  v0.2.2 docs hotfix (commit `337aba2`).
+- v0.3.0 ship record: memory `project_v030_shipped.md`.
+- v0.2.x ship records: memory `project_v020_shipped.md`,
+  `project_v021_shipped.md`, `project_v022_shipped.md`.
+- v1.0.0 LOCKED memory files (deferred items):
+  - `project_v100_progress_streaming.md` (D5 deferred portion).
+  - `project_v100_per_skill_model_flag.md` (E2 deferred portion).
+  - `project_v100_magi_dispatch_hardening.md` (Feature F).
+  - `project_v100_magi_cross_check.md` (Feature G PRIORITY).
+- Empirical findings v0.3.0:
+  - `.claude/magi-runs/v030-iter1/magi-report.json`.
+  - `.claude/magi-runs/v030-iter2/{melchior,balthasar,caspar}.raw.json`
+    (synthesizer crash, manual synthesis recovery rationale).
+- Historical precedent:
+  - v0.2.0 INV-0 override commit `5d7bfc4`.
+  - v0.2.1 lightweight pattern.
+  - v0.3.0 lightweight + 2-iter MAGI Loop 2 + manual synthesis.
 
 ---
 
 ## Nota sobre siguiente paso
 
-Este archivo cumple INV-27 (scan: 0 matches uppercase placeholder).
-Listo como input para `/brainstorming`. Decision pendiente clave para
-brainstorming: bundle 5 features in one cycle, o split en sub-ciclos
-(p.ej. v0.3.0 = D+E operational; v0.4.0 = F+G MAGI; v1.0.0 = H + tag
-estable). Brainstorming refinara esta decision basado en complejidad
-estimada y MAGI Checkpoint 2 risk.
+Este archivo cumple INV-27. Listo como input para `/brainstorming`.
+Decisiones pendientes clave para brainstorming:
+
+1. **Bundle vs split**: monolithic v1.0.0 (F+G+H+I+J subset) vs
+   v0.4.0 (operational polish J subset) + v1.0.0 (F+G+H+I + tag
+   estable).
+2. **Pattern**: lightweight (precedente v0.3.0 worked despite
+   MAGI fragility) vs full SBTDD `/sbtdd auto` (precedent v0.2.0
+   never reached, full auto e2e never validated).
+3. **Feature J subset**: which v0.4.0 candidates enter v1.0.0
+   (D5, INFO #10, INFO #11, INFO #12, balthasar #1, balthasar #2,
+   caspar #1, caspar #3).
+4. **INV-31 default decision**: option A preserve / B opt-in / C
+   config-driven.
+5. **Group B subset within Feature H**: (2) + (5) LOCKED, but
+   should (1) `scenario_coverage_check.py` ship as Feature B
+   pre-filter? Field data inconclusive.
+
+Brainstorming refinara estas decisiones basado en complejidad,
+risk, y empirical findings de v0.3.0.

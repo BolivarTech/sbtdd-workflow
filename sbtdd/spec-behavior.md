@@ -1,366 +1,353 @@
-# BDD overlay — sbtdd-workflow v0.3.0
+# BDD overlay — sbtdd-workflow v0.4.0
 
 > Generado por `/brainstorming` el 2026-04-25 a partir de
-> `sbtdd/spec-behavior-base.md` (v1.0.0 raw input). v0.3.0 cubre el
-> sub-set v1.0.0 D+E (operational hardening: auto streaming + per-skill
-> model selection flag) per directiva usuario sesion 2026-04-25
-> ("split (b)" + "lightweight pattern (a)" + "balanced trim (2)").
+> `sbtdd/spec-behavior-base.md` (v1.0.0 raw input post-v0.3.0).
+> v0.4.0 cubre el sub-set Feature F + J subset (J4, J5, J6, J8) per
+> directiva usuario sesion 2026-04-25 ("split (b)" + "balanced J
+> subset (2)").
 >
-> v0.4.0/v1.0.0 cubren los items deferred (D5 `status --watch`, E2
-> `schema_version: 2`, Features F+G+H -- MAGI hardening + cross-check
-> + Group B re-eval).
+> v1.0.0 cubre los items remaining (G cross-check, H Group B re-eval
+> + INV-31 default, I schema_version, J remaining: D5, J2 ResolvedModels,
+> J3 per-stream timeout, J7 origin ambiguity).
 >
 > Este BDD overlay materializa los criterios sec.S.12 del spec-base
 > en escenarios Given/When/Then testables. INV-27 compliant: cero
-> matches uppercase placeholder (verificado).
+> matches uppercase placeholder (verificable con grep).
 
 ---
 
 ## 1. Resumen ejecutivo
 
-**Objetivo v0.3.0**: ship dos features operacionales aditivos
-(no-BREAKING) en un ciclo lightweight (~4-6h wall time, 2 subagents
-paralelos + final review loop MAGI). Bumpa 0.2.2 -> 0.3.0 (MINOR).
+**Objetivo v0.4.0**: ship dos surfaces 100% disjoint en ciclo
+lightweight con 2 subagents paralelos (a diferencia de v0.3.0
+sequential):
+- **Feature F** — MAGI dispatch hardening + tolerant agent JSON
+  parsing + auto manual-synthesis recovery.
+- **J subset** — 4 v0.3.0 streaming follow-through items (J4
+  OSError handling, J5 SKILL.md docs hotfix, J6 _write_auto_run_audit
+  progress preservation, J8 pre-merge stream_prefix wiring).
 
-**Out-of-scope v0.3.0** (deferred):
-- D5 `/sbtdd status --watch` subcomando.
-- E2 `schema_version: 2` field en `plugin.local.md`.
-- Features F (MAGI marker discovery + retried_agents), G (cross-check
-  via `/requesting-code-review`), H (Group B re-eval + INV-31 default
-  flip).
+Bumpa 0.3.0 -> 0.4.0 (MINOR, non-BREAKING -- aditivo).
 
-**Criterio de exito**: bumpa 0.2.2->0.3.0 sin regresion (735 tests
-baseline preservados + 50-70 nuevos) + `/sbtdd auto` arranque de v1.0.0
-cycle gana ~70-80% cost reduction inmediato cuando el operador adopta
-el Sonnet+Haiku baseline.
+**Out-of-scope v0.4.0** (deferred a v1.0.0):
+- Feature G (MAGI -> /requesting-code-review cross-check).
+- Feature H (Group B re-eval + INV-31 default-on opt-in re-eval).
+- Feature I (schema_version: 2 + migration tool).
+- D5 `/sbtdd status --watch` companion subcommand.
+- J2 INFO #10 ResolvedModels dataclass.
+- J3 INFO #11 per-stream timeout.
+- J7 caspar #1 two-pump origin ambiguity.
+
+**Criterio de exito**: 0.3.0 -> 0.4.0 sin regresion (789 tests
+baseline preservados + ~30-40 nuevos), MAGI Loop 2 reliability
+recuperada empiricamente (NF16 target: tolerant parser + auto
+manual-synthesis recovery rescate degraded synthesis runs sin
+operator intervention), y v0.3.0 streaming surface closure (no INFO
+findings de v0.3.0 iter 1+2 sangrando a v1.0.0 noise).
+
+**Recursive payoff**: v0.4.0 ships F itself, asi que su propio final
+review loop puede dogfoodearlo en vivo. Iter 1 podria fallar igual
+que v0.3.0 (parser fragility), pero post-F-commit el orchestrator
+puede invocar `_manual_synthesis_recovery` sobre los `.raw.json`
+files para rescatar el iter sin intervencion manual.
 
 ---
 
-## 2. Feature D -- Auto progress streaming
+## 2. Feature F -- MAGI dispatch hardening + tolerant parsing
 
 ### 2.1 Scope (4 deliverables)
 
-- **D1**. `auto_cmd._stream_subprocess(proc)` -- read-line loop con
-  prefijo orquestador.
-- **D2**. `python -u` en argv del subprocess.
-- **D3**. State-machine breadcrumbs por phase transition.
-- **D4**. `auto-run.json` `progress` field atomic write.
+- **F43**. `magi_dispatch._discover_verdict_marker(output_dir)` --
+  marker-based discovery via `MAGI_VERDICT_MARKER.json` enumeration.
+- **F44**. `MAGIVerdict.retried_agents: tuple[str, ...]` field con
+  parser tolerance.
+- **F45**. `magi_dispatch._tolerant_agent_parse(raw_json_path)` --
+  preamble-tolerant agent JSON extraction.
+- **F46**. `magi_dispatch._manual_synthesis_recovery(run_dir)` --
+  auto-recovery cuando run_magi.py synthesizer crashes pero
+  >= 1 agent succeeded.
 
 ### 2.2 Escenarios Given/When/Then
 
-**Escenario D1.1: streaming flushes subprocess output line-by-line**
+**Escenario F43.1: marker-based discovery picks most recent by mtime**
 
-> **Given** un `/sbtdd auto` con un implementer subagent que escribe
-> 5 lineas a stdout separadas por 200ms.
-> **When** `auto_cmd._stream_subprocess(proc)` consume las pipes.
-> **Then** las 5 lineas aparecen en stderr del orquestador con
-> latencia maxima 250ms cada una (no se acumulan hasta proc exit).
+> **Given** un `output_dir` con dos `MAGI_VERDICT_MARKER.json` files
+> (e.g., from a re-run scenario): `marker_old.json` con mtime
+> 2026-04-25T10:00:00Z, `marker_new.json` con mtime
+> 2026-04-25T11:00:00Z.
+> **When** `magi_dispatch._discover_verdict_marker(output_dir)` ejecuta.
+> **Then** retorna path a `marker_new.json` (max by mtime).
 
-**Escenario D1.2: stderr breadcrumbs prefijados con `[sbtdd ...]`**
+**Escenario F43.2: marker-based discovery falla gracefully cuando no markers**
 
-> **Given** un subprocess invocando `/test-driven-development` que
-> emite a su propio stderr `[skill] starting red phase`.
-> **When** `_stream_subprocess` reescribe la linea al stderr del
-> orquestador.
-> **Then** la linea final lleva prefijo `[sbtdd task-N phase] [skill]
-> starting red phase`, distinguiendo origen sbtdd de origen subprocess.
+> **Given** un `output_dir` empty o sin markers (only `.raw.json`
+> files presentes from agents).
+> **When** `_discover_verdict_marker(output_dir)` ejecuta.
+> **Then** raises `ValidationError("No MAGI_VERDICT_MARKER.json found
+> in output_dir")` con detail listing files actually present
+> (debugability).
 
-**Escenario D1.3: streaming sobrevive a SIGTERM cleanup**
+**Escenario F43.3: marker discovery defensive sobre layout changes**
 
-> **Given** un `/sbtdd auto` interrumpido con Ctrl+C mid-task.
-> **When** la state machine recibe SIGINT.
-> **Then** `_stream_subprocess` flushea buffers pendientes a stderr
-> orquestador antes de exit 130, preservando ultima senal de progreso
-> visible.
+> **Given** MAGI 2.2.x cambia el path donde escribe markers (e.g.,
+> de `output_dir/marker.json` a `output_dir/run-XYZ/marker.json` —
+> hipotetical future change).
+> **When** SBTDD corre `_discover_verdict_marker(output_dir)` con
+> recursive enumeration via `Path.rglob("MAGI_VERDICT_MARKER.json")`.
+> **Then** picks marker from sub-dir; legacy flat-layout markers
+> tambien funcionan. Robust contra layout drift.
 
-**Escenario D2.1: python -u en argv del subprocess**
+**Escenario F44.1: retried_agents field parsed cuando present**
 
-> **Given** `auto_cmd` invocando subprocess `run_sbtdd.py`.
-> **When** se construye argv.
-> **Then** argv = `["python", "-u", "<run_sbtdd.py>", "<subcommand>",
-> ...]` (no `["python", "<run_sbtdd.py>", ...]`).
+> **Given** un `MAGI_VERDICT_MARKER.json` con MAGI 2.2.1+ schema
+> incluyendo `"retried_agents": ["caspar"]` campo.
+> **When** `MAGIVerdict.from_marker(marker_path)` parsea.
+> **Then** `verdict.retried_agents == ("caspar",)` (tuple coerced
+> from list for immutability).
 
-**Escenario D3.1: state-machine breadcrumb on red->green transition**
+**Escenario F44.2: retried_agents defaults a tuple vacio cuando absent**
 
-> **Given** task 14/36 en fase red, ultimo verification passed.
-> **When** `auto_cmd._phase2_task_loop` avanza fase a green.
-> **Then** stderr orquestador recibe linea exacta:
-> `[sbtdd] phase 2/5: task loop -- task 14/36 (green)` ANTES del
-> dispatch del siguiente subagent.
+> **Given** un MAGI 2.1.x marker sin `retried_agents` field.
+> **When** `MAGIVerdict.from_marker(marker_path)` parsea.
+> **Then** `verdict.retried_agents == ()`. Backward compat MAGI
+> 2.1.x preservado.
 
-**Escenario D3.2: breadcrumb on task close**
+**Escenario F44.3: retried_agents propagado a auto-run.json**
 
-> **Given** task 14/36 cerrando refactor + chore: mark complete.
-> **When** state machine avanza task_index 14 -> 15.
-> **Then** stderr orquestador recibe `[sbtdd] phase 2/5: task loop --
-> task 15/36 (red)` despues del commit `chore:` y antes del nuevo
-> implementer dispatch.
+> **Given** mid-`auto` run, MAGI iter 2 retorna verdict con
+> `retried_agents=("balthasar",)`.
+> **When** `auto_cmd._update_progress` o `_write_auto_run_audit`
+> fires post-MAGI dispatch.
+> **Then** `auto-run.json` contiene `magi_iter2_retried_agents:
+> ["balthasar"]` (or similar audit field) para escalation_prompt
+> visibility.
 
-**Escenario D4.1: progress field reescrito atomicamente cada transition**
+**Escenario F45.1: tolerant parse extracts JSON from preamble-wrapped result**
 
-> **Given** `.claude/auto-run.json` existing con `progress: {phase: 2,
-> task_index: 13, task_total: 36, sub_phase: "refactor"}`.
-> **When** state machine transitions a task 14 red.
-> **Then** un escritor concurrente leyendo `auto-run.json` durante el
-> write nunca observa estado intermediate corrupto: lee o el progress
-> previo (task 13 refactor) o el posterior (task 14 red), nunca un
-> JSON parcial.
+> **Given** un `agent.raw.json` con `result` field:
+> ```
+> "Based on my review of the iter-2 fixes, the streaming wiring is correctly threaded...\n\n{\"agent\": \"melchior\", \"verdict\": \"GO\", ...}"
+> ```
+> **When** `magi_dispatch._tolerant_agent_parse(raw_json_path)` ejecuta.
+> **Then** retorna parsed agent verdict dict
+> `{"agent": "melchior", "verdict": "GO", ...}` extracted via
+> balanced-brace regex sobre el `result` string. Strict v0.3.0
+> parser hubiera fallado.
 
-**Escenario D4.2: progress field schema correcto**
+**Escenario F45.2: tolerant parse pure-JSON result still works**
 
-> **Given** mid-`auto` run.
-> **When** se carga `auto-run.json` con `json.load`.
-> **Then** keys top-level incluyen `progress` con shape exacto
-> `{"phase": int, "task_index": int, "task_total": int, "sub_phase":
-> str}`. `phase` ∈ {0..5}, `sub_phase` ∈ {"red", "green", "refactor",
-> "task-close", "magi-loop", "checklist"}.
+> **Given** un `agent.raw.json` con `result` field que es JSON puro
+> (caspar v0.3.0 iter 2 caso): `result` empieza directamente con `{`.
+> **When** `_tolerant_agent_parse(raw_json_path)` ejecuta.
+> **Then** retorna parsed verdict dict identico al strict-parser
+> output. Backward compat: tolerant parser superset of strict.
 
-**Escenario D4.3: progress field absent en auto-run.json antes del primer phase**
+**Escenario F45.3: tolerant parse falla cuando zero recoverable JSON**
 
-> **Given** `auto_cmd` recien iniciado, antes de phase 1.
-> **When** se carga `auto-run.json` (que ya existe del checkpoint
-> initial pero sin progress).
-> **Then** `progress` field es opcional (parser tolera ausencia,
-> default `None` o `{}`); no es schema-required.
+> **Given** un `agent.raw.json` con `result` field que es solo
+> narrative (e.g., agent crashed mid-output con error message but
+> no JSON).
+> **When** `_tolerant_agent_parse(raw_json_path)` ejecuta.
+> **Then** raises `ValidationError("No JSON object recoverable from
+> {raw_json_path}")` con preview de result content (first 200
+> chars) for debugging.
 
-### 2.3 Acceptance criteria mapping (sec.S.12 v0.3.0)
+**Escenario F45.4: tolerant parse extrae primer balanced JSON object**
+
+> **Given** un `agent.raw.json` con `result` que tiene multiple
+> `{...}` snippets (e.g., embedded code examples in narrative
+> antes del verdict JSON).
+> **When** `_tolerant_agent_parse(raw_json_path)` ejecuta el regex.
+> **Then** extrae el primer balanced `{...}` que parsea como verdict
+> JSON con `agent` field present (validation: must contain agent
+> name from {melchior, balthasar, caspar}). Skips `{"key": "val"}`
+> code-example snippets.
+
+**Escenario F46.1: manual synthesis recovery cuando 1+ agent succeeded**
+
+> **Given** un `run_dir` post-MAGI invocation donde
+> run_magi.py synthesizer aborto con `RuntimeError: Only 1 agent(s)
+> succeeded` pero 2 de 3 agents tienen `.raw.json` files con valid
+> verdicts (preamble-wrapped).
+> **When** `magi_dispatch._manual_synthesis_recovery(run_dir)` ejecuta.
+> **Then** reads `*.raw.json`, applies F45 tolerant parser to each,
+> synthesizes manually using same VERDICT_RANK weights as
+> run_magi.py, emits `manual-synthesis.json` con flag
+> `recovered: true` y `recovery_reason: "synthesizer-failure"`.
+> Returns synthesized verdict.
+
+**Escenario F46.2: manual recovery preserves agent dissent**
+
+> **Given** raw.json files: melchior REJECT, balthasar APPROVE,
+> caspar APPROVE.
+> **When** `_manual_synthesis_recovery(run_dir)` ejecuta.
+> **Then** synthesized verdict reflects 2-1 majority approve, but
+> dissenting opinion from melchior preserved en verdict's findings
+> + dissent fields. Same rank logic que run_magi.py synthesize.py.
+
+**Escenario F46.3: manual recovery falla cuando zero recoverable**
+
+> **Given** un `run_dir` donde todos los agents fallaron (every
+> raw.json file has non-recoverable result fields per F45.3).
+> **When** `_manual_synthesis_recovery(run_dir)` ejecuta.
+> **Then** raises `MAGIGateError("No recoverable agent verdicts in
+> run_dir; manual synthesis impossible")`. Operator must investigate
+> raw.json files manually OR retry MAGI iter.
+
+**Escenario F46.4: manual recovery fires automaticamente en MAGI dispatch**
+
+> **Given** SBTDD invoca `magi_dispatch.dispatch_magi(...)` que
+> internamente runs `run_magi.py`. Synthesis crashes con RuntimeError.
+> **When** dispatch wrapper detects exit code != 0 + error pattern
+> matches "Only N agent(s) succeeded" + N >= 1.
+> **Then** automaticamente invokes `_manual_synthesis_recovery(run_dir)`,
+> emits stderr breadcrumb `[sbtdd magi] synthesizer failed; manual
+> synthesis recovery applied (N/3 agents)`, returns recovered
+> verdict to caller. Default ON; suppress via `--no-magi-recovery`
+> flag (when operator wants strict run_magi.py-only).
+
+**Escenario F46.5: --no-magi-recovery flag respected**
+
+> **Given** SBTDD invocation con `--no-magi-recovery`. Synthesizer
+> crashes.
+> **When** dispatch wrapper detects synthesizer crash.
+> **Then** raises `MAGIGateError` con synthesizer original message;
+> NO auto-recovery invoked. Strict behavior preserved per operator
+> choice.
+
+### 2.3 Acceptance criteria mapping (sec.S.12 v0.4.0)
 
 | Criterion | Escenario | Test fixture |
 |-----------|-----------|--------------|
-| **D1**: subprocess streaming line-by-line | D1.1, D1.2, D1.3 | `tests/test_auto_streaming.py` |
-| **D2**: `python -u` en argv | D2.1 | `tests/test_auto_streaming.py` |
-| **D3**: stderr breadcrumbs por phase | D3.1, D3.2 | `tests/test_auto_streaming.py` |
-| **D4**: `auto-run.json progress` atomic write | D4.1, D4.2, D4.3 | `tests/test_auto_progress.py` |
+| **F43**: marker-based discovery | F43.1, F43.2, F43.3 | `tests/test_magi_hardening.py` |
+| **F44**: retried_agents field | F44.1, F44.2, F44.3 | `tests/test_magi_hardening.py` |
+| **F45**: tolerant agent JSON parsing | F45.1, F45.2, F45.3, F45.4 | `tests/test_magi_hardening.py` |
+| **F46**: manual synthesis recovery | F46.1, F46.2, F46.3, F46.4, F46.5 | `tests/test_manual_synthesis_recovery.py` |
 
-### 2.4 Invariantes Feature D
+### 2.4 Invariantes Feature F
 
-- INV-22 (sequential auto) preservado -- streaming es write-only.
-- Atomic writes a `auto-run.json` mismo patron que `state_file.save`
-  + `magi-escalation-pending.md` (v0.2.1).
-- Cross-platform: Windows + POSIX line-buffering identico (test
-  cubre ambos).
-- Streaming no introduce latencia perceptible: NF13 < 5% wall-time
-  overhead (medido benchmark mock auto run).
+- INV-28 (degraded MAGI no-exit) preservado: manual recovery NO
+  contradice degraded handling — recovery fires solo on synthesizer
+  crash with >= 1 agent succeeded; degraded verdict (< 3 agents
+  with valid output) sigue consumiendo iter sin exit signal.
+- INV-29 (/receiving-code-review gate) preservado sin cambio.
+- Recovery NO es backdoor para skip MAGI: tolerant parser requires
+  balanced JSON object AND parsable AND verdict in
+  VERDICT_RANK known set AND agent field in {melchior, balthasar,
+  caspar}.
+- Marker file format: JSON con `verdict`, `iteration`, `agents`,
+  `retried_agents`, `timestamp`, `synthesizer_status`. Schema fixed
+  in `models.py`.
+- Backward compat: MAGI 2.1.x (sin retried_agents, sin marker
+  files) sigue funcionando via path-based discovery fallback +
+  retried_agents default `()`.
 
 ---
 
-## 3. Feature E -- Per-skill model selection flag
+## 3. J subset -- v0.3.0 streaming follow-through
 
-### 3.1 Scope (6 deliverables)
+### 3.1 Scope (4 deliverables)
 
-- **E1**. 4 campos opcionales en `config.PluginConfig`.
-- **E3**. Dispatch wiring + INV-0 precedence.
-- **E4**. `--model-override <skill>:<model>` CLI en `auto`.
-- **E5**. `dependency_check.check_model_ids`.
-- **E6**. `models.ALLOWED_CLAUDE_MODEL_IDS` immutable tuple.
-- **E7**. Template `plugin.local.md.template` ships Sonnet+Haiku baseline.
-
-**Deferred a v1.0.0**: E2 (`schema_version: 2`).
+- **J4**. INFO #12 `_update_progress` OSError handling.
+- **J5**. balthasar #1 SKILL.md exit code docs hotfix (line 78).
+- **J6**. balthasar #2 `_write_auto_run_audit` preserves `progress`
+  field.
+- **J8**. caspar #3 pre-merge stream_prefix wiring.
 
 ### 3.2 Escenarios Given/When/Then
 
-**Escenario E1.1: 4 campos parseados de plugin.local.md**
+**Escenario J4.1: _update_progress wraps OSError gracefully**
 
-> **Given** un `plugin.local.md` con frontmatter:
-> ```yaml
-> implementer_model: claude-sonnet-4-6
-> spec_reviewer_model: claude-haiku-4-5
-> code_review_model: claude-sonnet-4-6
-> magi_dispatch_model: null
-> ```
-> **When** `config.load(path)` parsea el archivo.
-> **Then** retorna `PluginConfig(implementer_model="claude-sonnet-4-6",
-> spec_reviewer_model="claude-haiku-4-5",
-> code_review_model="claude-sonnet-4-6", magi_dispatch_model=None, ...)`.
+> **Given** mid-`auto` run con disk full (simulated via mock
+> raising `OSError(28, "No space left")` from `tmp.write_text`).
+> **When** `auto_cmd._update_progress(auto_run_path, ...)` fires.
+> **Then** OSError caught, stderr breadcrumb emitted `[sbtdd]
+> warning: progress write failed: OSError(28, ...). Auto run continues
+> (observability degraded).` Auto run proceeds NOT killed.
 
-**Escenario E1.2: campos ausentes default None (backward compat)**
+**Escenario J4.2: _update_progress preserves auto-run.json on os.replace failure**
 
-> **Given** un `plugin.local.md` v0.2 sin ninguno de los 4 model fields.
-> **When** `config.load(path)` parsea.
-> **Then** retorna `PluginConfig` con todos los 4 model fields = None.
-> Ningun error, ningun warning. Plugin v0.2 plugin.local.md files cargan
-> sin migracion.
+> **Given** atomic rename fails (OSError on Windows during
+> concurrent reader holding file open + retry exhaustion at 20
+> attempts).
+> **When** `_update_progress` exhausts retry loop.
+> **Then** original `auto-run.json` preserved (tmp file removed
+> via try/finally), warning emitted, auto continues. No silent
+> data loss.
 
-**Escenario E1.3: campo invalido (typo en YAML key) ignorado silenciosamente**
+**Escenario J5.1: SKILL.md line 78 documents exit 1 not exit 2**
 
-> **Given** `plugin.local.md` con campo `implementer-model:
-> claude-sonnet-4-6` (dash en vez de underscore).
-> **When** `config.load(path)` parsea.
-> **Then** `implementer_model` = None (campo desconocido ignorado),
-> stderr emite warning `[sbtdd] unknown plugin.local.md key:
-> implementer-model -- did you mean implementer_model?`.
+> **Given** `skills/sbtdd/SKILL.md` v0.4.0 ship.
+> **When** se lee la seccion `### v0.3 flags` describing
+> `--model-override` invalid skill name behavior.
+> **Then** texto exacto contiene `"exit 1 (USER_ERROR)"` (no `exit
+> 2 (PRECONDITION_FAILED)`). Matches `auto_cmd._parse_model_overrides`
+> raises `ValidationError` -> exit 1 actual implementation per
+> errors.EXIT_CODES.
 
-**Escenario E3.1: dispatch con model=None = byte-identical argv a v0.2**
+**Escenario J6.1: _write_auto_run_audit preserves existing progress field**
 
-> **Given** `superpowers_dispatch.dispatch_skill("test-driven-development",
-> args, model=None)`.
-> **When** se construye argv.
-> **Then** argv = `["claude", "-p", "/test-driven-development", *args]`
-> (idéntico a v0.2.x; ningun `--model` flag presente).
+> **Given** `.claude/auto-run.json` existing con
+> `{"progress": {"phase": 2, "task_index": 14, ...}, "started_at":
+> "..."}`.
+> **When** `auto_cmd._write_auto_run_audit(audit)` ejecuta para
+> serializar `AutoRunAudit.to_dict()` (que normalmente NO contiene
+> progress field).
+> **Then** post-write, `auto-run.json` contiene tanto el audit
+> snapshot fields AS WELL AS el progress field preservado del
+> previous state. No transient drop.
 
-**Escenario E3.2: dispatch con model="claude-haiku-4-5" agrega --model**
+**Escenario J6.2: _write_auto_run_audit cuando progress field absent**
 
-> **Given** `superpowers_dispatch.dispatch_skill("test-driven-development",
-> args, model="claude-haiku-4-5")`.
-> **When** se construye argv.
-> **Then** argv = `["claude", "-p", "--model", "claude-haiku-4-5",
-> "/test-driven-development", *args]`. Order: `--model` antes del
-> skill path.
+> **Given** auto-run.json sin progress field (e.g., very early in
+> auto run, before phase 1).
+> **When** `_write_auto_run_audit(audit)` ejecuta.
+> **Then** post-write, auto-run.json contiene audit fields. progress
+> field permanece absent (D4.3 absent-tolerant downstream).
 
-**Escenario E3.3: INV-0 precedence -- CLAUDE.md pinned model wins**
+**Escenario J8.1: pre-merge MAGI dispatch threads stream_prefix**
 
-> **Given** `~/.claude/CLAUDE.md` contiene linea
-> `Use claude-opus-4-7 for all sessions` (detectable por scan).
-> **And** `plugin.local.md` tiene `implementer_model:
-> claude-sonnet-4-6`.
-> **When** `superpowers_dispatch.dispatch_skill(...,
-> model="claude-sonnet-4-6")` (pasado de config).
-> **Then** argv NO contiene `--model claude-sonnet-4-6`. Stderr emite
-> breadcrumb: `[sbtdd inv-0] CLAUDE.md pins claude-opus-4-7 globally;
-> ignoring plugin.local.md implementer_model=claude-sonnet-4-6 to
-> respect global authority. Cost implication: ~5x vs configured
-> Sonnet baseline.`
-
-**Escenario E3.4: INV-0 detection no-pinned = config respetada**
-
-> **Given** `~/.claude/CLAUDE.md` no contiene patron `claude-opus-X` /
-> `claude-sonnet-X` / `claude-haiku-X` pinning.
-> **When** dispatch fires con model="claude-sonnet-4-6".
-> **Then** argv contiene `--model claude-sonnet-4-6`. Ningun breadcrumb.
-
-**Escenario E4.1: --model-override con skill name valido acepta**
-
-> **Given** `/sbtdd auto --model-override implementer:claude-haiku-4-5`.
-> **When** `auto_cmd` parsea CLI args.
-> **Then** `auto_cmd._cli_model_overrides` = `{"implementer":
-> "claude-haiku-4-5"}`. Override gana sobre `plugin.local.md` para
-> ese skill solamente; los otros 3 skills siguen usando config.
-
-**Escenario E4.2: --model-override con skill name invalido rechaza**
-
-> **Given** `/sbtdd auto --model-override foo:claude-haiku-4-5` (foo
-> no es uno de los 4 skill names canonicos).
-> **When** `auto_cmd` parsea CLI args.
-> **Then** exit code 1 (USER_ERROR). Stderr: `[sbtdd] invalid
-> --model-override skill name 'foo'. Valid: implementer,
-> spec_reviewer, code_review, magi_dispatch.`
-
-**Escenario E4.3: multi-flag accumulator**
-
-> **Given** `/sbtdd auto --model-override
-> implementer:claude-haiku-4-5 --model-override
-> spec_reviewer:claude-sonnet-4-6`.
-> **When** parser procesa.
-> **Then** `_cli_model_overrides` = `{"implementer":
-> "claude-haiku-4-5", "spec_reviewer": "claude-sonnet-4-6"}` (ambos
-> presentes).
-
-**Escenario E4.4: --model-override pierde contra INV-0 pinned**
-
-> **Given** `/sbtdd auto --model-override
-> implementer:claude-haiku-4-5` + `~/.claude/CLAUDE.md` pina
-> claude-opus-4-7.
+> **Given** `pre_merge_cmd._loop2(...)` invoking `magi_dispatch.invoke_magi`
+> for Loop 2 iter N.
 > **When** dispatch fires.
-> **Then** argv usa modelo de session (no `--model`), stderr emite
-> breadcrumb INV-0 mencionando que el CLI override fue ignorado en
-> favor del global pin.
+> **Then** argv passed a `magi_dispatch.invoke_magi` includes
+> `stream_prefix="[sbtdd pre-merge magi-loop2]"`. Subprocess output
+> streams a operator stderr en tiempo real durante MAGI invocation
+> (5-10 min for opus-based agents).
 
-**Escenario E4.5: --model-override format invalido (sin ":") rechaza**
+**Escenario J8.2: pre-merge code-review dispatch threads stream_prefix**
 
-> **Given** `/sbtdd auto --model-override implementerhaiku4-5` (sin
-> separator).
-> **When** parser procesa.
-> **Then** exit 1, stderr `[sbtdd] --model-override expects
-> '<skill>:<model>'; got 'implementerhaiku4-5'`.
+> **Given** `pre_merge_cmd._loop1(...)` invoking
+> `superpowers_dispatch.invoke_skill("requesting-code-review", ...)`.
+> **When** dispatch fires.
+> **Then** argv includes `stream_prefix="[sbtdd pre-merge loop1
+> iter-N]"` per iteration.
 
-**Escenario E5.1: dependency_check warns en init para model ID desconocido**
+**Escenario J8.3: pre-merge mini-cycle TDD dispatches thread stream_prefix**
 
-> **Given** `plugin.local.md` con `implementer_model:
-> claude-sonnet-9-9` (no en `ALLOWED_CLAUDE_MODEL_IDS`).
-> **When** `/sbtdd init` corre dependency_check.
-> **Then** init no fail (exit 0); stderr emite warning `[sbtdd init]
-> implementer_model 'claude-sonnet-9-9' not in known model list. Will
-> hard-fail at runtime if Anthropic does not recognize this ID. Verify
-> spelling.`
+> **Given** `pre_merge_cmd._apply_finding_via_mini_cycle(finding)` invocando
+> implementer subagent for Red phase.
+> **When** dispatch fires.
+> **Then** argv includes
+> `stream_prefix="[sbtdd pre-merge fix-finding-N red]"` para cada
+> phase del mini-cycle (red/green/refactor).
 
-**Escenario E5.2: dependency_check hard-fails en runtime para model ID desconocido**
-
-> **Given** `plugin.local.md` con `implementer_model:
-> claude-sonnet-9-9`. Subagent dispatch fires.
-> **When** `superpowers_dispatch.dispatch_skill(...,
-> model="claude-sonnet-9-9")` ejecuta y `claude` CLI rejecta el flag.
-> **Then** raise `ValidationError("Unknown model 'claude-sonnet-9-9'.
-> Configured in plugin.local.md implementer_model. Update to one of
-> ALLOWED_CLAUDE_MODEL_IDS or remove the field.")`. Exit 1.
-
-**Escenario E6.1: ALLOWED_CLAUDE_MODEL_IDS es immutable**
-
-> **Given** `from models import ALLOWED_CLAUDE_MODEL_IDS`.
-> **When** intento `ALLOWED_CLAUDE_MODEL_IDS.append(...)` o
-> `ALLOWED_CLAUDE_MODEL_IDS[0] = ...`.
-> **Then** raise `AttributeError` (es `tuple[str, ...]`, no list) o
-> `TypeError` (immutable). Test pina contra mutation.
-
-**Escenario E6.2: ALLOWED_CLAUDE_MODEL_IDS contiene families 4.x actuales**
-
-> **Given** `models.ALLOWED_CLAUDE_MODEL_IDS`.
-> **When** se enumera.
-> **Then** contiene al menos: `claude-opus-4-7`, `claude-sonnet-4-6`,
-> `claude-haiku-4-5-20251001`. (Lista exacta refrescable cada family
-> bump; pero la presencia de las 3 actuales es regression-pinned).
-
-**Escenario E7.1: template ships Sonnet+Haiku baseline (commented)**
-
-> **Given** `templates/plugin.local.md.template`.
-> **When** se renderiza con substitutions standard de `init --stack
-> python --author "Foo"`.
-> **Then** output contiene los 4 fields como comentarios YAML:
-> ```yaml
-> # Recommended cost-optimized baseline (uncomment to opt in):
-> # implementer_model: claude-sonnet-4-6
-> # spec_reviewer_model: claude-haiku-4-5
-> # code_review_model: claude-sonnet-4-6
-> # magi_dispatch_model: null   # outer dispatcher, sub-agents pick own
-> ```
-> Default null preservado (todos comentados); operador opt-in
-> uncommentando.
-
-**Escenario E7.2: init --stack python expande template preservando comentarios**
-
-> **Given** `init --stack python --author "Test"` ejecutando.
-> **When** template se expande a destination project's
-> `.claude/plugin.local.md`.
-> **Then** las 4 lineas commented (Sonnet+Haiku baseline) estan
-> presentes en el archivo final. Operador puede uncommentar con un
-> editor sin re-correr init.
-
-### 3.3 Acceptance criteria mapping (sec.S.12 v0.3.0)
+### 3.3 Acceptance criteria mapping
 
 | Criterion | Escenario | Test fixture |
 |-----------|-----------|--------------|
-| **E1**: 4 fields opcionales parseados | E1.1, E1.2, E1.3 | `tests/test_config_model_fields.py` |
-| **E3**: dispatch wiring + INV-0 | E3.1, E3.2, E3.3, E3.4 | `tests/test_dispatch_model_arg.py` |
-| **E4**: CLI override en `auto` | E4.1, E4.2, E4.3, E4.4, E4.5 | `tests/test_cli_model_override.py` |
-| **E5**: dependency_check models | E5.1, E5.2 | `tests/test_dependency_check_models.py` |
-| **E6**: ALLOWED_CLAUDE_MODEL_IDS immutable | E6.1, E6.2 | `tests/test_models_constants.py` |
-| **E7**: template baseline | E7.1, E7.2 | `tests/test_init_cmd.py` (existing, extended) |
+| **J4**: OSError handling | J4.1, J4.2 | `tests/test_auto_progress.py` (extended) |
+| **J5**: SKILL.md docs hotfix | J5.1 | `tests/test_skill_md.py` (extended) |
+| **J6**: audit preserves progress | J6.1, J6.2 | `tests/test_auto_progress.py` (extended) |
+| **J8**: pre-merge stream_prefix | J8.1, J8.2, J8.3 | `tests/test_pre_merge_streaming.py` (new) |
 
-### 3.4 Invariantes Feature E
+### 3.4 Invariantes J subset
 
-- **INV-0** (CLAUDE.md prevails): pinned model en CLAUDE.md gana
-  siempre. Cascade: CLAUDE.md > CLI `--model-override` > plugin.local.md
-  > None (inherit session). Stderr breadcrumb obligatorio cuando
-  CLAUDE.md pin fires.
-- **Default null = byte-identical argv a v0.2.x**. Escenario E3.1
-  pina; cualquier regression en argv shape rompe esta invariante.
-- **MAGI sub-agent models NO controlados**: el field
-  `magi_dispatch_model` afecta SOLO el outer dispatcher (proceso que
-  invoca `claude -p /magi:magi`). Los 3 sub-agentes
-  Melchior/Balthasar/Caspar pickan modelo internamente per MAGI plugin
-  contract. Documentado en CHANGELOG + SKILL.md operational impact.
-- **No-BREAKING**: ningun field requerido nuevo, ningun default flip,
-  ningun exit code nuevo. v0.2 plugin.local.md files load sin
-  migration.
+- INV-22 (sequential auto) preservado.
+- INV-26 (audit trail) extendido: audit writes preserve progress
+  field rather than drop.
+- v0.3.0 contract preservado: D4.3 absent-progress-tolerant
+  parser sigue funcionando; nueva preservation no rompe nada.
 
 ---
 
@@ -368,167 +355,127 @@ el Sonnet+Haiku baseline.
 
 ### 4.1 Scope
 
-Despues de que ambos subagents (D + E) reporten DONE + working tree
-limpio, ejecuta loop MAGI -> /receiving-code-review hasta exit
-criterion o cap.
+Identico a v0.3.0: MAGI -> /receiving-code-review loop hasta exit
+criterion (verdict `GO_WITH_CAVEATS` full + 0 CRITICAL + 0 WARNING
++ 0 Conditions for Approval), cap 5 iter.
 
-### 4.2 Escenarios
+### 4.2 Special v0.4.0 dogfood pattern
 
-**Escenario R1.1: exit cuando MAGI verdict GO_WITH_CAVEATS clean**
+**Recursive payoff oportunity**: este ciclo ships F itself. Si
+iter 1 final review hits MAGI synthesizer crash (mismo failure mode
+como v0.3.0 iter 2), el orchestrator puede invocar el recien
+shipado `_manual_synthesis_recovery` para rescatar el iter sin
+intervencion manual. Empirical validation de F durante su propio
+ship cycle.
 
-> **Given** iter 1 del final review loop. MAGI emite verdict
-> `GO_WITH_CAVEATS` full (3 agentes consensus, no degraded), 0
-> findings `[CRITICAL]`, 0 findings `[WARNING]`, 0 Conditions for
-> Approval pendientes.
-> **When** verdict parser evalua exit criterion.
-> **Then** loop sale con SHIP. Proceder a version bump 0.2.2 -> 0.3.0
-> + tag + push.
+**Escenario R2.1: F dogfood en iter 2+ rescues crashed synthesis**
 
-**Escenario R1.2: continue cuando hay CRITICAL findings**
+> **Given** v0.4.0 final review iter 2. F shipped en commit C
+> earlier in this cycle. MAGI synthesizer crashes igual que v0.3.0
+> (preamble-wrapped agent JSON).
+> **When** `magi_dispatch.dispatch_magi(...)` wrapper detecta
+> crash + ≥1 agent succeeded.
+> **Then** auto-invokes `_manual_synthesis_recovery(run_dir)`,
+> reads .raw.json files, parses tolerantly, emits
+> `manual-synthesis.json`, returns rescued verdict to orchestrator.
+> Iter completes WITHOUT manual intervention. F empirically
+> validated.
 
-> **Given** iter 1. MAGI emite `GO_WITH_CAVEATS` full pero con 2
-> findings `[CRITICAL]`.
-> **When** parser evalua exit.
-> **Then** NO exit. Route findings via `/receiving-code-review` (INV-29
-> gate). Findings aceptadas -> mini-cycle TDD per finding (test: ->
-> fix: -> refactor:) con `commits.create`. Findings rechazadas
-> documentadas + alimentadas como contexto en iter 2 MAGI invocation.
+**Escenario R2.2: F dogfood en iter 1 (pre-F-commit) requires manual recovery**
 
-**Escenario R1.3: continue cuando hay WARNING findings o Conditions**
+> **Given** v0.4.0 final review iter 1, F NOT YET committed (still
+> in subagent #1's working tree). MAGI crashes.
+> **When** orchestrator detects crash.
+> **Then** orchestrator manually applies v0.3.0 playbook (read
+> raw.json, manual synthesize, document). NORMAL behavior; subagent
+> #1's F commits land BEFORE final review starts (orchestrator
+> coordinates).
 
-> **Given** iter 1. MAGI emite `GO_WITH_CAVEATS` full, 0 CRITICAL, pero
-> 3 findings `[WARNING]` + 2 Conditions for Approval ("address before
-> merge").
-> **When** parser evalua exit.
-> **Then** NO exit. Mismo pipeline R1.2 (route via
-> /receiving-code-review + mini-cycle).
+### 4.3 Other escenarios (R1.x identical to v0.3.0 spec)
 
-**Escenario R1.4: continue cuando MAGI degraded (INV-28)**
-
-> **Given** iter 1. MAGI verdict `GO_WITH_CAVEATS` pero `degraded:
-> true` (solo 2 agentes retornaron output usable).
-> **When** parser evalua exit + INV-28 check.
-> **Then** verdict NO cuenta como exit signal (per INV-28). Iter
-> consumed. Re-invoke MAGI esperando full 3-agent consensus en iter 2.
-> Excepcion: si verdict degraded es `STRONG_NO_GO`, abort inmediato
-> (sec.S.10.3).
-
-**Escenario R1.5: cap 5 iter exhausted -> escalation_prompt**
-
-> **Given** iter 5 completed. Verdict aun no cumple exit criterion
-> (sigue con CRITICAL o WARNING findings).
-> **When** loop counter alcanza cap.
-> **Then** trigger `escalation_prompt.py` con context `pre-merge`,
-> findings clasificadas, root-cause inference. Operador elige (a)
-> override INV-0 con `--reason` mandatory, (b) retry +1 (extiende cap
-> a 6), (c) replan, (d) abort (default headless).
-
-**Escenario R1.6: rejected findings alimentan contexto MAGI iter+1**
-
-> **Given** iter 2 con MAGI emitiendo finding `[CRITICAL] race
-> condition in _stream_subprocess`. `/receiving-code-review` evalua y
-> rechaza con razon "false positive: subprocess module is GIL-protected
-> for line-buffered reads on POSIX, equivalent on Windows via
-> WaitForMultipleObjects".
-> **When** se construye prompt para MAGI iter 3.
-> **Then** prompt incluye sub-section "Previous findings rejected with
-> rationale: [iter 2] race condition in _stream_subprocess --
-> rejected: GIL-protected line reads on POSIX, equivalent Windows
-> guarantee. Do not re-raise unless new evidence." Reduce loops
-> esteriles.
-
-**Escenario R1.7: Loop 1 surrogate via make verify**
-
-> **Given** ambos subagents reportan DONE. `make verify` ejecuta:
-> pytest, ruff check, ruff format --check, mypy --strict.
-> **When** todos los 4 checks return exit 0.
-> **Then** Loop 1 (`/requesting-code-review`) considerado satisfied
-> per shortcut documentado v0.3.0 (SBTDD INV-9 interpretation: clean
-> mechanical lint = clean Loop 1 surrogate). Avanzar a Loop 2 MAGI.
-
-### 4.3 Acceptance criteria mapping
-
-| Criterion | Escenario | Notes |
-|-----------|-----------|-------|
-| Exit on GO_WITH_CAVEATS clean | R1.1 | No CRITICAL, no WARNING |
-| Continue on CRITICAL/WARNING | R1.2, R1.3 | Mini-cycle TDD per finding |
-| INV-28 degraded handling | R1.4 | Iter consumed, re-invoke |
-| Cap exhaustion -> escalation_prompt | R1.5 | Feature A v0.2.0 |
-| Sterile loop prevention | R1.6 | Rejected findings contextualizadas |
-| Loop 1 shortcut justification | R1.7 | Documented en CHANGELOG Process notes |
+R1.1-R1.7 from v0.3.0 spec apply identically:
+- R1.1 exit on GO_WITH_CAVEATS clean.
+- R1.2 continue on CRITICAL findings.
+- R1.3 continue on WARNING findings or Conditions.
+- R1.4 continue on degraded MAGI (INV-28).
+- R1.5 cap 5 iter -> escalation_prompt.
+- R1.6 rejected findings feed iter+1 context.
+- R1.7 Loop 1 surrogate via make verify.
 
 ### 4.4 Invariantes final review
 
-- INV-9 (Loop 2 requires Loop 1 clean): satisfied via `make verify`
-  surrogate; shortcut documentado en CHANGELOG.
-- INV-11 (safety valve): cap 5 iteraciones (mas alto que default 3
-  per Feature A precedent v0.2.0).
-- INV-28 (MAGI degraded): preservado.
-- INV-29 (/receiving-code-review gate): cada finding enrutada antes
-  de mini-cycle TDD.
+- INV-9, INV-11, INV-28, INV-29 preservados sin cambio.
+- F's auto-recovery operates within INV-28 scope (degraded =
+  recovered manual synthesis still counts as iteration consumed,
+  not exit signal).
 
 ---
 
 ## 5. Subagent layout + execution timeline
 
-### 5.1 Layout
+### 5.1 Layout (parallel — surfaces 100% disjoint)
 
 | Phase | Duracion proyectada | Subagents | Output |
 |-------|--------------------|-----------|--------|
-| 0. Spec base + brainstorming + spec-behavior.md | DONE | -- | esta seccion + spec-base |
-| 1. Subagent #1 (D) | ~2.5h | 1 paralelo | 4 atomic commits (Red/Green/Refactor + integ) |
-| 1. Subagent #2 (E) | ~2.5h | 1 paralelo | ~6 atomic commits |
+| 0. Spec + brainstorming + spec-behavior.md | DONE | -- | esta seccion |
+| 1. Subagent #1 (F) | ~2.5h | parallel | 4-6 atomic commits |
+| 1. Subagent #2 (J subset) | ~2-2.5h | parallel | 4-5 atomic commits |
 | 2. `make verify` post-merge | ~5min | -- | 4 checks clean |
-| 3. Final review loop MAGI -> /receiving-code-review | 1.5-3h | -- | 1-5 iter, exit en GO_WITH_CAVEATS clean |
-| 4. Version bump + tag + push | ~10min | -- | 0.2.2 -> 0.3.0 |
-| **Total wall time** | **~4-6h** | -- | -- |
+| 3. Final review loop MAGI -> /receiving-code-review | 1-2h | -- | 1-3 iter expected (lower than v0.3.0 because F itself rescues) |
+| 4. Version bump + tag + push | ~10min | -- | 0.3.0 -> 0.4.0 |
+| **Total wall time** | **~4-5h** | -- | -- |
 
 ### 5.2 Subagent dispatch contracts
 
-**Subagent #1 (D)**:
-- Input: spec-behavior.md sec.2 (Feature D scope + escenarios D1-D4).
-- Tools: Edit, Write, Bash (para `make verify`), Read, Grep, Glob.
-- TDD-Guard: ON (ciclo Red->Green->Refactor enforced).
-- Output: atomic commits con prefijos sec.M.5 + actualizacion
-  state-file por phase.
-- Files tocados: `skills/sbtdd/scripts/auto_cmd.py` +
-  `tests/test_auto_streaming.py` +
-  `tests/test_auto_progress.py`.
-- Done criterion: 4 deliverables D1-D4 implemented + tests passing
-  + `make verify` clean.
-
-**Subagent #2 (E)**:
-- Input: spec-behavior.md sec.3 (Feature E scope + escenarios E1-E7).
-- Tools: idem.
+**Subagent #1 (F)**:
+- Input: spec-behavior.md sec.2 (Feature F escenarios F43.1-F46.5).
+- Files tocados: `skills/sbtdd/scripts/magi_dispatch.py`,
+  `skills/sbtdd/scripts/models.py`, new
+  `tests/test_magi_hardening.py`, new
+  `tests/test_manual_synthesis_recovery.py`.
 - TDD-Guard: ON.
-- Files tocados: `skills/sbtdd/scripts/config.py` (extension),
-  `skills/sbtdd/scripts/superpowers_dispatch.py` (extension),
-  `skills/sbtdd/scripts/spec_review_dispatch.py` (extension),
-  `skills/sbtdd/scripts/magi_dispatch.py` (extension),
-  `skills/sbtdd/scripts/models.py` (extension),
-  `skills/sbtdd/scripts/dependency_check.py` (extension),
-  `skills/sbtdd/scripts/auto_cmd.py` (CLI override parser solo) +
-  `templates/plugin.local.md.template` (extension) + 6 nuevos test
-  modules.
-- Done criterion: 6 deliverables E1, E3-E7 implemented + tests
-  passing + `make verify` clean.
+- Forbidden: any J-subset file.
+- Done: 4 deliverables F43-F46 implemented + tests passing +
+  `make verify` clean.
 
-**Coordination**: ambos subagents tocan `auto_cmd.py` (D toca
-streaming logic; E toca CLI parser solo). Files-conflict riesgo
-mitigado: D escribe `_stream_subprocess` + `_update_progress`; E
-escribe `_parse_model_overrides` + `_apply_inv0_check`. Funciones
-disjuntas. Si conflicto en commit, subagent #2 espera + rebases.
+**Subagent #2 (J subset)**:
+- Input: spec-behavior.md sec.3 (J4, J5, J6, J8 escenarios).
+- Files tocados: `skills/sbtdd/scripts/auto_cmd.py` (J4 OSError
+  wrap + J6 audit progress preservation), `skills/sbtdd/SKILL.md`
+  (J5 docs hotfix), `skills/sbtdd/scripts/pre_merge_cmd.py` (J8
+  stream_prefix wiring), tests/test_auto_progress.py (extended for
+  J4/J6), tests/test_skill_md.py (extended for J5), new
+  tests/test_pre_merge_streaming.py (J8).
+- TDD-Guard: ON.
+- Forbidden: `skills/sbtdd/scripts/magi_dispatch.py`,
+  `skills/sbtdd/scripts/models.py`.
+- Done: 4 deliverables implemented + tests passing + `make verify`
+  clean.
 
-### 5.3 Final review loop dispatch
+### 5.3 Coordination
 
-**Loop driver**: orquestador session (no subagent), invoca:
-1. `/magi:magi revisa v0.3.0 diff` directamente (no via
-   `pre_merge_cmd` -- lightweight pattern, skip Loop 1 formal).
-2. Parsea verdict + findings.
-3. Si exit cumple -> ship. Si no, dispatcha subagent #3 con findings
-   filtradas (post-receiving-code-review).
-4. Subagent #3 corre mini-cycle TDD per finding.
-5. Loop hasta cap o exit.
+**Surfaces 100% disjoint**: F touches `magi_dispatch.py` + `models.py`
+(no auto_cmd, no pre_merge); J touches `auto_cmd.py` + `pre_merge_cmd.py`
++ `SKILL.md` (no magi_dispatch, no models). Zero risk de auto_cmd.py
+merge conflict como v0.3.0.
+
+Both subagents commit to `main` (lightweight pattern, no feature
+branch). Orchestrator coordina dispatch parallel, espera DONE de
+ambos, then drives final review.
+
+### 5.4 Final review loop dispatch (orchestrator)
+
+Mismo pattern v0.3.0:
+1. `make verify` clean (Loop 1 surrogate).
+2. Compute diff range (HEAD_pre_v040..HEAD).
+3. Iter 1: invoke `/magi:magi` con prompt referencing spec + plan +
+   diff. Si synthesizer crashes AND F shipped en working tree -> use
+   F's `_manual_synthesis_recovery` (escenario R2.1). Si no -> v0.3.0
+   playbook manual.
+4. Parse verdict + findings. Eval exit criterion.
+5. Si NO exit: route findings via /receiving-code-review (INV-29) +
+   mini-cycle TDD per accepted finding. Re-invoke MAGI iter+1.
+6. Cap 5 iter; exhausted -> escalation_prompt.
 
 ---
 
@@ -536,95 +483,116 @@ disjuntas. Si conflicto en commit, subagent #2 espera + rebases.
 
 ### 6.1 Bump
 
-`plugin.json` + `marketplace.json`: 0.2.2 -> 0.3.0 (MINOR).
+`plugin.json` + `marketplace.json`: 0.3.0 -> 0.4.0 (MINOR).
 
-Justificacion MINOR (no MAJOR): aditivo puro, no BREAKING, default
-null preserva v0.2.x behavior byte-identical.
+Justificacion MINOR (no MAJOR): aditivo puro. F adds new helpers
+(no public-API breakage, dispatch wrapper backward-compat). J subset
+extends existing surfaces (no behavior flip). retried_agents field
+optional (default `()`). marker-based discovery has fallback to
+path-based. Tolerant parser is superset of strict parser.
 
-### 6.2 CHANGELOG.md `[0.3.0]` sections
+### 6.2 CHANGELOG.md `[0.4.0]` sections
 
-- **Added** -- Features D + E + 50-70 nuevos tests.
-- **Changed** -- (vacio para v0.3.0; ningun behavior change).
-- **Process notes** -- Loop 1 surrogate via `make verify`
-  documentado (justificacion: lightweight pattern v0.3.0 scope).
-- **Deferred a v1.0.0** -- D5, E2, F, G, H.
+- **Added** -- F (4 deliverables: marker discovery, retried_agents
+  field, tolerant parser, manual synthesis recovery) + J subset
+  (4 deliverables: OSError handling, SKILL.md docs hotfix, audit
+  progress preservation, pre-merge streaming).
+- **Changed** -- (vacio o minor: pre-merge dispatch sites now thread
+  stream_prefix when invoked via auto path).
+- **Process notes** -- F's recursive payoff: shipped F empirically
+  validated during own final review loop via R2.1 dogfood. Loop 1
+  surrogate via `make verify` per lightweight pattern.
+- **Deferred (rolled to v1.0.0)** -- G cross-check, H Group B
+  re-eval + INV-31 default, I schema_version, J1 D5 status --watch,
+  J2 ResolvedModels, J3 per-stream timeout, J7 origin ambiguity.
 
 ### 6.3 README + SKILL.md
 
-- README: agregar seccion "Cost optimization" con matriz Sonnet+Haiku
-  baseline vs full Opus.
-- SKILL.md: nueva seccion `## v0.3 flags` mencionando
-  `--model-override`.
-- CLAUDE.md (proyecto): agregar `## v0.3.0 release notes` apuntando
-  a CHANGELOG entry.
+- README: v0.4.0 docs section if user-facing changes (mostly
+  internal infra; possibly add a "MAGI reliability" mini-section
+  documenting Feature F user-facing benefit).
+- SKILL.md: J5 docs hotfix (line 78 exit code correction). Possibly
+  add `### v0.4 notes` section documenting F's auto-recovery.
+- CLAUDE.md (proyecto): update con v0.4.0 release notes pointer.
 
 ---
 
-## 7. Risk register v0.3.0
+## 7. Risk register v0.4.0
 
-- **R1**. Subagents paralelos en `auto_cmd.py` -- mitigacion:
-  funciones disjuntas (D toca _stream_subprocess + _update_progress;
-  E toca _parse_model_overrides solo); rebase no-fast-forward si
-  commits clash; subagent #2 ultimo.
-- **R2**. Streaming overhead > NF13 5% -- mitigacion: benchmark con
-  mock `auto_cmd` corriendo 10 fake tasks; si excede, switch a
-  `select.select` non-blocking I/O.
-- **R3**. INV-0 detection en CLAUDE.md scan -- mitigacion: regex
-  contra patrones explicitos (`use claude-X-Y for`, `pin claude-X-Y`,
-  etc.); false-positive rate ~0; documentar regex en `models.py`.
-- **R4**. Final review loop MAGI 5-iter exhaustion -- mitigacion:
-  escalation_prompt v0.2.0 maduro + INV-0 override precedent
-  disponible.
-- **R5**. ALLOWED_CLAUDE_MODEL_IDS staleness (Anthropic shipea
-  family nueva durante v0.3 cycle) -- mitigacion: hard-fail at
-  runtime con error message accionable; bump tuple en `models.py`
-  como hotfix v0.3.1.
+- **R1**. Tolerant agent JSON parsing introduces false-positive
+  recovery -- mitigation: regex requires balanced `{...}` AND valid
+  JSON-parse AND `agent` field in known set AND `verdict` in
+  VERDICT_RANK; manual synthesis report flags recovery clearly with
+  `recovered: true` flag.
+- **R2**. Marker-based MAGI discovery breaks if MAGI changes marker
+  schema -- mitigation: SBTDD tolera ausencia de campos opcionales en
+  marker; mantener test contra MAGI versions cacheadas; fallback a
+  path-based discovery preserved as compat.
+- **R3**. Auto-recovery silently masks legit MAGI failures --
+  mitigation: stderr breadcrumb prominent + `recovered: true` flag
+  + `--no-magi-recovery` opt-out for strict mode.
+- **R4**. Subagent #1 + #2 parallel timing variance: if subagent #1
+  finishes much later than #2, the dogfood pattern (R2.1) for final
+  review is delayed -- mitigation: orchestrator waits for both DONE
+  before final review starts; F lands BEFORE iter 1 review.
+- **R5**. Iter 1 final review fails because F not yet "in production"
+  during subagent #1 work -- mitigation: orchestrator coordina dispatch;
+  subagents both DONE before final review; F's commits LANDED before
+  iter 1 invocation.
 
 ---
 
-## 8. Acceptance criteria final v0.3.0
+## 8. Acceptance criteria final v0.4.0
 
-v0.3.0 ship-ready cuando:
+v0.4.0 ship-ready cuando:
 
-- [ ] Feature D 4 deliverables implementados + escenarios D1-D4 pass.
-- [ ] Feature E 6 deliverables implementados + escenarios E1-E7 pass.
+- [ ] Feature F 4 deliverables implementados + escenarios F43-F46
+      pass.
+- [ ] J subset 4 deliverables implementados + escenarios J4, J5, J6,
+      J8 pass.
 - [ ] Final review loop alcanzado exit en <= 5 iter con MAGI verdict
       `GO_WITH_CAVEATS` full + 0 CRITICAL + 0 WARNING + 0 Conditions
       pendientes.
-- [ ] `make verify` clean (pytest + ruff + mypy --strict).
-- [ ] Tests baseline 735 preservados + 50-70 nuevos = 785-805.
-- [ ] CHANGELOG `[0.3.0]` entry escrita.
-- [ ] Version bump 0.2.2 -> 0.3.0 sync `plugin.json` +
+- [ ] `make verify` clean (pytest + ruff + mypy --strict, runtime
+      <= 90s).
+- [ ] Tests baseline 789 preservados + ~30-40 nuevos = 819-829.
+- [ ] CHANGELOG `[0.4.0]` entry escrita.
+- [ ] Version bump 0.3.0 -> 0.4.0 sync `plugin.json` +
       `marketplace.json`.
-- [ ] Tag `v0.3.0` creado + push `origin/main` + push tag.
-- [ ] README + SKILL.md actualizados con cost-optimization seccion.
-- [ ] Memory `project_v030_shipped.md` written + MEMORY.md index
+- [ ] Tag `v0.4.0` creado + push origin/main + push tag (con
+      authorization explicita user).
+- [ ] README + SKILL.md (J5 hotfix mandatory, otros opcionales).
+- [ ] Memory `project_v040_shipped.md` written + MEMORY.md index
       updated.
+- [ ] R2.1 dogfood empirically validated (or documented why not
+      observed in this cycle's iter sequence).
 
 ---
 
 ## 9. Referencias
 
-- Spec base v1.0.0 raw input: `sbtdd/spec-behavior-base.md` (este
-  ciclo cubre subset D+E del LOCKED v1.0.0 backlog).
-- Contrato autoritativo v0.1+v0.2 frozen:
+- Spec base post-v0.3.0: `sbtdd/spec-behavior-base.md` (v1.0.0
+  raw input; v0.4.0 cubre F + J subset).
+- Contrato autoritativo v0.1+v0.2+v0.3 frozen:
   `sbtdd/sbtdd-workflow-plugin-spec-base.md`.
-- Brainstorming session decisions log:
-  - (b) Split: v0.3.0 = D+E, v1.0.0 = F+G+H.
-  - (a) Lightweight TDD-Guard + subagents + final review pattern.
-  - (2) Balanced trim (defer D5, E2).
-  - Final review = MAGI -> /receiving-code-review loop, exit on
-    GO_WITH_CAVEATS clean, cap 5 iter (user directive 2026-04-25).
-- v1.0.0 LOCKED memory files (deferred items):
-  - `project_v100_progress_streaming.md` (D5 deferred portion).
-  - `project_v100_per_skill_model_flag.md` (E2 deferred portion).
-  - `project_v100_magi_dispatch_hardening.md` (F).
-  - `project_v100_magi_cross_check.md` (G).
+- Brainstorming session decisions log v0.4.0:
+  - (b) Split: v0.4.0 = F + small J, v1.0.0 = G + H + I + remaining.
+  - (2) Balanced J subset: J4 + J5 + J6 + J8.
+  - Lightweight + 2 parallel subagents (surfaces disjoint).
+  - Final review = MAGI -> /receiving-code-review loop con dogfood
+    rescue option (escenario R2.1).
+- v0.3.0 ship + empirical findings:
+  - `project_v030_shipped.md` (v0.3.0 ship record).
+  - `.claude/magi-runs/v030-iter1/magi-report.json` (iter 1 findings).
+  - `.claude/magi-runs/v030-iter2/{melchior,balthasar,caspar}.raw.json`
+    (synthesizer crash, manual recovery rationale).
 - Historical precedent:
-  - v0.2.1 lightweight pattern (commits 9622a55..cfb39ee, ~3h wall
-    time, 4 LOCKED items).
-  - v0.2.0 INV-0 override (commit 5d7bfc4, MAGI 4-iter overrun).
-  - v0.2.2 docs hotfix (commit 337aba2).
+  - v0.2.1 lightweight pattern (~3h, 4 LOCKED items).
+  - v0.3.0 lightweight + sequential 2 subagents + 2-iter MAGI
+    Loop 2 (~5h, 10 deliverables).
+- v1.0.0 deferred items roadmap:
+  - `project_v100_magi_cross_check.md` (Feature G).
+  - Group B options re-evaluation (Feature H).
+  - schema_version + migration tool (Feature I).
 - Branch: trabajo en `main` directamente (lightweight pattern, no
-  feature branch necesario per scope reducido). Si MAGI Loop 2 spawnea
-  scope-creep mid-loop, considerar branch v0_3_0 retroactivo.
+  feature branch).
