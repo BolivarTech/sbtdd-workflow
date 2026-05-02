@@ -1413,7 +1413,7 @@ Expected: bare-except swallows ValueError → no exception raised → test fails
 
 - [ ] **Step 3: Narrow except in `_wrap_with_heartbeat_if_auto`**
 
-Locate the function in `pre_merge_cmd.py`. Replace `except Exception` (or bare `except`) with `except (AttributeError, RuntimeError)`:
+Locate the function in `pre_merge_cmd.py`. Replace `except Exception` (or bare `except`) with `except (AttributeError, RuntimeError, LookupError)`:
 
 ```python
 def _wrap_with_heartbeat_if_auto(
@@ -1423,8 +1423,12 @@ def _wrap_with_heartbeat_if_auto(
     try:
         ctx = get_current_progress()
         is_auto_mode = ctx.phase != 0
-    except (AttributeError, RuntimeError):
-        # Per Loop 2 iter 4 W4 fix: narrow except to introspection failures only.
+    except (AttributeError, RuntimeError, LookupError):
+        # Per Loop 2 iter 2 W4 fix: narrow except to introspection failures only.
+        # AttributeError covers None/duck-typing misses, RuntimeError covers
+        # heartbeat-state breakage, LookupError covers ContextVar.get() with
+        # no default (caspar iter 2 WARNING — future-proofing for any refactor
+        # that swaps the module-level singleton for a ContextVar).
         # ValueError (fail-loud signal from _dispatch_with_heartbeat) MUST propagate.
         is_auto_mode = False
 
