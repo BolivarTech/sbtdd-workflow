@@ -21,11 +21,12 @@ loop breaker preserved from iter-1.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 import escalation_prompt
 import magi_dispatch
@@ -795,6 +796,317 @@ def _loop2(
     return _handle_safety_valve_exhaustion(
         root, cfg, verdict_history, last_accepted, last_rejected, ns
     )
+
+
+#: Annotation/diagnostic fields stripped from MAGI findings before re-emitting
+#: them as ``findings`` in the next MAGI iter payload (caspar Loop 2 iter 4 W4).
+#: The "Prior triage context" block (separate from ``findings``) is the
+#: canonical record of cross-check + INV-29 decisions; the working ``findings``
+#: set MUST be normalized back to the un-annotated form so annotations don't
+#: accumulate unbounded across iters.
+_CROSS_CHECK_ANNOTATION_FIELDS: tuple[str, ...] = (
+    "cross_check_decision",
+    "cross_check_rationale",
+    "cross_check_recommended_severity",
+    "_dispatch_failure",
+    "_failure_reason",
+)
+
+
+def _normalize_findings_for_carry_forward(
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Strip cross-check annotation fields before re-emitting to next MAGI iter.
+
+    Per caspar Loop 2 iter 4 W4 fix: annotation fields
+    (``cross_check_decision``, ``cross_check_rationale``,
+    ``cross_check_recommended_severity``) and dispatch diagnostic flags
+    (``_dispatch_failure``, ``_failure_reason``) accumulate unbounded
+    across MAGI iters if not stripped. The "Prior triage context" block
+    (separate from ``findings``) is the canonical record; the working
+    ``findings`` set MUST be normalized back to the un-annotated form
+    for the next iter.
+
+    Args:
+        findings: Annotated findings list (from a prior cross-check pass).
+
+    Returns:
+        New list of finding dicts with annotation fields removed; original
+        agent/severity/title/detail fields preserved.
+    """
+    return [
+        {k: v for k, v in f.items() if k not in _CROSS_CHECK_ANNOTATION_FIELDS} for f in findings
+    ]
+
+
+def _build_cross_check_prompt(
+    diff: str,
+    verdict: str,
+    findings: list[dict[str, Any]],
+) -> str:
+    """Build the meta-review prompt for ``/requesting-code-review``.
+
+    The prompt asks the reviewer to evaluate each MAGI finding for
+    technical soundness given the spec + plan + diff context. Output
+    format: structured JSON with one decision per finding.
+
+    Args:
+        diff: Cumulative diff under MAGI Loop 2 review.
+        verdict: MAGI consensus verdict string (e.g. ``"GO_WITH_CAVEATS"``).
+        findings: List of MAGI finding dicts.
+
+    Returns:
+        Prompt string suitable for ``superpowers_dispatch.invoke_requesting_code_review``.
+    """
+    findings_text = "\n".join(
+        f"- [{f.get('severity', '?')}] ({f.get('agent', '?')}): "
+        f"{f.get('title', '')}: {f.get('detail', '')}"
+        for f in findings
+    )
+    return (
+        f"Evaluate if the following MAGI Loop 2 findings are technically "
+        f"sound or false positives given the spec + plan + diff context.\n\n"
+        f"MAGI verdict: {verdict}\n"
+        f"MAGI findings:\n{findings_text}\n\n"
+        f"For each finding output JSON: "
+        f'{{"decisions": [{{"original_index": N, '
+        f'"decision": "KEEP"|"DOWNGRADE"|"REJECT", '
+        f'"rationale": "...", '
+        f'"recommended_severity": "WARNING"|"INFO"|null}}, ...]}}'
+    )
+
+
+def _dispatch_requesting_code_review(
+    *,
+    diff: str,
+    prompt: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Dispatch ``/requesting-code-review`` skill with cross-check meta-prompt.
+
+    Stub implementation returning ``NotImplementedError``; the real
+    superpowers wiring lands in S1-4. Tests monkeypatch this function to
+    inject canned review decisions.
+
+    Args:
+        diff: Cumulative diff context (currently unused by the stub but
+            forwarded by ``_loop2_cross_check``).
+        prompt: Meta-review prompt built by :func:`_build_cross_check_prompt`.
+        **kwargs: Reserved for future signature additions.
+
+    Returns:
+        Dict with ``decisions`` key (list of per-finding decision dicts).
+
+    Raises:
+        NotImplementedError: Real wiring lands in S1-4.
+    """
+    raise NotImplementedError(
+        "Real /requesting-code-review wiring lands in S1-4; tests must "
+        "monkeypatch _dispatch_requesting_code_review"
+    )
+
+
+def _apply_cross_check_decisions(
+    findings: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Annotate findings with cross-check decisions; never remove (CRITICAL #1+#4).
+
+    Per spec sec.2.1 redesign: cross-check is annotation-only. The returned
+    list has the SAME LENGTH as ``findings``. INV-29 (operator +
+    ``/receiving-code-review``) is the only stage that may filter findings.
+
+    Each annotated finding gains the following fields:
+    - ``cross_check_decision`` (KEEP | DOWNGRADE | REJECT)
+    - ``cross_check_rationale`` (review text)
+    - ``cross_check_recommended_severity`` (only set when DOWNGRADE; the
+      original ``severity`` field is preserved unchanged; KEEP/REJECT
+      surface ``None``).
+
+    Args:
+        findings: Original MAGI finding dicts.
+        decisions: Per-finding decision dicts with ``original_index`` and
+            ``decision`` keys (rationale + recommended_severity optional).
+
+    Returns:
+        Length-preserved list of annotated finding dicts.
+    """
+    decision_by_index = {d["original_index"]: d for d in decisions}
+    severity_downgrade = {"CRITICAL": "WARNING", "WARNING": "INFO"}
+    annotated: list[dict[str, Any]] = []
+    for idx, finding in enumerate(findings):
+        decision = decision_by_index.get(idx, {"decision": "KEEP"})
+        action = decision.get("decision", "KEEP")
+        rationale = decision.get("rationale", "")
+        recommended_severity: str | None = None
+        if action == "DOWNGRADE":
+            recommended_severity = decision.get(
+                "recommended_severity",
+                severity_downgrade.get(finding.get("severity", ""), "INFO"),
+            )
+        annotated.append(
+            {
+                **finding,
+                "cross_check_decision": action,
+                "cross_check_rationale": rationale,
+                "cross_check_recommended_severity": recommended_severity,
+            }
+        )
+    return annotated
+
+
+def _write_cross_check_audit(
+    audit_dir: Path,
+    *,
+    iter_n: int,
+    verdict: str,
+    original_findings: list[dict[str, Any]],
+    decisions: list[dict[str, Any]] | None = None,
+    annotated_findings: list[dict[str, Any]] | None = None,
+    cross_check_failed: bool = False,
+    failure_reason: str | None = None,
+    json_parse_failure: str | None = None,
+) -> Path:
+    """Write cross-check audit artifact JSON atomically (spec sec.2.1 G6 schema).
+
+    Atomic write: serialize to ``<path>.tmp.<pid>.<tid>``, then ``Path.replace``
+    to final name. Prevents partial-write corruption if process crashes
+    mid-write (per WARNING melchior — atomicization).
+
+    Per melchior W iter 3: ``cross_check_failed`` is reserved for full-
+    dispatch failures (subprocess error / unhandled exception);
+    ``json_parse_failure`` surfaces as a separate ``dispatch_failure`` block
+    so post-mortem can distinguish the two modes.
+
+    Args:
+        audit_dir: Directory for cross-check audit artifacts (created if absent).
+        iter_n: Current MAGI Loop 2 iteration number.
+        verdict: MAGI consensus verdict string.
+        original_findings: Verbatim MAGI findings (always preserved).
+        decisions: Per-finding cross-check decisions (None when skipped/failed).
+        annotated_findings: Annotated findings (defaults to original_findings).
+        cross_check_failed: True when the dispatch itself raised.
+        failure_reason: Free-form failure description (only when ``cross_check_failed``).
+        json_parse_failure: Reason string from JSON parse failure mode.
+
+    Returns:
+        Path to the written audit artifact.
+    """
+    import os
+    import threading
+
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    audit_path = audit_dir / f"iter{iter_n}-{timestamp}.json"
+    audit_data: dict[str, Any] = {
+        "iter": iter_n,
+        "timestamp": timestamp,
+        "magi_verdict": verdict,
+        "original_findings": original_findings,
+        "cross_check_decisions": decisions or [],
+        "annotated_findings": (
+            annotated_findings if annotated_findings is not None else original_findings
+        ),
+    }
+    if cross_check_failed:
+        audit_data["cross_check_failed"] = True
+        if failure_reason:
+            audit_data["failure_reason"] = failure_reason
+    if json_parse_failure is not None:
+        audit_data["dispatch_failure"] = {
+            "kind": "json_parse_error",
+            "reason": json_parse_failure,
+        }
+    tmp_path = audit_path.parent / (audit_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}")
+    tmp_path.write_text(json.dumps(audit_data, indent=2, default=str), encoding="utf-8")
+    tmp_path.replace(audit_path)  # atomic rename
+    return audit_path
+
+
+def _loop2_cross_check(
+    *,
+    diff: str,
+    verdict: str,
+    findings: list[dict[str, Any]],
+    iter_n: int,
+    config: Any,
+    audit_dir: Path,
+) -> list[dict[str, Any]]:
+    """Cross-check MAGI Loop 2 findings via /requesting-code-review meta-review.
+
+    Per spec sec.2.1 Feature G + INV-35: annotate MAGI findings with
+    KEEP/DOWNGRADE/REJECT decisions BEFORE routing to INV-29 triage. Opt-
+    out via ``config.magi_cross_check=False`` (default).
+
+    Annotation-only redesign (CRITICAL #1+#4): the returned list has the
+    SAME LENGTH as ``findings``; each surfaced finding is augmented with
+    ``cross_check_decision``, ``cross_check_rationale``, and
+    ``cross_check_recommended_severity`` fields. INV-29 (operator +
+    ``/receiving-code-review``) is the only stage that may filter
+    findings — silent drops here would hide real CRITICALs when the
+    review is wrong.
+
+    G4 stderr breadcrumb (spec sec.2.1 impl note): when opted out, emit
+    a one-time stderr breadcrumb at Loop 2 entry so operators see the
+    cross-check is OFF rather than silently inactive.
+
+    Args:
+        diff: Full diff under review (string).
+        verdict: MAGI consensus verdict (e.g. ``"GO_WITH_CAVEATS"``).
+        findings: List of MAGI findings dicts.
+        iter_n: Current MAGI Loop 2 iteration number.
+        config: PluginConfig (or duck-typed) with ``magi_cross_check`` field.
+        audit_dir: Directory for cross-check audit artifacts.
+
+    Returns:
+        Annotated findings list (same length as input). On dispatch failure,
+        returns the original findings unchanged (graceful fallback per G5).
+    """
+    if not config.magi_cross_check:
+        return findings
+    prompt = _build_cross_check_prompt(diff, verdict, findings)
+    try:
+        review_output = _dispatch_requesting_code_review(diff=diff, prompt=prompt)
+    except Exception as exc:  # noqa: BLE001 - graceful fallback per G5
+        sys.stderr.write(
+            f"[sbtdd magi-cross-check] failed (will fall back to MAGI findings as-is): {exc}\n"
+        )
+        sys.stderr.flush()
+        _write_cross_check_audit(
+            audit_dir,
+            iter_n=iter_n,
+            verdict=verdict,
+            original_findings=findings,
+            cross_check_failed=True,
+            failure_reason=str(exc),
+        )
+        return findings
+
+    # Per melchior W iter 3: surface JSON-parse-failure as a distinct audit
+    # field, separate from cross_check_failed (full-dispatch-fail).
+    if review_output.get("_dispatch_failure") == "json_parse_error":
+        _write_cross_check_audit(
+            audit_dir,
+            iter_n=iter_n,
+            verdict=verdict,
+            original_findings=findings,
+            decisions=[],
+            annotated_findings=findings,
+            json_parse_failure=str(review_output.get("_failure_reason", "")),
+        )
+        return findings  # original findings unchanged
+
+    decisions = review_output.get("decisions", [])
+    annotated = _apply_cross_check_decisions(findings, decisions)
+    _write_cross_check_audit(
+        audit_dir,
+        iter_n=iter_n,
+        verdict=verdict,
+        original_findings=findings,
+        decisions=decisions,
+        annotated_findings=annotated,
+    )
+    return annotated
 
 
 def main(argv: list[str] | None = None) -> int:
