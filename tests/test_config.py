@@ -423,7 +423,12 @@ auto_heartbeat_interval_seconds: 15
 
 
 def test_allowlist_empty_string_rejected(tmp_path):
-    """Empty string in allowlist would also defeat timeout — rejected."""
+    """Empty string in allowlist would also defeat timeout — rejected.
+
+    Loop 2 W12: post-W12 the empty-string path raises with the
+    "whitespace-only or empty" message (the W12 hardening unified empty
+    + whitespace-only handling).
+    """
     base = """---
 stack: python
 author: Julian Bolivar
@@ -448,7 +453,7 @@ auto_heartbeat_interval_seconds: 15
 
     config_path = tmp_path / "p.md"
     config_path.write_text(base + 'auto_no_timeout_dispatch_labels: ["", "magi-*"]\n---\n')
-    with pytest.raises(ValidationError, match=r"bare '\*' rejected"):
+    with pytest.raises(ValidationError, match=r"(whitespace|bare).*rejected"):
         load_plugin_local(config_path)
 
 
@@ -502,9 +507,7 @@ def test_allowlist_rejects_unicode_asterisk(tmp_path):
 
     config_path = tmp_path / "p.md"
     # ＊ = fullwidth asterisk, a Unicode lookalike for '*'.
-    config_path.write_text(
-        _W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["＊"]\n---\n'
-    )
+    config_path.write_text(_W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["＊"]\n---\n')
     with pytest.raises(ValidationError, match=r"(unicode|lookalike|bare).*rejected"):
         load_plugin_local(config_path)
 

@@ -230,16 +230,61 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
             f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
             f"= {5 * interval}; got {timeout}"
         )
-    # W11 (sec.11.1): bare '*' or empty string would defeat the timeout
-    # entirely (every label matches). Reject explicitly so misconfiguration
-    # is loud at config load rather than silently suppressing all timeouts.
+    # W11 (sec.11.1) + Loop 2 W12 hardening: reject any allowlist label
+    # that would defeat the timeout. The allowlist is meant for narrow
+    # well-defined patterns (e.g. ``magi-*``); permissive patterns let
+    # arbitrary dispatches bypass the timeout silently.
+    #
+    # Pre-W12: only exact ``'*'`` and ``''`` rejected. Post-W12 also
+    # rejects:
+    #
+    # - whitespace-only labels (``'  '``) -- after strip these become
+    #   empty strings.
+    # - Unicode lookalikes (``'＊'`` U+FF0A FULLWIDTH ASTERISK,
+    #   ``'？'`` U+FF1F FULLWIDTH QUESTION MARK) -- normalized via
+    #   NFKC before validation so the lookalike maps to the ASCII form.
+    # - multi-wildcard / wildcard-only patterns (``'**'``, ``'*?'``,
+    #   ``'?*'``, ``'?'``) -- match too broadly to be safe in a
+    #   timeout-allowlist context. Specifically: any label whose
+    #   stripped+NFKC form consists exclusively of fnmatch wildcards
+    #   ``*?[]`` is rejected.
+    import unicodedata
+
     labels = data["auto_no_timeout_dispatch_labels"]
+    _wildcard_only_chars = set("*?[]")
     if isinstance(labels, (list, tuple)):
         for label in labels:
-            if label == "*" or label == "":
+            if not isinstance(label, str):
                 raise ValidationError(
-                    "auto_no_timeout_dispatch_labels: bare '*' rejected "
-                    "(would defeat timeout); use specific glob like 'magi-*'"
+                    f"auto_no_timeout_dispatch_labels: non-string label "
+                    f"{label!r} rejected (must be str)"
+                )
+            # Strip + NFKC-normalize to defeat whitespace-only and
+            # Unicode-lookalike bypasses.
+            normalized = unicodedata.normalize("NFKC", label).strip()
+            if normalized == "":
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: whitespace-only or empty "
+                    f"label {label!r} rejected (would match nothing or "
+                    f"everything depending on downstream semantics); use "
+                    f"specific glob like 'magi-*'"
+                )
+            if normalized == "*":
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: bare '*' rejected "
+                    f"(would defeat timeout); got {label!r}; use specific "
+                    f"glob like 'magi-*'"
+                )
+            # Multi-wildcard / wildcard-only check: every char is a
+            # fnmatch wildcard. ``'*'`` already handled above; this
+            # covers ``'**'``, ``'*?'``, ``'?*'``, ``'?'``,
+            # ``'[abc]'`` (bracket-only), etc.
+            if normalized and all(c in _wildcard_only_chars for c in normalized):
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: wildcard-only label "
+                    f"{label!r} (normalized: {normalized!r}) rejected "
+                    f"(matches too broadly for a timeout allowlist); "
+                    f"use specific glob like 'magi-*'"
                 )
     try:
         return PluginConfig(**data)
