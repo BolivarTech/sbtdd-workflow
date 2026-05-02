@@ -21,6 +21,7 @@ loop breaker preserved from iter-1.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import re
 import sys
@@ -646,6 +647,11 @@ def _loop2(
         raise ValidationError(
             f"--magi-threshold can only elevate; {threshold} < config {cfg.magi_threshold}"
         )
+    # v1.0.0 C1 wiring (O-2 Loop 1 review): emit the G4 cross-check-disabled
+    # stderr breadcrumb once per Loop 2 invocation so operators see the
+    # sub-phase is OFF rather than silently inactive. No-op (early return)
+    # when ``cfg.magi_cross_check`` is True.
+    _emit_cross_check_disabled_breadcrumb_once(cfg)
     # MAGI Loop 2 D iter 1 Caspar: unlink any stale ``magi-conditions.md``
     # from a previous exit-8 run before starting this loop. If the gate
     # later reaches GO we leave no spurious artifact behind; if it exits
@@ -701,6 +707,32 @@ def _loop2(
             phase=3,
             dispatch_label=f"magi-loop2-iter{iteration}",
         )
+        # v1.0.0 C1 wiring (O-2 Loop 1 review CRITICAL #1): when
+        # ``cfg.magi_cross_check`` is True, route MAGI findings through the
+        # ``/requesting-code-review`` meta-reviewer (Feature G, INV-35).
+        # Annotation-only redesign per CRITICAL #1+#4: cross-check NEVER
+        # removes findings -- it tags each with ``cross_check_decision``
+        # (KEEP|DOWNGRADE|REJECT) + rationale. INV-29 (operator +
+        # ``/receiving-code-review``) is the only stage that may filter.
+        # Reconstruct the verdict via ``dataclasses.replace`` so downstream
+        # consumers (``_write_magi_findings_file``, audit emit) see the
+        # annotated set without breaking the frozen-dataclass contract.
+        # ``getattr`` default keeps backward-compat with pre-v1.0.0 duck-typed
+        # shadow configs (e.g. _ShadowCfg from auto_cmd) that may lack the
+        # field; absence is treated as opted-out.
+        if getattr(cfg, "magi_cross_check", False):
+            audit_dir = root / ".claude" / "magi-cross-check"
+            annotated_findings = _loop2_cross_check(
+                diff="",  # diff context wired in by reviewer's runtime
+                verdict=verdict.verdict,
+                findings=[dict(f) for f in (verdict.findings or ())],
+                iter_n=iteration,
+                config=cfg,
+                audit_dir=audit_dir,
+            )
+            verdict = dataclasses.replace(
+                verdict, findings=tuple(annotated_findings)
+            )
         verdict_history.append(verdict)
         # v1.0.0 F44.3 (S1-7): persist retried_agents telemetry to
         # auto-run.json (iff present, i.e. running under auto). Interactive
@@ -1311,9 +1343,11 @@ def _emit_cross_check_disabled_breadcrumb_once(config: Any) -> None:
 
     Args:
         config: PluginConfig (or duck-typed) with ``magi_cross_check`` field.
+            Pre-v1.0.0 duck-typed shadow configs (e.g. ``SimpleNamespace``)
+            without the field are treated as opted-out (default False).
     """
     global _cross_check_disabled_breadcrumb_emitted
-    if config.magi_cross_check:
+    if getattr(config, "magi_cross_check", False):
         return
     if _cross_check_disabled_breadcrumb_emitted:
         return
