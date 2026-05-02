@@ -1500,6 +1500,56 @@ def test_j2_3_resolved_models_is_frozen():
         rm.implementer = "z"  # type: ignore[misc]
 
 
+def test_w8_atomic_replace_tmp_filename_includes_thread_id(tmp_path, monkeypatch):
+    """W8 (caspar iter 4): tmp filename in atomic-rename pattern includes
+    threading.get_ident() so concurrent threads don't collide on
+    ``.tmp.{pid}`` (Windows PermissionError flake).
+
+    Spies on Path.write_text + os.replace to capture the tmp filenames
+    used by ``_update_progress`` from N=4 worker threads. Each tmp path
+    must include both the PID and a unique thread-id segment.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    captured_tmp_names: list[str] = []
+    real_write_text = Path.write_text
+    real_replace = os.replace
+
+    def fake_write_text(self, *args, **kwargs):
+        # Intercept tmp file writes to capture the filename pattern.
+        s = str(self)
+        if ".tmp." in s:
+            captured_tmp_names.append(self.name)
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fake_write_text)
+    monkeypatch.setattr(auto_cmd, "_assert_main_thread", lambda: None)
+
+    def writer(label: str) -> None:
+        auto_cmd._update_progress(auto_run, phase=2, task_index=1, task_total=10, sub_phase=label)
+
+    threads = [threading.Thread(target=writer, args=(f"l-{i}",)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
+
+    assert captured_tmp_names, "no tmp filenames captured"
+    # Per W8: each tmp filename's suffix is `.tmp.<pid>.<tid>` (TWO dot
+    # segments after `.tmp.`).
+    for name in captured_tmp_names:
+        assert ".tmp." in name, f"missing .tmp. infix in {name!r}"
+        # Strip everything before `.tmp.` then split.
+        suffix = name.split(".tmp.")[1]
+        parts = suffix.split(".")
+        # Must have at least pid + tid segments (>= 2).
+        assert len(parts) >= 2, (
+            f"W8 regression: tmp suffix {suffix!r} expected pid.tid pattern "
+            f"(>= 2 dot-separated segments)"
+        )
+
+
 def test_w7_persistence_vs_drain_breadcrumbs_use_independent_dedup(capsys):
     """W7 (caspar iter 4): persistence-failure and drain-decode-error
     breadcrumbs use SEPARATE dedup flags so neither defeats the other.

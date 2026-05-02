@@ -702,7 +702,12 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
                 existing_obs_int, _observability_swallowed_count
             )
         # Atomic rename (preserve existing _update_progress mechanism).
-        tmp_path = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
+        # v1.0.0 S1-20 W8 fix: tmp filename includes PID + thread.get_ident()
+        # so concurrent threads in the same process don't collide on
+        # ``.tmp.{pid}`` (Windows PermissionError flake observed in v0.5.0).
+        tmp_path = auto_run_path.parent / (
+            auto_run_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+        )
         try:
             tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             os.replace(tmp_path, auto_run_path)
@@ -1055,7 +1060,10 @@ def _do_update_progress(
             # _assert_main_thread tripped (off-thread caller); don't
             # corrupt auto-run.json.
             pass
-        tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
+        # v1.0.0 S1-20 W8 fix: include thread.get_ident() in tmp filename.
+        tmp = auto_run_path.parent / (
+            auto_run_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+        )
         tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         # ``os.replace`` is atomic on POSIX and Windows, but on Windows it
         # can transiently fail with PermissionError when another process /
@@ -2708,7 +2716,8 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
             # mirrors state_file.save so a process killed mid-write never leaves
             # a corrupted auto-run.json. If os.replace fails the tmp file is
             # cleaned up before the error propagates so nothing leaks.
-            tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+            # v1.0.0 S1-20 W8 fix: include thread.get_ident() in tmp filename.
+            tmp = path.parent / (path.name + f".tmp.{os.getpid()}.{threading.get_ident()}")
             tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
             try:
                 os.replace(tmp, path)  # atomic on POSIX and Windows
