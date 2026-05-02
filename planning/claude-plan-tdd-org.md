@@ -1179,14 +1179,28 @@ def _resolve_all_models_once(config: Any) -> Any:
     """
     import models  # deferred — S2-1 dependency
     from models import ResolvedModels  # noqa: PLC0415 - deferred per pre-flight Mitigation A
-    # Read CLAUDE.md once (or use existing helper if available)
-    claude_md_path = Path.home() / ".claude" / "CLAUDE.md"
-    try:
-        claude_md_text = claude_md_path.read_text(encoding="utf-8")
-    except (FileNotFoundError, OSError):
-        claude_md_text = ""
+    # CLAUDE.md cascade per CLAUDE.local.md jerarquia (caspar Loop 2 iter 2
+    # WARNING fix): project-level CLAUDE.md (`<repo>/CLAUDE.md`) is read
+    # FIRST and may pin a model; global ~/.claude/CLAUDE.md is read SECOND
+    # only if project did not pin. This matches the precedence rule already
+    # in CLAUDE.local.md §0 ("project file extends but never contradicts
+    # global"). If a future v0.x Feature E helper exists for this cascade
+    # (`superpowers_dispatch._read_cascaded_claude_md` or similar), prefer
+    # delegating to it instead of duplicating logic here.
+    claude_md_text = ""
+    project_claude_md = Path.cwd() / "CLAUDE.md"
+    global_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    for candidate in (project_claude_md, global_claude_md):
+        try:
+            claude_md_text = candidate.read_text(encoding="utf-8")
+        except (FileNotFoundError, OSError):
+            continue
+        if models.INV_0_PINNED_MODEL_RE.search(claude_md_text):
+            # Project pin found — stop cascade (project pin is authoritative
+            # for this run; do not let global override it).
+            break
 
-    # Check for INV-0 pin
+    # Check for INV-0 pin (after cascade selection above).
     pinned_model = None
     match = models.INV_0_PINNED_MODEL_RE.search(claude_md_text)
     if match:

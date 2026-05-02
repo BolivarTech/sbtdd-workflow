@@ -606,6 +606,18 @@ class ResolvedModels:
 
     INV-0 cascade: CLAUDE.md model pin (per `models.INV_0_PINNED_MODEL_RE`)
     overrides plugin.local.md fields silently; stderr breadcrumb emitted.
+
+    CLAUDE.md cascade order (caspar Loop 2 iter 2 WARNING fix —
+    matches CLAUDE.local.md jerarquia §0): project-level
+    ``<repo>/CLAUDE.md`` is consulted FIRST; if it pins a model
+    (regex match), it wins. Global ``~/.claude/CLAUDE.md`` is
+    consulted SECOND only when the project file is absent or has no
+    pin. The first file with a regex match terminates the cascade,
+    so a project pin is authoritative for that auto run. If a
+    Feature E v0.3.0 helper for cascading reads already exists
+    (e.g., ``superpowers_dispatch._read_cascaded_claude_md`` or
+    similar), implementations SHOULD delegate to it rather than
+    duplicating cascade logic.
     """
     implementer: str
     spec_reviewer: str
