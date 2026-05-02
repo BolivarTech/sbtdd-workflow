@@ -254,9 +254,29 @@ def _watch_render_one(
     *,
     json_mode: bool,
     last_progress: dict[str, Any] | None,
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Single-poll render. Returns the new progress dict or last_progress."""
-    data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+    """Single-poll render. Returns the new progress dict or last_progress.
+
+    Loop 2 WARNING #9 fix: accepts an already-read ``data`` dict so the
+    caller can share a single ``_read_auto_run_with_retry`` result across
+    both the diff/render path and the state-machine update path. When
+    ``data`` is ``None`` the helper falls back to its legacy behaviour
+    of reading the file itself (preserves existing test surface
+    ``test_w2_json_mode_emits_progress`` which calls this helper
+    directly with no pre-read dict).
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+        json_mode: Emit JSON lines (``True``) or TTY rewrite (``False``).
+        last_progress: The previously-rendered progress dict; used to
+            suppress duplicate emissions when the snapshot has not
+            changed.
+        data: Pre-read auto-run.json dict (Loop 2 WARNING #9). When
+            ``None`` the helper reads the file itself.
+    """
+    if data is None:
+        data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
     if data is None:
         return last_progress
     progress = data.get("progress", {}) or {}
@@ -299,10 +319,20 @@ def watch_main(
                 )
                 sys.stderr.flush()
                 return 0
-            new_progress = _watch_render_one(
-                auto_run_path, json_mode=json_mode, last_progress=last_progress
-            )
+            # Loop 2 WARNING #9 fix: read auto-run.json ONCE per cycle
+            # and share the result between the render/diff path and the
+            # state-machine update path. Pre-fix this loop called
+            # ``_read_auto_run_with_retry`` twice per cycle (once inside
+            # ``_watch_render_one`` and once here), wasting I/O and
+            # risking inconsistent state-machine updates if the two
+            # reads observed different on-disk payloads.
             data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+            new_progress = _watch_render_one(
+                auto_run_path,
+                json_mode=json_mode,
+                last_progress=last_progress,
+                data=data,
+            )
             if data is None:
                 state.record_parse_failure()
                 # Per Checkpoint 2 iter 3 caspar W9 fix: align breadcrumb
