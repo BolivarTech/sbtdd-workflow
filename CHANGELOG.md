@@ -48,6 +48,11 @@ v1.0.0 LOCKED items remaining:
     legacy `magi-report.json` lookup so MAGI 2.x layouts (which still
     write `magi-report.json`) continue to work unchanged. Forward-compat
     for future MAGI versions that emit `MAGI_VERDICT_MARKER.json`.
+    Marker schema (HF2 alignment with the impl-side documentation in
+    `magi_dispatch._MARKER_FILENAME` docstring): the four canonical
+    fields are `verdict`, `iteration`, `agents`, `timestamp`. Optional
+    fields tolerated by the parser: `retried_agents`,
+    `synthesizer_status`.
   - `MAGIVerdict.retried_agents: tuple[str, ...]` consumes the new
     MAGI 2.2.1+ telemetry field with default `()` for MAGI 2.1.x
     backward compat (F44). v0.4.0 ships the dataclass field + parser

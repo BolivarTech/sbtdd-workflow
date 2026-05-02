@@ -568,6 +568,20 @@ def verdict_passes_gate(verdict: MAGIVerdict, threshold: str) -> bool:
     return verdict_meets_threshold(verdict.verdict, threshold)
 
 
+#: Filename of the per-run MAGI verdict marker emitted by MAGI 2.2.1+
+#: under the ``--output-dir`` tree. SBTDD consumes the marker via
+#: :func:`_discover_verdict_marker` (recursive glob, picks max mtime).
+#:
+#: Marker schema (HF2, sec.2.5):
+#:
+#: - ``"verdict"``    — canonical MAGI verdict label (e.g. ``"GO"``)
+#: - ``"iteration"``  — 1-indexed iter number within the run
+#: - ``"agents"``     — list of agent identifiers that contributed
+#: - ``"timestamp"``  — ISO 8601 UTC string with ``Z`` suffix
+#:
+#: Optional fields (parser tolerates absence): ``retried_agents``,
+#: ``synthesizer_status``. SBTDD never writes the marker -- it is the
+#: consumer side of the MAGI 2.2.1+ contract.
 _MARKER_FILENAME = "MAGI_VERDICT_MARKER.json"
 
 #: Canonical names of the three MAGI agents. Used by

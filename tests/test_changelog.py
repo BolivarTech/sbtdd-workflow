@@ -42,3 +42,23 @@ def test_hf1_recovery_breadcrumb_wording_aligned():
     assert canonical in spec, "spec missing canonical wording"
     assert canonical in changelog, "CHANGELOG missing canonical wording"
     assert canonical in impl, "impl missing canonical wording"
+
+
+def test_hf2_marker_schema_docs_match_impl():
+    """HF2: marker file schema documented in CHANGELOG matches impl emission.
+
+    The four canonical fields ``verdict``, ``iteration``, ``agents``,
+    ``timestamp`` MUST appear quoted in the impl source AND named in the
+    CHANGELOG `[0.4.0]` section so operators investigating
+    ``MAGI_VERDICT_MARKER.json`` files have a single-source schema.
+    """
+    impl = _read("skills/sbtdd/scripts/magi_dispatch.py")
+    changelog = _read("CHANGELOG.md")
+    expected_fields = ["verdict", "iteration", "agents", "timestamp"]
+    for field_name in expected_fields:
+        assert (
+            f'"{field_name}"' in impl
+        ), f"impl missing marker field {field_name!r}"
+        assert (
+            field_name in changelog
+        ), f"CHANGELOG missing marker field doc {field_name!r}"
