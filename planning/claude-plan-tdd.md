@@ -1,2304 +1,3340 @@
-# sbtdd-workflow v0.2.0 Implementation Plan
+# v0.5.0 Observability Foundation Implementation Plan (FINAL — post-Checkpoint 2 INV-0 acceptance)
+
+> **Status:** approved by user 2026-05-02 via INV-0 override after MAGI
+> Checkpoint 2 4-iter convergence pattern. Verdict stable
+> `GO_WITH_CAVEATS (3-0)` full no-degraded across iters 1-4. Pattern:
+> ~10-15 new findings each iter at deeper edge-case level, architecture
+> consistently approved 3-0 by all 3 agents in all 4 iters. Iter 4 finding
+> character: "deeper edge case", NOT "architectural defect". Both Balthasar
+> and Caspar explicitly endorsed INV-0 acceptance in iter 4.
+>
+> See sec.13 "Known Limitations & resolution paths" at the end of this
+> document for all Checkpoint 2 iter 4 findings folded as implementation-
+> phase tasks per agent recommendations.
+>
+> **Source plan:** `planning/claude-plan-tdd-org.md` (original /writing-plans
+> output, MAGI iter 4 input). This file (`claude-plan-tdd.md`) = org plan
+> + sec.13 Known Limitations + iter 4 acceptance audit trail.
+
+---
+
+
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver v0.2.0 of the `sbtdd-workflow` plugin by landing three LOCKED release blockers: (A) interactive MAGI escalation prompt, (B) superpowers spec-reviewer integration per task, (C) MAGI version-agnostic parity tests. Preserve all v0.1 invariants and zero-regression test baseline (≥597 passing).
+**Goal:** Ship the v0.5.0 observability pillar (heartbeat in-band emitter + `/sbtdd status --watch` companion + per-stream timeout J3 + origin disambiguation J7) plus three v0.4.1 doc-alignment hotfixes folded in. Closes the empirical UX gap where MAGI/code-review subprocess dispatches (5-10 min) make the auto run "look dead" with no operator visibility.
 
-**Architecture:** Two new self-contained modules under `skills/sbtdd/scripts/` (`escalation_prompt.py`, `spec_review_dispatch.py`) + targeted extensions to five existing modules (`errors.py`, `spec_cmd.py`, `pre_merge_cmd.py`, `finalize_cmd.py`, `resume_cmd.py`, `auto_cmd.py`, `close_task_cmd.py`, `run_sbtdd.py`, `models.py`) + one test file rewrite (`tests/test_distribution_coherence.py`). New subcommand `review-spec-compliance` registered in the 9→10 dispatch map. New exit code 12 for `SpecReviewError`.
+**Architecture:** True parallel 2-subagent dispatch with surfaces 100% disjoint per spec sec.4.2/4.3.
 
-**Tech Stack:** Python 3.9+ stdlib-only hot paths, `argparse`, `subprocess` via `subprocess_utils.run_with_timeout`, `quota_detector`, `dataclasses(frozen=True)`, `MappingProxyType`, `claude -p` subprocess transport, pytest, ruff, mypy --strict.
+- **Subagent #1 — Heartbeat track:** owns `models.py` (+ ProgressContext), new `scripts/heartbeat.py` module (HeartbeatEmitter + Lock-protected singleton + queue-based reporting), `auto_cmd.py` (writer hooks + dispatch wrapping). Forbidden surfaces: `status_cmd.py`, streaming pump in `subprocess_utils.py`, CHANGELOG.md, SKILL.md.
+- **Subagent #2 — Streaming + watch + docs track:** owns `subprocess_utils.py` streaming pump (per-stream timeout + origin disambiguation), `status_cmd.py` (--watch + helpers), `run_sbtdd.py` (argv), `config.py` (5 new fields + INV-34 validation), CHANGELOG.md (`[0.5.0]` + v0.4.1 hotfix sections), SKILL.md (--watch docs + v0.4.1 corrections), CLAUDE.md (release notes pointer), new `docs/v0.5.0-config-matrix.md` (R9 single-source matrix). Forbidden surfaces: `models.py`, `auto_cmd.py`, `scripts/heartbeat.py`.
 
----
+Cross-subagent contract: ProgressContext schema pinned in spec sec.3. Both subagents implement against the contract; zero runtime code coupling.
 
-## Source of truth
-
-- **Spec input:** `sbtdd/spec-behavior-base.md` (v0.2 base, untracked), CLAUDE.md LOCKED sections ("v0.2 requirement (LOCKED) — ..."), v0.1 frozen contract `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 (invariants) + sec.S.11 (exit codes).
-- **SBTDD methodology:** `CLAUDE.local.md` §3 (Red-Green-Refactor protocol), §5 (commit prefixes), §6 (pre-merge Loops 1+2).
-- **Global precedence:** `~/.claude/CLAUDE.md` (INV-0: absolute top authority).
-
-## File Structure (new + modified)
-
-### New files
-
-| Path | Responsibility |
-|------|----------------|
-| `skills/sbtdd/scripts/escalation_prompt.py` | Feature A — interactive MAGI escalation prompt module (dataclasses + 4 public fns + audit artifact writer) |
-| `skills/sbtdd/scripts/spec_review_dispatch.py` | Feature B — per-task spec-reviewer dispatcher (dataclass + `dispatch_spec_reviewer` + artifact writer) |
-| `skills/sbtdd/scripts/review_spec_compliance_cmd.py` | Feature B — `/sbtdd review-spec-compliance <task-id>` subcommand handler |
-| `tests/test_escalation_prompt.py` | Feature A unit tests (root-cause inference, message rendering, headless fallback, audit artifact) |
-| `tests/test_spec_review_dispatch.py` | Feature B unit tests (dispatcher, safety valve, quota integration, audit artifact) |
-| `tests/test_review_spec_compliance_cmd.py` | Feature B subcommand CLI tests |
-| `tests/test_auto_cmd_spec_review.py` | Feature B integration tests into `auto_cmd._phase2_task_loop` |
-| `tests/test_close_task_cmd_spec_review.py` | Feature B integration tests into `close_task_cmd` (`--skip-spec-review`) |
-| `tests/fixtures/magi-escalations/` | Feature A golden-output fixtures per root-cause × context |
-| `tests/fixtures/spec-reviews/` | Feature B synthetic reviewer output fixtures |
-
-### Modified files
-
-| Path | Nature of change |
-|------|------------------|
-| `skills/sbtdd/scripts/errors.py` | Add `SpecReviewError` + register in `EXIT_CODES` → 12 |
-| `skills/sbtdd/scripts/models.py` | Add `"review-spec-compliance"` to `VALID_SUBCOMMANDS` |
-| `skills/sbtdd/scripts/run_sbtdd.py` | Add dispatch entry for `review-spec-compliance` |
-| `skills/sbtdd/scripts/spec_cmd.py` | Wire `--override-checkpoint`, `--reason`, `--non-interactive` + safety-valve escalation hook |
-| `skills/sbtdd/scripts/pre_merge_cmd.py` | Same as `spec_cmd.py` |
-| `skills/sbtdd/scripts/finalize_cmd.py` | Add `--override-checkpoint --reason` CLI flag with audit trail |
-| `skills/sbtdd/scripts/resume_cmd.py` | Detect `.claude/magi-escalation-pending.md` + re-enter prompt |
-| `skills/sbtdd/scripts/auto_cmd.py` | Extend `_phase2_task_loop` with spec-reviewer dispatch before `mark_and_advance`; honor headless policy for Feature A |
-| `skills/sbtdd/scripts/close_task_cmd.py` | Add `--skip-spec-review` flag; invoke reviewer by default |
-| `tests/fixtures/skill_stubs.py` | Add `StubSpecReviewer` mirroring `StubMAGI` pattern |
-| `tests/test_distribution_coherence.py` | Rewrite `_resolve_magi_plugin_json()` + add `_semver_key` helper + test |
-| `tests/test_errors.py` | Cover `SpecReviewError` + exit-code 12 mapping |
-| `tests/test_run_sbtdd.py` | Cover new subcommand dispatch |
-| `tests/test_models.py` | Cover expanded `VALID_SUBCOMMANDS` tuple |
-| `CHANGELOG.md` | Under `## [Unreleased]`: Added (Features A/B/C), Changed (`bump plugin.json + marketplace.json to 0.2.0`), BREAKING (new exit 12 taxonomy entry) |
-| `.claude-plugin/plugin.json` | `version` bump 0.1.0 → 0.2.0 |
-| `.claude-plugin/marketplace.json` | `version` bump 0.1.0 → 0.2.0 (both top-level + plugin entry) |
-| `CLAUDE.md` | Add INV-31 to "Invariants Summary" + remove shipped blockers from "v0.2 requirement (LOCKED)" sections |
-| `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 | Register INV-31 (if adopted) |
-
-## Invariants active during v0.2 (reminder)
-
-- **INV-0** (`~/.claude/CLAUDE.md` top authority) — `--override-checkpoint` is the INV-0 escape valve, requires `--reason`.
-- **INV-11** (safety valves) — Feature A fires when valve exhausts; Feature B loop caps at 3.
-- **INV-22** (auto sequential + headless) — Feature A NEVER runs inside `auto_cmd`; policy file drives headless decision.
-- **INV-26** (audit trail) — Features A + B both emit JSON artifacts in `.claude/`.
-- **INV-28** (MAGI degraded no-exit) — Feature A fires on degraded exhaustion.
-- **INV-29** (`/receiving-code-review` gate) — honored for Loop 1 (`requesting-code-review`) and Loop 2 (`magi`) findings as in v0.1. Feature B spec-reviewer findings are NOT routed through `/receiving-code-review` in v0.2 (see "v0.2 scope boundary — Feature B B6 relaxation" immediately below).
-- **INV-30** (resumibility) — Feature A integrates with `resume_cmd` via pending marker.
-- **INV-31 (new, proposed)** — Every task close in `auto_cmd` + `close_task_cmd` passes spec-reviewer unless `--skip-spec-review` or stub injected.
-
-## v0.2 scope boundary — Feature B B6 relaxation
-
-Spec-base §2.2 ("Entrega v0.2") describes a full reviewer-feedback loop: on `issues`, "treat as MAGI-like findings: feed to `/receiving-code-review`, mini-cycle TDD fix per accepted finding, re-dispatch reviewer, repeat up to a safety valve." Acceptance criterion B6 summarizes this as "Issues rutean via `/receiving-code-review` (extension INV-29)."
-
-**v0.2 lands the dispatcher + integration halves of B6; the automated reviewer-feedback mini-cycle is deferred to v0.2.1 or v0.3.** Concretely:
-
-- `spec_review_dispatch.dispatch_spec_reviewer` invokes the reviewer once per task, parses the result, writes the audit artifact, and returns `SpecReviewResult`.
-- On `approved=False`, the dispatcher returns with `issues` populated. Its caller (`auto_cmd._phase2_task_loop`, `close_task_cmd`, `review_spec_compliance_cmd`) raises `SpecReviewError` (exit 12) and aborts the run — same failure shape as `MAGIGateError`.
-- The user can (a) manually invoke `/receiving-code-review` on the findings, apply fixes via mini-cycle TDD, then resume via `/sbtdd resume`, or (b) pass `--skip-spec-review` on the re-run after investigating.
-- Automating the `/receiving-code-review` → mini-cycle → re-dispatch loop requires a headless `claude -p` reviewing interaction pattern not yet exercised in the codebase; shipping it in v0.2 would expand scope materially and risks an INV-29-style sterile loop if the auto-accept/auto-reject heuristic is wrong. Deferring the automation preserves INV-29's spirit (a human evaluates findings before applying) while still delivering v0.2's primary value: the per-task drift detection itself, which is the Milestone-A-Scenario-4-class defect prevention the feature exists to solve.
-
-**Decision record for MAGI:** when the Checkpoint 2 reviewer evaluates this plan, treat B6 as partially delivered and scoped accordingly. If MAGI classifies the deferral as CRITICAL, escalate to user per INV-11 safety-valve path; the user may (per INV-0) accept the deferral with `--reason "B6 scope split — dispatcher v0.2, auto-feedback v0.2.1"` or instruct that the full loop land in v0.2 before merge. This plan implements the dispatcher half; the second half is a single task addition (auto-accept lowest-risk findings, mini-cycle TDD, re-dispatch) if the user lands it here.
+**Tech Stack:** Python 3.9+, threading + queue + dataclasses + selectors + fnmatch (stdlib only on hot paths), pytest, pytest-asyncio (already in dev deps), ruff, mypy --strict.
 
 ---
 
-## MILESTONE F — Feature C: MAGI version-agnostic parity tests
+## Pre-flight contracts (read-only reference for both subagents)
 
-**Rationale:** MAGI 2.1.4 shipped (patch bump, zero schema change). The hardcoded `2.1.3` in `tests/test_distribution_coherence.py:91` will silently skip on fresh caches. Replace with semver-sorted auto-resolver.
+### Branch + working tree
 
-### Task F1: `_semver_key` helper + tests
+- Branch: `feature/v0.5.0-observability` (already created, checked out).
+- main is ahead of origin by 2 commits: `b4a37d6` (MAGI gate alignment + template + patch artifact) + `4538914` (v0.5.0 BDD overlay spec). The dev branch forks from `4538914`.
+- Implementation commits land on the dev branch; merge to main only after pre-merge gate passes.
+- Working tree must be clean before each task starts. Verify via `git status` returns empty.
+
+### ProgressContext schema (sec.3 of spec)
+
+Frozen dataclass with these fields:
+
+```python
+@dataclass(frozen=True)
+class ProgressContext:
+    iter_num: int = 0
+    phase: int = 0
+    task_index: int | None = None
+    task_total: int | None = None
+    dispatch_label: str | None = None
+    started_at: datetime | None = None
+```
+
+`started_at` is the **dispatch start** (per spec sec.3 PINNED post-iter 3); not the phase start, not the auto-run start.
+
+Serialized to `auto-run.json` under `progress` key with ISO 8601 UTC datetime (`Z` suffix).
+
+### Five new PluginConfig fields (sec.4.3)
+
+```python
+auto_per_stream_timeout_seconds: int = 900
+auto_heartbeat_interval_seconds: int = 15
+status_watch_default_interval_seconds: float = 1.0
+auto_origin_disambiguation: bool = True
+auto_no_timeout_dispatch_labels: tuple[str, ...] = ("magi-*",)  # default via field()
+```
+
+INV-34 validation (4 clauses, each with distinct error message):
+- Clause 1: `auto_per_stream_timeout_seconds >= 5 * auto_heartbeat_interval_seconds`
+- Clause 2: `auto_heartbeat_interval_seconds <= 60`
+- Clause 3: `auto_heartbeat_interval_seconds >= 5`
+- Clause 4: `auto_per_stream_timeout_seconds >= 600` (absolute timeout floor — protects caspar opus runs)
+
+### Three new invariants
+
+- **INV-32**: heartbeat thread NO debe matar/bloquear el auto run; first-failure stderr breadcrumb + queue-reported counter to main thread for incremental auto-run.json persistence.
+- **INV-33**: per-stream timeout es last-resort kill (heartbeat 1st-line, watch 2nd-line, timeout 3rd-line, operator intervention 4th).
+- **INV-34**: timeout-vs-interval relationship + absolute floor + ceiling validations as above.
+
+### Single-writer rule auto-run.json
+
+ONLY the main thread writes. Heartbeat thread reports `_failed_writes` counter via thread-safe queue (`_heartbeat_failures_q`); main thread drains and persists. No race possible.
+
+### Forbidden cross-subagent surfaces (recap)
+
+| Subagent | OWNS | FORBIDDEN |
+|----------|------|-----------|
+| #1 Heartbeat | `models.py`, new `scripts/heartbeat.py`, `auto_cmd.py`, `tests/test_models.py` (extend), `tests/test_heartbeat.py` (NEW), `tests/test_heartbeat_smoke.py` (NEW), `tests/test_auto_progress.py` (extend) | `status_cmd.py`, `subprocess_utils.py`, `run_sbtdd.py`, `config.py`, CHANGELOG.md, SKILL.md, CLAUDE.md, `docs/v0.5.0-config-matrix.md` |
+| #2 Streaming/Watch/Docs | `subprocess_utils.py`, `status_cmd.py`, `run_sbtdd.py`, `config.py`, CHANGELOG.md, SKILL.md, CLAUDE.md, new `docs/v0.5.0-config-matrix.md`, `tests/test_subprocess_utils.py` (extend), `tests/test_status_watch.py` (NEW), `tests/test_config.py` (extend), `tests/test_changelog.py` (extend), `tests/test_skill_md.py` (extend) | `models.py`, `auto_cmd.py`, `scripts/heartbeat.py` |
+
+### Verification commands (after each TDD phase)
+
+```bash
+pytest tests/ -v                    # All pass
+ruff check .                        # 0 warnings
+ruff format --check .               # Clean
+mypy . --strict                     # 0 errors
+```
+
+Shortcut: `make verify`.
+
+### Commit prefixes (sec.5 commit policy)
+
+| Phase | Prefix |
+|-------|--------|
+| Red (test) | `test:` |
+| Green (impl) | `feat:` (new feature) or `fix:` (bug fix) |
+| Refactor (cleanup) | `refactor:` |
+| Task close (chore) | `chore:` |
+
+---
+
+## Subagent #1 — Heartbeat track (13 tasks)
+
+### Task S1-1: Add ProgressContext dataclass to models.py
 
 **Files:**
-- Modify: `tests/test_distribution_coherence.py:78-97`
+- Modify: `skills/sbtdd/scripts/models.py` (append)
+- Modify: `tests/test_models.py` (append)
 
-- [x] **Step 1 (Red): add failing tests for `_semver_key`**
+- [ ] **Step 1: Write failing test for ProgressContext immutability + defaults**
 
-Append to `tests/test_distribution_coherence.py`:
-
-```python
-def test_semver_key_orders_patch_bump() -> None:
-    from tests.test_distribution_coherence import _semver_key
-    assert _semver_key("2.1.4") > _semver_key("2.1.3")
-    assert _semver_key("2.2.0") > _semver_key("2.1.99")
-    assert _semver_key("3.0.0") > _semver_key("2.99.99")
-
-
-def test_semver_key_handles_mixed_version_strings() -> None:
-    from tests.test_distribution_coherence import _semver_key
-    # non-numeric segment sorts BELOW numeric (we use -1 as the sentinel)
-    assert _semver_key("2.1.3") > _semver_key("2.1.beta")
-    assert _semver_key("2.1.0") > _semver_key("garbage")
-    # ties resolve deterministically
-    assert _semver_key("2.1.3") == _semver_key("2.1.3")
-```
-
-- [x] **Step 2: run tests, confirm ImportError on `_semver_key`**
-
-```bash
-python -m pytest tests/test_distribution_coherence.py::test_semver_key_orders_patch_bump -v
-```
-Expected: FAIL — `ImportError: cannot import name '_semver_key'`.
-
-- [x] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_distribution_coherence.py
-git commit -m "test: add failing _semver_key ordering tests"
-```
-
-- [x] **Step 4 (Green): implement `_semver_key`**
-
-Insert BEFORE `_resolve_magi_plugin_json` in `tests/test_distribution_coherence.py`:
+Append to `tests/test_models.py`:
 
 ```python
-def _semver_key(v: str) -> tuple[int, ...]:
-    """Convert '2.1.4' -> (2, 1, 4); non-numeric segments sort last (-1)."""
-    parts: list[int] = []
-    for seg in v.split("."):
-        try:
-            parts.append(int(seg))
-        except ValueError:
-            parts.append(-1)
-    return tuple(parts)
+from datetime import datetime, timezone
+from dataclasses import FrozenInstanceError
+import pytest
+
+from models import ProgressContext
+
+
+def test_progress_context_default_construction_uses_zero_and_none():
+    ctx = ProgressContext()
+    assert ctx.iter_num == 0
+    assert ctx.phase == 0
+    assert ctx.task_index is None
+    assert ctx.task_total is None
+    assert ctx.dispatch_label is None
+    assert ctx.started_at is None
+
+
+def test_progress_context_full_construction_preserves_fields():
+    ts = datetime(2026, 5, 1, 12, 34, 56, tzinfo=timezone.utc)
+    ctx = ProgressContext(
+        iter_num=2, phase=3, task_index=14, task_total=36,
+        dispatch_label="magi-loop2-iter2", started_at=ts,
+    )
+    assert (ctx.iter_num, ctx.phase, ctx.task_index, ctx.task_total) == (2, 3, 14, 36)
+    assert ctx.dispatch_label == "magi-loop2-iter2"
+    assert ctx.started_at == ts
+
+
+def test_progress_context_is_frozen():
+    ctx = ProgressContext()
+    with pytest.raises(FrozenInstanceError):
+        ctx.iter_num = 5  # type: ignore[misc]
 ```
 
-- [x] **Step 5: run the two new tests, confirm PASS**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-python -m pytest tests/test_distribution_coherence.py -k semver_key -v
-```
-Expected: 2 PASSED.
-
-- [x] **Step 6 (Green commit)**
-
-```bash
-git add tests/test_distribution_coherence.py
-git commit -m "feat: add _semver_key helper for MAGI version resolution"
+pytest tests/test_models.py::test_progress_context_default_construction_uses_zero_and_none -v
 ```
 
-- [x] **Step 7 (Refactor + verify)**
+Expected: `ImportError: cannot import name 'ProgressContext' from 'models'`.
 
-```bash
-make verify
-```
-Expected: pytest 0 fail, ruff clean, mypy 0 errors. If any, fix before commit.
+- [ ] **Step 3: Append ProgressContext dataclass to models.py**
 
-- [x] **Step 8 (Refactor commit if any cleanup landed)**
-
-```bash
-git commit --allow-empty -m "refactor: no-op; _semver_key reviewed, clean"
-```
-
-### Task F2: auto-resolver `_resolve_magi_plugin_json`
-
-**Files:**
-- Modify: `tests/test_distribution_coherence.py:78-97`
-
-- [x] **Step 1 (Red): add test asserting latest-version selection**
-
-Append:
+Add at top of `skills/sbtdd/scripts/models.py` (after the existing `from __future__ import annotations`):
 
 ```python
-def test_resolve_magi_plugin_json_picks_latest_semver(tmp_path, monkeypatch) -> None:
-    from tests.test_distribution_coherence import _resolve_magi_plugin_json
-    # Build synthetic cache with 2.1.3 and 2.1.4
-    for v in ("2.1.3", "2.1.4"):
-        d = tmp_path / "bolivartech-plugins" / "magi" / v / ".claude-plugin"
-        d.mkdir(parents=True)
-        (d / "plugin.json").write_text("{}", encoding="utf-8")
-    monkeypatch.delenv("MAGI_PLUGIN_ROOT", raising=False)
-    monkeypatch.setattr(
-        "pathlib.Path.home",
-        lambda: tmp_path.parent,  # home()/.claude/plugins/cache -> tmp_path
-    )
-    # Compose the expected base the resolver walks to
-    monkeypatch.setattr(
-        "tests.test_distribution_coherence._magi_cache_base",
-        lambda: tmp_path / "bolivartech-plugins" / "magi",
-    )
-    resolved = _resolve_magi_plugin_json()
-    assert resolved.parent.parent.name == "2.1.4"
-
-
-def test_resolve_magi_plugin_json_honors_env_override(tmp_path, monkeypatch) -> None:
-    from tests.test_distribution_coherence import _resolve_magi_plugin_json
-    monkeypatch.setenv("MAGI_PLUGIN_ROOT", str(tmp_path))
-    result = _resolve_magi_plugin_json()
-    assert result == tmp_path / ".claude-plugin" / "plugin.json"
-
-
-def test_resolve_magi_plugin_json_graceful_when_cache_missing(tmp_path, monkeypatch) -> None:
-    from tests.test_distribution_coherence import _resolve_magi_plugin_json
-    monkeypatch.delenv("MAGI_PLUGIN_ROOT", raising=False)
-    monkeypatch.setattr(
-        "tests.test_distribution_coherence._magi_cache_base",
-        lambda: tmp_path / "does-not-exist",
-    )
-    result = _resolve_magi_plugin_json()
-    assert not result.is_file()  # triggers existing skipif gate
+from dataclasses import dataclass
+from datetime import datetime
 ```
 
-- [x] **Step 2: run tests, confirm FAIL (resolver still hardcodes 2.1.3, no `_magi_cache_base` symbol)**
-
-```bash
-python -m pytest tests/test_distribution_coherence.py -k "resolve_magi" -v
-```
-Expected: FAIL.
-
-- [x] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_distribution_coherence.py
-git commit -m "test: add failing tests for MAGI auto-resolver"
-```
-
-- [x] **Step 4 (Green): rewrite `_resolve_magi_plugin_json`**
-
-Replace the existing function in `tests/test_distribution_coherence.py` (current lines 78-97):
+Append at end of `models.py`:
 
 ```python
-def _magi_cache_base() -> Path:
-    """Return the Claude Code cache base for MAGI. Extracted for test monkeypatch."""
-    return (
-        Path.home()
-        / ".claude"
-        / "plugins"
-        / "cache"
-        / "bolivartech-plugins"
-        / "magi"
-    )
+@dataclass(frozen=True)
+class ProgressContext:
+    """Immutable snapshot of auto-run progress (sec.3 of v0.5.0 spec).
 
+    Reader/writer protocol pinned in spec sec.3:
+    - Writer (auto_cmd) creates a NEW ProgressContext per phase/task/dispatch
+      transition and assigns to the module-level singleton via the
+      lock-protected setter in :mod:`heartbeat`.
+    - Reader (HeartbeatEmitter daemon thread) calls
+      :func:`heartbeat.get_current_progress` to read; the returned snapshot
+      is immutable so no further locking needed.
 
-def _resolve_magi_plugin_json() -> Path:
-    """Resolve the latest cached MAGI's plugin.json, honoring MAGI_PLUGIN_ROOT override.
+    The ``started_at`` field tracks the **current dispatch's** start time,
+    NOT the phase start nor the overall auto-run start. Heartbeat ticks
+    show ``elapsed=`` relative to this dispatch.
 
-    Enumerates version subdirs under the cache base and picks the highest
-    semver. Non-numeric segments sort last. Graceful skip when cache is
-    absent (returns a non-existent path that `is_file()` rejects, triggering
-    the existing `@pytest.mark.skipif` gate).
+    Serialization to ``auto-run.json`` uses ISO 8601 UTC with the ``Z``
+    suffix (e.g., ``"2026-05-01T12:34:56Z"``).
     """
-    env_override = os.environ.get("MAGI_PLUGIN_ROOT")
-    if env_override:
-        return Path(env_override) / ".claude-plugin" / "plugin.json"
-    cache_base = _magi_cache_base()
-    if not cache_base.is_dir():
-        return cache_base / "missing" / ".claude-plugin" / "plugin.json"
-    versions = [p.name for p in cache_base.iterdir() if p.is_dir()]
-    if not versions:
-        return cache_base / "missing" / ".claude-plugin" / "plugin.json"
-    latest = max(versions, key=_semver_key)
-    return cache_base / latest / ".claude-plugin" / "plugin.json"
+
+    iter_num: int = 0
+    phase: int = 0
+    task_index: int | None = None
+    task_total: int | None = None
+    dispatch_label: str | None = None
+    started_at: datetime | None = None
 ```
 
-- [x] **Step 5: run new + existing tests, confirm PASS**
+- [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-python -m pytest tests/test_distribution_coherence.py -v
+pytest tests/test_models.py -v
+ruff check skills/sbtdd/scripts/models.py
+mypy skills/sbtdd/scripts/models.py --strict
 ```
-Expected: all PASS (or skip when cache absent, which is the graceful path).
 
-- [x] **Step 6 (Green commit)**
+Expected: all pass, 0 warnings, 0 type errors.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_distribution_coherence.py
-git commit -m "feat: auto-resolve MAGI cache to latest semver version"
+git add skills/sbtdd/scripts/models.py tests/test_models.py
+git commit -m "test: add ProgressContext immutable dataclass for heartbeat snapshots"
 ```
 
-- [x] **Step 7 (Refactor): verify + ensure `MAGI_PLUGIN_JSON` module-level still computes correctly**
-
-```bash
-make verify
-```
-If `MAGI_PLUGIN_JSON` at module top-level now points to a real path on your dev machine (2.1.4 installed), the two `@pytest.mark.skipif` parity tests should run, not skip.
-
-- [x] **Step 8 (Refactor commit)**
-
-```bash
-git commit --allow-empty -m "refactor: keep _resolve_magi_plugin_json pure; cache base extracted for test patching"
-```
-
-### Task F3: close-task bookkeeping
-
-- [x] **Step 1: update plan checkbox for Milestone F**
-
-(Handled by `/sbtdd close-task` or manual edit.)
-
-- [x] **Step 2: close-task commit**
-
-```bash
-git commit --allow-empty -m "chore: mark task F complete"
-```
+(Combined Red+Green commit acceptable for scaffolding; subsequent tasks split.)
 
 ---
 
-## MILESTONE G — Feature A: Interactive MAGI escalation prompt
-
-**Rationale:** v0.1 exits 8 with artefacts when MAGI safety valve exhausts. v0.2 adds an interactive prompt emulating the assistant-in-chat interaction observed during Milestones A-E (see commit `5d7bfc4`, session 2026-04-20). INV-22 forbids running inside `auto_cmd`; headless policy file drives non-TTY fallback.
-
-### Task G1: skeleton module + dataclasses
+### Task S1-2: Create scripts/heartbeat.py module skeleton with Lock-protected singleton
 
 **Files:**
-- Create: `skills/sbtdd/scripts/escalation_prompt.py`
-- Create: `tests/test_escalation_prompt.py`
+- Create: `skills/sbtdd/scripts/heartbeat.py`
+- Create: `tests/test_heartbeat.py`
 
-- [x] **Step 1 (Red): write failing test for `EscalationContext` + `UserDecision` + `EscalationOption` dataclasses**
+- [ ] **Step 1: Write failing test for getter/setter contract**
 
-`tests/test_escalation_prompt.py`:
+Create `tests/test_heartbeat.py`:
 
 ```python
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
-# Date: 2026-04-23
-"""Unit tests for escalation_prompt module (Feature A)."""
+# Date: 2026-05-01
+"""Unit tests for the v0.5.0 heartbeat module."""
 
 from __future__ import annotations
 
+import sys
+import time
+from datetime import datetime, timezone, timedelta
+
 import pytest
 
-from escalation_prompt import (
-    EscalationContext,
-    EscalationOption,
-    UserDecision,
-    _RootCause,
+from heartbeat import (
+    get_current_progress,
+    set_current_progress,
+    reset_current_progress,
+    HeartbeatEmitter,
 )
+from models import ProgressContext
 
 
-def test_escalation_context_is_frozen() -> None:
-    ctx = EscalationContext(
-        iterations=(),
-        plan_id="A",
-        context="checkpoint2",
-        per_agent_verdicts=(),
-        findings=(),
-        root_cause=_RootCause.INFRA_TRANSIENT,
-    )
-    with pytest.raises((AttributeError, Exception)):
-        ctx.plan_id = "B"  # frozen
+@pytest.fixture(autouse=True)
+def _reset_progress():
+    reset_current_progress()
+    yield
+    reset_current_progress()
 
 
-def test_user_decision_is_frozen_and_carries_reason() -> None:
-    d = UserDecision(chosen_option="a", action="override", reason="caspar JSON bug again")
-    assert d.chosen_option == "a"
-    assert d.reason == "caspar JSON bug again"
-    with pytest.raises((AttributeError, Exception)):
-        d.reason = "changed"
+def test_get_current_progress_initial_is_default_progress():
+    assert get_current_progress() == ProgressContext()
 
 
-def test_escalation_option_has_letter_action_rationale() -> None:
-    opt = EscalationOption(letter="a", action="override", rationale="INV-0 user authority")
-    assert opt.letter == "a"
-    assert opt.action == "override"
+def test_set_then_get_returns_same_reference():
+    new_ctx = ProgressContext(iter_num=2, phase=3)
+    set_current_progress(new_ctx)
+    assert get_current_progress() is new_ctx
+
+
+def test_repeated_set_replaces_singleton():
+    set_current_progress(ProgressContext(iter_num=1))
+    set_current_progress(ProgressContext(iter_num=2))
+    assert get_current_progress().iter_num == 2
+
+
+def test_reset_returns_default_after_set():
+    set_current_progress(ProgressContext(iter_num=99))
+    reset_current_progress()
+    assert get_current_progress() == ProgressContext()
 ```
 
-- [x] **Step 2: run, confirm `ModuleNotFoundError: escalation_prompt`**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-python -m pytest tests/test_escalation_prompt.py -v
+pytest tests/test_heartbeat.py -v
 ```
 
-- [x] **Step 3 (Red commit)**
+Expected: `ImportError: No module named 'heartbeat'`.
 
-```bash
-git add tests/test_escalation_prompt.py
-git commit -m "test: add failing tests for escalation_prompt dataclasses"
-```
+- [ ] **Step 3: Create scripts/heartbeat.py with Lock-protected getter/setter**
 
-- [x] **Step 4 (Green): implement module skeleton**
-
-`skills/sbtdd/scripts/escalation_prompt.py`:
+Create `skills/sbtdd/scripts/heartbeat.py`:
 
 ```python
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
-# Date: 2026-04-23
-"""Interactive MAGI escalation prompt (Feature A, v0.2.0).
+# Date: 2026-05-01
+"""HeartbeatEmitter and ProgressContext singleton for v0.5.0 observability.
 
-Fires when INV-11 safety valve exhausts in `/sbtdd spec` (Checkpoint 2) or
-`/sbtdd pre-merge` (Loop 2). INV-22 forbids running inside `/sbtdd auto`:
-auto invocations consult `.claude/magi-auto-policy.json` instead.
+Concurrency model (PINNED per spec sec.3):
+- Module-level ``_current_progress`` reference, protected by
+  ``_progress_lock: threading.Lock``.
+- Writer (``auto_cmd`` main thread) calls :func:`set_current_progress`.
+- Reader (HeartbeatEmitter daemon thread) calls :func:`get_current_progress`;
+  operates on the immutable snapshot WITHOUT further locking.
 
-Public API:
-    build_escalation_context(iterations, plan_id, context) -> EscalationContext
-    format_escalation_message(ctx) -> str
-    prompt_user(ctx, options) -> UserDecision
-    apply_decision(decision, ctx, root) -> int  # writes audit artifact
-
-Precedent: Milestone D Checkpoint 2 iter 3 chat escalation (commit 5d7bfc4).
+The lock is forward-defensive against PEP 703 free-threaded Python and
+maintainer drift; the immutable ``ProgressContext`` plus pointer
+assignment is correct on current CPython but depends on memory model
+implementation detail that the lock approach avoids.
 """
 
 from __future__ import annotations
 
-import enum
-from dataclasses import dataclass
-from typing import Any, Literal
-
-
-class _RootCause(enum.Enum):
-    INFRA_TRANSIENT = "infra_transient"       # same agent fails across iters
-    PLAN_VS_SPEC = "plan_vs_spec"             # CRITICAL findings persist
-    STRUCTURAL_DEFECT = "structural_defect"   # STRONG_NO_GO from >=1 agent
-    SPEC_AMBIGUITY = "spec_ambiguity"         # confidence trending down
-
-
-_ContextLit = Literal["checkpoint2", "pre-merge", "auto"]
-_ActionLit = Literal["override", "retry", "abandon", "alternative"]
-
-
-@dataclass(frozen=True)
-class EscalationOption:
-    letter: str       # 'a' | 'b' | 'c' | 'd'
-    action: _ActionLit
-    rationale: str    # shown in the menu after the action verb
-    caveat: str = ""  # optional consequence / tradeoff line
-
-
-@dataclass(frozen=True)
-class EscalationContext:
-    iterations: tuple[dict[str, Any], ...]     # per-iter verdict snapshots
-    plan_id: str
-    context: _ContextLit
-    per_agent_verdicts: tuple[tuple[str, str], ...]  # (agent_name, verdict)
-    findings: tuple[tuple[str, str], ...]            # (severity, text)
-    root_cause: _RootCause
-
-
-@dataclass(frozen=True)
-class UserDecision:
-    chosen_option: str
-    action: _ActionLit
-    reason: str
-```
-
-- [x] **Step 5: run tests, confirm PASS**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [x] **Step 6 (Green commit)**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py tests/test_escalation_prompt.py
-git commit -m "feat: add escalation_prompt skeleton with typed dataclasses"
-```
-
-- [x] **Step 7 (Refactor + verify)**
-
-```bash
-make verify
-```
-
-- [x] **Step 8 (Refactor commit)**
-
-```bash
-git commit --allow-empty -m "refactor: escalation_prompt skeleton reviewed, clean"
-```
-
-### Task G2: root-cause classifier + `build_escalation_context`
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-
-- [x] **Step 1 (Red): tests for classifier**
-
-Append to `tests/test_escalation_prompt.py`:
-
-```python
-from escalation_prompt import (
-    build_escalation_context,
-    _classify_root_cause,
-)
-from magi_dispatch import MAGIVerdict
-
-
-def _mkv(verdict: str, degraded: bool = False, findings: tuple = (), conds: tuple = ()) -> MAGIVerdict:
-    return MAGIVerdict(verdict=verdict, degraded=degraded, conditions=conds, findings=findings, raw_output="")
-
-
-def test_classify_infra_transient_when_degraded_repeats() -> None:
-    iters = [
-        _mkv("HOLD", degraded=True),
-        _mkv("GO", degraded=False),
-        _mkv("HOLD", degraded=True),
-    ]
-    assert _classify_root_cause(iters) == _RootCause.INFRA_TRANSIENT
-
-
-def test_classify_structural_defect_when_strong_no_go_present() -> None:
-    iters = [_mkv("STRONG_NO_GO")]
-    assert _classify_root_cause(iters) == _RootCause.STRUCTURAL_DEFECT
-
-
-def test_classify_plan_vs_spec_when_critical_findings_persist() -> None:
-    critical = ({"severity": "CRITICAL", "text": "f"},)
-    iters = [_mkv("HOLD", findings=critical), _mkv("HOLD", findings=critical)]
-    assert _classify_root_cause(iters) == _RootCause.PLAN_VS_SPEC
-
-
-def test_build_escalation_context_checkpoint2_returns_frozen_struct() -> None:
-    iters = [_mkv("HOLD_TIE"), _mkv("HOLD"), _mkv("HOLD_TIE")]
-    ctx = build_escalation_context(iterations=iters, plan_id="A", context="checkpoint2")
-    assert ctx.plan_id == "A"
-    assert ctx.context == "checkpoint2"
-    assert len(ctx.iterations) == 3
-    assert ctx.root_cause in set(_RootCause)
-```
-
-- [x] **Step 2: run, confirm FAIL**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [x] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_escalation_prompt.py
-git commit -m "test: add classifier + build_escalation_context tests"
-```
-
-- [x] **Step 4 (Green): implement classifier + builder**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-from magi_dispatch import MAGIVerdict
-
-
-def _classify_root_cause(iterations: list[MAGIVerdict]) -> _RootCause:
-    """Infer the dominant failure mode across iterations."""
-    if any(v.verdict == "STRONG_NO_GO" for v in iterations):
-        return _RootCause.STRUCTURAL_DEFECT
-    degraded_count = sum(1 for v in iterations if v.degraded)
-    if degraded_count >= 2 and degraded_count >= len(iterations) / 2:
-        return _RootCause.INFRA_TRANSIENT
-    critical_across = [
-        any(str(f.get("severity", "")).upper() == "CRITICAL" for f in v.findings)
-        for v in iterations
-    ]
-    if sum(critical_across) >= 2:
-        return _RootCause.PLAN_VS_SPEC
-    return _RootCause.SPEC_AMBIGUITY
-
-
-def build_escalation_context(
-    iterations: list[MAGIVerdict],
-    plan_id: str,
-    context: _ContextLit,
-) -> EscalationContext:
-    """Collect iter history + classify root cause."""
-    snapshots = tuple(
-        {
-            "verdict": v.verdict,
-            "degraded": v.degraded,
-            "n_conditions": len(v.conditions),
-            "n_findings": len(v.findings),
-        }
-        for v in iterations
-    )
-    per_agent: tuple[tuple[str, str], ...] = ()  # v0.2: MAGI does not expose per-agent breakdown
-    findings = tuple(
-        (str(f.get("severity", "INFO")).upper(), str(f.get("text", f)))
-        for v in iterations
-        for f in v.findings
-    )
-    return EscalationContext(
-        iterations=snapshots,
-        plan_id=plan_id,
-        context=context,
-        per_agent_verdicts=per_agent,
-        findings=findings,
-        root_cause=_classify_root_cause(iterations),
-    )
-```
-
-- [x] **Step 5: run tests, PASS**
-
-- [x] **Step 6 (Green commit)**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py tests/test_escalation_prompt.py
-git commit -m "feat: implement root-cause classifier + build_escalation_context"
-```
-
-- [x] **Step 7-8 (Refactor + verify + commit)**
-
-```bash
-make verify && git commit --allow-empty -m "refactor: classifier reviewed, clean"
-```
-
-### Task G3: `format_escalation_message` (golden-output render)
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-- Create: `tests/fixtures/magi-escalations/checkpoint2-infra-transient.txt`
-
-- [x] **Step 1 (Red): golden-output test**
-
-Create `tests/fixtures/magi-escalations/checkpoint2-infra-transient.txt` with the full template from CLAUDE.md "canonical output template" section, adapted to synthetic inputs. Then append to `tests/test_escalation_prompt.py`:
-
-```python
-from pathlib import Path
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "magi-escalations"
-
-
-def test_format_escalation_message_matches_golden_checkpoint2_infra() -> None:
-    from escalation_prompt import format_escalation_message
-    iters = [
-        _mkv("HOLD", degraded=True),
-        _mkv("GO", degraded=False),
-        _mkv("HOLD", degraded=True),
-    ]
-    ctx = build_escalation_context(iters, plan_id="D", context="checkpoint2")
-    msg = format_escalation_message(ctx)
-    # Render must be <=40 lines and include the four expected markers
-    assert msg.count("\n") <= 40
-    assert "Escalando al usuario" in msg
-    assert "Opciones per INV-0" in msg
-    assert "(a)" in msg and "(b)" in msg and "(c)" in msg and "(d)" in msg
-    assert "Cual?" in msg or "¿Cuál?" in msg
-
-
-def test_format_escalation_message_structural_defect_omits_retry() -> None:
-    from escalation_prompt import format_escalation_message
-    iters = [_mkv("STRONG_NO_GO")]
-    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
-    msg = format_escalation_message(ctx)
-    # option (b) retry should be absent when STRONG_NO_GO present
-    assert "retry" not in msg.lower() or "abandonar" in msg.lower()
-```
-
-- [x] **Step 2-3 (Red commit)**
-
-```bash
-git add tests/test_escalation_prompt.py tests/fixtures/magi-escalations/
-git commit -m "test: add golden-output tests for format_escalation_message"
-```
-
-- [x] **Step 4 (Green): implement `format_escalation_message` + dynamic option composer**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-def _compose_options(ctx: EscalationContext) -> tuple[EscalationOption, ...]:
-    """Build context-aware menu per root cause."""
-    opts: list[EscalationOption] = []
-    # (a) override — always available unless STRONG_NO_GO
-    if ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
-        opts.append(EscalationOption(
-            letter="a",
-            action="override",
-            rationale="Override INV-0 (user authority)",
-            caveat="requires --reason; audit artifact written.",
-        ))
-    # (b) retry one iter — only for infra transient
-    if ctx.root_cause == _RootCause.INFRA_TRANSIENT:
-        opts.append(EscalationOption(
-            letter="b",
-            action="retry",
-            rationale="Re-invocar MAGI una iter mas (safety valve +1)",
-            caveat="consume iter extra; INV-0 override del INV-11.",
-        ))
-    # (c) replan / split — for plan-vs-spec or ambiguity
-    if ctx.root_cause in (_RootCause.PLAN_VS_SPEC, _RootCause.SPEC_AMBIGUITY):
-        opts.append(EscalationOption(
-            letter="c",
-            action="alternative",
-            rationale="Replan: split spec o ajustar scope",
-            caveat="reinicia flujo desde sec.1.",
-        ))
-    # (d) v0.1 behavior — always available, default in non-TTY
-    opts.append(EscalationOption(
-        letter="d",
-        action="abandon",
-        rationale="Exit 8 (v0.1 behavior) + artefactos para review manual",
-        caveat="default en non-TTY.",
-    ))
-    # Reassign letters a/b/c/d sequentially so the menu is contiguous
-    letters = ("a", "b", "c", "d")
-    return tuple(
-        EscalationOption(letter=letters[i], action=o.action, rationale=o.rationale, caveat=o.caveat)
-        for i, o in enumerate(opts[:4])
-    )
-
-
-def format_escalation_message(ctx: EscalationContext) -> str:
-    """Render the canonical escalation template (<=40 lines)."""
-    n = len(ctx.iterations)
-    last = ctx.iterations[-1] if ctx.iterations else {"verdict": "?", "degraded": False}
-    root_label = {
-        _RootCause.INFRA_TRANSIENT: "transient-infra (agent degraded repite)",
-        _RootCause.PLAN_VS_SPEC: "plan-vs-spec gap (CRITICAL findings persisten)",
-        _RootCause.STRUCTURAL_DEFECT: "defecto estructural (STRONG_NO_GO)",
-        _RootCause.SPEC_AMBIGUITY: "spec ambiguity (confidence trending down)",
-    }[ctx.root_cause]
-    opts = _compose_options(ctx)
-    lines = [
-        f"MAGI iter {n} FINAL ({ctx.context}): veredicto '{last['verdict']}' degraded={last['degraded']}.",
-        f"Causa raiz inferida: {root_label}.",
-        f"Safety valve INV-11 exhausted tras {n} iter.",
-        "",
-        "Escalando al usuario per INV-11 + INV-18:",
-        "",
-        f"Estado plan {ctx.plan_id}:",
-        f"- Iteraciones: {n}",
-        f"- Findings residuales: {len(ctx.findings)}",
-        "",
-        "Opciones per INV-0 (user authority):",
-    ]
-    for o in opts:
-        line = f"- ({o.letter}) {o.action}: {o.rationale}."
-        if o.caveat:
-            line += f" {o.caveat}"
-        lines.append(line)
-    lines.append("")
-    lines.append("¿Cuál?")
-    return "\n".join(lines)
-```
-
-- [x] **Step 5 (verify tests PASS)**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [x] **Step 6-8 (Green + Refactor commits)**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py
-git commit -m "feat: implement format_escalation_message with dynamic option menu"
-make verify
-git commit --allow-empty -m "refactor: template render reviewed, ≤40 lines"
-```
-
-### Task G4: `prompt_user` TTY-guarded + headless fallback
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-
-- [x] **Step 1 (Red): TTY + headless tests**
-
-Append to `tests/test_escalation_prompt.py`:
-
-```python
-def test_prompt_user_non_tty_defaults_to_abandon(monkeypatch, capsys) -> None:
-    from escalation_prompt import prompt_user, _compose_options
-    iters = [_mkv("HOLD", degraded=True), _mkv("HOLD", degraded=True)]
-    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
-    opts = _compose_options(ctx)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    decision = prompt_user(ctx, opts, non_interactive=True)
-    assert decision.action == "abandon"
-    assert decision.chosen_option == "d"
-
-
-def test_prompt_user_tty_accepts_letter(monkeypatch) -> None:
-    from escalation_prompt import prompt_user, _compose_options
-    iters = [_mkv("HOLD", degraded=True)] * 3
-    ctx = build_escalation_context(iters, plan_id="X", context="checkpoint2")
-    opts = _compose_options(ctx)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    inputs = iter(["a", "caspar JSON bug"])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    decision = prompt_user(ctx, opts, non_interactive=False)
-    assert decision.action == "override"
-    assert decision.reason == "caspar JSON bug"
-
-
-def test_prompt_user_invalid_letter_reprompts(monkeypatch) -> None:
-    from escalation_prompt import prompt_user, _compose_options
-    iters = [_mkv("HOLD", degraded=True)] * 3
-    ctx = build_escalation_context(iters, plan_id="X", context="checkpoint2")
-    opts = _compose_options(ctx)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    inputs = iter(["z", "A", "reason text"])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    decision = prompt_user(ctx, opts, non_interactive=False)
-    assert decision.chosen_option == "a"
-```
-
-- [x] **Step 2-3 (Red commit)**
-
-```bash
-git add tests/test_escalation_prompt.py
-git commit -m "test: add prompt_user TTY + headless + re-prompt tests"
-```
-
-- [x] **Step 4 (Green): implement `prompt_user`**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
-import json
+import queue
 import sys
-from pathlib import Path
-
-
-_HEADLESS_POLICY_FILE = ".claude/magi-auto-policy.json"
-# Canonical registry of allowed `on_exhausted` policy values. Lives in
-# models.py per NF10 (fixed registries are centralized in models.py).
-# Imported here to avoid a second source of truth.
-from models import AUTO_POLICIES  # tuple[str, ...] of allowed policy names
-
-
-def _read_headless_policy(root: Path) -> str:
-    """Return the configured policy or 'abort' (default)."""
-    p = root / _HEADLESS_POLICY_FILE
-    if not p.is_file():
-        return "abort"
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return "abort"
-    policy = str(data.get("on_exhausted", "abort"))
-    return policy if policy in AUTO_POLICIES else "abort"
-
-
-def prompt_user(
-    ctx: EscalationContext,
-    options: tuple[EscalationOption, ...],
-    *,
-    non_interactive: bool = False,
-    project_root: Path | None = None,
-) -> UserDecision:
-    """Print the formatted escalation message + prompt user for choice.
-
-    Non-TTY / --non-interactive / auto path: apply headless policy from
-    .claude/magi-auto-policy.json (default 'abort' = option d).
-
-    TTY path: loop input() until user enters a valid letter; then collect
-    a one-line reason (mandatory for override action).
-    """
-    sys.stderr.write(format_escalation_message(ctx) + "\n")
-    tty = sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
-    if non_interactive or not tty:
-        policy = _read_headless_policy(project_root or Path.cwd())
-        if policy == "override_strong_go_only" and ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
-            match = next((o for o in options if o.action == "override"), options[-1])
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="headless policy: override_strong_go_only")
-        if policy == "retry_once" and any(o.action == "retry" for o in options):
-            match = next(o for o in options if o.action == "retry")
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="headless policy: retry_once")
-        # default 'abort' -> option d (abandon)
-        match = next((o for o in options if o.action == "abandon"), options[-1])
-        return UserDecision(chosen_option=match.letter, action=match.action,
-                            reason="headless policy: abort (default)")
-    valid = {o.letter: o for o in options}
-    while True:
-        try:
-            choice = input("Option (a/b/c/d): ").strip().lower()
-        except EOFError:
-            match = next((o for o in options if o.action == "abandon"), options[-1])
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="EOFError during prompt; headless default")
-        if choice in valid:
-            break
-        sys.stderr.write(f"Invalid choice '{choice}'; expected one of {sorted(valid)}.\n")
-    opt = valid[choice]
-    if opt.action == "override":
-        try:
-            reason = input("Reason (mandatory for override): ").strip()
-        except EOFError:
-            reason = ""
-        if not reason:
-            sys.stderr.write("Override requires non-empty --reason; falling back to abandon.\n")
-            match = next((o for o in options if o.action == "abandon"), options[-1])
-            return UserDecision(chosen_option=match.letter, action=match.action,
-                                reason="override requested without reason")
-        return UserDecision(chosen_option=choice, action="override", reason=reason)
-    return UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
-```
-
-- [x] **Step 5: tests PASS**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-```
-
-- [x] **Step 6-8**
-
-```bash
-git add skills/sbtdd/scripts/escalation_prompt.py
-git commit -m "feat: add prompt_user with TTY + headless fallback paths"
-make verify
-git commit --allow-empty -m "refactor: prompt_user reviewed for EOFError safety"
-```
-
-### Task G5: `apply_decision` + audit artifact writer
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/escalation_prompt.py`
-- Modify: `tests/test_escalation_prompt.py`
-
-- [x] **Step 1 (Red): audit artifact test**
-
-Append:
-
-```python
-def test_apply_decision_writes_audit_artifact(tmp_path) -> None:
-    from escalation_prompt import apply_decision, _compose_options
-    iters = [_mkv("HOLD", degraded=True)] * 3
-    ctx = build_escalation_context(iters, plan_id="D", context="checkpoint2")
-    opts = _compose_options(ctx)
-    decision = UserDecision(chosen_option="a", action="override", reason="caspar bug")
-    code = apply_decision(decision, ctx, project_root=tmp_path)
-    assert code == 0
-    # artifact written
-    audits = list((tmp_path / ".claude" / "magi-escalations").glob("*.json"))
-    assert len(audits) == 1
-    import json
-    data = json.loads(audits[0].read_text(encoding="utf-8"))
-    assert data["decision"] == "override"
-    assert data["chosen_option"] == "a"
-    assert data["reason"] == "caspar bug"
-    assert data["plan_id"] == "D"
-    assert data["magi_context"] == "checkpoint2"
-
-
-def test_apply_decision_abandon_returns_exit_8(tmp_path) -> None:
-    from escalation_prompt import apply_decision
-    iters = [_mkv("HOLD_TIE")] * 3
-    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
-    decision = UserDecision(chosen_option="d", action="abandon",
-                            reason="headless policy")
-    code = apply_decision(decision, ctx, project_root=tmp_path)
-    assert code == 8
-```
-
-- [x] **Step 2-3 (Red commit)**
-
-```bash
-python -m pytest tests/test_escalation_prompt.py -v
-git add tests/test_escalation_prompt.py
-git commit -m "test: add apply_decision audit artifact + exit-code tests"
-```
-
-- [x] **Step 4 (Green)**
-
-Append to `skills/sbtdd/scripts/escalation_prompt.py`:
-
-```python
+import threading
 from datetime import datetime, timezone
+from typing import Any
+
+from models import ProgressContext
+
+_progress_lock = threading.Lock()
+_current_progress: ProgressContext = ProgressContext()
 
 
-def apply_decision(decision: UserDecision, ctx: EscalationContext, project_root: Path) -> int:
-    """Write audit artifact + return process exit code.
+def get_current_progress() -> ProgressContext:
+    """Return the current ProgressContext singleton (lock-protected)."""
+    with _progress_lock:
+        return _current_progress
 
-    Returns:
-        0 if decision is override/retry/alternative (caller continues);
-        8 if abandon (exit 8 matches v0.1 behavior so wrappers can propagate).
-    """
-    artifact_dir = project_root / ".claude" / "magi-escalations"
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    safe_ts = ts.replace(":", "-")
-    artifact = artifact_dir / f"{safe_ts}-{ctx.plan_id}.json"
-    payload = {
-        "decision": decision.action,
-        "chosen_option": decision.chosen_option,
-        "reason": decision.reason,
-        "escalation_context": {
-            "iterations": list(ctx.iterations),
-            "plan_id": ctx.plan_id,
-            "root_cause": ctx.root_cause.value,
-            "n_findings": len(ctx.findings),
-        },
-        "timestamp": ts,
-        "plan_id": ctx.plan_id,
-        "magi_context": ctx.context,
-    }
-    artifact.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return 8 if decision.action == "abandon" else 0
+
+def set_current_progress(new_ctx: ProgressContext) -> None:
+    """Replace the current ProgressContext singleton (lock-protected)."""
+    global _current_progress
+    with _progress_lock:
+        _current_progress = new_ctx
+
+
+def reset_current_progress() -> None:
+    """Reset the singleton to its default value. Test-only helper."""
+    set_current_progress(ProgressContext())
+
+
+# HeartbeatEmitter is added in S1-3.
+class HeartbeatEmitter:
+    pass  # placeholder; replaced in S1-3
 ```
 
-- [x] **Step 5: tests PASS**
-
-- [x] **Step 6-8**
+- [ ] **Step 4: Run tests to verify pass**
 
 ```bash
-git add skills/sbtdd/scripts/escalation_prompt.py
-git commit -m "feat: add apply_decision with audit artifact + exit-code mapping"
-make verify
-git commit --allow-empty -m "refactor: apply_decision reviewed"
+pytest tests/test_heartbeat.py -k "current_progress or repeated_set or reset" -v
+ruff check skills/sbtdd/scripts/heartbeat.py
+mypy skills/sbtdd/scripts/heartbeat.py --strict
 ```
 
-### Task G6: wire into `spec_cmd.py` safety-valve exhaustion path
+Expected: 4 tests pass.
 
-**Files:**
-- Modify: `skills/sbtdd/scripts/spec_cmd.py`
-- Create: `tests/test_spec_cmd_escalation.py`
-
-- [x] **Step 1 (Red): test escalation fires on exhaustion**
-
-`tests/test_spec_cmd_escalation.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-23
-"""spec_cmd -> escalation_prompt wiring tests (Feature A)."""
-
-from __future__ import annotations
-
-import pytest
-from pathlib import Path
-from unittest.mock import patch
-
-import spec_cmd
-from errors import MAGIGateError
-from tests.fixtures.skill_stubs import StubMAGI, make_verdict
-
-
-def test_spec_cmd_escalates_on_safety_valve_exhaustion(tmp_path, monkeypatch) -> None:
-    # synthesize a full project root with spec-behavior-base.md etc
-    # (use existing fixtures helper if one exists; otherwise create minimal)
-    ...  # skeleton; concretize using test_spec_cmd.py fixtures
-
-
-def test_spec_cmd_override_flag_skips_prompt_and_writes_audit(tmp_path) -> None:
-    ...  # `--override-checkpoint --reason "..."` path bypasses prompt
-```
-
-Replace the `...` placeholders by lifting fixture setup from existing `tests/test_spec_cmd.py`. (Do NOT ship literal `...` — that would be a placeholder per skill rules.) The exact fixture setup uses `_make_project_fixture(tmp_path)` analogous to what test_spec_cmd already does.
-
-- [x] **Step 2-3 (Red commit)**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_spec_cmd_escalation.py
-git commit -m "test: add spec_cmd safety-valve escalation wiring tests"
-```
-
-- [x] **Step 4 (Green): wire escalation into `spec_cmd`**
-
-In `skills/sbtdd/scripts/spec_cmd.py`:
-
-1. Extend `_build_parser()` to accept `--override-checkpoint`, `--reason`, and `--non-interactive`:
-
-```python
-def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="sbtdd spec")
-    p.add_argument("--project-root", type=Path, default=Path.cwd())
-    p.add_argument("--override-checkpoint", action="store_true",
-                   help="Override MAGI gate per INV-0; requires --reason")
-    p.add_argument("--reason", type=str, default=None,
-                   help="Mandatory when --override-checkpoint is set")
-    p.add_argument("--non-interactive", action="store_true",
-                   help="Force headless path on safety-valve exhaustion")
-    return p
-```
-
-2. Modify `_run_magi_checkpoint2` to catch exhaustion and route to `escalation_prompt`:
-
-```python
-import escalation_prompt
-
-
-def _run_magi_checkpoint2(root: Path, cfg: object, ns: argparse.Namespace) -> magi_dispatch.MAGIVerdict:
-    ...  # existing body (unchanged until final raise)
-    # replace `raise MAGIGateError(f"... did not converge ...")` with:
-    # Build escalation context from the iterations the loop tracked; wire
-    # apply_decision to either raise (abandon/exit 8), override (accept
-    # last verdict), or retry (one more iter). Plan_id derived from the
-    # plan path name suffix ('A' in claude-plan-tdd-A.md).
-```
-
-Concretely replace the final `raise MAGIGateError(...)` with:
-
-```python
-    # Exhaustion path: build context + escalate
-    ctx = escalation_prompt.build_escalation_context(
-        iterations=list(_verdict_history),
-        plan_id=_plan_id_from_path(plan.name),
-        context="checkpoint2",
-    )
-    options = escalation_prompt._compose_options(ctx)
-    if ns.override_checkpoint:
-        if not ns.reason:
-            raise MAGIGateError("--override-checkpoint requires --reason")
-        decision = UserDecision(chosen_option="a", action="override", reason=ns.reason)
-    else:
-        decision = escalation_prompt.prompt_user(
-            ctx, options, non_interactive=ns.non_interactive, project_root=root
-        )
-    code = escalation_prompt.apply_decision(decision, ctx, project_root=root)
-    if code == 0 and decision.action == "override":
-        return _verdict_history[-1]  # accept last verdict
-    if code == 0 and decision.action == "retry":
-        # One extra iter — re-enter the loop body once more
-        verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
-        _write_plan_tdd(root, verdict, plan_org, plan)
-        if magi_dispatch.verdict_passes_gate(verdict, threshold):
-            return verdict
-        raise MAGIGateError("retry iter also failed gate")
-    raise MAGIGateError(f"user chose '{decision.action}' on safety-valve exhaustion")
-```
-
-Track iterations via `_verdict_history: list[MAGIVerdict]` accumulated inside the for loop (refactor the existing loop to append each `verdict` observed). Add module-level `_plan_id_from_path` helper:
-
-```python
-def _plan_id_from_path(name: str) -> str:
-    """Extract plan id suffix from filename (claude-plan-tdd-A.md -> 'A')."""
-    import re
-    m = re.search(r"-([A-Z0-9]+)\.md$", name)
-    return m.group(1) if m else "X"
-```
-
-Pass `ns` to `_run_magi_checkpoint2(root, cfg, ns)` from `main(argv)`.
-
-- [x] **Step 5: tests PASS**
-
-- [x] **Step 6-8 (Green + Refactor commits)**
-
-```bash
-git add skills/sbtdd/scripts/spec_cmd.py tests/test_spec_cmd_escalation.py
-git commit -m "feat: wire escalation_prompt into spec_cmd safety-valve exhaustion"
-make verify
-git commit --allow-empty -m "refactor: spec_cmd wiring reviewed"
-```
-
-### Task G7: wire into `pre_merge_cmd.py`
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/pre_merge_cmd.py`
-- Create: `tests/test_pre_merge_cmd_escalation.py`
-
-Mirror Task G6 for `pre_merge_cmd._loop2`. The non-convergence raise at `pre_merge_cmd.py:540-546` becomes the escalation entry. Pass `context="pre-merge"` and `plan_id` derived analogously. The `MAGIGateError` constructor already carries `accepted_conditions` / `rejected_conditions` / `verdict` / `iteration` — preserve them on re-raise paths when the user picks abandon.
-
-- [x] **Step 1-3 (Red commit)**
-
-Same structure as G6 step 1-3.
-
-- [x] **Step 4 (Green)**
-
-Add `import escalation_prompt` and modify the final raise in `_loop2`:
-
-```python
-# replace the final raise MAGIGateError(...) block with:
-from escalation_prompt import build_escalation_context, _compose_options, prompt_user, apply_decision
-ctx = build_escalation_context(
-    iterations=_verdict_history,
-    plan_id=_plan_id_from_path(cfg.plan_path),
-    context="pre-merge",
-)
-opts = _compose_options(ctx)
-if ns.override_checkpoint:
-    if not ns.reason:
-        raise MAGIGateError("--override-checkpoint requires --reason")
-    decision = UserDecision(chosen_option="a", action="override", reason=ns.reason)
-else:
-    decision = prompt_user(ctx, opts, non_interactive=ns.non_interactive, project_root=root)
-apply_decision(decision, ctx, project_root=root)
-if decision.action == "override" and last_verdict is not None:
-    return last_verdict
-raise MAGIGateError(
-    f"user chose '{decision.action}' on pre-merge Loop 2 exhaustion",
-    verdict=last_verdict.verdict if last_verdict else None,
-    iteration=cfg.magi_max_iterations,
-)
-```
-
-Accumulate `_verdict_history` inside the existing `for iteration in range(...)` loop and add the same three flags to `_build_parser()`. Pass `ns` into `_loop2`.
-
-- [x] **Step 5-8**: verify + commits.
-
-### Task G8: `finalize_cmd --override-checkpoint --reason`
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/finalize_cmd.py`
-- Create: `tests/test_finalize_cmd_override.py`
-
-- [x] **Step 1-3 (Red)**: test asserting override flag produces audit artifact + bypasses `degraded: true` reject.
-
-- [x] **Step 4 (Green)**: add `--override-checkpoint --reason` to `finalize_cmd._build_parser`. In `main()`, before rejecting a degraded verdict, check `ns.override_checkpoint`. When set, build an abbreviated `EscalationContext` (synthesize a single-iter history from `.claude/magi-verdict.json`), call `apply_decision` with the user's reason, and permit the gate to pass. The audit artifact is the record.
-
-- [x] **Step 5-8**: tests + commits.
-
-### Task G9: `resume_cmd` detects pending escalation
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/resume_cmd.py`
-- Create: `tests/test_resume_cmd_escalation_recovery.py`
-
-- [x] **Step 1-3 (Red)**: test that `resume_cmd` detects `.claude/magi-escalation-pending.md` and re-enters the prompt.
-
-- [x] **Step 4 (Green)**: in `resume_cmd._preflight_diagnose` (or equivalent entry point), check for `.claude/magi-escalation-pending.md`. When present, read the serialized `EscalationContext` JSON inside it, compose options, call `prompt_user`, `apply_decision`, delete the pending marker, then delegate to the original subcommand (`spec` or `pre-merge`) based on the stored context. In parallel, modify `prompt_user` to write the pending marker BEFORE the first `input()` call so Ctrl+C recovery works:
-
-```python
-# inside prompt_user, right before input():
-pending = (project_root or Path.cwd()) / ".claude" / "magi-escalation-pending.md"
-pending.parent.mkdir(parents=True, exist_ok=True)
-pending.write_text(json.dumps({
-    "plan_id": ctx.plan_id,
-    "context": ctx.context,
-    "root_cause": ctx.root_cause.value,
-    "iterations": list(ctx.iterations),
-}, indent=2), encoding="utf-8")
-# ... after decision made (success or EOF), remove:
-if pending.is_file():
-    pending.unlink()
-```
-
-- [x] **Step 5-8**: tests + commits.
-
-### Task G9b: A8 invariant — Feature A never invoked from `auto_cmd`
-
-**Files:**
-- Create: `tests/test_auto_cmd_escalation_headless.py`
-
-Acceptance criterion A8 (`spec-behavior-base.md:282`) and INV-22 both require that Feature A's interactive prompt NEVER runs inside `/sbtdd auto`. This task proves the invariant with two orthogonal checks: a static import check (`auto_cmd.py` does not import `prompt_user`) and a behavioral check (stubbing `prompt_user` to count calls, then driving `auto_cmd` through a MAGI-exhaustion path and asserting zero calls).
-
-- [x] **Step 1 (Red): create `tests/test_auto_cmd_escalation_headless.py`**
-
-```python
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-23
-
-from __future__ import annotations
-
-import ast
-import sys
-from pathlib import Path
-from unittest.mock import patch
-
-import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = REPO_ROOT / "skills" / "sbtdd" / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-
-def _names_imported_by(module_path: Path, from_module: str) -> set[str]:
-    """Return the set of names imported from `from_module` by the given .py file."""
-    tree = ast.parse(module_path.read_text(encoding="utf-8"))
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == from_module:
-            names.update(alias.name for alias in node.names)
-    return names
-
-
-def test_auto_cmd_does_not_import_prompt_user() -> None:
-    """A8 static guarantee: auto_cmd.py must not import any TTY-driven entry
-    point from escalation_prompt. Importing build_escalation_context /
-    apply_decision is permitted (headless-safe); prompt_user is not."""
-    imported = _names_imported_by(SCRIPTS_DIR / "auto_cmd.py", "escalation_prompt")
-    assert "prompt_user" not in imported, (
-        "INV-22 / A8 violation: auto_cmd imports escalation_prompt.prompt_user. "
-        "auto_cmd must remain headless; use apply_decision with a headless "
-        "UserDecision synthesized from .claude/magi-auto-policy.json instead."
-    )
-
-
-def test_auto_cmd_magi_exhaustion_never_calls_prompt_user(tmp_path: Path) -> None:
-    """A8 behavioral guarantee: drive auto_cmd through a MAGI non-convergence
-    path with a StubMAGI that returns HOLD on every iter. prompt_user is patched
-    to raise on invocation. The run must abort with MAGIGateError (or the
-    headless policy verdict) without ever calling prompt_user."""
-    from tests.fixtures.skill_stubs import StubMAGI  # existing fixture
-    import auto_cmd
-    import escalation_prompt
-
-    # Stage a minimal project: state file done-with-plan, plan approved, one
-    # pre-merge Loop 2 non-convergence path. Reuse existing tests/fixtures/auto-runs
-    # staging helpers (lifted from tests/test_auto_cmd.py setup).
-    ...  # concretize: reuse _stage_auto_run(tmp_path) helper, approved plan, all tasks [x]
-
-    def _boom(*a: object, **kw: object) -> None:
-        raise AssertionError("prompt_user invoked inside auto_cmd — INV-22 violated")
-
-    with patch.object(escalation_prompt, "prompt_user", _boom):
-        with pytest.raises(Exception):  # MAGIGateError or SystemExit
-            auto_cmd.main(["--dry-run=false"])
-```
-
-- [x] **Step 2: run tests to confirm Red**
-
-```bash
-python -m pytest tests/test_auto_cmd_escalation_headless.py -v
-```
-Expected: `test_auto_cmd_does_not_import_prompt_user` FAILS if Task G6/G7 accidentally leaked the import into `auto_cmd.py`; `test_auto_cmd_magi_exhaustion_never_calls_prompt_user` FAILS with `NotImplementedError` on the `...` placeholder until the stage helper is concretized.
-
-- [x] **Step 3 (Red commit)**
-
-```bash
-git add tests/test_auto_cmd_escalation_headless.py
-git commit -m "test: add A8 invariant — prompt_user never called inside auto_cmd"
-```
-
-- [x] **Step 4 (Green): concretize the stage helper**
-
-Replace the `...` line with the real staging code lifted from `tests/test_auto_cmd.py::_stage_auto_run` (or equivalent fixture helper). Ensure the test run uses a stub pre-merge Loop 2 that exhausts iterations with HOLD verdicts.
-
-> **Do NOT ship literal `...`**: any `...` left in committed test code is a landing-time failure. Replace every `...` placeholder with real code before the Green commit, and re-run `pytest` + `ruff check` to confirm zero warnings.
-
-- [x] **Step 5: run tests, confirm PASS**
-
-```bash
-python -m pytest tests/test_auto_cmd_escalation_headless.py -v
-```
-Expected: both tests PASS. If the behavioral test passes vacuously (auto_cmd raises before reaching the Loop 2 exhaustion at all), add an explicit `assert verdict_exhausted_code_was_hit` breadcrumb inside the stage helper to detect the vacuous case.
-
-- [x] **Step 6 (Green commit)**
-
-```bash
-make verify
-git add tests/test_auto_cmd_escalation_headless.py
-git commit -m "feat: concretize A8 headless invariant test"
-```
-
-- [x] **Step 7 (Refactor)**
-
-```bash
-git commit --allow-empty -m "refactor: A8 test reviewed, clean"
-```
-
-### Task G10: close-task Milestone G
-
-- [x] **Step 1**: mark Milestone G checkbox [x] in the plan.
-- [x] **Step 2**: commit.
-
-```bash
-git commit --allow-empty -m "chore: mark task G complete"
+git add skills/sbtdd/scripts/heartbeat.py tests/test_heartbeat.py
+git commit -m "feat: add scripts/heartbeat.py with lock-protected ProgressContext singleton"
 ```
 
 ---
 
-## MILESTONE H — Feature B: Superpowers spec-reviewer integration per task
-
-**Rationale:** Per-task semantic drift detection. Runs a superpowers spec-reviewer subagent after implementer DONE but before `mark_and_advance`. Reviewer operates on task diff + task text (NOT full spec) to bound cost. Findings route via `/receiving-code-review` (INV-29 extension → INV-31 new).
-
-### Task H1: new `SpecReviewError` + exit 12
+### Task S1-3: HeartbeatEmitter context manager scaffold
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/errors.py`
-- Modify: `tests/test_errors.py`
+- Modify: `skills/sbtdd/scripts/heartbeat.py`
+- Modify: `tests/test_heartbeat.py`
 
-- [x] **Step 1 (Red)**:
+- [ ] **Step 1: Write failing test for context manager protocol**
 
-Append to `tests/test_errors.py`:
+Append to `tests/test_heartbeat.py`:
 
 ```python
-def test_spec_review_error_maps_to_exit_12() -> None:
-    from errors import EXIT_CODES, SpecReviewError
-    assert EXIT_CODES[SpecReviewError] == 12
+def test_heartbeat_emitter_context_manager_protocol():
+    emitter = HeartbeatEmitter(label="test-dispatch", interval_seconds=15)
+    assert emitter.label == "test-dispatch"
+    assert emitter.interval_seconds == 15
+    with emitter as e:
+        assert e is emitter
 
 
-def test_spec_review_error_is_sbtdd_error() -> None:
-    from errors import SBTDDError, SpecReviewError
-    assert issubclass(SpecReviewError, SBTDDError)
+def test_heartbeat_emitter_validates_interval_positive():
+    with pytest.raises(ValueError, match="interval_seconds must be > 0"):
+        HeartbeatEmitter(label="x", interval_seconds=0)
+    with pytest.raises(ValueError, match="interval_seconds must be > 0"):
+        HeartbeatEmitter(label="x", interval_seconds=-1)
 ```
 
-- [x] **Step 2-3**: run, fail, commit `test:`.
+- [ ] **Step 2: Run + verify fail**
 
-- [x] **Step 4 (Green)**: in `skills/sbtdd/scripts/errors.py`:
+```bash
+pytest tests/test_heartbeat.py::test_heartbeat_emitter_context_manager_protocol -v
+```
+
+Expected: fail (placeholder class has no `__init__`).
+
+- [ ] **Step 3: Replace placeholder with full HeartbeatEmitter scaffold**
+
+Replace the `class HeartbeatEmitter: pass` placeholder in `heartbeat.py`:
 
 ```python
-class SpecReviewError(SBTDDError):
-    """Spec-reviewer safety valve exhausted — exit 12 (SPEC_REVIEW_ISSUES).
+class HeartbeatEmitter:
+    """Context manager that emits stderr ticks every ``interval_seconds``.
 
-    Introduced in v0.2 (Feature B). Carries the last-iteration issues
-    list as a typed attribute so dispatchers can enrich audit artifacts.
+    Wraps long subprocess dispatches (MAGI Loop 2, /requesting-code-review,
+    spec-reviewer) so the operator sees periodic liveness signals on
+    stderr while the dispatch's own stdout/stderr is quiet.
     """
+
+    # Class-level zombie counter (Checkpoint 2 iter 3 caspar CRITICAL fix):
+    # tracks heartbeat threads that survived __exit__'s 2s join timeout.
+    _zombie_thread_count: int = 0
 
     def __init__(
         self,
-        message: str,
-        *,
-        task_id: str | None = None,
-        iteration: int | None = None,
-        issues: tuple[str, ...] = (),
+        label: str,
+        interval_seconds: float = 15.0,
+        failures_queue: "queue.Queue[int] | None" = None,
     ) -> None:
-        super().__init__(message)
-        self.task_id = task_id
-        self.iteration = iteration
-        self.issues = issues
+        if interval_seconds <= 0:
+            raise ValueError(
+                f"interval_seconds must be > 0, got {interval_seconds!r}"
+            )
+        self.label = label
+        self.interval_seconds = interval_seconds
+        self._failures_queue = failures_queue
+        self._failed_writes = 0
+        self._stop_event: threading.Event | None = None
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "HeartbeatEmitter":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        return None
 ```
 
-Add to `_EXIT_CODES_MUTABLE`:
+- [ ] **Step 4: Run + verify pass**
 
-```python
-    SpecReviewError: 12,
+```bash
+pytest tests/test_heartbeat.py -v
+mypy skills/sbtdd/scripts/heartbeat.py --strict
 ```
 
-- [x] **Step 5-8**: tests pass, `feat:`, verify, `refactor:` commits.
+- [ ] **Step 5: Commit**
 
-### Task H2: `SpecReviewResult` + `SpecIssue` dataclasses
+```bash
+git add skills/sbtdd/scripts/heartbeat.py tests/test_heartbeat.py
+git commit -m "feat: add HeartbeatEmitter context manager scaffold (no thread yet)"
+```
+
+---
+
+### Task S1-4: Daemon thread + threading.Event tick loop
 
 **Files:**
-- Create: `skills/sbtdd/scripts/spec_review_dispatch.py`
-- Create: `tests/test_spec_review_dispatch.py`
+- Modify: `skills/sbtdd/scripts/heartbeat.py`
+- Modify: `tests/test_heartbeat.py`
 
-- [x] **Step 1 (Red)**: dataclass shape tests mirroring Task G1 pattern.
+- [ ] **Step 1: Write failing tests for tick emission + Event-interruptible exit**
+
+Append to `tests/test_heartbeat.py`:
 
 ```python
-def test_spec_review_result_is_frozen() -> None:
-    from spec_review_dispatch import SpecReviewResult, SpecIssue
-    r = SpecReviewResult(approved=True, issues=(), reviewer_iter=1, artifact_path=None)
-    with pytest.raises((AttributeError, Exception)):
-        r.approved = False
+def test_heartbeat_thread_emits_ticks_during_active_lifetime(capsys):
+    set_current_progress(
+        ProgressContext(
+            iter_num=2, phase=3, task_index=14, task_total=36,
+            dispatch_label="test-dispatch",
+            started_at=datetime.now(timezone.utc),
+        )
+    )
+    with HeartbeatEmitter(label="test-dispatch", interval_seconds=0.05):
+        time.sleep(0.18)  # ~3 ticks at 50ms cadence
+    captured = capsys.readouterr()
+    tick_lines = [
+        line for line in captured.err.splitlines()
+        if line.startswith("[sbtdd auto] tick:")
+    ]
+    assert len(tick_lines) >= 2
 
 
-def test_spec_issue_carries_severity_and_text() -> None:
-    from spec_review_dispatch import SpecIssue
-    i = SpecIssue(severity="MISSING", text="Scenario 4 not covered")
-    assert i.severity == "MISSING"
+def test_heartbeat_exit_join_returns_within_timeout_when_thread_sleeping():
+    """Verify Event.wait() (NOT time.sleep) so __exit__ can interrupt mid-tick."""
+    emitter = HeartbeatEmitter(label="x", interval_seconds=10.0)
+    t0 = time.monotonic()
+    with emitter:
+        time.sleep(0.1)
+    t1 = time.monotonic()
+    assert t1 - t0 < 2.5, (
+        f"exit took {t1-t0:.2f}s; thread loop is using time.sleep instead of "
+        f"threading.Event.wait()"
+    )
 ```
 
-- [x] **Step 2-3**: commit `test:`.
+- [ ] **Step 2: Run + verify fail**
 
-- [x] **Step 4 (Green)**: create `skills/sbtdd/scripts/spec_review_dispatch.py`:
+Expected: both fail (no thread yet).
+
+- [ ] **Step 3: Implement daemon thread with Event-interruptible wait**
+
+Replace `__enter__` and `__exit__` and add `_tick_loop` + `_emit_tick` + `_format_tick` in `HeartbeatEmitter`:
+
+```python
+    def __enter__(self) -> "HeartbeatEmitter":
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._tick_loop,
+            name=f"heartbeat-{self.label}",
+            daemon=True,
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+        return None
+
+    def _tick_loop(self) -> None:
+        """Emit a stderr tick every interval until _stop_event is set.
+
+        Per Checkpoint 2 iter 1 caspar fix: check `_stop_event.is_set()` BEFORE
+        each emit_tick to avoid the daemon-thread-outlives-context-manager race
+        where the thread is between `wait()` returns (stop signaled) and the
+        next iteration starts. Combined with `Event.wait(timeout)` (which
+        returns immediately when set), this guarantees thread terminates
+        within max(interval, time-since-last-emit) of __exit__ signal.
+        """
+        assert self._stop_event is not None
+        while not self._stop_event.is_set():
+            self._emit_tick()
+            if self._stop_event.wait(timeout=self.interval_seconds):
+                break
+
+    def _emit_tick(self) -> None:
+        """Format + write a single tick to stderr (best-effort)."""
+        ctx = get_current_progress()
+        line = self._format_tick(ctx)
+        try:
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
+        except OSError:
+            self._failed_writes += 1
+
+    def _format_tick(self, ctx: ProgressContext) -> str:
+        """Stub format — full impl in S1-5."""
+        return f"[sbtdd auto] tick: phase {ctx.phase}"
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+```bash
+pytest tests/test_heartbeat.py -v
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/heartbeat.py tests/test_heartbeat.py
+git commit -m "feat: HeartbeatEmitter spawns Event-interruptible daemon tick thread"
+```
+
+---
+
+### Task S1-5: Tick format with full fields (H5) + null omission (H6) + elapsed helper
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/heartbeat.py`
+- Modify: `tests/test_heartbeat.py`
+
+- [ ] **Step 1: Write failing tests for H5/H6**
+
+Append to `tests/test_heartbeat.py`:
+
+```python
+def test_format_tick_full_fields_matches_h5():
+    fake_start = datetime.now(timezone.utc) - timedelta(seconds=15)
+    ctx = ProgressContext(
+        iter_num=2, phase=3, task_index=14, task_total=36,
+        dispatch_label="magi-loop2-iter2", started_at=fake_start,
+    )
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ctx)
+    assert line.startswith("[sbtdd auto] tick:")
+    assert "iter 2" in line
+    assert "phase 3" in line
+    assert "task 14/36" in line
+    assert "dispatch=magi-loop2-iter2" in line
+    assert "elapsed=" in line
+    assert any(s in line for s in ("0m14s", "0m15s", "0m16s"))
+
+
+def test_format_tick_omits_null_fields_h6():
+    fake_start = datetime.now(timezone.utc) - timedelta(seconds=45)
+    ctx = ProgressContext(phase=1, started_at=fake_start)
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ctx)
+    assert "phase 1" in line
+    assert "iter " not in line
+    assert "task " not in line
+    assert "dispatch=" not in line
+    assert "elapsed=" in line
+
+
+def test_format_tick_no_started_at_omits_elapsed():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ProgressContext())
+    assert line.startswith("[sbtdd auto] tick:")
+    assert "phase 0" in line
+    assert "elapsed" not in line
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Implement full _format_tick + elapsed helper**
+
+Replace `_format_tick` in `heartbeat.py` and add helper:
+
+```python
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        """Render elapsed seconds as ``<min>m<sec>s`` (clamped to >= 0)."""
+        mins, secs = divmod(int(max(seconds, 0)), 60)
+        return f"{mins}m{secs}s"
+
+    def _format_tick(self, ctx: ProgressContext) -> str:
+        """Format a tick line per sec.2.1 H5 (full) and H6 (null omission)."""
+        parts: list[str] = []
+        if ctx.iter_num:
+            parts.append(f"iter {ctx.iter_num}")
+        parts.append(f"phase {ctx.phase}")
+        if ctx.task_index is not None and ctx.task_total is not None:
+            parts.append(f"task {ctx.task_index}/{ctx.task_total}")
+        if ctx.dispatch_label:
+            parts.append(f"dispatch={ctx.dispatch_label}")
+        if ctx.started_at is not None:
+            elapsed_s = (datetime.now(timezone.utc) - ctx.started_at).total_seconds()
+            parts.append(f"elapsed={self._format_elapsed(elapsed_s)}")
+        return "[sbtdd auto] tick: " + " ".join(parts)
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/heartbeat.py tests/test_heartbeat.py
+git commit -m "feat: implement tick format with H5 full-fields and H6 null-omission"
+```
+
+---
+
+### Task S1-6: First-failure breadcrumb + counter (INV-32 part 1)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/heartbeat.py`
+- Modify: `tests/test_heartbeat.py`
+
+- [ ] **Step 1: Write failing tests for first-failure breadcrumb + counter**
+
+Append to `tests/test_heartbeat.py`:
+
+```python
+def test_heartbeat_first_failure_emits_breadcrumb_then_silent(monkeypatch):
+    write_calls = {"count": 0}
+    real_write = sys.stderr.write
+
+    def failing_write(s):
+        write_calls["count"] += 1
+        if write_calls["count"] == 1 or write_calls["count"] >= 3:
+            raise OSError("broken pipe")
+        return real_write(s)
+
+    monkeypatch.setattr(sys.stderr, "write", failing_write)
+    emitter = HeartbeatEmitter(label="x", interval_seconds=0.05)
+    with emitter:
+        time.sleep(0.18)
+    assert emitter._failed_writes >= 1
+
+
+def test_heartbeat_failed_writes_counter_starts_zero():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    assert emitter._failed_writes == 0
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+`test_heartbeat_failed_writes_counter_starts_zero` already passes; the breadcrumb test may need the explicit logic.
+
+- [ ] **Step 3: Add explicit first-failure breadcrumb logic in _emit_tick**
+
+Replace `_emit_tick` in `heartbeat.py`:
+
+```python
+    def _emit_tick(self) -> None:
+        """Format + write a single tick to stderr (best-effort).
+
+        On stderr write failure (OSError, e.g. broken pipe):
+        - First failure: emit one warning breadcrumb (best-effort).
+        - Subsequent failures: silent.
+        """
+        ctx = get_current_progress()
+        line = self._format_tick(ctx)
+        try:
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
+        except OSError as exc:
+            self._failed_writes += 1
+            if self._failed_writes == 1:
+                try:
+                    sys.stderr.write(
+                        f"[sbtdd auto] heartbeat write failed "
+                        f"(will continue silently): {exc}\n"
+                    )
+                    sys.stderr.flush()
+                except OSError:
+                    pass
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/heartbeat.py tests/test_heartbeat.py
+git commit -m "feat: heartbeat first-failure breadcrumb + silent subsequent failures"
+```
+
+---
+
+### Task S1-7: Queue-based incremental persistence (INV-32 part 2)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/heartbeat.py`
+- Modify: `tests/test_heartbeat.py`
+
+- [ ] **Step 1: Write failing tests for queue reporting + exit flush**
+
+Append to `tests/test_heartbeat.py`:
+
+```python
+import queue
+
+
+def test_heartbeat_reports_failure_counter_via_queue_every_n10(monkeypatch):
+    real_write = sys.stderr.write
+
+    def always_fail(s):
+        raise OSError("broken pipe")
+
+    monkeypatch.setattr(sys.stderr, "write", always_fail)
+    q: "queue.Queue[int]" = queue.Queue()
+    emitter = HeartbeatEmitter(
+        label="x", interval_seconds=0.01, failures_queue=q,
+    )
+    with emitter:
+        deadline = time.monotonic() + 2.0
+        while emitter._failed_writes < 10 and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert emitter._failed_writes >= 10
+    drained: list[int] = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    assert any(c >= 10 for c in drained), f"expected counter >= 10 in queue, got {drained}"
+
+
+def test_heartbeat_exit_pushes_final_counter_to_queue():
+    q: "queue.Queue[int]" = queue.Queue()
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15.0, failures_queue=q)
+    with emitter:
+        emitter._failed_writes = 7
+    drained: list[int] = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    assert drained[-1] == 7
+
+
+def test_heartbeat_no_queue_means_no_persistence():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15.0, failures_queue=None)
+    with emitter:
+        emitter._failed_writes = 5
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Add queue push at every N=10 increments + on exit**
+
+Modify `_emit_tick` to push every N=10:
+
+```python
+        except OSError as exc:
+            self._failed_writes += 1
+            if self._failures_queue is not None and self._failed_writes % 10 == 0:
+                try:
+                    self._failures_queue.put_nowait(self._failed_writes)
+                except queue.Full:
+                    pass
+            if self._failed_writes == 1:
+                # ... existing breadcrumb logic ...
+```
+
+Modify `__exit__` to flush final counter:
+
+```python
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            # Per Checkpoint 2 iter 2 caspar + iter 3 caspar CRITICAL fix:
+            # if join timed out, the thread is blocked on a stderr write
+            # (broken pipe + the write call itself blocks). EXPLICIT
+            # accounting: increment a class-level _zombie_thread_count and
+            # emit a structured warning to alternate channel (best-effort
+            # syslog-style line via os.write to fd=2 if available, swallow
+            # otherwise). The thread is daemonized so process exit collects
+            # it; we cannot safely interrupt a blocked syscall without
+            # unsafe primitives.
+            if self._thread.is_alive():
+                HeartbeatEmitter._zombie_thread_count += 1
+                # Best-effort alternate-channel breadcrumb: write directly
+                # to fd=2 (bypasses sys.stderr buffering that caused the
+                # original block).
+                try:
+                    import os as _os
+                    _os.write(
+                        2,
+                        f"[sbtdd auto] WARNING: heartbeat thread blocked at "
+                        f"__exit__ for label={self.label!r} (zombie count="
+                        f"{HeartbeatEmitter._zombie_thread_count}); "
+                        f"daemon=True will GC at process end\n".encode(),
+                    )
+                except OSError:
+                    pass
+        # Final flush queue counter (single-writer rule preserved — main
+        # thread sees the put via queue API).
+        if self._failures_queue is not None and self._failed_writes > 0:
+            try:
+                self._failures_queue.put_nowait(self._failed_writes)
+            except queue.Full:
+                pass
+            try:
+                sys.stderr.write(
+                    f"[sbtdd auto] heartbeat completed with "
+                    f"{self._failed_writes} silent write failures\n"
+                )
+                sys.stderr.flush()
+            except OSError:
+                pass
+        return None
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/heartbeat.py tests/test_heartbeat.py
+git commit -m "feat: heartbeat reports failure counter via queue every N=10 + on exit"
+```
+
+---
+
+### Task S1-8: Mechanical smoke fixture (R2.3 — protect NF-A budget)
+
+**Files:**
+- Create: `tests/test_heartbeat_smoke.py`
+
+- [ ] **Step 1: Write smoke fixture test**
+
+Create `tests/test_heartbeat_smoke.py`:
 
 ```python
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
-# Date: 2026-04-23
-"""Superpowers spec-reviewer dispatcher (Feature B, v0.2.0).
+# Date: 2026-05-01
+"""Mechanical smoke fixture for HeartbeatEmitter (sec.5.2 R2.3)."""
 
-Wraps `superpowers:subagent-driven-development/spec-reviewer-prompt.md` as
-a per-task spec-compliance check. Invoked by `auto_cmd._phase2_task_loop`
-after implementer DONE / before `close_task_cmd.mark_and_advance`, and by
-`close_task_cmd` interactively (unless --skip-spec-review set).
+from __future__ import annotations
 
-Reviewer contract (three defect classes):
-  - MISSING: requirement claimed but not built
-  - EXTRA: work outside spec scope (over-engineering)
-  - MISUNDERSTANDING: right problem solved wrong way
+import time
+from datetime import datetime, timezone
 
-Directive embedded in reviewer prompt (per superpowers): 'Verify by reading
-code, NOT by trusting report.'
+from heartbeat import HeartbeatEmitter, set_current_progress, reset_current_progress
+from models import ProgressContext
 
-Cost envelope: task diff + task text (~1-5 KB per call). For a 36-task
-plan this adds 36 `claude -p` invocations. Quota-aware via quota_detector.
+
+def test_emitter_emits_ticks_deterministically(capsys):
+    """R2.3: Sub-second cadence = ~5 ticks in 2.5s wall time (NF-A protected)."""
+    reset_current_progress()
+    set_current_progress(
+        ProgressContext(
+            iter_num=1, phase=2, task_index=3, task_total=10,
+            dispatch_label="smoke-dispatch",
+            started_at=datetime.now(timezone.utc),
+        )
+    )
+    with HeartbeatEmitter(label="smoke-dispatch", interval_seconds=0.5):
+        time.sleep(2.5)
+    captured = capsys.readouterr()
+    tick_lines = [
+        line for line in captured.err.splitlines()
+        if line.startswith("[sbtdd auto] tick:")
+    ]
+    assert 4 <= len(tick_lines) <= 6, (
+        f"expected 4-6 ticks in 2.5s window, got {len(tick_lines)}: {tick_lines}"
+    )
+    for line in tick_lines:
+        assert "dispatch=smoke-dispatch" in line
+        assert "elapsed=" in line
+    reset_current_progress()
+```
+
+- [ ] **Step 2: Run smoke test**
+
+```bash
+time pytest tests/test_heartbeat_smoke.py -v
+```
+
+Expected: pass; wall time <5s.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_heartbeat_smoke.py
+git commit -m "test: add mechanical heartbeat smoke fixture (NF-A budget protected)"
+```
+
+---
+
+### Task S1-9: ProgressContext writer hooks at the 10 transition sites in auto_cmd
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py`
+- Modify: `tests/test_auto_progress.py`
+
+- [ ] **Step 1: Survey existing auto_cmd structure**
+
+```bash
+grep -n "_phase\|def _.*phase\|def _.*dispatch\|task_index\|task_total" skills/sbtdd/scripts/auto_cmd.py | head -40
+```
+
+Locate the 10 transition sites enumerated in spec sec.3.
+
+- [ ] **Step 2: Add helper + writer at phase 1 entry**
+
+In `skills/sbtdd/scripts/auto_cmd.py`, add at top:
+
+```python
+from datetime import datetime, timezone
+from heartbeat import set_current_progress
+from models import ProgressContext
+
+
+def _set_progress(
+    *,
+    iter_num: int = 0,
+    phase: int,
+    task_index: int | None = None,
+    task_total: int | None = None,
+    dispatch_label: str | None = None,
+) -> None:
+    """Helper: write a fresh ProgressContext for the current transition.
+
+    **started_at semantics (Checkpoint 2 iter 2 caspar CRITICAL #3 fix):**
+    `started_at` represents the **current dispatch's** start time per spec
+    sec.3. Refreshing per `_set_progress` call would break that contract
+    when a single dispatch has multiple intra-dispatch updates (e.g.,
+    progress refinement during a long subagent invocation).
+
+    Rules:
+    - If `dispatch_label` differs from current ProgressContext's label
+      (or current is None): treat as new dispatch, refresh `started_at`.
+    - If `dispatch_label` matches current: preserve `started_at`
+      (intra-dispatch update; elapsed timer continues monotonically).
+    - If `dispatch_label is None` (between dispatches): set started_at to None.
+    """
+    from heartbeat import get_current_progress
+    current = get_current_progress()
+    # Single label-transition predicate (Checkpoint 2 iter 3 melchior CRITICAL fix):
+    # Compute is_dispatch_transition first; then derive started_at from one rule.
+    is_dispatch_transition = (current.dispatch_label != dispatch_label)
+    if dispatch_label is None:
+        new_started = None
+    elif is_dispatch_transition or current.started_at is None:
+        # New dispatch OR first dispatch ever.
+        new_started = datetime.now(timezone.utc)
+    else:
+        # Same dispatch — preserve started_at for monotonic elapsed.
+        new_started = current.started_at
+    set_current_progress(
+        ProgressContext(
+            iter_num=iter_num, phase=phase,
+            task_index=task_index, task_total=task_total,
+            dispatch_label=dispatch_label,
+            started_at=new_started,
+        )
+    )
+```
+
+**Test additions for `started_at` semantics (per Checkpoint 2 iter 2 caspar fix):**
+
+```python
+def test_set_progress_preserves_started_at_within_same_dispatch():
+    """Intra-dispatch update keeps elapsed monotonic (sec.3 PINNED semantics)."""
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+    import time
+
+    reset_current_progress()
+    _set_progress(phase=2, task_index=1, task_total=10, dispatch_label="green")
+    first_started = get_current_progress().started_at
+    time.sleep(0.01)
+    # Same dispatch_label, intra-dispatch progress refinement
+    _set_progress(phase=2, task_index=1, task_total=10, dispatch_label="green")
+    second_started = get_current_progress().started_at
+    assert second_started == first_started, "started_at must NOT refresh within same dispatch"
+    reset_current_progress()
+
+
+def test_set_progress_refreshes_started_at_on_dispatch_change():
+    """Different dispatch_label resets the elapsed timer."""
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+    import time
+
+    reset_current_progress()
+    _set_progress(phase=2, dispatch_label="red")
+    red_started = get_current_progress().started_at
+    time.sleep(0.01)
+    _set_progress(phase=2, dispatch_label="green")
+    green_started = get_current_progress().started_at
+    assert green_started > red_started, "different dispatch must refresh started_at"
+    reset_current_progress()
+
+
+def test_set_progress_clears_started_at_when_label_none():
+    """Between-dispatches state has no elapsed timer."""
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    _set_progress(phase=2, dispatch_label="red")
+    assert get_current_progress().started_at is not None
+    _set_progress(phase=2, dispatch_label=None)
+    assert get_current_progress().started_at is None
+    reset_current_progress()
+```
+
+- [ ] **Step 3: Write failing test for phase 1 entry**
+
+Append to `tests/test_auto_progress.py`:
+
+```python
+from datetime import datetime, timezone
+from heartbeat import get_current_progress, reset_current_progress
+
+
+def test_phase_1_entry_writes_progress_phase_1(monkeypatch, tmp_path):
+    reset_current_progress()
+    from auto_cmd import _set_progress
+    _set_progress(phase=1)
+    ctx = get_current_progress()
+    assert ctx.phase == 1
+    assert ctx.iter_num == 0
+    assert ctx.dispatch_label is None
+    reset_current_progress()
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Wire `_set_progress` into all 10 transition sites**
+
+For each transition, find the existing function and insert `_set_progress(...)` at entry. Sites:
+
+1. **Phase 1 entry** (`_phase1_*` or `run_phase_1`): `_set_progress(phase=1)`
+2. **Phase 2 entry** (task loop start): `_set_progress(phase=2, task_total=len(tasks))`
+3. **Per-task iteration**: inside the task loop, before each iteration: `_set_progress(phase=2, task_index=i+1, task_total=len(tasks))`
+4. **Per-dispatch within task** (TDD red/green/refactor, spec-reviewer, code-review): `_set_progress(phase=2, task_index=i+1, task_total=len(tasks), dispatch_label=<label>)` where `<label>` is `"red" | "green" | "refactor" | "spec-review" | "code-review"`.
+5. **Phase 3 entry**: `_set_progress(phase=3, task_total=len(tasks))` (preserve task_total)
+6. **MAGI Loop 2 iter**: `_set_progress(iter_num=N, phase=3, dispatch_label=f"magi-loop2-iter{N}")`
+7. **Phase 3 dispatch sites** (Loop 1 review, mini-cycle fix dispatches): `_set_progress(iter_num=N, phase=3, dispatch_label=...)`
+8. **Phase 4 entry**: `_set_progress(phase=4)`
+9. **Phase 5 entry**: `_set_progress(phase=5)`
+10. **End-of-dispatch (clear label)**: `_set_progress(phase=current_phase, dispatch_label=None)` — apply between successive dispatches in same task.
+
+- [ ] **Step 6: Add coverage tests for each transition site**
+
+For each site, add a test stubbing the surrounding function so the test verifies ProgressContext fields after the transition. Example for phase 2:
+
+```python
+def test_phase_2_entry_writes_phase_2_with_task_total():
+    reset_current_progress()
+    from auto_cmd import _set_progress
+    _set_progress(phase=2, task_total=36)
+    ctx = get_current_progress()
+    assert ctx.phase == 2
+    assert ctx.task_total == 36
+    reset_current_progress()
+
+
+def test_magi_loop_2_iter_writes_iter_n():
+    reset_current_progress()
+    from auto_cmd import _set_progress
+    _set_progress(iter_num=2, phase=3, dispatch_label="magi-loop2-iter2")
+    ctx = get_current_progress()
+    assert ctx.iter_num == 2
+    assert ctx.phase == 3
+    assert ctx.dispatch_label == "magi-loop2-iter2"
+    reset_current_progress()
+```
+
+- [ ] **Step 7: Run all tests + verify**
+
+```bash
+pytest tests/test_auto_progress.py -v
+ruff check skills/sbtdd/scripts/auto_cmd.py
+mypy skills/sbtdd/scripts/auto_cmd.py --strict
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "feat: add ProgressContext writer hooks at 10 transitions in auto_cmd"
+```
+
+---
+
+### Task S1-10: Wrap long dispatches in auto_cmd with HeartbeatEmitter
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py`
+- Modify: `tests/test_auto_progress.py`
+
+- [ ] **Step 1: Write failing test for `_dispatch_with_heartbeat` helper**
+
+Append to `tests/test_auto_progress.py`:
+
+```python
+import time
+
+
+def test_long_dispatch_wrapped_with_heartbeat_emits_ticks(capsys):
+    from auto_cmd import _dispatch_with_heartbeat, _set_progress
+    from heartbeat import reset_current_progress
+
+    reset_current_progress()
+    # Per Checkpoint 2 iter 2 melchior fix: caller MUST set dispatch_label
+    # before invoking the wrapper (fail-loud); no silent fallback.
+    _set_progress(phase=2, dispatch_label="test-dispatch")
+
+    def fake_invoke():
+        time.sleep(1.0)
+        return 0
+
+    rc = _dispatch_with_heartbeat(
+        invoke=fake_invoke,
+        heartbeat_interval=0.3,
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    tick_lines = [
+        line for line in captured.err.splitlines()
+        if line.startswith("[sbtdd auto] tick:")
+    ]
+    assert len(tick_lines) >= 2  # 1.0s / 0.3s = 3-4 ticks
+    reset_current_progress()
+
+
+def test_dispatch_with_heartbeat_fails_loud_when_no_dispatch_label():
+    """Per Checkpoint 2 iter 2 melchior CRITICAL #1: silent fallback rejected."""
+    from auto_cmd import _dispatch_with_heartbeat
+    from heartbeat import reset_current_progress
+
+    reset_current_progress()
+    with pytest.raises(ValueError, match="dispatch_label"):
+        _dispatch_with_heartbeat(invoke=lambda: 0, heartbeat_interval=0.5)
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Implement `_dispatch_with_heartbeat`**
+
+In `skills/sbtdd/scripts/auto_cmd.py`:
+
+```python
+import queue
+from typing import Callable, Any
+
+from heartbeat import HeartbeatEmitter
+
+# Module-level queue: heartbeat thread -> main thread (sec.3 single-writer rule).
+# maxsize=0 (UNBOUNDED) is a hard contract per Checkpoint 2 iter 3 melchior CRITICAL #3:
+# bounded queue + queue.Full silently loses heartbeat audit data. Memory cost is
+# negligible (single int per push, bounded by failed-write count + N=10 batching).
+_heartbeat_failures_q: "queue.Queue[int]" = queue.Queue(maxsize=0)
+
+
+def _dispatch_with_heartbeat(
+    *,
+    invoke: Callable[..., Any],
+    heartbeat_interval: float = 15.0,
+    **invoke_kwargs: Any,
+) -> Any:
+    """Wrap a long subprocess invocation in a HeartbeatEmitter.
+
+    The dispatch label is **derived from the current ProgressContext**
+    (set by ``_set_progress`` immediately before this call). Eliminates
+    the iter-1 Checkpoint 2 caspar finding: dispatch_label drift between
+    the writer hook and the heartbeat wrapper.
+
+    **Fail-loud (Checkpoint 2 iter 2 melchior fix)**: raises ValueError
+    if `dispatch_label` is None at call time. Silent fallback to
+    "unlabeled-dispatch" was rejected per fail-loud principle — caller
+    MUST establish dispatch context before invoking the wrapper.
+
+    Failures queue is the module-level ``_heartbeat_failures_q`` drained
+    by ``_update_progress`` (single-writer rule per sec.3 of spec).
+    """
+    from heartbeat import get_current_progress
+    ctx = get_current_progress()
+    if ctx.dispatch_label is None:
+        raise ValueError(
+            "_dispatch_with_heartbeat called without dispatch_label set. "
+            "Caller must invoke `_set_progress(..., dispatch_label='...')` "
+            "BEFORE this wrapper. Silent fallback rejected per fail-loud "
+            "(Checkpoint 2 iter 2 melchior CRITICAL #1)."
+        )
+    with HeartbeatEmitter(
+        label=ctx.dispatch_label,
+        interval_seconds=heartbeat_interval,
+        failures_queue=_heartbeat_failures_q,
+    ):
+        return invoke(**invoke_kwargs)
+```
+
+**Note (Checkpoint 2 iter 1 caspar finding):** caller MUST call `_set_progress(..., dispatch_label="...")` BEFORE invoking `_dispatch_with_heartbeat`. The wrapper auto-derives label from ProgressContext to eliminate label-drift risk. Add unit test asserting derivation:
+
+```python
+def test_dispatch_with_heartbeat_derives_label_from_progress(capsys):
+    from auto_cmd import _dispatch_with_heartbeat, _set_progress
+    _set_progress(phase=2, dispatch_label="green")
+    captured_label = {}
+
+    def fake_invoke():
+        from heartbeat import get_current_progress
+        captured_label["label"] = get_current_progress().dispatch_label
+        return 0
+
+    rc = _dispatch_with_heartbeat(invoke=fake_invoke, heartbeat_interval=0.1)
+    assert rc == 0
+    assert captured_label["label"] == "green"
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Wire `_dispatch_with_heartbeat` into existing dispatch sites**
+
+For each long-running subprocess invocation in auto_cmd (MAGI Loop 2 dispatch, /requesting-code-review dispatch, mini-cycle TDD red/green/refactor, spec-reviewer dispatch), wrap it:
+
+```python
+# Before:
+result = magi_dispatch.invoke_magi(...)
+
+# After:
+_set_progress(iter_num=iter_n, phase=3, dispatch_label=f"magi-loop2-iter{iter_n}")
+result = _dispatch_with_heartbeat(
+    invoke=lambda: magi_dispatch.invoke_magi(...),
+    heartbeat_interval=config.auto_heartbeat_interval_seconds,
+)
+```
+
+The wrapper reads `dispatch_label` from `_set_progress` automatically (Checkpoint 2 iter 1 caspar fix), eliminating label drift risk.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "feat: wrap long dispatches in auto_cmd with HeartbeatEmitter"
+```
+
+---
+
+### Task S1-11: Drain heartbeat queue + persist counter in _update_progress
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py`
+- Modify: `tests/test_auto_progress.py`
+
+- [ ] **Step 1: Write failing test for queue drain semantics (max())**
+
+Append to `tests/test_auto_progress.py`:
+
+```python
+def test_update_progress_drains_heartbeat_queue_and_writes_max(tmp_path):
+    """sec.3 single-writer rule: main thread drains queue, persists max() to JSON."""
+    from auto_cmd import _heartbeat_failures_q, _drain_heartbeat_queue_and_persist
+    import json
+
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+
+    _heartbeat_failures_q.put(5)
+    _heartbeat_failures_q.put(10)
+    _heartbeat_failures_q.put(15)
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8")
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["heartbeat_failed_writes_total"] == 15
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Implement `_drain_heartbeat_queue_and_persist`**
+
+In `skills/sbtdd/scripts/auto_cmd.py`:
+
+```python
+import json
+from pathlib import Path
+
+
+def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
+    """Drain queue + persist max() counter to auto-run.json (sec.3 single-writer)."""
+    drained: list[int] = []
+    while True:
+        try:
+            drained.append(_heartbeat_failures_q.get_nowait())
+        except queue.Empty:
+            break
+    if not drained:
+        return
+    try:
+        data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    data["heartbeat_failed_writes_total"] = max(
+        data.get("heartbeat_failed_writes_total", 0), *drained,
+    )
+    # Atomic rename pattern (preserve existing _update_progress mechanism).
+    tmp_path = auto_run_path.with_suffix(auto_run_path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp_path.replace(auto_run_path)
+```
+
+Add a call to `_drain_heartbeat_queue_and_persist(auto_run_path)` inside the existing `_update_progress` function (or its equivalent) so each progress write also drains the queue.
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "feat: drain heartbeat failures queue + persist max() to auto-run.json"
+```
+
+---
+
+### Task S1-12: ProgressContext serialization to auto-run.json (ISO 8601 UTC)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py`
+- Modify: `tests/test_auto_progress.py`
+
+- [ ] **Step 1: Write failing test**
+
+Append to `tests/test_auto_progress.py`:
+
+```python
+def test_serialize_progress_context_iso_utc(tmp_path):
+    from auto_cmd import _serialize_progress
+    from heartbeat import set_current_progress, reset_current_progress
+    from models import ProgressContext
+    import json
+
+    set_current_progress(
+        ProgressContext(
+            iter_num=2, phase=3, task_index=14, task_total=36,
+            dispatch_label="magi-loop2-iter2",
+            started_at=datetime(2026, 5, 1, 12, 34, 56, tzinfo=timezone.utc),
+        )
+    )
+    serialized = _serialize_progress()
+    assert serialized["iter_num"] == 2
+    assert serialized["phase"] == 3
+    assert serialized["task_index"] == 14
+    assert serialized["task_total"] == 36
+    assert serialized["dispatch_label"] == "magi-loop2-iter2"
+    assert serialized["started_at"] == "2026-05-01T12:34:56Z"
+    reset_current_progress()
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Implement `_serialize_progress`**
+
+In `skills/sbtdd/scripts/auto_cmd.py`:
+
+```python
+from heartbeat import get_current_progress
+
+
+def _serialize_progress() -> dict[str, Any]:
+    """Serialize current ProgressContext to JSON-friendly dict (ISO 8601 UTC)."""
+    ctx = get_current_progress()
+    started = ctx.started_at
+    if started is not None:
+        # Normalize to UTC + format with 'Z' suffix via strftime (NOT
+        # str.replace('+00:00', 'Z') — that breaks if input already has 'Z'
+        # or different tzinfo formatting). Per Checkpoint 2 iter 1 melchior fix.
+        started_str = started.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        started_str = None
+    return {
+        "iter_num": ctx.iter_num,
+        "phase": ctx.phase,
+        "task_index": ctx.task_index,
+        "task_total": ctx.task_total,
+        "dispatch_label": ctx.dispatch_label,
+        "started_at": started_str,
+    }
+```
+
+Wire into existing `_update_progress` (or equivalent): after reading `data` and before atomic rename:
+
+```python
+    data["progress"] = _serialize_progress()
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "feat: serialize ProgressContext to auto-run.json with ISO 8601 UTC"
+```
+
+---
+
+### Task S1-13: Periodic queue drain (W8 fix — bound counter latency)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py`
+- Modify: `tests/test_auto_progress.py`
+
+- [ ] **Step 1: Write failing test**
+
+```python
+def test_periodic_drain_persists_counter_without_phase_transition(tmp_path):
+    """Spec sec.11.1 W8: bound persistence latency to <= 30s even sin transitions."""
+    from auto_cmd import _periodic_drain_if_due, _heartbeat_failures_q
+    import json
+
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+    _heartbeat_failures_q.put(5)
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8")
+    _periodic_drain_if_due(auto_run_path, force=True)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["heartbeat_failed_writes_total"] == 5
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Implement `_periodic_drain_if_due`**
+
+In `auto_cmd.py`:
+
+```python
+import time
+
+_PROGRESS_DRAIN_INTERVAL_SECONDS = 30
+
+
+@dataclass
+class _DrainState:
+    """Encapsulates last-drain timestamp to avoid module-level state.
+
+    Per Checkpoint 2 iter 1 caspar fix: module-level `_last_drain_at` caused
+    test order dependency. Encapsulating in a dataclass instance allows
+    fixture reset and parallel-test isolation.
+    """
+    last_drain_at: float = 0.0
+
+
+_drain_state = _DrainState()
+
+
+def _periodic_drain_if_due(
+    auto_run_path: Path,
+    *,
+    force: bool = False,
+    state: _DrainState = _drain_state,
+) -> None:
+    """Drain heartbeat queue if 30s elapsed since last drain (sec.11.1 W8)."""
+    now = time.monotonic()
+    if not force and (now - state.last_drain_at) < _PROGRESS_DRAIN_INTERVAL_SECONDS:
+        return
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    state.last_drain_at = now
+
+
+def _reset_drain_state_for_tests() -> None:
+    """Test-only helper: reset drain state to ensure isolation."""
+    _drain_state.last_drain_at = 0.0
+```
+
+Wire `_periodic_drain_if_due` into the auto_cmd main loop at convenient checkpoints (e.g., between dispatch invocations within a task, between task iterations). Tests should call `_reset_drain_state_for_tests()` in fixture setup or use `force=True`.
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "feat: periodic queue drain bounds heartbeat counter persistence latency"
+```
+
+---
+
+## Subagent #2 — Streaming + watch + docs track (17 tasks)
+
+### Task S2-1: Add 5 new fields to PluginConfig
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/config.py`
+- Modify: `tests/test_config.py`
+
+- [ ] **Step 1: Write failing tests**
+
+Append to `tests/test_config.py`:
+
+```python
+def test_plugin_config_new_observability_fields_have_defaults(tmp_path):
+    """v0.5.0: 5 new PluginConfig fields with documented defaults."""
+    config_path = tmp_path / "plugin.local.md"
+    config_path.write_text("""---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest, "ruff check ."]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+---
+""")
+    from config import load_plugin_local
+    cfg = load_plugin_local(config_path)
+    assert cfg.auto_per_stream_timeout_seconds == 900
+    assert cfg.auto_heartbeat_interval_seconds == 15
+    assert cfg.status_watch_default_interval_seconds == 1.0
+    assert cfg.auto_origin_disambiguation is True
+    assert cfg.auto_no_timeout_dispatch_labels == ("magi-*",)
+
+
+def test_plugin_config_observability_fields_overridable(tmp_path):
+    config_path = tmp_path / "plugin.local.md"
+    config_path.write_text("""---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 600
+auto_heartbeat_interval_seconds: 30
+status_watch_default_interval_seconds: 0.5
+auto_origin_disambiguation: false
+auto_no_timeout_dispatch_labels: ["magi-*", "long-build-*"]
+---
+""")
+    from config import load_plugin_local
+    cfg = load_plugin_local(config_path)
+    assert cfg.auto_per_stream_timeout_seconds == 600
+    assert cfg.auto_heartbeat_interval_seconds == 30
+    assert cfg.status_watch_default_interval_seconds == 0.5
+    assert cfg.auto_origin_disambiguation is False
+    assert cfg.auto_no_timeout_dispatch_labels == ("magi-*", "long-build-*")
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Add fields to PluginConfig + apply defaults in load**
+
+In `skills/sbtdd/scripts/config.py`, modify the `PluginConfig` dataclass:
+
+```python
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class PluginConfig:
+    # ... existing fields ...
+
+    # v0.5.0 observability fields (sec.4.3 of spec).
+    auto_per_stream_timeout_seconds: int = 900
+    auto_heartbeat_interval_seconds: int = 15
+    status_watch_default_interval_seconds: float = 1.0
+    auto_origin_disambiguation: bool = True
+    auto_no_timeout_dispatch_labels: tuple[str, ...] = field(
+        default_factory=lambda: ("magi-*",)
+    )
+```
+
+In `load_plugin_local`, after the existing validations:
+
+```python
+    # v0.5.0 observability defaults applied if absent.
+    data.setdefault("auto_per_stream_timeout_seconds", 900)
+    data.setdefault("auto_heartbeat_interval_seconds", 15)
+    data.setdefault("status_watch_default_interval_seconds", 1.0)
+    data.setdefault("auto_origin_disambiguation", True)
+    data.setdefault("auto_no_timeout_dispatch_labels", ["magi-*"])
+    if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
+        data["auto_no_timeout_dispatch_labels"] = tuple(
+            data["auto_no_timeout_dispatch_labels"]
+        )
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+```bash
+pytest tests/test_config.py -v
+mypy skills/sbtdd/scripts/config.py --strict
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/config.py tests/test_config.py
+git commit -m "feat: add 5 v0.5.0 observability fields to PluginConfig"
+```
+
+---
+
+### Task S2-2: INV-34 four-clause validation with distinct error messages
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/config.py`
+- Modify: `tests/test_config.py`
+
+- [ ] **Step 1: Write failing tests for each of the 3 INV-34 clauses**
+
+```python
+def test_inv34_clause_1_ratio_violation(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
 """
+    config_path = tmp_path / "p1.md"
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 50\n"
+        "auto_heartbeat_interval_seconds: 15\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 1"):
+        load_plugin_local(config_path)
+
+
+def test_inv34_clause_2_ceiling_violation(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "p2.md"
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 1000\n"
+        "auto_heartbeat_interval_seconds: 120\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 2"):
+        load_plugin_local(config_path)
+
+
+def test_inv34_clause_3_floor_violation(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "p3.md"
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 100\n"
+        "auto_heartbeat_interval_seconds: 2\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 3"):
+        load_plugin_local(config_path)
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Add INV-34 validation with distinct error messages**
+
+In `load_plugin_local`, after the observability defaults block:
+
+```python
+    # INV-34 (sec.2.7 of spec): timeout-vs-interval + floor + ceiling.
+    timeout = data["auto_per_stream_timeout_seconds"]
+    interval = data["auto_heartbeat_interval_seconds"]
+    if not isinstance(timeout, int) or timeout < 0:
+        raise ValidationError(
+            f"auto_per_stream_timeout_seconds must be int >= 0, got {timeout!r}"
+        )
+    if not isinstance(interval, int) or interval < 0:
+        raise ValidationError(
+            f"auto_heartbeat_interval_seconds must be int >= 0, got {interval!r}"
+        )
+    # Validation order PINNED post-Checkpoint 2 iter 2 melchior fix: cheapest
+    # bound checks first (clauses 4, 2, 3), then ratio (clause 1) which only
+    # runs after absolute floors confirm no pathological values.
+    if timeout < 600:
+        raise ValidationError(
+            f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
+            f"(caspar opus runs observed empirically up to 10min); got {timeout}"
+        )
+    if interval > 60:
+        raise ValidationError(
+            f"INV-34 clause 2: auto_heartbeat_interval_seconds must be <= 60s "
+            f"to keep operator awareness within 1-minute granularity; got {interval}"
+        )
+    if interval < 5:
+        raise ValidationError(
+            f"INV-34 clause 3: auto_heartbeat_interval_seconds must be >= 5s "
+            f"to avoid stderr spam without value; got {interval}"
+        )
+    # Clause 1 last: ratio check. With clauses 2-4 already satisfied,
+    # this only catches the narrow case where timeout in [600, 5*interval).
+    # E.g., timeout=600, interval=60: 5*60=300 <= 600, pass.
+    # E.g., timeout=600, interval=121 (rejected by clause 2 first).
+    if timeout < 5 * interval:
+        raise ValidationError(
+            f"INV-34 clause 1: auto_per_stream_timeout_seconds ({timeout}) "
+            f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
+            f"= {5 * interval}; got {timeout}"
+        )
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Add positive boundary test**
+
+Append to `tests/test_config.py`:
+
+```python
+def test_inv34_clause_1_boundary_timeout_equals_5x_interval_accepts(tmp_path):
+    """Boundary: timeout == 5 * interval is accepted (>= ratio satisfied)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "boundary.md"
+    # 600s = max(5*60, 600) = 600 — boundary of clauses 1 AND 4.
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 600\n"
+        "auto_heartbeat_interval_seconds: 60\n---\n"
+    )
+    from config import load_plugin_local
+    cfg = load_plugin_local(config_path)
+    assert cfg.auto_per_stream_timeout_seconds == 600
+    assert cfg.auto_heartbeat_interval_seconds == 60
+
+
+def test_inv34_clause_4_timeout_below_600_rejected(tmp_path):
+    """Clause 4: timeout < 600s rejected even if clauses 1-3 satisfied."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "p4.md"
+    # 75s satisfies clause 1 (5*15=75) but violates clause 4 (>=600).
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 75\n"
+        "auto_heartbeat_interval_seconds: 15\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 4"):
+        load_plugin_local(config_path)
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add skills/sbtdd/scripts/config.py tests/test_config.py
+git commit -m "feat: add INV-34 four-clause validation (incl. clause 4 absolute timeout floor)"
+```
+
+---
+
+### Task S2-3: Allowlist validation (reject bare wildcards)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/config.py`
+- Modify: `tests/test_config.py`
+
+- [ ] **Step 1: Write failing test**
+
+```python
+def test_allowlist_bare_wildcard_rejected(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+"""
+    from config import load_plugin_local
+    from errors import ValidationError
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base + 'auto_no_timeout_dispatch_labels: ["*"]\n---\n')
+    with pytest.raises(ValidationError, match="bare '\\*' rejected"):
+        load_plugin_local(config_path)
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Add allowlist validation**
+
+After INV-34 in `load_plugin_local`:
+
+```python
+    # W11 (sec.11.1): bare '*' or '' would defeat timeout entirely.
+    labels = data["auto_no_timeout_dispatch_labels"]
+    if isinstance(labels, (list, tuple)):
+        for label in labels:
+            if label == "*" or label == "":
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: bare '*' rejected "
+                    f"(would defeat timeout); use specific glob like 'magi-*'"
+                )
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/config.py tests/test_config.py
+git commit -m "fix: reject bare '*' in auto_no_timeout_dispatch_labels"
+```
+
+---
+
+### Task S2-4: subprocess_utils — `run_streamed_with_timeout` scaffold + last_write_at tracking
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/subprocess_utils.py`
+- Modify: `tests/test_subprocess_utils.py`
+
+- [ ] **Step 1: Survey existing subprocess_utils**
+
+```bash
+grep -n "def \|select\|read" skills/sbtdd/scripts/subprocess_utils.py | head -30
+```
+
+- [ ] **Step 2: Write failing test**
+
+```python
+import sys
+
+def test_streamed_with_timeout_returns_stdout_and_stderr_separately():
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", """
+import sys, time
+for i in range(3):
+    sys.stdout.write(f'out{i}\\n'); sys.stdout.flush()
+    time.sleep(0.05)
+"""]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=10.0, dispatch_label="test",
+    )
+    assert result.returncode == 0
+    assert "out0" in result.stdout
+    assert "out2" in result.stdout
+```
+
+- [ ] **Step 3: Run + verify fail**
+
+- [ ] **Step 4: Implement `run_streamed_with_timeout` scaffold**
+
+In `skills/sbtdd/scripts/subprocess_utils.py`:
+
+```python
+import fnmatch
+import selectors
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class StreamedResult:
+    """Output of run_streamed_with_timeout."""
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+DEFAULT_ORIGIN_WINDOW_SECONDS = 0.050  # 50ms temporal window default.
+
+
+def _matches_allowlist(label: str, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatch(label, pat) for pat in patterns)
+
+
+def run_streamed_with_timeout(
+    cmd: list[str],
+    *,
+    per_stream_timeout_seconds: float = 900.0,
+    dispatch_label: str = "",
+    no_timeout_labels: tuple[str, ...] = ("magi-*",),
+    origin_disambiguation: bool = True,
+    origin_window_seconds: float = DEFAULT_ORIGIN_WINDOW_SECONDS,
+    **popen_kwargs: object,
+) -> StreamedResult:
+    """Per Checkpoint 2 iter 1 melchior+balthasar finding: origin_window_seconds
+    is now a parameter (not a module constant) so tests can override to avoid
+    Windows CI flakiness on loaded systems. Default 50ms preserves prior behavior."""
+    """Run subprocess with per-stream timeout + origin disambiguation."""
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, bufsize=1,
+        **popen_kwargs,
+    )
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    now = time.monotonic()
+    last_write_at: dict[str, float] = {"stdout": now, "stderr": now}
+    last_chunk_at: dict[str, float] = {"stdout": 0.0, "stderr": 0.0}
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ, data="stdout")
+    sel.register(proc.stderr, selectors.EVENT_READ, data="stderr")
+    open_streams = {"stdout", "stderr"}
+    timeout_exempt = _matches_allowlist(dispatch_label, no_timeout_labels)
+
+    # Per Checkpoint 2 iter 3 caspar CRITICAL fix: use read1() not readline().
+    # readline() blocks waiting for newline; if subprocess writes partial-line
+    # bytes (e.g., progress bar without \n), pump never sees the bytes and
+    # last_write_at stays stale -> false-positive timeout kill.
+    # read1(N) returns whatever bytes are available (after select indicated
+    # readiness), allowing the timeout tracker to update on every chunk.
+    READ_CHUNK_SIZE = 8192
+    while open_streams:
+        events = sel.select(timeout=0.1)
+        for key, _ in events:
+            stream_name = key.data
+            chunk = key.fileobj.read1(READ_CHUNK_SIZE) if hasattr(key.fileobj, "read1") else key.fileobj.read(READ_CHUNK_SIZE)
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode("utf-8", errors="replace")
+            line = chunk
+            if line == "":
+                sel.unregister(key.fileobj)
+                open_streams.discard(stream_name)
+                continue
+            now = time.monotonic()
+            last_write_at[stream_name] = now
+            other_stream = "stderr" if stream_name == "stdout" else "stdout"
+            both_recent = (
+                origin_disambiguation
+                and last_chunk_at[other_stream] > 0
+                and (now - last_chunk_at[other_stream]) < origin_window_seconds
+            )
+            last_chunk_at[stream_name] = now
+            output_line = f"[{stream_name}] " + line if both_recent else line
+            if stream_name == "stdout":
+                stdout_chunks.append(output_line)
+            else:
+                stderr_chunks.append(output_line)
+        # Per-stream timeout: kill if all open streams silent for window.
+        if (
+            not timeout_exempt
+            and open_streams
+            and all(
+                (time.monotonic() - last_write_at[s]) > per_stream_timeout_seconds
+                for s in open_streams
+            )
+        ):
+            sys.stderr.write(
+                f"[sbtdd] killed subprocess (all open streams silent for "
+                f">{per_stream_timeout_seconds}s); add 'dispatch_label_pattern' "
+                f"to plugin.local.md auto_no_timeout_dispatch_labels to exempt\n"
+            )
+            sys.stderr.flush()
+            _kill_subprocess_tree(proc)
+            break
+        if proc.poll() is not None and not open_streams:
+            break
+
+    proc.wait()
+    return StreamedResult(
+        returncode=proc.returncode,
+        stdout="".join(stdout_chunks),
+        stderr="".join(stderr_chunks),
+    )
+
+
+def _kill_subprocess_tree(proc: subprocess.Popen) -> None:
+    """Kill subprocess + descendants (preserves R3-1 invariant on Windows).
+
+    Per Checkpoint 2 iter 3 melchior W3: taskkill timeout reduced from 5s
+    to 1s — kill path should not block the pump's select loop measurably.
+    Even if taskkill itself is slow on a loaded box, proc.kill() runs
+    immediately after as fallback. R3-1 ordering preserved.
+    """
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                check=False, capture_output=True, timeout=1,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+    proc.kill()
+```
+
+- [ ] **Step 5: Run + verify pass**
+
+```bash
+pytest tests/test_subprocess_utils.py -v
+mypy skills/sbtdd/scripts/subprocess_utils.py --strict
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add skills/sbtdd/scripts/subprocess_utils.py tests/test_subprocess_utils.py
+git commit -m "feat: add run_streamed_with_timeout with per-stream timeout + origin disambig"
+```
+
+---
+
+### Task S2-5: Per-stream timeout escenarios T1, T5, T7, T8
+
+**Files:**
+- Modify: `tests/test_subprocess_utils.py`
+
+- [ ] **Step 1: Write failing tests for T1, T5, T7, T8**
+
+Append to `tests/test_subprocess_utils.py`:
+
+```python
+import sys
+import pytest
+from unittest.mock import MagicMock
+
+
+def test_t1_all_streams_silent_kills_subprocess(capsys):
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", "import time; time.sleep(10)"]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=0.5, dispatch_label="test-hang",
+    )
+    assert result.returncode != 0
+    captured = capsys.readouterr()
+    assert "all open streams silent" in captured.err
+    assert "auto_no_timeout_dispatch_labels" in captured.err
+
+
+def test_t5_allowlist_exempts_dispatch_label():
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", "import time; time.sleep(1.0)"]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=0.3, dispatch_label="magi-loop2-iter1",
+        no_timeout_labels=("magi-*",),
+    )
+    assert result.returncode == 0
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="os.close(sys.stdout.fileno()) has Windows-specific failure modes; "
+           "T7 verified via integration on POSIX (Checkpoint 2 iter 1 caspar finding)",
+)
+def test_t7_closed_stream_excluded_from_timeout():
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", """
+import sys, os, time
+os.close(sys.stdout.fileno())
+for i in range(3):
+    sys.stderr.write(f'err{i}\\n')
+    sys.stderr.flush()
+    time.sleep(0.1)
+"""]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=0.3, dispatch_label="test-closed",
+    )
+    assert result.returncode == 0
+    assert "err0" in result.stderr
+
+
+def test_t8_kill_tree_order_preserved_on_windows(monkeypatch):
+    if sys.platform != "win32":
+        pytest.skip("Windows-only invariant")
+    from subprocess_utils import _kill_subprocess_tree
+    call_order: list[str] = []
+
+    def fake_run(*args, **kwargs):
+        call_order.append("taskkill")
+        from subprocess import CompletedProcess
+        return CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr("subprocess_utils.subprocess.run", fake_run)
+    proc = MagicMock()
+    proc.pid = 12345
+    proc.kill = lambda: call_order.append("proc.kill")
+    _kill_subprocess_tree(proc)
+    assert call_order == ["taskkill", "proc.kill"]
+```
+
+- [ ] **Step 2: Run + verify pass**
+
+The S2-4 implementation already covers T1, T5, T7 (closed stream auto-removed), T8 (R3-1 order). All four tests should pass.
+
+```bash
+pytest tests/test_subprocess_utils.py -v
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_subprocess_utils.py
+git commit -m "test: cover T1/T5/T7/T8 escenarios for per-stream timeout"
+```
+
+---
+
+### Task S2-6: Origin disambiguation escenarios O1-O4
+
+**Files:**
+- Modify: `tests/test_subprocess_utils.py`
+
+- [ ] **Step 1: Write failing tests for O1-O4**
+
+```python
+def test_o1_single_stream_no_prefix():
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", "import sys\nfor i in range(3):\n    sys.stdout.write(f'line{i}\\n')\n    sys.stdout.flush()"]
+    result = run_streamed_with_timeout(
+        cmd, origin_disambiguation=True, dispatch_label="test",
+    )
+    assert "[stdout]" not in result.stdout
+    assert "line0" in result.stdout
+
+
+def test_o2_dual_stream_in_50ms_window_prefixes():
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", """
+import sys, time
+sys.stdout.write('out1\\n'); sys.stdout.flush()
+time.sleep(0.005)
+sys.stderr.write('err1\\n'); sys.stderr.flush()
+"""]
+    result = run_streamed_with_timeout(
+        cmd, origin_disambiguation=True, dispatch_label="test",
+    )
+    # At least one of out1/err1 should be prefixed because they emit within 50ms.
+    combined = result.stdout + result.stderr
+    assert "[stdout]" in combined or "[stderr]" in combined
+
+
+def test_o3_alternating_distant_windows_no_prefix():
+    """O3: streams emit far apart -> no prefix.
+
+    Per Checkpoint 2 iter 2 melchior fix: use a 5ms origin_window_seconds
+    override (vs production 50ms default) and a deterministic 100ms gap to
+    avoid Windows CI flakiness on loaded systems.
+    """
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", """
+import sys, time
+sys.stdout.write('out1\\n'); sys.stdout.flush()
+time.sleep(0.1)  # 100ms gap >> 5ms test window
+sys.stderr.write('err1\\n'); sys.stderr.flush()
+"""]
+    result = run_streamed_with_timeout(
+        cmd,
+        origin_disambiguation=True,
+        origin_window_seconds=0.005,  # 5ms test window (vs 50ms production)
+        dispatch_label="test",
+    )
+    assert "[stdout]" not in result.stdout
+    assert "[stderr]" not in result.stderr
+
+
+def test_o4_disabled_no_prefix_even_on_dual_stream():
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", """
+import sys, time
+sys.stdout.write('out1\\n'); sys.stdout.flush()
+time.sleep(0.005)
+sys.stderr.write('err1\\n'); sys.stderr.flush()
+"""]
+    result = run_streamed_with_timeout(
+        cmd, origin_disambiguation=False, dispatch_label="test",
+    )
+    assert "[stdout]" not in result.stdout
+    assert "[stderr]" not in result.stderr
+```
+
+- [ ] **Step 2: Run + verify pass**
+
+S2-4's implementation covers O1-O4 already. All tests should pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_subprocess_utils.py
+git commit -m "test: cover O1-O4 escenarios for origin disambiguation"
+```
+
+---
+
+### Task S2-7: status_cmd watch helpers (W1, W3, W6 — TTY render + missing file + interval validation)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/status_cmd.py`
+- Create: `tests/test_status_watch.py`
+
+- [ ] **Step 1: Create failing test file**
+
+Create `tests/test_status_watch.py`:
+
+```python
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-05-01
+"""Unit tests for /sbtdd status --watch (sec.2.2 W1-W6)."""
 
 from __future__ import annotations
 
 import json
-import subprocess
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
 
-import quota_detector
-import subprocess_utils
-from errors import QuotaExhaustedError, SpecReviewError, ValidationError
+import pytest
 
 
-_SeverityLit = Literal["MISSING", "EXTRA", "MISUNDERSTANDING", "INFO"]
+def test_w3_watch_exits_zero_when_auto_run_missing(tmp_path, capsys):
+    from status_cmd import _watch_loop_once
+    rc = _watch_loop_once(tmp_path / "missing.json", json_mode=False)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "no auto run in progress" in captured.err.lower()
 
 
-@dataclass(frozen=True)
-class SpecIssue:
-    severity: _SeverityLit
-    text: str
+def test_w1_watch_render_tty_contains_progress_fields():
+    from status_cmd import _watch_render_tty
+    progress = {
+        "iter_num": 2, "phase": 3, "task_index": 14, "task_total": 36,
+        "dispatch_label": "magi-loop2-iter2",
+        "started_at": "2026-05-01T12:00:00Z",
+    }
+    output = _watch_render_tty(progress)
+    assert "iter 2" in output
+    assert "phase 3" in output
+    assert "task 14/36" in output
+    assert "magi-loop2-iter2" in output
 
 
-@dataclass(frozen=True)
-class SpecReviewResult:
-    approved: bool
-    issues: tuple[SpecIssue, ...]
-    reviewer_iter: int
-    artifact_path: Path | None
-
-
-def _extract_task_text(plan_text: str, task_id: str) -> str:
-    """Return the task section from plan markdown (### Task N: title body)."""
-    import re
-    # Find heading line for this task; take until the next ### heading
-    pattern = re.compile(
-        rf"^### Task {re.escape(task_id)}[:\s].*?(?=^### Task |\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    m = pattern.search(plan_text)
-    return m.group(0) if m else ""
-
-
-def _collect_task_diff(repo_root: Path, task_id: str, n_commits: int = 4) -> str:
-    """Return combined diff of last N commits tagged for this task."""
-    # Best effort: pull HEAD~N..HEAD; caller can refine via commit-message grep
-    result = subprocess_utils.run_with_timeout(
-        ["git", "log", f"-{n_commits}", "--pretty=format:%H %s", "--no-merges"],
-        timeout=10,
-        cwd=str(repo_root),
-    )
-    # Filter commit lines referencing the task id
-    shas: list[str] = []
-    for line in result.stdout.splitlines():
-        parts = line.split(" ", 1)
-        if len(parts) == 2 and task_id in parts[1]:
-            shas.append(parts[0])
-    if not shas:
-        return ""
-    diff = subprocess_utils.run_with_timeout(
-        ["git", "show", "--stat", *shas],
-        timeout=30,
-        cwd=str(repo_root),
-    )
-    return diff.stdout
+def test_w6_validates_interval_minimum():
+    from status_cmd import validate_watch_interval
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match=">= 0.1"):
+        validate_watch_interval(0.05)
+    validate_watch_interval(0.1)
+    validate_watch_interval(5.0)
 ```
 
-- [x] **Step 5-8**: tests pass, commits.
+- [ ] **Step 2: Run + verify fail**
 
-### Task H3: `dispatch_spec_reviewer` core
+- [ ] **Step 3: Implement helpers in status_cmd.py**
 
-- [x] **Step 1 (Red)**: tests using a stubbed `subprocess.run` that returns scripted reviewer outputs.
-
-```python
-def test_dispatch_approved_path(tmp_path, monkeypatch) -> None:
-    from spec_review_dispatch import dispatch_spec_reviewer
-    # craft minimal plan + fake subprocess
-    plan = tmp_path / "plan.md"
-    plan.write_text("### Task 1: foo\n- [x] stuff\n", encoding="utf-8")
-    def fake_run(*a, **k):
-        class R: returncode = 0; stdout = '{"approved": true, "issues": []}'; stderr = ""
-        return R()
-    monkeypatch.setattr("spec_review_dispatch.subprocess_utils.run_with_timeout", fake_run)
-    result = dispatch_spec_reviewer(task_id="1", plan_path=plan, repo_root=tmp_path)
-    assert result.approved is True
-    assert result.issues == ()
-
-
-def test_dispatch_safety_valve_raises_spec_review_error(tmp_path, monkeypatch) -> None:
-    from spec_review_dispatch import dispatch_spec_reviewer
-    plan = tmp_path / "plan.md"
-    plan.write_text("### Task 1: foo\n- [x] stuff\n", encoding="utf-8")
-    def fake_run(*a, **k):
-        class R:
-            returncode = 0
-            stdout = '{"approved": false, "issues": [{"severity": "MISSING", "text": "scenario N"}]}'
-            stderr = ""
-        return R()
-    monkeypatch.setattr("spec_review_dispatch.subprocess_utils.run_with_timeout", fake_run)
-    with pytest.raises(SpecReviewError):
-        dispatch_spec_reviewer(task_id="1", plan_path=plan, repo_root=tmp_path,
-                               max_iterations=3)
-```
-
-- [x] **Step 2-3**: commit `test:`.
-
-- [x] **Step 4 (Green)**: append to `spec_review_dispatch.py`:
+In `skills/sbtdd/scripts/status_cmd.py`:
 
 ```python
-_REVIEWER_SKILL_REF = "/superpowers:subagent-driven-development/spec-reviewer-prompt.md"
-
-
-def _parse_reviewer_output(raw: str) -> tuple[bool, tuple[SpecIssue, ...]]:
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValidationError(f"spec-reviewer output is not valid JSON: {exc}") from exc
-    approved = bool(payload.get("approved", False))
-    issues_raw = payload.get("issues", []) or []
-    if not isinstance(issues_raw, list):
-        raise ValidationError("spec-reviewer 'issues' must be a list")
-    issues = tuple(
-        SpecIssue(
-            severity=str(i.get("severity", "INFO")).upper(),  # type: ignore[arg-type]
-            text=str(i.get("text", "")),
-        )
-        for i in issues_raw
-    )
-    return approved, issues
-
-
-def _write_artifact(
-    result_payload: dict,
-    repo_root: Path,
-    task_id: str,
-) -> Path:
-    d = repo_root / ".claude" / "spec-reviews"
-    d.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z").replace(":", "-")
-    artifact = d / f"{task_id}-{ts}.json"
-    artifact.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
-    return artifact
-
-
-def dispatch_spec_reviewer(
-    *,
-    task_id: str,
-    plan_path: Path,
-    repo_root: Path,
-    max_iterations: int = 3,
-    timeout: int = 900,
-) -> SpecReviewResult:
-    """Run the spec-reviewer for ONE task; retry on issues up to `max_iterations`.
-
-    Raises:
-        SpecReviewError: Safety valve exhausted (issues remain after last iter).
-        QuotaExhaustedError: Claude API quota detected in stderr.
-        ValidationError: Reviewer output malformed.
-    """
-    plan_text = plan_path.read_text(encoding="utf-8")
-    task_text = _extract_task_text(plan_text, task_id)
-    diff_text = _collect_task_diff(repo_root, task_id)
-    iter_history: list[dict] = []
-    for iteration in range(1, max_iterations + 1):
-        prompt = (
-            f"Task: {task_id}\n\n"
-            f"Task text:\n{task_text}\n\n"
-            f"Diff:\n{diff_text}\n\n"
-            "Verify by reading code, NOT by trusting implementer report."
-        )
-        cmd = ["claude", "-p", _REVIEWER_SKILL_REF, prompt]
-        try:
-            r = subprocess_utils.run_with_timeout(cmd, timeout=timeout, capture=True,
-                                                   cwd=str(repo_root))
-        except subprocess.TimeoutExpired as exc:
-            raise SpecReviewError(
-                f"spec-reviewer timed out at iter {iteration} for task {task_id}",
-                task_id=task_id, iteration=iteration,
-            ) from exc
-        if r.returncode != 0:
-            exh = quota_detector.detect(r.stderr)
-            if exh is not None:
-                raise QuotaExhaustedError(f"{exh.kind}: {exh.raw_message}")
-            raise SpecReviewError(
-                f"spec-reviewer exited {r.returncode} at iter {iteration}",
-                task_id=task_id, iteration=iteration,
-            )
-        approved, issues = _parse_reviewer_output(r.stdout)
-        iter_history.append({"iter": iteration, "approved": approved,
-                             "n_issues": len(issues)})
-        if approved:
-            artifact = _write_artifact({
-                "task_id": task_id,
-                "approved": True,
-                "iter_history": iter_history,
-                "final_issues": [],
-            }, repo_root, task_id)
-            return SpecReviewResult(approved=True, issues=(),
-                                    reviewer_iter=iteration, artifact_path=artifact)
-        # Not approved: exhaust budget first, then raise.
-        if iteration == max_iterations:
-            artifact = _write_artifact({
-                "task_id": task_id,
-                "approved": False,
-                "iter_history": iter_history,
-                "final_issues": [{"severity": i.severity, "text": i.text} for i in issues],
-            }, repo_root, task_id)
-            raise SpecReviewError(
-                f"spec-reviewer safety valve exhausted for task {task_id} "
-                f"after {iteration} iterations ({len(issues)} issues)",
-                task_id=task_id, iteration=iteration,
-                issues=tuple(i.text for i in issues),
-            )
-        # Otherwise: next iteration re-dispatches. v0.2 keeps it simple —
-        # caller (auto_cmd) is responsible for landing mini-cycle TDD fixes
-        # between reviewer iterations via /receiving-code-review. The
-        # dispatcher itself does not mutate code; it only decides approval.
-    # unreachable
-    raise SpecReviewError(f"unreachable: max_iterations must be >= 1 for task {task_id}",
-                          task_id=task_id, iteration=0)
-```
-
-- [x] **Step 5-8**: tests pass, commits.
-
-### Task H4: `StubSpecReviewer` fixture
-
-**Files:**
-- Modify: `tests/fixtures/skill_stubs.py`
-- Modify: `tests/test_skill_stubs.py`
-
-- [x] **Step 1 (Red)**: tests for the stub.
-
-```python
-def test_stub_spec_reviewer_sequence_consumed_fifo() -> None:
-    from tests.fixtures.skill_stubs import StubSpecReviewer
-    stub = StubSpecReviewer(sequence=[True, False, True])
-    assert stub.dispatch_spec_reviewer(task_id="1", plan_path=None, repo_root=None).approved is True
-    assert stub.dispatch_spec_reviewer(task_id="2", plan_path=None, repo_root=None).approved is False
-    assert stub.dispatch_spec_reviewer(task_id="3", plan_path=None, repo_root=None).approved is True
-
-
-def test_stub_spec_reviewer_empty_raises() -> None:
-    from tests.fixtures.skill_stubs import StubSpecReviewer
-    stub = StubSpecReviewer(sequence=[])
-    with pytest.raises(IndexError):
-        stub.dispatch_spec_reviewer(task_id="1", plan_path=None, repo_root=None)
-```
-
-- [x] **Step 2-3**: commit `test:`.
-
-- [x] **Step 4 (Green)**: append to `tests/fixtures/skill_stubs.py`:
-
-```python
-from spec_review_dispatch import SpecIssue, SpecReviewResult
-
-
-@dataclass
-class StubSpecReviewer:
-    """Stub for spec_review_dispatch.dispatch_spec_reviewer (Feature B)."""
-
-    sequence: list[bool]   # True -> approved; False -> 1 MISSING issue returned
-    calls: list[dict[str, Any]] = field(default_factory=list)
-    iter_count: int = 1
-
-    def dispatch_spec_reviewer(
-        self,
-        *,
-        task_id: str,
-        plan_path: Any,
-        repo_root: Any,
-        max_iterations: int = 3,
-        timeout: int = 900,
-    ) -> SpecReviewResult:
-        self.calls.append({"task_id": task_id, "max_iterations": max_iterations})
-        approved = self.sequence.pop(0)
-        issues: tuple[SpecIssue, ...] = ()
-        if not approved:
-            issues = (SpecIssue(severity="MISSING", text=f"stub issue for task {task_id}"),)
-        return SpecReviewResult(
-            approved=approved, issues=issues,
-            reviewer_iter=self.iter_count, artifact_path=None,
-        )
-```
-
-- [x] **Step 5-8**: tests pass, commits.
-
-### Task H5: `close_task_cmd --skip-spec-review` flag
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py`
-- Create: `tests/test_close_task_cmd_spec_review.py`
-
-- [x] **Step 1 (Red)**: tests asserting default-invoke + `--skip-spec-review` bypass + reviewer-issues abort.
-
-- [x] **Step 2-3**: commit `test:`.
-
-- [x] **Step 4 (Green)**: modify `close_task_cmd._build_parser`:
-
-```python
-def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="sbtdd close-task")
-    p.add_argument("--project-root", type=Path, default=Path.cwd())
-    p.add_argument("--skip-spec-review", action="store_true",
-                   help="Skip spec-reviewer dispatch (INV-31 escape valve)")
-    return p
-```
-
-Modify `main()` to call the reviewer before `mark_and_advance`:
-
-```python
-def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    ns = parser.parse_args(argv)
-    root: Path = ns.project_root
-    state = _preflight(root)
-    closed_task_id = state.current_task_id
-    if not ns.skip_spec_review:
-        import spec_review_dispatch
-        result = spec_review_dispatch.dispatch_spec_reviewer(
-            task_id=closed_task_id or "",
-            plan_path=root / state.plan_path,
-            repo_root=root,
-        )
-        if not result.approved:
-            # Unreachable in practice — dispatch_spec_reviewer raises on
-            # non-approved exhaustion — but keep the guard for safety.
-            raise SpecReviewError(f"spec-reviewer did not approve task {closed_task_id}")
-    new_state = mark_and_advance(state, root)
-    next_msg = (
-        f"Next: task {new_state.current_task_id}" if new_state.current_task_id else "Plan complete."
-    )
-    sys.stdout.write(f"Task {closed_task_id} closed. {next_msg}\n")
-    return 0
-```
-
-Add the import:
-
-```python
-from errors import DriftError, PreconditionError, SpecReviewError
-```
-
-- [x] **Step 5-8**: verify + commits.
-
-### Task H6: `auto_cmd._phase2_task_loop` integration
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py`
-- Create: `tests/test_auto_cmd_spec_review.py`
-
-- [x] **Step 1 (Red)**: integration tests using `StubSpecReviewer` — auto loop with 3 tasks where task 2 returns issues that route via `/receiving-code-review` + mini-cycle.
-
-For v0.2 simplification: `auto_cmd` invokes the dispatcher which is already wrapped with its own safety-valve loop. On `SpecReviewError` the loop aborts with exit 12.
-
-- [x] **Step 2-3**: commit `test:`.
-
-- [x] **Step 4 (Green)**: in `auto_cmd.py`, import `spec_review_dispatch`. In `_phase2_task_loop`, right before the `current = close_task_cmd.mark_and_advance(current, root)` line (currently at auto_cmd.py:441):
-
-```python
-            else:
-                # Feature B (v0.2, INV-31): spec-reviewer gate before task close.
-                # Wrap in try/except so the audit trail captures the abort.
-                try:
-                    spec_review_dispatch.dispatch_spec_reviewer(
-                        task_id=current.current_task_id or "",
-                        plan_path=root / current.plan_path,
-                        repo_root=root,
-                    )
-                except SpecReviewError:
-                    _write_auto_run_audit(
-                        auto_run,
-                        AutoRunAudit(
-                            schema_version=_AUTO_RUN_SCHEMA_VERSION,
-                            auto_started_at=started_at,
-                            auto_finished_at=_now_iso(),
-                            status="failed",
-                            verdict=None,
-                            degraded=None,
-                            accepted_conditions=0,
-                            rejected_conditions=0,
-                            tasks_completed=tasks_completed,
-                            error="SpecReviewError",
-                        ),
-                    )
-                    raise
-                # W1: delegate to public helper in close_task_cmd
-                current = close_task_cmd.mark_and_advance(current, root)
-                ...  # existing body below — replace `...` with the actual remainder of _phase2_task_loop before committing
-```
-
-> **Do NOT ship literal `...`:** the `...` above is a structural marker for "paste the existing body here unchanged." Before the Green commit, open `skills/sbtdd/scripts/auto_cmd.py` at `_phase2_task_loop`, copy the loop body that follows the current `mark_and_advance` call, and substitute it in. A literal `...` left in production code is a landing-time failure — run `python -c "from auto_cmd import _phase2_task_loop; _phase2_task_loop(...)"` against a staged fixture before committing to force-execute the diff path and prove no `Ellipsis` slipped through.
-
-Add import:
-
-```python
-import spec_review_dispatch
-from errors import (
-    ChecklistError,
-    DriftError,
-    Loop1DivergentError,
-    MAGIGateError,
-    PreconditionError,
-    QuotaExhaustedError,
-    SpecReviewError,        # NEW
-    ValidationError,
-    VerificationIrremediableError,
-)
-```
-
-- [x] **Step 5-8**: verify + commits.
-
-### Task H7: new subcommand `review-spec-compliance`
-
-**Files:**
-- Create: `skills/sbtdd/scripts/review_spec_compliance_cmd.py`
-- Modify: `skills/sbtdd/scripts/models.py`
-- Modify: `skills/sbtdd/scripts/run_sbtdd.py`
-- Modify: `tests/test_models.py`
-- Modify: `tests/test_run_sbtdd.py`
-- Create: `tests/test_review_spec_compliance_cmd.py`
-
-- [x] **Step 1 (Red)**: tests:
-
-```python
-# tests/test_models.py — extend
-def test_valid_subcommands_includes_review_spec_compliance() -> None:
-    from models import VALID_SUBCOMMANDS
-    assert "review-spec-compliance" in VALID_SUBCOMMANDS
-
-
-# tests/test_run_sbtdd.py — extend
-def test_dispatch_review_spec_compliance_routes_to_cmd(monkeypatch) -> None:
-    import run_sbtdd
-    called: list = []
-    def fake(argv): called.append(argv); return 0
-    monkeypatch.setitem(run_sbtdd.SUBCOMMAND_DISPATCH, "review-spec-compliance", fake)
-    assert run_sbtdd.main(["review-spec-compliance", "3"]) == 0
-    assert called == [["3"]]
-
-
-# tests/test_review_spec_compliance_cmd.py
-def test_review_spec_compliance_approved_exits_0(tmp_path, monkeypatch):
-    ...  # using StubSpecReviewer + fixture plan
-def test_review_spec_compliance_issues_exits_12(tmp_path, monkeypatch):
-    ...
-```
-
-- [x] **Step 2-3**: commit `test:`.
-
-- [x] **Step 4 (Green)**: 
-
-In `models.py`:
-
-```python
-VALID_SUBCOMMANDS: tuple[str, ...] = (
-    "init",
-    "spec",
-    "close-phase",
-    "close-task",
-    "status",
-    "pre-merge",
-    "finalize",
-    "auto",
-    "resume",
-    "review-spec-compliance",   # Feature B, v0.2
-)
-```
-
-Create `skills/sbtdd/scripts/review_spec_compliance_cmd.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-23
-"""/sbtdd review-spec-compliance <task-id> — manual spec-reviewer dispatch.
-
-Exposes dispatch_spec_reviewer as a subcommand for flows outside auto_cmd
-(executing-plans, manual close-task after --skip-spec-review was used).
-"""
-
-from __future__ import annotations
-
-import argparse
+import json
 import sys
 from pathlib import Path
 
-import spec_review_dispatch
-from errors import PreconditionError
-from state_file import load as load_state
+from errors import ValidationError
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="sbtdd review-spec-compliance")
-    p.add_argument("task_id", type=str, help="Plan task id to review")
-    p.add_argument("--project-root", type=Path, default=Path.cwd())
-    p.add_argument("--max-iterations", type=int, default=3)
-    return p
+def validate_watch_interval(interval: float) -> None:
+    """W6: validate watch interval is >= 0.1s."""
+    if interval < 0.1:
+        raise ValidationError(
+            f"--interval must be >= 0.1s (sub-100ms spins CPU); got {interval}"
+        )
 
 
-def main(argv: list[str] | None = None) -> int:
-    ns = _build_parser().parse_args(argv)
-    root: Path = ns.project_root
-    state_path = root / ".claude" / "session-state.json"
-    if not state_path.is_file():
-        raise PreconditionError(f"state file not found: {state_path}")
-    state = load_state(state_path)
-    plan_path = root / state.plan_path
-    if not plan_path.is_file():
-        raise PreconditionError(f"plan file not found: {plan_path}")
-    result = spec_review_dispatch.dispatch_spec_reviewer(
-        task_id=ns.task_id,
-        plan_path=plan_path,
-        repo_root=root,
-        max_iterations=ns.max_iterations,
-    )
-    if result.approved:
-        sys.stdout.write(f"Task {ns.task_id}: spec-review APPROVED (iter {result.reviewer_iter}).\n")
+def _watch_render_tty(progress: dict) -> str:
+    """W1: format ProgressContext snapshot for TTY rewrite-line render."""
+    parts: list[str] = []
+    if progress.get("iter_num"):
+        parts.append(f"iter {progress['iter_num']}")
+    parts.append(f"phase {progress.get('phase', 0)}")
+    if progress.get("task_index") is not None and progress.get("task_total") is not None:
+        parts.append(f"task {progress['task_index']}/{progress['task_total']}")
+    if progress.get("dispatch_label"):
+        parts.append(f"dispatch={progress['dispatch_label']}")
+    return "[sbtdd watch] " + " ".join(parts)
+
+
+def _watch_loop_once(auto_run_path: Path, *, json_mode: bool) -> int:
+    """W3: single-poll cycle. Returns 0 if missing file."""
+    if not auto_run_path.exists():
+        sys.stderr.write("[sbtdd status] no auto run in progress\n")
         return 0
-    # dispatch_spec_reviewer raises on non-approved exhaustion; this path is
-    # only reached when max_iterations=1 and issues returned without retry.
-    sys.stderr.write(f"Task {ns.task_id}: {len(result.issues)} issue(s) found.\n")
-    for i in result.issues:
-        sys.stderr.write(f"  [{i.severity}] {i.text}\n")
-    return 12
-
-
-run = main
+    return 0  # full loop in S2-9
 ```
 
-In `run_sbtdd.py`:
+- [ ] **Step 4: Run + verify pass**
 
-```python
-import review_spec_compliance_cmd  # with the other imports
+- [ ] **Step 5: Commit**
 
-SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
-    "init": init_cmd.main,
-    "spec": spec_cmd.main,
-    "close-phase": close_phase_cmd.main,
-    "close-task": close_task_cmd.main,
-    "status": status_cmd.main,
-    "pre-merge": pre_merge_cmd.main,
-    "finalize": finalize_cmd.main,
-    "auto": auto_cmd.main,
-    "resume": resume_cmd.main,
-    "review-spec-compliance": review_spec_compliance_cmd.main,
-}
+```bash
+git add skills/sbtdd/scripts/status_cmd.py tests/test_status_watch.py
+git commit -m "feat: status --watch helpers (TTY render + missing file + interval validation)"
 ```
-
-- [x] **Step 5-8**: verify + commits.
-
-### Task H8: close-task Milestone H
-
-- [x] **Step 1**: mark Milestone H complete.
-- [x] **Step 2**: `git commit --allow-empty -m "chore: mark task H complete"`.
 
 ---
 
-## MILESTONE I — Meta: documentation + version bump + INV-31
-
-### Task I1: INV-31 documentation
+### Task S2-8: status --watch JSON race retry + slow-poll fallback (W4)
 
 **Files:**
-- Modify: `CLAUDE.md` (Invariants Summary section)
-- Modify: `sbtdd/sbtdd-workflow-plugin-spec-base.md` (sec.S.10)
-- Modify: `tests/test_inv_documentation.py`
+- Modify: `skills/sbtdd/scripts/status_cmd.py`
+- Modify: `tests/test_status_watch.py`
 
-- [x] **Step 1 (Red)**: test asserting INV-31 appears in both artifacts.
+- [ ] **Step 1: Write failing test**
 
 ```python
-def test_inv31_documented_in_claude_md() -> None:
-    t = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "INV-31" in t
-    assert "spec-reviewer" in t
+def test_w4_retry_5x_with_4_sleeps_between_attempts(tmp_path, monkeypatch):
+    """W4: 5 attempts, 4 sleeps between (no sleep after final fail)."""
+    from status_cmd import _read_auto_run_with_retry
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("not-json", encoding="utf-8")
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda s: sleep_calls.append(s))
+    result = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+    assert result is None
+    # Per Checkpoint 2 iter 1 melchior fix: 4 sleeps (between 5 attempts), not 5.
+    assert sleep_calls == [0.05, 0.1, 0.2, 0.4]
+
+
+def test_w4_slow_poll_fallback_after_3_consecutive_parse_failures():
+    from status_cmd import WatchPollState
+    state = WatchPollState(default_interval=1.0)
+    state.record_parse_failure(); state.record_parse_failure(); state.record_parse_failure()
+    assert state.current_interval == 2.0
+    state.record_parse_failure()
+    assert state.current_interval == 4.0
+    state.record_parse_failure(); state.record_parse_failure(); state.record_parse_failure()
+    assert state.current_interval <= 10.0
+    state.record_parse_success()
+    assert state.current_interval == 1.0
 ```
 
-- [x] **Step 2-4**: commit `test:`, add the INV-31 bullet to both docs, commit `feat:`.
+- [ ] **Step 2: Run + verify fail**
 
-In `CLAUDE.md` under "Invariants Summary":
+- [ ] **Step 3: Implement retry + WatchPollState**
 
-```markdown
-- **INV-31** Every task close in `auto_cmd` and `close_task_cmd` (interactive) MUST pass spec-reviewer approval before `mark_and_advance` advances state, unless `--skip-spec-review` flag set (manual workflows) or stub fixture injected (tests). Introduced in v0.2 (Feature B).
+In `status_cmd.py`:
+
+```python
+import time
+from dataclasses import dataclass, field
+
+
+def _read_auto_run_with_retry(
+    auto_run_path: Path, *, max_retries: int = 5
+) -> dict | None:
+    """W4: 5x exponential backoff on JSON parse error.
+
+    Sleep occurs BETWEEN attempts (not after the last one) — total budget
+    is 4 sleeps (50+100+200+400ms = 750ms) for 5 attempts. Per Checkpoint 2
+    iter 1 melchior fix (no wasted sleep after final failed attempt).
+    """
+    backoff_schedule = [0.05, 0.1, 0.2, 0.4]  # 4 sleeps between 5 attempts
+    for attempt_idx in range(max_retries):
+        try:
+            return json.loads(auto_run_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            if attempt_idx < len(backoff_schedule):
+                time.sleep(backoff_schedule[attempt_idx])
+            # No sleep after final attempt; just return None below.
+    return None
+
+
+@dataclass
+class WatchPollState:
+    """W4 slow-poll fallback: track JSON parse failures, adjust interval.
+
+    Critical (Checkpoint 2 iter 1 caspar fix): only triggered by ACTUAL
+    JSON parse contention failures (5x retry exhaustion). Idle auto-runs
+    that return same data successfully are NOT failures — they keep the
+    default poll interval so operators see updates promptly when MAGI
+    dispatch ends.
+    """
+    default_interval: float
+    current_interval: float = field(default=0.0)
+    consecutive_parse_failures: int = 0
+    cap_seconds: float = 10.0
+
+    def __post_init__(self) -> None:
+        if self.current_interval == 0.0:
+            self.current_interval = self.default_interval
+
+    def record_parse_failure(self) -> None:
+        """Called ONLY when _read_auto_run_with_retry returns None."""
+        self.consecutive_parse_failures += 1
+        if self.consecutive_parse_failures >= 3:
+            self.current_interval = min(self.current_interval * 2, self.cap_seconds)
+
+    def record_parse_success(self) -> None:
+        """Called when JSON parsed (even if progress dict equals previous — idle)."""
+        if self.current_interval > self.default_interval:
+            self.current_interval = self.default_interval
+        self.consecutive_parse_failures = 0
 ```
 
-- [x] **Step 5-8**: verify + commits.
+**Note (Checkpoint 2 iter 1 caspar fix):** previous design conflated "no progress change" with "parse failure". Now `record_parse_success()` is called whenever JSON loads cleanly, even if the progress dict is unchanged from the previous poll (idle case). Slow-poll triggers ONLY on contention (5x retry exhaustion), not on idle. Update the test accordingly:
 
-### Task I1b: D2/D3 — update SKILL.md dispatch + README usage
+```python
+def test_w4_idle_does_not_trigger_slow_poll(tmp_path):
+    """Idle auto-run (same data on each poll) does NOT trigger slow-poll fallback."""
+    from status_cmd import WatchPollState
+    state = WatchPollState(default_interval=1.0)
+    # Simulate 10 successful idle polls (same data each time)
+    for _ in range(10):
+        state.record_parse_success()
+    assert state.current_interval == 1.0  # NEVER doubled
+    assert state.consecutive_parse_failures == 0
 
-Spec-base §6.6 acceptance criteria D2 (cross-artifact coherence tests updated for 0.2.0) and D3 (new subcommand `review-spec-compliance` + four new flags `--override-checkpoint`, `--reason`, `--non-interactive`, `--skip-spec-review` documented in README + SKILL.md + CLAUDE.md) require user-visible documentation updates. CLAUDE.md is covered by I1 (INV-31) and I4 (strip shipped blockers); this task covers SKILL.md + README.md and the matching coherence test deltas.
+
+def test_w4_three_consecutive_parse_failures_triggers_slow_poll():
+    from status_cmd import WatchPollState
+    state = WatchPollState(default_interval=1.0)
+    state.record_parse_failure(); state.record_parse_failure(); state.record_parse_failure()
+    assert state.current_interval == 2.0
+    state.record_parse_success()
+    assert state.current_interval == 1.0
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/scripts/status_cmd.py tests/test_status_watch.py
+git commit -m "feat: add W4 5x retry + slow-poll fallback to status --watch"
+```
+
+---
+
+### Task S2-9: status --watch full poll loop + Ctrl+C handling + JSON mode (W2, W5)
 
 **Files:**
-- Modify: `skills/sbtdd/SKILL.md`
-- Modify: `README.md`
-- Modify: `tests/test_distribution_coherence.py`
-- Modify: `tests/test_skill_md.py`
-- Modify: `tests/test_readme.py`
+- Modify: `skills/sbtdd/scripts/status_cmd.py`
+- Modify: `tests/test_status_watch.py`
 
-- [x] **Step 1 (Red): extend coherence tests for the new subcommand + flags**
-
-Append to `tests/test_distribution_coherence.py`:
+- [ ] **Step 1: Write failing tests**
 
 ```python
-def test_skill_md_lists_review_spec_compliance_subcommand() -> None:
-    skill = (REPO_ROOT / "skills" / "sbtdd" / "SKILL.md").read_text(encoding="utf-8")
-    assert "review-spec-compliance" in skill, (
-        "D3: SKILL.md must document new v0.2 subcommand review-spec-compliance"
+def test_w2_json_mode_emits_progress(tmp_path, capsys):
+    from status_cmd import _watch_render_one
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"progress": {"phase": 2}}), encoding="utf-8"
+    )
+    _watch_render_one(auto_run_path, json_mode=True, last_progress=None)
+    captured = capsys.readouterr()
+    line = json.loads(captured.out.strip())
+    assert "timestamp" in line
+    assert line["progress"]["phase"] == 2
+
+
+def test_w5_ctrl_c_returns_130(tmp_path, monkeypatch):
+    from status_cmd import watch_main
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"progress": {"phase": 1}}), encoding="utf-8"
     )
 
+    def raise_kbi(*args, **kwargs):
+        raise KeyboardInterrupt()
 
-def test_readme_documents_v02_flags() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    for flag in ("--override-checkpoint", "--reason", "--non-interactive", "--skip-spec-review"):
-        assert flag in readme, f"D3: README.md must document {flag}"
+    monkeypatch.setattr("status_cmd._watch_render_one", raise_kbi)
+    rc = watch_main(auto_run_path, interval=1.0, json_mode=False)
+    assert rc == 130
 ```
 
-Extend `tests/test_skill_md.py` contract: the subcommand dispatch table must have 10 rows (was 9 in v0.1); add a row for `review-spec-compliance`.
+- [ ] **Step 2: Run + verify fail**
 
-Extend `tests/test_readme.py` contract: the usage section must reference `review-spec-compliance` and the four new flags.
+- [ ] **Step 3: Implement full watch_main**
 
-- [x] **Step 2: run tests, confirm Red**
+In `status_cmd.py`:
+
+```python
+def _watch_render_one(
+    auto_run_path: Path,
+    *,
+    json_mode: bool,
+    last_progress: dict | None,
+) -> dict | None:
+    """Single-poll render. Returns the new progress dict or None on no-op."""
+    data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+    if data is None:
+        return last_progress
+    progress = data.get("progress", {})
+    if progress != last_progress:
+        if json_mode:
+            sys.stdout.write(
+                json.dumps({"timestamp": time.time(), "progress": progress}) + "\n"
+            )
+        else:
+            sys.stdout.write("\r" + _watch_render_tty(progress) + " ")
+        sys.stdout.flush()
+    return progress
+
+
+def watch_main(
+    auto_run_path: Path,
+    *,
+    interval: float,
+    json_mode: bool,
+) -> int:
+    """W1-W6: full status --watch poll loop.
+
+    Distinguishes (a) idle (parse success, same data), (b) contention (parse
+    failure after 5x retries), and (c) file-disappearance (path stops existing
+    mid-poll, e.g., auto-run finished + cleaned up). Per Checkpoint 2 iter 1
+    caspar + iter 2 caspar fixes.
+    """
+    validate_watch_interval(interval)
+    if not auto_run_path.exists():
+        sys.stderr.write("[sbtdd status] no auto run in progress\n")
+        return 0
+    state = WatchPollState(default_interval=interval)
+    last_progress: dict | None = None
+    try:
+        while True:
+            # Re-check existence each poll: file may disappear mid-watch
+            # (auto-run completed + .claude/ cleanup). Distinguish from
+            # contention.
+            if not auto_run_path.exists():
+                sys.stderr.write(
+                    "\n[sbtdd status] auto run ended (auto-run.json no longer present)\n"
+                )
+                sys.stderr.flush()
+                return 0
+            data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+            if data is None:
+                # CONTENTION (parse failure): trigger slow-poll if sustained
+                state.record_parse_failure()
+                # Per Checkpoint 2 iter 3 caspar W9 fix: align breadcrumb
+                # cadence with slow-poll trigger threshold (3) rather than 5.
+                if state.consecutive_parse_failures % 3 == 0:
+                    sys.stderr.write(
+                        f"[sbtdd status] contention: JSON parse failed after "
+                        f"5 retries (cumulative={state.consecutive_parse_failures})\n"
+                    )
+                    sys.stderr.flush()
+            else:
+                # PARSE SUCCESS (idle OR change): record success either way
+                state.record_parse_success()
+                progress = data.get("progress", {})
+                if progress != last_progress:
+                    if json_mode:
+                        sys.stdout.write(
+                            json.dumps({"timestamp": time.time(), "progress": progress}) + "\n"
+                        )
+                    else:
+                        sys.stdout.write("\r" + _watch_render_tty(progress) + " ")
+                    sys.stdout.flush()
+                    last_progress = progress
+            time.sleep(state.current_interval)
+    except KeyboardInterrupt:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return 130
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
 
 ```bash
-python -m pytest tests/test_distribution_coherence.py tests/test_skill_md.py tests/test_readme.py -v
+git add skills/sbtdd/scripts/status_cmd.py tests/test_status_watch.py
+git commit -m "feat: status --watch full poll loop with JSON mode + SIGINT handling"
 ```
-Expected: three new test cases FAIL with assertion errors on missing strings.
 
-- [x] **Step 3 (Red commit)**
+---
+
+### Task S2-10: run_sbtdd.py argv extension (--watch, --interval, --json)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/run_sbtdd.py`
+- Modify: `tests/test_run_sbtdd.py`
+
+- [ ] **Step 1: Write failing test**
+
+```python
+def test_status_watch_dispatches_with_new_flags(monkeypatch):
+    from run_sbtdd import main
+    captured: dict = {}
+
+    def fake_watch_main(auto_run_path, *, interval, json_mode):
+        captured["interval"] = interval
+        captured["json_mode"] = json_mode
+        return 0
+
+    monkeypatch.setattr("status_cmd.watch_main", fake_watch_main)
+    rc = main(["status", "--watch", "--interval", "2.0", "--json"])
+    assert rc == 0
+    assert captured["interval"] == 2.0
+    assert captured["json_mode"] is True
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Extend run_sbtdd argv parsing**
+
+In `run_sbtdd.py`, add to the status subcommand parser:
+
+```python
+def _build_status_parser(subparsers):
+    p = subparsers.add_parser("status", help="Report current sbtdd state")
+    p.add_argument("--watch", action="store_true", help="Live poll of auto-run.json")
+    p.add_argument(
+        "--interval", type=float, default=1.0,
+        help="Poll interval (seconds, >= 0.1)",
+    )
+    p.add_argument(
+        "--json", dest="json_mode", action="store_true",
+        help="Emit JSON per progress change",
+    )
+    return p
+
+
+def _dispatch_status(args) -> int:
+    if getattr(args, "watch", False):
+        from status_cmd import watch_main
+        from pathlib import Path
+        return watch_main(
+            Path(".claude/auto-run.json"),
+            interval=args.interval,
+            json_mode=args.json_mode,
+        )
+    return _existing_status_dispatch(args)
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_distribution_coherence.py tests/test_skill_md.py tests/test_readme.py
-git commit -m "test: add D2/D3 coherence tests for v0.2 subcommand + flags"
+git add skills/sbtdd/scripts/run_sbtdd.py tests/test_run_sbtdd.py
+git commit -m "feat: extend run_sbtdd status with --watch, --interval, --json flags"
 ```
 
-- [x] **Step 4 (Green): update SKILL.md**
+---
 
-Locate the subcommand dispatch table in `skills/sbtdd/SKILL.md` (section "Subcommand dispatch", sec.S.6.3). Add a new row between `finalize` and `auto` (keeping alphabetical-free v0.1 order + new subcommand grouped with its conceptual neighbor `close-task`):
+### Task S2-11: HF1 — recovery breadcrumb wording alignment
 
-```markdown
-| `review-spec-compliance` | `review_spec_compliance_cmd.py` | Per-task spec-reviewer dispatch for manual flows (`/executing-plans`, ad-hoc). Dispatches `superpowers:subagent-driven-development/spec-reviewer-prompt.md`, returns exit 0 on approve, exit 12 on issues. New in v0.2. |
+**Files:**
+- Modify: `CHANGELOG.md` (verify wording)
+- Modify: `skills/sbtdd/scripts/magi_dispatch.py` (verify wording — DO NOT touch logic)
+- Modify: `tests/test_changelog.py`
+
+- [ ] **Step 1: Write failing test**
+
+In `tests/test_changelog.py`:
+
+```python
+from pathlib import Path
+
+
+def test_hf1_recovery_breadcrumb_wording_aligned():
+    """HF1: spec, CHANGELOG, and impl all use identical recovery breadcrumb wording."""
+    canonical = "[sbtdd magi] synthesizer failed; manual synthesis recovery applied"
+    spec = Path("sbtdd/spec-behavior.md").read_text(encoding="utf-8")
+    changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+    impl = Path("skills/sbtdd/scripts/magi_dispatch.py").read_text(encoding="utf-8")
+    assert canonical in spec, "spec missing canonical wording"
+    assert canonical in changelog, "CHANGELOG missing canonical wording"
+    assert canonical in impl, "impl missing canonical wording"
 ```
 
-In the same SKILL.md, under the "Fallback" section (or equivalent flag-summary section), append the four new v0.2 flags with one-line descriptions:
+- [ ] **Step 2: Run + verify fail**
 
-```markdown
-**v0.2 flags:**
+- [ ] **Step 3: Adjust CHANGELOG and impl wording to match spec**
 
-- `--override-checkpoint --reason "<text>"` (on `spec`, `pre-merge`, `finalize`) — INV-0 escape valve when MAGI safety valve exhausts. `--reason` is mandatory; reason + verdict persisted to `.claude/magi-escalations/`.
-- `--non-interactive` (on `spec`, `pre-merge`) — force headless policy even on a TTY; applies `.claude/magi-auto-policy.json`.
-- `--skip-spec-review` (on `close-task`) — bypass Feature B reviewer for manual flows where compliance is verified by hand.
-```
-
-- [x] **Step 5 (Green): update README.md**
-
-In `README.md` under the "Usage" section (subcommands table), add a row for `/sbtdd review-spec-compliance <task-id>` with one-line purpose. Below the table, in the "New in v0.2" (or equivalent) subsection, list the four flags with the same one-line descriptions as SKILL.md.
-
-- [x] **Step 6: run tests, confirm PASS**
+If CHANGELOG.md or magi_dispatch.py wording diverges from the canonical line, update them to use the exact text. Do NOT change the logic in magi_dispatch.py — only the message text. Search:
 
 ```bash
-make verify
+grep -n "synthesizer\|manual synthesis" CHANGELOG.md skills/sbtdd/scripts/magi_dispatch.py
 ```
-Expected: all coherence tests PASS; mypy clean; ruff clean.
 
-- [x] **Step 7 (Green commit)**
+Adjust as needed.
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add skills/sbtdd/SKILL.md README.md
-git commit -m "docs: document review-spec-compliance subcommand and v0.2 flags"
+git add CHANGELOG.md skills/sbtdd/scripts/magi_dispatch.py tests/test_changelog.py
+git commit -m "fix: align recovery breadcrumb wording across spec/CHANGELOG/impl"
 ```
 
-- [x] **Step 8 (Refactor)**
+---
 
-```bash
-git commit --allow-empty -m "refactor: SKILL.md + README v0.2 docs reviewed"
-```
-
-### Task I2: CHANGELOG Unreleased → v0.2.0
+### Task S2-12: HF2 — marker file schema docs match impl emission
 
 **Files:**
 - Modify: `CHANGELOG.md`
+- Modify: `tests/test_changelog.py`
 
-- [x] **Step 1 (Red)**: new test asserting 0.2.0 entry exists AND references the three features:
+- [ ] **Step 1: Write failing test**
 
 ```python
-def test_changelog_v02_section_references_features() -> None:
-    t = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "0.2.0" in t
-    assert "escalation" in t.lower()
-    assert "spec-reviewer" in t.lower() or "spec reviewer" in t.lower()
-    assert "semver" in t.lower() or "auto-resolve" in t.lower()
+def test_hf2_marker_schema_docs_match_impl():
+    impl = Path("skills/sbtdd/scripts/magi_dispatch.py").read_text(encoding="utf-8")
+    changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+    expected_fields = ["verdict", "iteration", "agents", "timestamp"]
+    for field in expected_fields:
+        assert f'"{field}"' in impl, f"impl missing marker field {field!r}"
+        assert field in changelog, f"CHANGELOG missing marker field doc {field!r}"
 ```
 
-- [x] **Step 2-3**: commit `test:`.
+- [ ] **Step 2: Run + verify fail**
 
-- [x] **Step 4 (Green)**: in `CHANGELOG.md`, promote `[Unreleased]` to `[0.2.0] - 2026-04-XX`:
+- [ ] **Step 3: Update CHANGELOG to enumerate marker fields**
 
-```markdown
-## [0.2.0] - 2026-04-XX
+In `CHANGELOG.md` `[0.4.0]` Added section, ensure the marker file description lists `verdict`, `iteration`, `agents`, `timestamp`.
 
-### Added
-- Interactive MAGI escalation prompt (`escalation_prompt.py`) — fires on
-  INV-11 safety valve exhaustion in `spec` / `pre-merge` / `finalize`. New
-  CLI flags `--override-checkpoint --reason` (mandatory reason); audit
-  artifacts at `.claude/magi-escalations/`. Headless fallback via
-  `.claude/magi-auto-policy.json` (default `abort` preserves v0.1 exit 8).
-- Superpowers spec-reviewer integration per task
-  (`spec_review_dispatch.py`, `review_spec_compliance_cmd.py`) — new
-  subcommand `/sbtdd review-spec-compliance <task-id>`; default-invoke in
-  `close_task_cmd` + `auto_cmd._phase2_task_loop`; opt-out via
-  `--skip-spec-review`. Audit artifacts at `.claude/spec-reviews/`.
-- `SpecReviewError` exception + exit code 12 (`SPEC_REVIEW_ISSUES`).
-- `StubSpecReviewer` fixture for test suites.
-- INV-31: spec-reviewer gate on task close.
+- [ ] **Step 4: Run + verify pass**
 
-### Changed
-- MAGI parity tests auto-detect latest cached version instead of pinning
-  to v2.1.3 (`_resolve_magi_plugin_json` + `_semver_key` in
-  `tests/test_distribution_coherence.py`). `MAGI_PLUGIN_ROOT` env var
-  override preserved.
-- `close_task_cmd.main` now invokes spec-reviewer by default before
-  `mark_and_advance` (behavior change under INV-31).
-- `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`
-  `version` bumped 0.1.0 → 0.2.0.
+- [ ] **Step 5: Commit**
 
-### BREAKING
-- New exit code 12 (`SPEC_REVIEW_ISSUES`). Scripts grepping exit codes
-  should update their taxonomy. v0.1 exit 8 semantics preserved for the
-  default headless policy.
+```bash
+git add CHANGELOG.md tests/test_changelog.py
+git commit -m "docs: align marker file schema docs with actual impl emission"
 ```
 
-- [x] **Step 5-8**: verify + commits.
+---
 
-### Task I3: version bump 0.1.0 → 0.2.0
+### Task S2-13: HF3 — F45 verdict-set delta documentation
 
 **Files:**
-- Modify: `.claude-plugin/plugin.json`
-- Modify: `.claude-plugin/marketplace.json`
+- Modify: `CHANGELOG.md`
+- Modify: `tests/test_changelog.py`
 
-- [x] **Step 1**: existing test `test_plugin_and_marketplace_versions_match` will fail immediately once either file changes without the other. Use that as the red signal:
+- [ ] **Step 1: Write failing test**
 
-```bash
-# Edit plugin.json only first
-python -m pytest tests/test_distribution_coherence.py::test_plugin_and_marketplace_versions_match -v
-```
-Expected: FAIL with version mismatch.
-
-- [x] **Step 2 (Green)**: edit both files in one commit:
-
-`.claude-plugin/plugin.json`: change `"version": "0.1.0"` → `"version": "0.2.0"`.
-
-`.claude-plugin/marketplace.json`: change BOTH the top-level `"version"` AND the plugin entry `"version"` to `"0.2.0"`.
-
-- [x] **Step 3 (verify)**:
-
-```bash
-python -m pytest tests/test_distribution_coherence.py -v
-```
-Expected: all PASS.
-
-- [x] **Step 4 (Green commit)**:
-
-```bash
-git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
-git commit -m "chore: bump plugin + marketplace to v0.2.0"
+```python
+def test_hf3_f45_verdict_set_delta_documented():
+    changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+    assert "VERDICT_RANK" in changelog
+    assert "ValidationError" in changelog
+    assert "tolerant parser" in changelog.lower()
 ```
 
-### Task I4: strip shipped blockers from CLAUDE.md
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Add F45 delta paragraph to CHANGELOG**
+
+In `CHANGELOG.md` `[0.4.0]` Added section:
+
+```markdown
+- F45 tolerant parser additionally validates that the parsed `verdict` field
+  is in the known `VERDICT_RANK` set; agent JSON with unknown verdict raises
+  ValidationError instead of silently passing through. (Behavior delta vs the
+  v0.4.0 strict parser baseline.)
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add CHANGELOG.md tests/test_changelog.py
+git commit -m "docs: document F45 verdict-set delta in CHANGELOG [0.4.0]"
+```
+
+---
+
+### Task S2-14: CHANGELOG [0.5.0] entry
+
+**Files:**
+- Modify: `CHANGELOG.md`
+- Modify: `tests/test_changelog.py`
+
+- [ ] **Step 1: Write failing test for [0.5.0] structure**
+
+```python
+def test_changelog_v0_5_0_entry_complete():
+    changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [0.5.0]" in changelog
+    section = changelog.split("## [0.5.0]")[1].split("## [0.4")[0]
+    assert "### Added" in section
+    assert "Heartbeat" in section
+    assert "status --watch" in section
+    assert "Per-stream timeout" in section
+    assert "Origin disambiguation" in section
+    assert "ProgressContext" in section
+    assert "INV-32" in section or "INV-34" in section
+    assert "### Deferred" in section
+    assert "Feature G" in section
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Add [0.5.0] entry**
+
+Insert at top of `CHANGELOG.md`:
+
+```markdown
+## [0.5.0] - 2026-MM-DD
+
+### Added
+- **Heartbeat in-band emitter** (`scripts/heartbeat.py`) — context manager
+  wrapping long subprocess dispatches; daemon thread emits stderr breadcrumb
+  every 15s (configurable) with iter / phase / task / dispatch / elapsed.
+- **`/sbtdd status --watch`** companion subcommand for out-of-band monitoring;
+  default TTY rewrite-line render, `--json` flag for piping, `--interval`
+  override.
+- **Per-stream timeout (J3)** — `subprocess_utils.run_streamed_with_timeout`
+  kills subprocess if all open streams silent for `auto_per_stream_timeout_seconds`
+  (default 900s). `auto_no_timeout_dispatch_labels` allowlist exempts MAGI
+  dispatches by default (`["magi-*"]`).
+- **Origin disambiguation (J7)** — pump prefixes `[stdout]` / `[stderr]` when
+  both streams emit chunks within a 50ms temporal window. Forward-only
+  semantics (no retroactive prefix). Gated behind `auto_origin_disambiguation`
+  (default ON).
+- **ProgressContext dataclass** in `models.py`; lock-protected singleton in
+  `scripts/heartbeat.py` with `get_current_progress()` / `set_current_progress()`.
+- **5 new PluginConfig fields**: `auto_per_stream_timeout_seconds`,
+  `auto_heartbeat_interval_seconds`, `status_watch_default_interval_seconds`,
+  `auto_origin_disambiguation`, `auto_no_timeout_dispatch_labels`.
+- **3 new invariants**: INV-32 (heartbeat resilience + queue-based incremental
+  persistence), INV-33 (per-stream timeout last-resort), INV-34 (timeout/interval
+  ratio + floor + ceiling validation).
+
+### Changed
+- `auto-run.json` schema gains `progress` key (ProgressContext snapshot,
+  ISO 8601 UTC datetimes) and `heartbeat_failed_writes_total` counter.
+  Backward-compat: v0.4.0 files without these fields parse cleanly.
+
+### Hotfixes folded
+- HF1: recovery breadcrumb wording aligned across spec / CHANGELOG / impl.
+- HF2: marker file schema docs match actual emission fields.
+- HF3: F45 verdict-set delta documented (validates `verdict in VERDICT_RANK`).
+
+### Process notes
+- Bundle accepted via INV-0 override after MAGI Loop 2 4-iter convergence
+  pattern (verdict stable `GO_WITH_CAVEATS (3-0)` full no-degraded).
+  Known Limitations from iter 4 documented in spec sec.11; resolution in
+  this implementation phase.
+- True parallel 2-subagent dispatch repeated (Heartbeat track vs
+  Streaming/Watch/Docs track), surfaces 100% disjoint, ~6-8h wall time.
+
+### Deferred (rolled to v1.0.0)
+- Feature G: MAGI -> /requesting-code-review cross-check meta-reviewer.
+- F44.3: retried_agents propagation to auto-run.json.
+- J2: ResolvedModels preflight dataclass.
+- Feature I: schema_version + migration tool.
+- Feature H: Group B re-eval + INV-31 default decision.
+```
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add CHANGELOG.md tests/test_changelog.py
+git commit -m "docs: add CHANGELOG [0.5.0] entry"
+```
+
+---
+
+### Task S2-15: SKILL.md v0.5 notes section
+
+**Files:**
+- Modify: `skills/sbtdd/SKILL.md`
+- Modify: `tests/test_skill_md.py`
+
+- [ ] **Step 1: Write failing test**
+
+```python
+def test_skill_md_has_v0_5_notes_section():
+    skill_md = Path("skills/sbtdd/SKILL.md").read_text(encoding="utf-8")
+    assert "v0.5" in skill_md
+    assert "status --watch" in skill_md
+    assert "heartbeat" in skill_md.lower()
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+- [ ] **Step 3: Add v0.5 notes section**
+
+Append to `skills/sbtdd/SKILL.md` (after existing v0.4 notes, before final references):
+
+```markdown
+### v0.5 notes
+
+v0.5.0 adds the observability pillar:
+
+- **Heartbeat in-band**: long dispatches (MAGI, `/requesting-code-review`)
+  emit a stderr tick every 15s showing `iter / phase / task / dispatch /
+  elapsed`. Configurable via `auto_heartbeat_interval_seconds` (5-60s,
+  default 15).
+- **`/sbtdd status --watch`**: companion subcommand for out-of-band
+  monitoring. Run from a second terminal: `python run_sbtdd.py status --watch`.
+  Use `--json` for piping; `--interval N` for poll cadence.
+- **Per-stream timeout** (`auto_per_stream_timeout_seconds`, default 900s):
+  kills subprocess if all open streams are silent for the timeout window.
+  MAGI dispatches are exempt by default (`auto_no_timeout_dispatch_labels:
+  ["magi-*"]`).
+
+See `docs/v0.5.0-config-matrix.md` for the full field/invariant matrix.
+```
+
+Also fix any HF1 wording in v0.4 notes section if divergent.
+
+- [ ] **Step 4: Run + verify pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/SKILL.md tests/test_skill_md.py
+git commit -m "docs: add v0.5 notes section to SKILL.md"
+```
+
+---
+
+### Task S2-16: CLAUDE.md release notes pointer for v0.5.0
 
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [x] **Step 1**: remove the three `## v0.2 requirement (LOCKED) — ...` sections from `CLAUDE.md` now that they shipped. Replace with a single `## v0.2 release notes` pointer to `CHANGELOG.md [0.2.0]`.
+- [ ] **Step 1: Open CLAUDE.md and locate the v0.4 release notes section**
 
-- [x] **Step 2 (commit)**:
+- [ ] **Step 2: Append v0.5.0 release notes pointer**
+
+```markdown
+## v0.5.0 release notes
+
+The v0.5.0 observability pillar (heartbeat + `/sbtdd status --watch` +
+per-stream timeout J3 + origin disambiguation J7 + 3 v0.4.1 doc-alignment
+hotfixes) shipped in v0.5.0. Bundle accepted via INV-0 override after
+MAGI Loop 2 4-iter convergence pattern (verdict stable `GO_WITH_CAVEATS
+(3-0)` full no-degraded). Known Limitations from iter 4 documented in
+`sbtdd/spec-behavior.md` sec.11; resolution applied during implementation.
+See `CHANGELOG.md` `[0.5.0]` for the as-shipped behavior.
+```
+
+- [ ] **Step 3: Commit**
 
 ```bash
 git add CLAUDE.md
-git commit -m "docs: archive shipped v0.2 blockers to CHANGELOG"
-```
-
-### Task I5: final full test sweep + close plan
-
-- [x] **Step 1**: run full `make verify` at repo root.
-
-```bash
-make verify
-```
-Expected: pytest ≥ 597 baseline + ~40-80 new tests all PASS; ruff clean; mypy clean.
-
-- [x] **Step 2**: mark Milestone I complete; plan [x] all.
-
-- [x] **Step 3**: close-plan:
-
-```bash
-git commit --allow-empty -m "chore: mark task I complete"
+git commit -m "docs: add v0.5.0 release notes pointer to CLAUDE.md"
 ```
 
 ---
 
-## Pre-merge gate (after all tasks closed)
+### Task S2-17: docs/v0.5.0-config-matrix.md (R9 single-source matrix)
 
-Follow `CLAUDE.local.md` §6 pre-merge protocol strictly:
+**Files:**
+- Create: `docs/v0.5.0-config-matrix.md`
 
-1. Confirm state: `.claude/session-state.json` has `current_phase: "done"`, all plan boxes `[x]`, `git status` clean.
-2. Run `/sbtdd pre-merge` — Loop 1 (`/requesting-code-review` clean-to-go, safety valve 10 iter) then Loop 2 (`/magi:magi` verdict ≥ `GO_WITH_CAVEATS` full + non-degraded, INV-28 honored).
-3. MAGI findings route through `/receiving-code-review` (INV-29) + mini-cycle TDD fixes per accepted finding. With Feature A live, exhausted safety valve now prompts interactively (or writes pending marker + exit 8 headless per `.claude/magi-auto-policy.json`).
-4. Run `/sbtdd finalize` — validates sec.M.7 checklist and invokes `/finishing-a-development-branch`. Merge + tag `v0.2.0` happens here under explicit user authorization (INV-0 / `~/.claude/CLAUDE.md` Git section — NEVER autonomous).
+- [ ] **Step 1: Create the matrix doc**
 
-## Self-review notes
+Create `docs/v0.5.0-config-matrix.md`:
 
-**Spec coverage check:** every F15-F27 + NF8-NF12 + A1-A9 + B1-B10 + C1-C5 + NF-A-E + P1-P5 + D1-D3 acceptance criterion maps to a task above. The only spec item deliberately deferred is Feature B safety-valve MID-cycle `/receiving-code-review` + mini-cycle TDD fix automation — v0.2 dispatcher raises `SpecReviewError` on issues and the caller (`auto_cmd` / `close_task_cmd`) aborts. Full mini-cycle automation between reviewer iterations lands in v0.3 or a v0.2.1 patch. This matches the spec-base §2.2 "entrega v0.2" which says "si `issues`, treat as MAGI-like findings: feed to `/receiving-code-review`, mini-cycle TDD fix per accepted finding, re-dispatch reviewer, repeat up to a safety valve" — but keeping automation strictly inside `auto_cmd` (not the dispatcher) is a defensible design boundary; document this split in the Task H6 commit message.
+```markdown
+# v0.5.0 Config Matrix — single-source-of-truth
 
-**Placeholder scan:** searched for `TODO`, `TBD`, `implement later`, `...`. The three `...` occurrences in Tasks G6, H3, H6, H7 test skeletons (marked with `...  # skeleton; concretize ...`) are intentional pointers to lift fixtures from existing test modules. The implementer MUST replace each one with concrete code before landing the red commit — per the per-task instruction. This is not a shipping-time placeholder.
+> **Purpose (R9 mitigation):** prevent doc-drift recurrence by maintaining a
+> single source of truth for every new PluginConfig field and every new
+> invariant. HF1-HF3 hotfixes were caused by exactly this drift class in v0.4.0.
+>
+> If you change a default, validation, or wording for any of these,
+> update THIS doc + the related code + the related test in lock-step.
 
-**Type consistency:** `SpecReviewResult.issues: tuple[SpecIssue, ...]`, `SpecReviewError.issues: tuple[str, ...]` — different shapes by design. The `Error.issues` is flat text (for stderr printing) while `Result.issues` carries severity. Call sites need only one or the other.
+## Config fields (5)
 
-**Sequencing:** Feature C first (isolated test rewrite, zero risk). Feature A before Feature B because `apply_decision`'s audit artifact pattern informs `_write_artifact` in `spec_review_dispatch.py`. Meta (I1-I5) last because CHANGELOG + version bump must reflect landed features.
+| Field | Default | Type | Range | Where defined | Where validated | Where documented |
+|-------|---------|------|-------|---------------|-----------------|------------------|
+| `auto_per_stream_timeout_seconds` | `900` | `int` | `>= 5 * auto_heartbeat_interval_seconds` (INV-34 clause 1) | `config.py:PluginConfig` | `config.py:load_plugin_local` | spec sec.2.3, CHANGELOG `[0.5.0]`, SKILL.md v0.5 notes |
+| `auto_heartbeat_interval_seconds` | `15` | `int` | `[5, 60]` (INV-34 clauses 2 + 3) | `config.py:PluginConfig` | `config.py:load_plugin_local` | spec sec.2.1, CHANGELOG `[0.5.0]`, SKILL.md v0.5 notes |
+| `status_watch_default_interval_seconds` | `1.0` | `float` | `>= 0.1` (validated by `validate_watch_interval`) | `config.py:PluginConfig` | `status_cmd.validate_watch_interval` | spec sec.2.2, CHANGELOG `[0.5.0]` |
+| `auto_origin_disambiguation` | `True` | `bool` | n/a | `config.py:PluginConfig` | (no validation) | spec sec.2.4, CHANGELOG `[0.5.0]` |
+| `auto_no_timeout_dispatch_labels` | `("magi-*",)` | `tuple[str, ...]` | bare `"*"` rejected | `config.py:PluginConfig` | `config.py:load_plugin_local` | spec sec.2.3, CHANGELOG `[0.5.0]` |
+
+## Invariants (3 new)
+
+| Invariant | Statement | Enforcement | Where defined | Tests |
+|-----------|-----------|-------------|---------------|-------|
+| **INV-32** | Heartbeat thread NEVER blocks/kills auto run; first-failure stderr breadcrumb; counter persisted incrementally via queue → main thread → auto-run.json | `scripts/heartbeat.py:HeartbeatEmitter._emit_tick` + `auto_cmd._drain_heartbeat_queue_and_persist` | spec sec.2.7 | `tests/test_heartbeat.py::test_heartbeat_first_failure_*`, `tests/test_auto_progress.py::test_update_progress_drains_*` |
+| **INV-33** | Per-stream timeout is last-resort kill (heartbeat 1st-line, watch 2nd-line, timeout 3rd-line) | `subprocess_utils.run_streamed_with_timeout` | spec sec.2.7 | `tests/test_subprocess_utils.py::test_t1_*` |
+| **INV-34** | Timeout-vs-interval relationship: `timeout >= 5*interval`; interval in `[5, 60]` | `config.py:load_plugin_local` (3 clauses with distinct error messages) | spec sec.2.7 | `tests/test_config.py::test_inv34_clause_*` |
+
+## Worked examples
+
+### Example 1: Default config
+```yaml
+# (no overrides; all defaults applied)
+```
+Resulting validated config: timeout=900s, interval=15s, watch_interval=1.0s, origin=True, allowlist=("magi-*",). All INV-34 clauses satisfied (900 >= 75, 15 in [5,60]).
+
+### Example 2: Aggressive CI config
+```yaml
+auto_per_stream_timeout_seconds: 600
+auto_heartbeat_interval_seconds: 10
+auto_origin_disambiguation: false
+```
+Validates: 600 >= 50, 10 in [5,60]. Origin disambiguation off for parser-strict consumers.
+
+### Example 3: INV-34 clause 1 violation
+```yaml
+auto_per_stream_timeout_seconds: 50
+auto_heartbeat_interval_seconds: 15
+```
+Raises: `ValidationError: INV-34 clause 1: auto_per_stream_timeout_seconds (50) must be >= 5 * auto_heartbeat_interval_seconds (15) = 75; got 50`.
+
+### Example 4: INV-34 clause 2 violation
+```yaml
+auto_heartbeat_interval_seconds: 120
+```
+Raises: `ValidationError: INV-34 clause 2: auto_heartbeat_interval_seconds must be <= 60s ...; got 120`.
+
+### Example 5: INV-34 clause 3 violation
+```yaml
+auto_heartbeat_interval_seconds: 2
+```
+Raises: `ValidationError: INV-34 clause 3: auto_heartbeat_interval_seconds must be >= 5s ...; got 2`.
+
+### Example 6: Allowlist bare wildcard rejected
+```yaml
+auto_no_timeout_dispatch_labels: ["*"]
+```
+Raises: `ValidationError: auto_no_timeout_dispatch_labels: bare '*' rejected (would defeat timeout); use specific glob like 'magi-*'`.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add docs/v0.5.0-config-matrix.md
+git commit -m "docs: add v0.5.0 config matrix (R9 single-source mitigation)"
+```
+
+---
+
+## Pre-merge prep (orchestrator-level after both subagents complete)
+
+### Task O-1: `make verify` clean post-merge
+
+- [ ] Run `make verify` locally with both subagent commits merged on the feature branch.
+- [ ] Expected: pytest pass (818 baseline + ~30-40 new tests = 848-858), ruff check 0 warnings, ruff format clean, mypy --strict 0 errors.
+- [ ] Total runtime <= 90s (NF-A budget).
+
+### Task O-2: Pre-merge MAGI gate (Loop 1 + Loop 2)
+
+- [ ] Loop 1 surrogate: `make verify` clean (already done in O-1).
+- [ ] Loop 2: invoke `/magi:magi` on the cumulative diff vs `4538914`.
+- [ ] If iter 1 verdict >= `GO_WITH_CAVEATS` full no-degraded: proceed.
+- [ ] If iter 1 verdict has structural conditions: route via `/receiving-code-review` + mini-cycle TDD; iterate up to cap=5 (auto_magi_max_iterations).
+
+### Task O-3: Version bump
+
+- [ ] Modify `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`: bump `"version"` from `0.4.0` to `0.5.0`. Both files MUST match.
+
+```bash
+git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
+git commit -m "chore: bump to 0.5.0"
+```
+
+### Task O-4: Tag + push (with explicit user authorization)
+
+- [ ] Create annotated tag: `git tag -a v0.5.0 -m "v0.5.0 observability foundation"`.
+- [ ] **Pause for explicit user authorization before `git push`** (per `~/.claude/CLAUDE.md` Git rules).
+- [ ] On authorization: merge `feature/v0.5.0-observability` to `main`, then `git push origin main && git push origin v0.5.0`.
+
+---
+
+## Self-review checklist (run after writing this plan, before dispatch)
+
+- [x] **Spec coverage:** every spec sec.2 deliverable mapped to a task.
+  - Heartbeat emitter (sec.2.1, H1-H6) → S1-2 through S1-7 + S1-10
+  - status --watch (sec.2.2, W1-W6) → S2-7 through S2-10
+  - Per-stream timeout (sec.2.3, T1-T8) → S2-4 through S2-5
+  - Origin disambiguation (sec.2.4, O1-O4) → S2-6
+  - v0.4.1 hotfixes (sec.2.5, HF1-HF3) → S2-11 through S2-13
+  - ProgressContext schema (sec.3) → S1-1
+  - 5 PluginConfig fields + INV-34 + allowlist validation → S2-1 through S2-3
+  - Mechanical smoke fixture (R2.3) → S1-8
+  - 10 transition writer hooks (sec.3) → S1-9
+  - HeartbeatEmitter wrapping (sec.4.2) → S1-10
+  - Single-writer drain + persistence + ISO 8601 → S1-11, S1-12, S1-13
+  - CHANGELOG / SKILL / CLAUDE / matrix → S2-14 through S2-17
+- [x] **Placeholder scan:** no "TBD", "implement later", "similar to Task N" without code, etc.
+- [x] **Type consistency:** ProgressContext fields used uniformly across S1-1 (definition), S1-9 (writer), S1-12 (serializer). PluginConfig new fields named consistently across S2-1, S2-2, S2-3, S2-15, S2-17. HeartbeatEmitter API stable across S1-2 through S1-10.
 
 ---
 
 ## Execution Handoff
 
-**Plan complete and saved to `planning/claude-plan-tdd-org.md`.**
+**Plan complete and saved to `planning/claude-plan-tdd-org.md`. Two execution options:**
 
-Per CLAUDE.md §1 Flujo de especificacion step 4-6: this is `claude-plan-tdd-org.md` (pre-MAGI review). Next steps belong to the USER:
+**1. Subagent-Driven (recommended)** — orchestrator dispatches a fresh subagent per task, reviews between tasks, fast iteration. Aligns with v0.4.0 true parallel pattern (Subagent #1 + Subagent #2 dispatched in single message, surfaces disjoint).
 
-1. Manual review (Checkpoint 1). If the user rejects, re-run `/writing-plans` (or `/sbtdd spec`) with feedback.
-2. Checkpoint 2 MAGI review: `/magi:magi revisa @sbtdd/spec-behavior-base.md y @planning/claude-plan-tdd-org.md`.
-3. Apply Conditions for Approval and write `planning/claude-plan-tdd.md` (safety valve 3 iter per INV-11; INV-28 degraded handling).
-4. Execute via `/subagent-driven-development` or `/executing-plans`.
+**2. Inline Execution** — execute tasks in this session using `superpowers:executing-plans`, batch execution with checkpoints for review.
 
-**Plugin's own auto path:** once `planning/claude-plan-tdd.md` exists and `plan_approved_at` is set in `.claude/session-state.json`, `/sbtdd auto` can ship v0.2 end-to-end (with Feature B dogfooded — `auto_cmd` will invoke spec-reviewer per task using `StubSpecReviewer` in test environments, real `dispatch_spec_reviewer` in production).
+**Which approach?**
 
-The merge + `v0.2.0` tag are explicit user actions per INV-0 / `~/.claude/CLAUDE.md` Git rules — not autonomous even under `/sbtdd auto`.
+**If Subagent-Driven chosen:**
+- REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`.
+- Per spec sec.4.4 + 6.2 (true parallel surfaces 100% disjoint), Subagent #1 + Subagent #2 are dispatched in a SINGLE message with two `Agent` tool calls (validated v0.4.0 pattern).
+- Each subagent owns its task list strictly per the forbidden-files matrix in pre-flight.
 
+**If Inline Execution chosen:**
+- REQUIRED SUB-SKILL: `superpowers:executing-plans`.
+- Sequential task-by-task in this session with manual checkpoints.
 
-## MAGI Conditions for Approval
+Note: per project convention (`CLAUDE.local.md` §1 paso 5) Checkpoint 2 is
+**already complete**. 4 iters consumed (cap 3 + 1 user-authorized override).
+Verdict stable `GO_WITH_CAVEATS (3-0)` full no-degraded. Accepted 2026-05-02
+via INV-0 override per spec sec.11.4 precedent. Iter 4 findings folded as
+sec.13 below.
 
-- Plan is architecturally sound and covers 95% of spec, but contains several concrete correctness defects plus a material scope deviation from B6 that must be resolved before execution.
-- Pragmatic plan with strong TDD discipline, but scope creep risks and a few landing-time traps need tightening before execution.
-- Plan is structurally sound but carries three high-impact risks: Feature B scope relaxation against INV-31/INV-29, fragile task-diff correlation, and placeholder code in test skeletons.
+---
+
+## 13. Known Limitations & resolution paths (Checkpoint 2 iter 4 fold-in)
+
+**INV-0 override audit trail.** User explicitly authorized acceptance at
+iter 4 via session 2026-05-02. Pattern of convergence (verdict stable at
+threshold across 4 iters; finding character refining-not-architecting;
+all 3 agents approve 3-0 in all 4 iters) supports the authorization.
+Both Balthasar and Caspar explicitly endorsed this option in their iter
+4 Recommended Actions ("INV-0 override after 4-iter convergence is
+defensible precedent" — Balthasar; "iter 4 acceptance is defensible given
+convergence pattern" — Caspar).
+
+This authorization applies SOLO to esta v0.5.0 plan. Future Checkpoint 2
+runs default to strict iter cap=3 escalation per CLAUDE.local.md §6 sin
+override implicit.
+
+### 13.1 Iter 4 CRITICALs — resolution paths
+
+| # | Source | Finding | Resolution path | Owner task |
+|---|--------|---------|-----------------|------------|
+| C1 | melchior | Streaming pump uses `read1()` on TextIOWrapper with selectors — select/text-mode deadlock risk | Switch S2-4 implementation to **binary mode pipes + `os.read(fd, n)` + incremental UTF-8 decoder** (`codecs.getincrementaldecoder("utf-8")`). Binary mode + os.read avoid TextIOWrapper buffering interaction with selectors. Impact: bytes-level pump, decode chunks per-stream as they arrive. Test: append `test_pump_handles_partial_utf8_split_at_chunk_boundary` to `tests/test_subprocess_utils.py`. | Subagent #2 — S2-4 (modify) |
+| C2 | caspar | `selectors.DefaultSelector` on Windows pipes will fail at runtime | Subagent #2 implements **threaded-reader fallback for Windows**: when `sys.platform == "win32"`, replace `selectors.DefaultSelector` with two `threading.Thread`s (one per stream) that push bytes to a shared `queue.Queue`. Pump reads from the queue with timeout for last_write_at tracking. Add Windows-specific smoke test: `test_streaming_pump_works_on_windows_subprocess` (skipped on POSIX). NF-C cross-platform claim becomes empirically verified. | Subagent #2 — S2-4 (extend) |
+| C3 | caspar | Heartbeat zombie thread cannot be bounded; fallback writes to same broken fd | Subagent #1 adds **hard zombie threshold** in `__exit__`: if `_zombie_thread_count >= MAX_ZOMBIES (default 5)`, escalate by raising `RuntimeError` after best-effort fd=2 write — process exit becomes the bound. Persist `_zombie_thread_count` to `auto-run.json` via the existing failures queue (extend with sentinel +1000 to indicate "zombie alert" rather than "failed write"). Add test `test_zombie_thread_count_persists_across_emitter_lifecycles` to `tests/test_heartbeat.py`. | Subagent #1 — S1-7 (extend) |
+| C4 | caspar | `auto-run.json` read-modify-write has no cross-process locking | Subagent #1 adds **fcntl/msvcrt cross-process file lock** in `_drain_heartbeat_queue_and_persist`: acquire lock on the path, read-modify-write, release. POSIX uses `fcntl.flock(LOCK_EX)`, Windows uses `msvcrt.locking(LK_LOCK)`. Wrap in helper `_with_file_lock(path, fn)`. Single-writer rule preserved within process; cross-process lock prevents corruption when status --watch and auto_cmd run simultaneously. Add test `test_concurrent_writers_serialize_via_file_lock`. | Subagent #1 — S1-11 (extend) |
+
+### 13.2 Iter 4 high-impact WARNINGs — resolution paths
+
+| # | Source | Finding | Resolution path | Owner task |
+|---|--------|---------|-----------------|------------|
+| W1 | melchior, caspar | INV-34 clause 1 is dead code given clauses 2+4 (timeout >= 600 ∧ interval <= 60 ⇒ 5*interval <= 300 <= timeout) | Document clause 1 explicitly as **defensive** in `config.py` comment + matrix doc S2-17: "Clause 1 is mathematically subsumed by clauses 2+4 in the current default range; preserved as defense-in-depth against future clause modifications that could weaken bounds". | Subagent #2 — S2-2 (comment) + S2-17 (matrix doc) |
+| W2 | melchior | `_set_progress` transition predicate misses None→label first dispatch | The current predicate `is_dispatch_transition = (current.dispatch_label != dispatch_label)` correctly evaluates `None != "red"` as True (transition). Add explicit test: `test_set_progress_first_dispatch_from_none_label_refreshes_started_at`. | Subagent #1 — S1-9 (test extension) |
+| W3 | melchior, balthasar, caspar | 50ms origin-disambig window vulnerable to OS scheduling jitter, especially Windows CI | Subagent #2 raises **production default to 100ms** in `config.py` (`DEFAULT_ORIGIN_WINDOW_SECONDS = 0.100`) but keeps the parameter `origin_window_seconds` overridable. Tests use 5ms via parameter override (already done iter 2 fix). Document jitter behavior in matrix doc. | Subagent #2 — S2-4 + S2-17 |
+| W4 | melchior | H3 scenario prose still describes `_failures_queue` as instance attribute | Spec sec.2.1 H3 already updated iter 2 to "module-level queue" / "queue → main thread" wording. Verify final spec text doesn't have residual `_failures_queue` instance-attribute references. Plan: H3 scenario text in tests already uses module-level pattern. No additional fix needed — verified. | (already addressed iter 2) |
+| W5 | balthasar | Wall-time estimate optimistic given task count (34 tasks) | Plan sec.6.1 already padded 4-5h → 6-8h (iter 2 fix). Per Balthasar, mentally budget **8-10h** with explicit scope-trim tripwire: if either subagent isn't past task 8 by hour 4, fall back to v0.5.1 split (J3+J7 deferred). Add as O-1.5 pre-merge checkpoint. | Orchestrator — O-1.5 (new) |
+| W6 | balthasar | Sub-second timing tests are CI-fragile | Subagent #1's S1-8 already specifies "monkey-patched clock as fallback if sub-second cadence introduces flakiness". Pin **monkey-patched clock as primary**, sub-second sleep as fallback. Update S1-8 step 1 test to use `monkeypatch.setattr("time.monotonic", ...)` from the start. | Subagent #1 — S1-8 (pin clock strategy) |
+| W7 | balthasar | Threading correctness is high-blast-radius | Already mitigated via lock-protected singleton (sec.3) + queue-based reporting (INV-32) + Event-interruptible tick loop (H2). No additional code change; document risk acceptance in matrix S2-17 invariants table. | Subagent #2 — S2-17 (note) |
+| W8 | balthasar | Single-writer rule depends on discipline, not enforcement | Add a **module-level assertion helper** in `auto_cmd.py`: `_assert_main_thread()` called at the start of `_drain_heartbeat_queue_and_persist` and `_serialize_progress`. Helper checks `threading.current_thread() is threading.main_thread()` — raises `RuntimeError` if violated. Mechanical enforcement vs convention. | Subagent #1 — S1-11 (extend) |
+| W9 | caspar | W4 contention breadcrumb cadence has 6-second silence gap | Iter 3 fix already changed cadence from `% 5` to `% 3` aligned with slow-poll trigger. With 5x retry budget = 1.25s + slow-poll 2s = breadcrumb every ~9.75s when fully stuck. Acceptable cadence; document in W4 escenario. | (already addressed iter 3) |
+| W10 | caspar | `read1()` + `text=True` interaction is subtle | Resolved by C1 — switch to binary mode + `os.read` + incremental decoder. | Subagent #2 — S2-4 (covered by C1) |
+
+### 13.3 Iter 4 INFOs — acknowledged
+
+INFO findings represent observation/polish, no blocking impact:
+
+- **Daemon thread zombie counter is process-global mutable state — test isolation hazard** (melchior): add `_reset_zombie_count_for_tests()` helper alongside existing `_reset_drain_state_for_tests()`.
+- **`_drain_heartbeat_queue_and_persist` swallows JSON decode errors silently** (melchior): log the swallow via stderr breadcrumb (one-shot per error class).
+- **Matrix doc is the right insurance against HF1-HF3 recurrence** (balthasar): confirmation, no action.
+- **INV-0 override after 4-iter convergence is defensible precedent** (balthasar): confirmation, no action.
+- **Pre-merge MAGI gate (O-2) cap=5 is correct but concentration of risk** (balthasar): documented; cap is intentional given empirical Loop 2 patterns.
+- **Recursive dogfood R2.1 cannot detect interaction defects** (caspar): track A is supplementary per spec sec.5.2; track B (mechanical) is authoritative. Confirms the iter 2 demotion was correct.
+
+### 13.4 Pre-dispatch checklist (must-do before Subagent #1/#2 invocation)
+
+- [ ] All sec.13.1 CRITICAL resolution paths added as concrete steps to their owner tasks (S2-4, S1-7, S1-11).
+- [ ] All sec.13.2 high-impact WARNING resolutions added (S2-2, S2-4, S2-17, S1-8, S1-9, S1-11) OR documented as already-addressed.
+- [ ] sec.13.3 INFO acknowledgments confirmed as low-risk.
+- [ ] Wall-time budget reset to 8-10h (was 6-8h iter 2; bumped iter 4 per Balthasar W5).
+- [ ] Scope-trim tripwire armed: at hour 4, if either subagent past task 8, defer J3+J7 to v0.5.1.
+
+---
+
+## 14. Iter 4 acceptance metadata
+
+- **Verdict at acceptance**: `GO_WITH_CAVEATS (3-0)` full no-degraded
+- **Outstanding CRITICALs at acceptance**: 4 (all with implementation-phase resolution paths in sec.13.1)
+- **Outstanding WARNINGs at acceptance**: 12 (all addressed or already-resolved per sec.13.2 / 13.3)
+- **Iter sequence**: 1, 2, 3, 4 (cap 3 + 1 user-authorized override)
+- **Iter 1 verdict**: GO_WITH_CAVEATS (3-0), 3 CRITICALs + 12 WARNINGs
+- **Iter 2 verdict**: GO_WITH_CAVEATS (3-0), 3 CRITICALs + 13 WARNINGs
+- **Iter 3 verdict**: GO_WITH_CAVEATS (3-0), 5 CRITICALs + 11 WARNINGs
+- **Iter 4 verdict**: GO_WITH_CAVEATS (3-0), 4 CRITICALs + 12 WARNINGs
+- **Caspar (Critic) iter 4 quote**: "iter 4 acceptance is defensible given convergence pattern"
+- **Balthasar (Pragmatist) iter 4 quote**: "INV-0 override after 4-iter convergence is defensible precedent"
+- **MAGI run artifacts**: `.claude/magi-runs/v050-checkpoint2-iter1` through `iter4`
