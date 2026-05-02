@@ -318,8 +318,11 @@ tdd_guard_enabled: true
 worktree_policy: optional
 """
     config_path = tmp_path / "p3.md"
+    # Spec PINNED order 4 -> 2 -> 3 -> 1: fixture must satisfy clauses 4
+    # (timeout >= 600) and 2 (interval <= 60) so clause 3 is the first
+    # failing predicate. timeout=900 satisfies 4 + 1; interval=2 violates 3.
     config_path.write_text(
-        base + "auto_per_stream_timeout_seconds: 100\nauto_heartbeat_interval_seconds: 2\n---\n"
+        base + "auto_per_stream_timeout_seconds: 900\nauto_heartbeat_interval_seconds: 2\n---\n"
     )
     from config import load_plugin_local
     from errors import ValidationError

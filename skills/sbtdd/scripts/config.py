@@ -174,46 +174,61 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
         data["auto_no_timeout_dispatch_labels"] = tuple(data["auto_no_timeout_dispatch_labels"])
     # INV-34 (sec.2.7 of spec): timeout-vs-interval relationship + absolute
-    # floor + ceiling validations. Validation order is 1 -> 2 -> 3 -> 4
-    # because each test fixture (test_inv34_clause_N_*) varies ONE clause
-    # while keeping the others at safe defaults; the most-specific clause
-    # fires first under those fixtures so error messages name the violated
-    # invariant uniquely.
+    # floor + ceiling validations.
     #
-    # W1 (Checkpoint 2 iter 4 melchior + caspar): clause 1 is mathematically
-    # subsumed by clauses 2 + 4 in the current default range
-    # (timeout >= 600 AND interval <= 60 implies 5 * interval <= 300 <= timeout).
-    # We preserve clause 1 explicitly as DEFENSE-IN-DEPTH against future
-    # weakening of clauses 2 or 4 that could make clause 1 the only barrier.
-    # See docs/v0.5.0-config-matrix.md for the worked-example table.
+    # Validation order is the spec PINNED order 4 -> 2 -> 3 -> 1 (Loop 2
+    # WARNING #1/#7 fix): cheapest absolute-bound checks fire first
+    # (clauses 4 + 2 + 3 each test a single field against a constant),
+    # then the ratio clause (clause 1) which depends on both fields.
+    # Under this ordering a fixture that violates only clause 1 cannot
+    # exist because clauses 2 + 4 mathematically subsume it: any
+    # ``timeout >= 600`` AND ``interval <= 60`` implies
+    # ``5 * interval <= 300 <= 600 <= timeout``, satisfying clause 1.
+    #
+    # W1 (Checkpoint 2 iter 4 melchior + caspar): clause 1 is therefore
+    # DEFENSE-IN-DEPTH against future weakening of clauses 2 or 4 that
+    # could make clause 1 the only barrier preventing pathological
+    # ratios. Removing clause 1 alone would not change current behavior
+    # but would couple any future change of clauses 2/4 to a separate
+    # re-evaluation of the ratio invariant -- preserving clause 1
+    # avoids that hidden coupling. See ``docs/v0.5.0-config-matrix.md``
+    # `W1` section for the worked-example table.
     timeout = data["auto_per_stream_timeout_seconds"]
     interval = data["auto_heartbeat_interval_seconds"]
     if not isinstance(timeout, int) or timeout < 0:
         raise ValidationError(f"auto_per_stream_timeout_seconds must be int >= 0, got {timeout!r}")
     if not isinstance(interval, int) or interval < 0:
         raise ValidationError(f"auto_heartbeat_interval_seconds must be int >= 0, got {interval!r}")
-    # Clause 1 (ratio) checked first so fixtures targeting the ratio
-    # report the ratio violation rather than masking it with clause 4.
-    if timeout < 5 * interval:
+    # Clause 4 (timeout absolute floor) -- cheapest single-field bound,
+    # protects against pathological short timeouts that would kill
+    # legitimate caspar opus runs (~10min observed). 600s = 10min.
+    if timeout < 600:
         raise ValidationError(
-            f"INV-34 clause 1: auto_per_stream_timeout_seconds ({timeout}) "
-            f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
-            f"= {5 * interval}; got {timeout}"
+            f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
+            f"(caspar opus runs observed empirically up to 10min); got {timeout}"
         )
+    # Clause 2 (interval ceiling) -- single-field bound, prevents loss
+    # of operator awareness on intervals exceeding 1 minute.
     if interval > 60:
         raise ValidationError(
             f"INV-34 clause 2: auto_heartbeat_interval_seconds must be <= 60s "
             f"to keep operator awareness within 1-minute granularity; got {interval}"
         )
+    # Clause 3 (interval floor) -- single-field bound, prevents stderr
+    # spam at sub-5s cadences without observable value.
     if interval < 5:
         raise ValidationError(
             f"INV-34 clause 3: auto_heartbeat_interval_seconds must be >= 5s "
             f"to avoid stderr spam without value; got {interval}"
         )
-    if timeout < 600:
+    # Clause 1 (ratio multiplier) -- two-field invariant, defense-in-depth
+    # against future weakening of clauses 2 + 4 that would make clause 1
+    # the sole barrier preventing pathological ratios.
+    if timeout < 5 * interval:
         raise ValidationError(
-            f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
-            f"(caspar opus runs observed empirically up to 10min); got {timeout}"
+            f"INV-34 clause 1: auto_per_stream_timeout_seconds ({timeout}) "
+            f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
+            f"= {5 * interval}; got {timeout}"
         )
     # W11 (sec.11.1): bare '*' or empty string would defeat the timeout
     # entirely (every label matches). Reject explicitly so misconfiguration
