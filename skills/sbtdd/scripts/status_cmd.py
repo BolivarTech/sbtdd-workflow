@@ -249,22 +249,30 @@ class WatchPollState:
         self.consecutive_parse_failures = 0
 
 
+_SENTINEL_NOT_PROVIDED: dict[str, Any] = {"__sentinel__": "watch_render_one_not_provided"}
+
+
 def _watch_render_one(
     auto_run_path: Path,
     *,
     json_mode: bool,
     last_progress: dict[str, Any] | None,
-    data: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = _SENTINEL_NOT_PROVIDED,
 ) -> dict[str, Any] | None:
     """Single-poll render. Returns the new progress dict or last_progress.
 
     Loop 2 WARNING #9 fix: accepts an already-read ``data`` dict so the
-    caller can share a single ``_read_auto_run_with_retry`` result across
-    both the diff/render path and the state-machine update path. When
-    ``data`` is ``None`` the helper falls back to its legacy behaviour
-    of reading the file itself (preserves existing test surface
-    ``test_w2_json_mode_emits_progress`` which calls this helper
-    directly with no pre-read dict).
+    caller can share a single ``_read_auto_run_with_retry`` result
+    across both the diff/render path and the state-machine update path.
+
+    Loop 2 WARNING #10 fix: distinguish "data not supplied" (sentinel)
+    from "data supplied as None / parse failed". Pre-W10 the helper
+    re-read the file when ``data is None`` -- so on the parse-failure
+    path of ``watch_main`` (data already supplied as ``None``) the cycle
+    re-read auto-run.json a second time, defeating the W9 single-read
+    consolidation. Post-W10: only re-read when the sentinel default is
+    in effect (legacy callers that omit ``data``); explicit ``None``
+    is treated as "parse failed, use last_progress".
 
     Args:
         auto_run_path: Path to ``.claude/auto-run.json``.
@@ -272,12 +280,17 @@ def _watch_render_one(
         last_progress: The previously-rendered progress dict; used to
             suppress duplicate emissions when the snapshot has not
             changed.
-        data: Pre-read auto-run.json dict (Loop 2 WARNING #9). When
-            ``None`` the helper reads the file itself.
+        data: Pre-read auto-run.json dict, or ``None`` when the caller
+            already attempted a read and got a parse failure (W10),
+            or omitted entirely for legacy direct callers (W9 retains
+            the auto-read fallback).
     """
-    if data is None:
+    if data is _SENTINEL_NOT_PROVIDED:
+        # Legacy path: caller did not pre-read; do it ourselves.
         data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
     if data is None:
+        # Either the legacy auto-read above returned None, or the caller
+        # explicitly passed None to signal a parse failure (W10).
         return last_progress
     progress = data.get("progress", {}) or {}
     if progress != last_progress:
