@@ -402,3 +402,76 @@ def test_o4_disabled_no_prefix_even_on_dual_stream():
     )
     assert "[stdout]" not in result.stdout
     assert "[stderr]" not in result.stderr
+
+
+def test_t1_windows_kill_residual_queue_drain_code_present():
+    """W7 (caspar Loop 2 iter 3): Windows kill path drains reader queue.
+
+    Pre-fix: the Windows threaded-reader fallback funnels chunks into a
+    ``queue.Queue``. When the timeout-kill branch fires, the function
+    breaks out of the read loop and proceeds to ``proc.wait()`` without
+    draining chunks still queued by the reader threads. If a reader
+    thread put a chunk into the queue but the main loop hasn't dequeued
+    it yet (race window between ``chunk_queue.get(timeout=0.1)`` and
+    the silence-check), the chunk is silently discarded.
+
+    Post-fix: after ``_kill_subprocess_tree(proc)``, the kill branch
+    drains the chunk queue once more (best-effort, non-blocking) so
+    any residual bytes already pumped by the reader threads are
+    absorbed into the captured output.
+
+    A live concurrency test for this race window is impossible to make
+    reliable (the race depends on OS scheduler choices). Instead this
+    test is a structural regression guard: assert the kill branch in
+    the Windows path contains the residual-drain comment marker so a
+    future refactor cannot silently drop the drain.
+    """
+    import inspect
+
+    from subprocess_utils import run_streamed_with_timeout
+
+    source = inspect.getsource(run_streamed_with_timeout)
+    assert "residual reader-thread queue data" in source, (
+        "W7 regression: Windows kill branch is missing the residual "
+        "reader-thread queue drain. Restore the post-kill drain in "
+        "subprocess_utils.run_streamed_with_timeout (Windows path)."
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="W7 live test exercises the Windows threaded-reader fallback; "
+    "the POSIX selector path reads directly from the pipe FD with no "
+    "intermediate queue.",
+)
+def test_t1_windows_kill_preserves_pre_kill_stderr_data():
+    """W7 live (caspar Loop 2 iter 3): pre-kill stderr is captured.
+
+    Subprocess writes a sentinel to stderr, then sleeps. The per-stream
+    timeout fires, the subprocess is killed, and the sentinel must
+    appear in ``result.stderr`` because either the read loop already
+    absorbed it OR (post-fix) the residual-queue drain absorbed it.
+    Pre-fix this test passed in most schedules; it serves as a smoke
+    test for the W7 fold-in to ensure no observable regression.
+    """
+    from subprocess_utils import run_streamed_with_timeout
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys, time\n"
+            "sys.stderr.write('final-stderr-line\\n')\n"
+            "sys.stderr.flush()\n"
+            "time.sleep(5)\n"
+        ),
+    ]
+    result = run_streamed_with_timeout(
+        cmd,
+        per_stream_timeout_seconds=0.5,
+        dispatch_label="test-w7-live",
+    )
+    assert result.returncode != 0
+    assert "final-stderr-line" in result.stderr, (
+        f"W7 regression: pre-kill stderr data lost. stderr={result.stderr!r}"
+    )
