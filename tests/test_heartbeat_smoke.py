@@ -39,6 +39,15 @@ def test_emitter_emits_ticks_at_short_cadence(capsys):
     The longer 2.5s real-time variant below is skipped on CI to avoid
     sub-second-cadence flakiness; it is retained as a developer-workstation
     sanity check.
+
+    Loop 2 WARNING #6 (tick-monotonicity assertion): the original assertion
+    only verified ``len(tick_lines) >= 2`` and the presence of dispatch +
+    elapsed substrings. That fixture would NOT catch a class of regressions
+    where each tick recomputes ``started_at`` (so ``elapsed=`` resets to
+    near-zero on every tick) or where ProgressContext snapshot is
+    inconsistent between ticks. We additionally parse the elapsed value
+    out of every tick line and assert monotonicity (each tick's elapsed
+    >= previous), which catches the "started_at refresh" regression class.
     """
     reset_current_progress()
     set_current_progress(
@@ -65,6 +74,36 @@ def test_emitter_emits_ticks_at_short_cadence(capsys):
     for line in tick_lines:
         assert "dispatch=smoke-dispatch" in line
         assert "elapsed=" in line
+
+    # Tick-monotonicity assertion (Loop 2 WARNING #6 fix). Format produced
+    # by ``HeartbeatEmitter._format_elapsed`` is ``<min>m<sec>s``; parse
+    # back to total seconds and assert each subsequent tick's elapsed is
+    # >= the previous tick's elapsed (allows ties on coarse 1s clamp).
+    elapsed_values: list[int] = []
+    for line in tick_lines:
+        # Extract ``elapsed=<min>m<sec>s`` from the line. Tolerant: tail
+        # may include other tokens after ``elapsed=`` if the formatter
+        # changes; the regex matches up to the next whitespace.
+        marker = "elapsed="
+        idx = line.find(marker)
+        assert idx >= 0, f"tick line missing elapsed= marker: {line!r}"
+        tail = line[idx + len(marker) :].split()[0]
+        # tail is e.g. ``0m1s`` or ``2m15s``; parse digits.
+        m_idx = tail.find("m")
+        s_idx = tail.find("s")
+        assert m_idx >= 0 and s_idx > m_idx, (
+            f"unexpected elapsed format: {tail!r} from line {line!r}"
+        )
+        mins = int(tail[:m_idx])
+        secs = int(tail[m_idx + 1 : s_idx])
+        elapsed_values.append(mins * 60 + secs)
+    for i in range(1, len(elapsed_values)):
+        assert elapsed_values[i] >= elapsed_values[i - 1], (
+            f"tick-monotonicity violated: tick {i} elapsed={elapsed_values[i]}s "
+            f"< tick {i - 1} elapsed={elapsed_values[i - 1]}s; "
+            f"full sequence={elapsed_values} from lines={tick_lines}"
+        )
+
     reset_current_progress()
 
 
