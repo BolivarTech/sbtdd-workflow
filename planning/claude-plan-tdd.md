@@ -3962,7 +3962,7 @@ git commit -m "fix: append 's' unit suffix to INV-34 validation messages (I-Hk2)
 
 ### Task S2-9: Final make verify pass for Subagent #2
 
-- [ ] **Step 1: Run full make verify**
+- [x] **Step 1: Run full make verify**
 
 ```bash
 make verify
@@ -3970,7 +3970,13 @@ make verify
 
 Expected: pytest pass with new tests added, ruff check + format clean, mypy --strict clean.
 
-- [ ] **Step 2: Report DONE**
+Result (Subagent #2 close, commit `93bbc14`):
+991 tests pass, 1 skipped. 2 failures (`test_hf1_recovery_breadcrumb_wording_aligned`,
+`test_plugin_version_is_current_v0_4_patch`) are pre-existing v1.0.0 orchestrator-level
+tripwires unrelated to Subagent #2 surfaces — both will resolve in orchestrator task O-3
+(version bump 0.5.0 → 1.0.0 + CHANGELOG `[1.0.0]` entry). Runtime: 146s (vs 150s NF-A budget).
+
+- [x] **Step 2: Report DONE**
 
 Verify all S2-1 through S2-8 commits landed cleanly. Report `DONE: Subagent #2` with commit list.
 
