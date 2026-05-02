@@ -382,6 +382,45 @@ def test_spec_creates_state_file_on_approval(
     assert state["current_task_id"] == "1"
 
 
+def test_spec_main_emits_snapshot_and_watermark_on_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R10 plan-approval handler interception (caspar Checkpoint 2 iter 5 W).
+
+    spec_cmd.main MUST route plan-approval through
+    auto_cmd._mark_plan_approved_with_snapshot so the spec-snapshot file
+    AND the state-file watermark are persisted at the same transition
+    that sets plan_approved_at. Without this, H2-5 bypass-by-deletion
+    gate degrades to false-negative because the watermark is missing.
+    """
+    import json
+
+    import magi_dispatch
+    import spec_cmd
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+
+    def fake_magi(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    spec_cmd.main(["--project-root", str(tmp_path)])
+
+    snapshot_path = tmp_path / "planning" / "spec-snapshot.json"
+    assert snapshot_path.exists(), (
+        "planning/spec-snapshot.json must be emitted at plan approval (R10)"
+    )
+
+    state = json.loads(
+        (tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8")
+    )
+    assert state.get("spec_snapshot_emitted_at") is not None, (
+        "state file must record spec_snapshot_emitted_at watermark (R10)"
+    )
+
+
 def test_spec_commits_approved_artifacts_after_state_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
