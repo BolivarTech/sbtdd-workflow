@@ -50,3 +50,61 @@ def test_w6_validates_interval_minimum():
         validate_watch_interval(0.05)
     validate_watch_interval(0.1)
     validate_watch_interval(5.0)
+
+
+def test_w4_retry_5x_with_4_sleeps_between_attempts(tmp_path, monkeypatch):
+    """W4: 5 attempts, 4 sleeps between (no sleep after final fail)."""
+    from status_cmd import _read_auto_run_with_retry
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("not-json", encoding="utf-8")
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda s: sleep_calls.append(s))
+    result = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+    assert result is None
+    # Per Checkpoint 2 iter 1 melchior fix: 4 sleeps (between 5 attempts), not 5.
+    assert sleep_calls == [0.05, 0.1, 0.2, 0.4]
+
+
+def test_w4_slow_poll_fallback_after_3_consecutive_parse_failures():
+    """W4: slow-poll doubles interval after 3 consecutive parse failures."""
+    from status_cmd import WatchPollState
+
+    state = WatchPollState(default_interval=1.0)
+    state.record_parse_failure()
+    state.record_parse_failure()
+    state.record_parse_failure()
+    assert state.current_interval == 2.0
+    state.record_parse_failure()
+    assert state.current_interval == 4.0
+    state.record_parse_failure()
+    state.record_parse_failure()
+    state.record_parse_failure()
+    assert state.current_interval <= 10.0
+    state.record_parse_success()
+    assert state.current_interval == 1.0
+
+
+def test_w4_idle_does_not_trigger_slow_poll(tmp_path):
+    """Idle auto-run (same data on each poll) does NOT trigger slow-poll."""
+    from status_cmd import WatchPollState
+
+    state = WatchPollState(default_interval=1.0)
+    for _ in range(10):
+        state.record_parse_success()
+    assert state.current_interval == 1.0  # NEVER doubled
+    assert state.consecutive_parse_failures == 0
+
+
+def test_w4_three_consecutive_parse_failures_triggers_slow_poll():
+    """W4: exactly 3 consecutive failures crosses the threshold."""
+    from status_cmd import WatchPollState
+
+    state = WatchPollState(default_interval=1.0)
+    state.record_parse_failure()
+    state.record_parse_failure()
+    state.record_parse_failure()
+    assert state.current_interval == 2.0
+    state.record_parse_success()
+    assert state.current_interval == 1.0
