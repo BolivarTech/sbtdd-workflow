@@ -808,7 +808,7 @@ def test_write_auto_run_audit_routes_through_with_file_lock(tmp_path, monkeypatc
     )
 
 
-def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
+def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path, monkeypatch):
     """C4 extension: ``_update_progress`` writes serialize through ``_with_file_lock``.
 
     Pre-fix: ``_with_file_lock`` only wrapped ``_drain_heartbeat_queue_and_persist``.
@@ -858,16 +858,14 @@ def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
     # which by definition must run from worker threads. Bypass the W13
     # assert for the duration of this test (production callers stay on
     # the main thread; the assertion guards them).
-    original_assert = auto_cmd._assert_main_thread
-    auto_cmd._assert_main_thread = lambda: None
-    try:
-        threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10.0)
-    finally:
-        auto_cmd._assert_main_thread = original_assert
+    # Per Loop 2 iter 4 W6 fix (S1-18): use monkeypatch.setattr instead of
+    # direct mutation so cleanup is automatic on test failure.
+    monkeypatch.setattr(auto_cmd, "_assert_main_thread", lambda: None)
+    threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
 
     if errors:
         # Re-raise the first error so the test failure is informative.
