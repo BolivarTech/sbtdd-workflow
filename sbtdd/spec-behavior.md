@@ -598,6 +598,17 @@ class ResolvedModels:
     magi_dispatch: str
 ```
 
+**Pre-existing dependency note (CRITICAL #3 fix):**
+``models.INV_0_PINNED_MODEL_RE`` is **pre-existing in `models.py` since
+v0.3.0 Feature E** (per-skill model selection); v1.0.0 does NOT introduce
+or modify it. Subagent #2 task **S2-1** only adds the new
+``ResolvedModels`` dataclass next to the existing regex; it does NOT
+re-export, alias, or redefine ``INV_0_PINNED_MODEL_RE``. Subagent #1
+task **S1-8** consumes the regex via the standard
+``import models; models.INV_0_PINNED_MODEL_RE.search(...)`` path with no
+cross-subagent surface contamination. This clarification removes the
+ambiguity flagged by MAGI Checkpoint 2 iter 1 CRITICAL #3.
+
 ### 5.2 PluginConfig fields (G + I)
 
 ```python

@@ -36,6 +36,9 @@ class ResolvedModels:
 
 Resolved once at task-loop entry per auto run. INV-0 cascade applies: CLAUDE.md model pin overrides plugin.local.md fields silently.
 
+**Pre-existing dependency (CRITICAL #3 fix):**
+``models.INV_0_PINNED_MODEL_RE`` is **pre-existing in `models.py` since v0.3.0** (Feature E per-skill model selection). v1.0.0 does NOT introduce, alias, or redefine the regex. S2-1 (Subagent #2) only ADDS the ``ResolvedModels`` dataclass beside the existing regex. S1-8 (Subagent #1) consumes via ``import models; models.INV_0_PINNED_MODEL_RE.search(...)`` without touching Subagent #2 surfaces.
+
 ### PluginConfig new fields (spec sec.5.2)
 
 ```python
