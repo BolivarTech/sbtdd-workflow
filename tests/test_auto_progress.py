@@ -860,6 +860,7 @@ def test_concurrent_write_audit_writers_serialize_via_file_lock(tmp_path):
     data = json.loads(auto_run.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     assert "tasks_completed" in data
+    assert isinstance(data["tasks_completed"], int)
 
 
 def test_update_progress_with_nonempty_queue_does_not_deadlock(tmp_path):
@@ -880,9 +881,7 @@ def test_update_progress_with_nonempty_queue_does_not_deadlock(tmp_path):
     block forever.
     """
     auto_run_path = tmp_path / "auto-run.json"
-    auto_run_path.write_text(
-        '{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8"
-    )
+    auto_run_path.write_text('{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8")
 
     # Drain any leftover queue items from earlier tests so we control the state.
     while not auto_cmd._heartbeat_failures_q.empty():
@@ -935,4 +934,3 @@ def test_update_progress_with_nonempty_queue_does_not_deadlock(tmp_path):
         # Any error is acceptable -- the test guards specifically against
         # deadlock. But surface unexpected errors so they are not silenced.
         raise error_holder[0]
-    assert isinstance(data["tasks_completed"], int)
