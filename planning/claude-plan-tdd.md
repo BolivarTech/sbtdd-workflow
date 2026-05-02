@@ -3723,7 +3723,7 @@ git commit -m "feat: add spec_snapshot.emit_snapshot (H2-1)"
 - Modify: `skills/sbtdd/scripts/spec_snapshot.py`
 - Modify: `tests/test_spec_snapshot.py`
 
-- [ ] **Step 1: Write failing tests for H2-2, H2-4**
+- [x] **Step 1: Write failing tests for H2-2, H2-4**
 
 Append to `tests/test_spec_snapshot.py`:
 
@@ -3765,9 +3765,9 @@ def test_load_snapshot_round_trip(tmp_path):
     assert loaded == snapshot
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Add compare + persist + load**
+- [x] **Step 3: Add compare + persist + load**
 
 Append to `spec_snapshot.py`:
 
@@ -3808,7 +3808,7 @@ def load_snapshot(path: Path) -> dict[str, str]:
     return json.loads(path.read_text(encoding="utf-8"))
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_spec_snapshot.py -v
