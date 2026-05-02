@@ -305,3 +305,121 @@ def test_write_auto_run_audit_when_progress_absent(tmp_path):
     # Audit body is present.
     assert data["auto_started_at"] == "2026-04-25T10:00:00Z"
     assert data["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# v0.5.0 S1-9: ProgressContext writer hooks at the 10 transition sites.
+# ---------------------------------------------------------------------------
+
+
+def test_phase_1_entry_writes_progress_phase_1():
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    _set_progress(phase=1)
+    ctx = get_current_progress()
+    assert ctx.phase == 1
+    assert ctx.iter_num == 0
+    assert ctx.dispatch_label is None
+    reset_current_progress()
+
+
+def test_phase_2_entry_writes_phase_2_with_task_total():
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    _set_progress(phase=2, task_total=36)
+    ctx = get_current_progress()
+    assert ctx.phase == 2
+    assert ctx.task_total == 36
+    reset_current_progress()
+
+
+def test_magi_loop_2_iter_writes_iter_n():
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    _set_progress(iter_num=2, phase=3, dispatch_label="magi-loop2-iter2")
+    ctx = get_current_progress()
+    assert ctx.iter_num == 2
+    assert ctx.phase == 3
+    assert ctx.dispatch_label == "magi-loop2-iter2"
+    reset_current_progress()
+
+
+def test_set_progress_preserves_started_at_within_same_dispatch():
+    """Intra-dispatch update keeps elapsed monotonic (sec.3 PINNED semantics)."""
+    import time
+
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    _set_progress(phase=2, task_index=1, task_total=10, dispatch_label="green")
+    first_started = get_current_progress().started_at
+    time.sleep(0.01)
+    # Same dispatch_label, intra-dispatch progress refinement.
+    _set_progress(phase=2, task_index=1, task_total=10, dispatch_label="green")
+    second_started = get_current_progress().started_at
+    assert second_started == first_started, (
+        "started_at must NOT refresh within same dispatch"
+    )
+    reset_current_progress()
+
+
+def test_set_progress_refreshes_started_at_on_dispatch_change():
+    """Different dispatch_label resets the elapsed timer."""
+    import time
+
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    _set_progress(phase=2, dispatch_label="red")
+    red_started = get_current_progress().started_at
+    assert red_started is not None
+    time.sleep(0.01)
+    _set_progress(phase=2, dispatch_label="green")
+    green_started = get_current_progress().started_at
+    assert green_started is not None
+    assert green_started > red_started, "different dispatch must refresh started_at"
+    reset_current_progress()
+
+
+def test_set_progress_clears_started_at_when_label_none():
+    """Between-dispatches state has no elapsed timer."""
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    _set_progress(phase=2, dispatch_label="red")
+    assert get_current_progress().started_at is not None
+    _set_progress(phase=2, dispatch_label=None)
+    assert get_current_progress().started_at is None
+    reset_current_progress()
+
+
+def test_set_progress_first_dispatch_from_none_label_refreshes_started_at():
+    """W2 fold-in: None -> label first dispatch must set started_at.
+
+    Predicate ``is_dispatch_transition = current.dispatch_label != dispatch_label``
+    correctly evaluates ``None != "red"`` as True; this test pins that
+    behavior so a future refactor doesn't accidentally swallow the first
+    dispatch.
+    """
+    from auto_cmd import _set_progress
+    from heartbeat import get_current_progress, reset_current_progress
+
+    reset_current_progress()
+    # Initial: label None.
+    assert get_current_progress().dispatch_label is None
+    assert get_current_progress().started_at is None
+    # First labeled dispatch must populate started_at.
+    _set_progress(phase=2, dispatch_label="red")
+    ctx = get_current_progress()
+    assert ctx.dispatch_label == "red"
+    assert ctx.started_at is not None
+    reset_current_progress()

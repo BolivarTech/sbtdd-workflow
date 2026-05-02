@@ -75,7 +75,11 @@ from errors import (
     ValidationError,
     VerificationIrremediableError,
 )
-from models import COMMIT_PREFIX_MAP
+from heartbeat import (
+    get_current_progress,
+    set_current_progress,
+)
+from models import COMMIT_PREFIX_MAP, ProgressContext
 from state_file import SessionState
 from state_file import load as load_state
 from state_file import save as save_state
@@ -100,6 +104,59 @@ _ALLOWED_AUTO_RUN_STATUSES: tuple[str, ...] = (
 #: status value removed). Additive changes (new status, new optional
 #: field) keep the version.
 _AUTO_RUN_SCHEMA_VERSION: int = 1
+
+
+def _set_progress(
+    *,
+    iter_num: int = 0,
+    phase: int,
+    task_index: int | None = None,
+    task_total: int | None = None,
+    dispatch_label: str | None = None,
+) -> None:
+    """Helper: write a fresh ProgressContext for the current transition.
+
+    ``started_at`` semantics (Checkpoint 2 iter 2 caspar CRITICAL #3 fix):
+    ``started_at`` represents the **current dispatch's** start time per
+    spec sec.3. Refreshing per ``_set_progress`` call would break that
+    contract when a single dispatch has multiple intra-dispatch updates
+    (e.g., progress refinement during a long subagent invocation).
+
+    Rules:
+
+    - If ``dispatch_label`` differs from the current ProgressContext's
+      label (or current is ``None``): treat as new dispatch, refresh
+      ``started_at``.
+    - If ``dispatch_label`` matches current: preserve ``started_at``
+      (intra-dispatch update; elapsed timer continues monotonically).
+    - If ``dispatch_label is None`` (between dispatches): set
+      ``started_at`` to ``None``.
+
+    The W2 fold-in (Checkpoint 2 iter 4) pins the ``None -> label`` case
+    as a transition (first labeled dispatch refreshes ``started_at``).
+    """
+    current = get_current_progress()
+    # Single label-transition predicate (Checkpoint 2 iter 3 melchior CRITICAL):
+    # compute is_dispatch_transition first; then derive started_at from one rule.
+    is_dispatch_transition = current.dispatch_label != dispatch_label
+    if dispatch_label is None:
+        new_started = None
+    elif is_dispatch_transition or current.started_at is None:
+        # New dispatch OR first dispatch ever (W2 fold-in: None -> label).
+        new_started = datetime.now(timezone.utc)
+    else:
+        # Same dispatch -- preserve started_at for monotonic elapsed.
+        new_started = current.started_at
+    set_current_progress(
+        ProgressContext(
+            iter_num=iter_num,
+            phase=phase,
+            task_index=task_index,
+            task_total=task_total,
+            dispatch_label=dispatch_label,
+            started_at=new_started,
+        )
+    )
 
 
 def _stream_subprocess(
@@ -656,6 +713,8 @@ def _phase1_preflight(ns: argparse.Namespace) -> tuple[SessionState, PluginConfi
         PreconditionError: Missing state file or ``plan_approved_at is None``.
         DependencyError: Any pre-flight check reported non-OK status.
     """
+    # v0.5.0 S1-9 transition site #1: phase 1 entry.
+    _set_progress(phase=1)
     root: Path = ns.project_root
     state_path = root / ".claude" / "session-state.json"
     if not state_path.exists():
@@ -1236,6 +1295,13 @@ def _phase2_task_loop(
         task_total=_t_total,
         sub_phase=current.current_phase,
     )
+    # v0.5.0 S1-9 transition site #2: phase 2 entry (task loop start).
+    _set_progress(
+        phase=2,
+        task_index=_t_idx,
+        task_total=_t_total,
+        dispatch_label=current.current_phase,
+    )
     try:
         while current.current_task_id is not None:
             phase_idx = (
@@ -1360,6 +1426,14 @@ def _phase2_task_loop(
                         task_total=_t_total,
                         sub_phase=next_phase,
                     )
+                    # v0.5.0 S1-9 transition site #3: per-phase dispatch
+                    # (red/green/refactor) within a task.
+                    _set_progress(
+                        phase=2,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        dispatch_label=next_phase,
+                    )
                 else:
                     # H6 (INV-31): spec-reviewer gate BEFORE mark_and_advance.
                     assert current.current_task_id is not None
@@ -1437,6 +1511,14 @@ def _phase2_task_loop(
                         task_index=_t_idx,
                         task_total=_t_total,
                         sub_phase=current.current_phase,
+                    )
+                    # v0.5.0 S1-9 transition site #4: per-task iteration
+                    # advance after mark_and_advance().
+                    _set_progress(
+                        phase=2,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        dispatch_label=current.current_phase,
                     )
                     # Plan D iter 2 Caspar: incremental audit write after
                     # each task close so a mid-loop raise preserves the
@@ -1526,6 +1608,8 @@ def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
     import magi_dispatch
     import pre_merge_cmd
 
+    # v0.5.0 S1-9 transition site #5: phase 3 entry (pre-merge).
+    _set_progress(phase=3)
     root: Path = ns.project_root
     pre_merge_cmd._loop1(root)
     max_iter = (
@@ -1566,6 +1650,8 @@ def _phase4_checklist(root: Path, state: SessionState, cfg: PluginConfig) -> Non
     """
     import finalize_cmd
 
+    # v0.5.0 S1-9 transition site #6: phase 4 entry (checklist).
+    _set_progress(phase=4)
     magi_verdict_path = root / ".claude" / "magi-verdict.json"
     items = finalize_cmd._checklist(root, state, magi_verdict_path, cfg)
     failures = [(n, d) for (n, ok, d) in items if not ok]
@@ -1590,6 +1676,8 @@ def _phase5_report(root: Path, started: str, verdict: object) -> None:
             run aborted before Phase 3 completed (never expected in the
             happy path).
     """
+    # v0.5.0 S1-9 transition site #7: phase 5 entry (audit + report).
+    _set_progress(phase=5)
     auto_run = root / ".claude" / "auto-run.json"
     finished = _now_iso()
     tasks_completed = _read_audit_tasks_completed(auto_run)
