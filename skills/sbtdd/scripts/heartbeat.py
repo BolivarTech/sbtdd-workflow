@@ -24,6 +24,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+from datetime import datetime, timezone
 from typing import Any
 
 from models import ProgressContext
@@ -127,6 +128,23 @@ class HeartbeatEmitter:
         except OSError:
             self._failed_writes += 1
 
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        """Render elapsed seconds as ``<min>m<sec>s`` (clamped to >= 0)."""
+        mins, secs = divmod(int(max(seconds, 0)), 60)
+        return f"{mins}m{secs}s"
+
     def _format_tick(self, ctx: ProgressContext) -> str:
-        """Stub format; full impl in S1-5."""
-        return f"[sbtdd auto] tick: phase {ctx.phase}"
+        """Format a tick line per sec.2.1 H5 (full) and H6 (null omission)."""
+        parts: list[str] = []
+        if ctx.iter_num:
+            parts.append(f"iter {ctx.iter_num}")
+        parts.append(f"phase {ctx.phase}")
+        if ctx.task_index is not None and ctx.task_total is not None:
+            parts.append(f"task {ctx.task_index}/{ctx.task_total}")
+        if ctx.dispatch_label:
+            parts.append(f"dispatch={ctx.dispatch_label}")
+        if ctx.started_at is not None:
+            elapsed_s = (datetime.now(timezone.utc) - ctx.started_at).total_seconds()
+            parts.append(f"elapsed={self._format_elapsed(elapsed_s)}")
+        return "[sbtdd auto] tick: " + " ".join(parts)

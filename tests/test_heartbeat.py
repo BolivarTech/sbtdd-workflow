@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -103,3 +103,44 @@ def test_heartbeat_exit_join_returns_within_timeout_when_thread_sleeping():
     )
     # Make sure sys is referenced so import isn't unused.
     _ = sys.stderr
+
+
+def test_format_tick_full_fields_matches_h5():
+    fake_start = datetime.now(timezone.utc) - timedelta(seconds=15)
+    ctx = ProgressContext(
+        iter_num=2,
+        phase=3,
+        task_index=14,
+        task_total=36,
+        dispatch_label="magi-loop2-iter2",
+        started_at=fake_start,
+    )
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ctx)
+    assert line.startswith("[sbtdd auto] tick:")
+    assert "iter 2" in line
+    assert "phase 3" in line
+    assert "task 14/36" in line
+    assert "dispatch=magi-loop2-iter2" in line
+    assert "elapsed=" in line
+    assert any(s in line for s in ("0m14s", "0m15s", "0m16s"))
+
+
+def test_format_tick_omits_null_fields_h6():
+    fake_start = datetime.now(timezone.utc) - timedelta(seconds=45)
+    ctx = ProgressContext(phase=1, started_at=fake_start)
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ctx)
+    assert "phase 1" in line
+    assert "iter " not in line
+    assert "task " not in line
+    assert "dispatch=" not in line
+    assert "elapsed=" in line
+
+
+def test_format_tick_no_started_at_omits_elapsed():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ProgressContext())
+    assert line.startswith("[sbtdd auto] tick:")
+    assert "phase 0" in line
+    assert "elapsed" not in line
