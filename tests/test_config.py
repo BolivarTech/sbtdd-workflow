@@ -706,3 +706,115 @@ schema_version: 2
 
     cfg = load_plugin_local(config_path)
     assert cfg.schema_version == 2
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 I-Hk2 — INV-34 messages append 's' unit suffix (sec.4.4 housekeeping; S2-8)
+# ---------------------------------------------------------------------------
+
+
+def _inv34_base() -> str:
+    """Reusable plugin.local.md frontmatter that satisfies all but INV-34 clauses."""
+    return """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+
+
+def test_i_hk2_inv34_clause_4_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 4 timeout floor): ValidationError message includes 's' suffix."""
+    base = _inv34_base() + (
+        "auto_per_stream_timeout_seconds: 50\n"
+        "auto_heartbeat_interval_seconds: 5\n"
+        "---\n"
+    )
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    with pytest.raises(ValidationError) as excinfo:
+        load_plugin_local(config_path)
+    msg = str(excinfo.value)
+    assert "INV-34 clause 4" in msg
+    # I-Hk2: 'got 50' must include 's' unit suffix.
+    assert "got 50s" in msg
+
+
+def test_i_hk2_inv34_clause_2_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 2 interval ceiling): ValidationError message includes 's' suffix."""
+    base = _inv34_base() + (
+        "auto_per_stream_timeout_seconds: 900\n"
+        "auto_heartbeat_interval_seconds: 75\n"  # > 60 ⇒ clause 2
+        "---\n"
+    )
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    with pytest.raises(ValidationError) as excinfo:
+        load_plugin_local(config_path)
+    msg = str(excinfo.value)
+    assert "INV-34 clause 2" in msg
+    assert "got 75s" in msg
+
+
+def test_i_hk2_inv34_clause_3_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 3 interval floor): ValidationError message includes 's' suffix."""
+    base = _inv34_base() + (
+        "auto_per_stream_timeout_seconds: 900\n"
+        "auto_heartbeat_interval_seconds: 2\n"  # < 5 ⇒ clause 3
+        "---\n"
+    )
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    with pytest.raises(ValidationError) as excinfo:
+        load_plugin_local(config_path)
+    msg = str(excinfo.value)
+    assert "INV-34 clause 3" in msg
+    assert "got 2s" in msg
+
+
+def test_i_hk2_inv34_clause_1_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 1 ratio): ValidationError message includes 's' suffix on timeout.
+
+    Clause 1 is defense-in-depth and only fires when clauses 2 + 4 are
+    artificially weakened. We synthesize a scenario where timeout is
+    exactly 600 (passes clause 4) but interval is set so that
+    5 * interval > timeout. With clause 4 floor = 600, clause 2 ceiling
+    = 60, both pass, but a hand-crafted ratio violation (timeout=600,
+    interval=60) does NOT trigger clause 1 either. Clause 1 is
+    unreachable through plugin.local.md inputs given the current 4 +
+    2 + 3 mathematical subsumption (clause 1 is preserved as guard for
+    future weakening per Loop 2 W1). We assert the suffix is present in
+    the source code instead via a string match -- same intent without
+    crafting an unreachable input.
+    """
+    import inspect
+
+    import config as config_mod
+
+    src = inspect.getsource(config_mod)
+    # Find the clause-1 ValidationError raise (line ~250 pre-fix). The
+    # I-Hk2 fix appends 's' to the {timeout} interpolation in that raise.
+    # The exact source-level fragment must exist:
+    assert "= {5 * interval}; got {timeout}s" in src or (
+        "= {5 * interval}; got {timeout} s" in src.lower()
+    ), "INV-34 clause 1 message missing 's' unit suffix on {timeout}"
