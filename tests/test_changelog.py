@@ -62,3 +62,16 @@ def test_hf2_marker_schema_docs_match_impl():
         assert (
             field_name in changelog
         ), f"CHANGELOG missing marker field doc {field_name!r}"
+
+
+def test_hf3_f45_verdict_set_delta_documented():
+    """HF3: F45 tolerant parser verdict-set behavior delta documented.
+
+    Validates that the v0.4.0 entry mentions both the strict-vs-tolerant
+    verdict-set behavior delta and the ValidationError raised on
+    unknown verdicts in agent JSON.
+    """
+    changelog = _read("CHANGELOG.md")
+    assert "VERDICT_RANK" in changelog
+    assert "ValidationError" in changelog
+    assert "tolerant parser" in changelog.lower()

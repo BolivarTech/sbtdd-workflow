@@ -73,6 +73,14 @@ v1.0.0 LOCKED items remaining:
     `models.VERDICT_RANK ∪ {approve, conditional, reject}`; verdict
     typos (e.g. `"GO_LATER"`) no longer slip through to silently
     weigh as 0.0 in `_manual_synthesis_recovery`.
+  - HF3 (sec.2.5 doc-alignment): the F45 tolerant parser additionally
+    validates that every parsed `verdict` field is a member of the
+    known `VERDICT_RANK` set (∪ the agent-side `{approve, conditional,
+    reject}` aliases). Agent JSON carrying an unknown verdict raises
+    `ValidationError` instead of silently passing through with weight
+    0.0 -- the v0.3.x strict-parser baseline accepted any string in
+    the verdict slot, the v0.4.0 tolerant parser rejects unknowns.
+    Behavior delta documented for downstream consumers.
   - `magi_dispatch._manual_synthesis_recovery(run_dir)` (F46) rescues a
     `MAGIVerdict` when the MAGI synthesizer crashed (`"Only N agent(s)
     succeeded"` stderr) but at least one agent persisted recoverable
