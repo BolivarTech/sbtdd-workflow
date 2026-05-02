@@ -1148,9 +1148,26 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
         VerificationIrremediableError: Non-quota verification failures
             exhausted the retry budget (exit 6).
     """
+    # Loop 1 fix v0.5.0 CRITICAL #1: wrap each verification + sys-debug
+    # dispatch in ``_dispatch_with_heartbeat`` so the operator sees liveness
+    # ticks during multi-minute subagent invocations. ``_set_progress`` MUST
+    # establish ``dispatch_label`` before the wrapper fires (fail-loud per
+    # Checkpoint 2 iter 2 melchior). The label is preserved (started_at
+    # refreshed) for the verification call and replaced for systematic-
+    # debugging via the same helper.
+    current = get_current_progress()
     for attempt in range(retries + 1):
         try:
-            superpowers_dispatch.verification_before_completion(cwd=str(root))
+            _set_progress(
+                iter_num=current.iter_num,
+                phase=current.phase,
+                task_index=current.task_index,
+                task_total=current.task_total,
+                dispatch_label="verification",
+            )
+            _dispatch_with_heartbeat(
+                invoke=lambda: superpowers_dispatch.verification_before_completion(cwd=str(root)),
+            )
             return
         except QuotaExhaustedError:
             # MAGI Loop 2 iter 1 Finding 2: quota exhaustion is NOT a
@@ -1167,7 +1184,16 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
                 raise VerificationIrremediableError(
                     f"verification failed after {retries} retries: {exc}"
                 ) from exc
-            superpowers_dispatch.systematic_debugging(cwd=str(root))
+            _set_progress(
+                iter_num=current.iter_num,
+                phase=current.phase,
+                task_index=current.task_index,
+                task_total=current.task_total,
+                dispatch_label="systematic-debugging",
+            )
+            _dispatch_with_heartbeat(
+                invoke=lambda: superpowers_dispatch.systematic_debugging(cwd=str(root)),
+            )
 
 
 def _phase_prefix(phase: str) -> str:
@@ -1235,7 +1261,19 @@ def _run_spec_review_gate(
         kwargs["model"] = model
     if stream_prefix is not None:
         kwargs["stream_prefix"] = stream_prefix
-    spec_review_dispatch.dispatch_spec_reviewer(**kwargs)
+    # Loop 1 fix v0.5.0 CRITICAL #1: wrap with heartbeat so the operator
+    # sees liveness ticks during the spec-reviewer subagent invocation.
+    current = get_current_progress()
+    _set_progress(
+        iter_num=current.iter_num,
+        phase=current.phase,
+        task_index=current.task_index,
+        task_total=current.task_total,
+        dispatch_label="spec-review",
+    )
+    _dispatch_with_heartbeat(
+        invoke=lambda: spec_review_dispatch.dispatch_spec_reviewer(**kwargs),
+    )
 
 
 #: Maximum outer iterations for the B6 feedback loop, mirroring INV-11
@@ -1373,20 +1411,39 @@ def _run_mini_cycle_for_finding(
         ("refactor", COMMIT_PREFIX_MAP["refactor"]),
     )
     for phase_label, prefix in phase_prefix_pairs:
+        # Loop 1 fix v0.5.0 CRITICAL #1: wrap each phase dispatch in
+        # ``_dispatch_with_heartbeat`` so multi-minute implementer subagent
+        # invocations emit liveness ticks. Use a phase-tagged label so the
+        # heartbeat output names which mini-cycle phase is in flight.
+        current = get_current_progress()
+        mini_cycle_label = f"spec-review-mini-cycle-{phase_label}"
+        _set_progress(
+            iter_num=current.iter_num,
+            phase=current.phase,
+            task_index=current.task_index,
+            task_total=current.task_total,
+            dispatch_label=mini_cycle_label,
+        )
         # v0.3.0 Feature E: omit model kwargs entirely when None so test
         # stubs pre-dating v0.3.0 keep accepting the call signature.
         if implementer_model is None:
-            superpowers_dispatch.test_driven_development(
-                args=[f"--phase={phase_label}", f"--finding={finding}", f"--task-id={task_id}"],
-                cwd=str(root),
-            )
+
+            def _invoke_tdd(_phase: str = phase_label) -> None:
+                superpowers_dispatch.test_driven_development(
+                    args=[f"--phase={_phase}", f"--finding={finding}", f"--task-id={task_id}"],
+                    cwd=str(root),
+                )
         else:
-            superpowers_dispatch.test_driven_development(
-                args=[f"--phase={phase_label}", f"--finding={finding}", f"--task-id={task_id}"],
-                cwd=str(root),
-                model=implementer_model,
-                skill_field_name="implementer_model",
-            )
+
+            def _invoke_tdd(_phase: str = phase_label) -> None:
+                superpowers_dispatch.test_driven_development(
+                    args=[f"--phase={_phase}", f"--finding={finding}", f"--task-id={task_id}"],
+                    cwd=str(root),
+                    model=implementer_model,
+                    skill_field_name="implementer_model",
+                )
+
+        _dispatch_with_heartbeat(invoke=_invoke_tdd)
         _run_verification_with_retries(root, retries)
         _commit_mini_cycle_phase(root, task_id, finding, prefix, phase_label)
 

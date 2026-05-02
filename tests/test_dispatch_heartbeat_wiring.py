@@ -66,9 +66,7 @@ def test_run_verification_with_retries_wraps_with_heartbeat(monkeypatch):
     def fake_verify(**_: Any) -> None:
         return None
 
-    monkeypatch.setattr(
-        superpowers_dispatch, "verification_before_completion", fake_verify
-    )
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", fake_verify)
     auto_cmd._run_verification_with_retries(Path("."), retries=0)
     assert len(captured) == 1
     assert captured[0] == "verification"
@@ -90,9 +88,7 @@ def test_run_verification_with_retries_wraps_systematic_debugging(monkeypatch):
     def fake_sysdebug(**_: Any) -> None:
         return None
 
-    monkeypatch.setattr(
-        superpowers_dispatch, "verification_before_completion", fake_verify
-    )
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", fake_verify)
     monkeypatch.setattr(superpowers_dispatch, "systematic_debugging", fake_sysdebug)
     # retries=1 -> first call fails, sys-debug fires, second call succeeds.
     auto_cmd._run_verification_with_retries(Path("."), retries=1)
@@ -114,9 +110,7 @@ def test_run_spec_review_gate_wraps_with_heartbeat(monkeypatch, tmp_path):
         return None
 
     monkeypatch.setattr(srd, "dispatch_spec_reviewer", fake_dispatch)
-    auto_cmd._run_spec_review_gate(
-        task_id="3", plan_path=tmp_path / "plan.md", root=tmp_path
-    )
+    auto_cmd._run_spec_review_gate(task_id="3", plan_path=tmp_path / "plan.md", root=tmp_path)
     assert len(captured) == 1
     assert captured[0] == "spec-review"
     reset_current_progress()
@@ -137,9 +131,7 @@ def test_run_mini_cycle_wraps_test_driven_development(monkeypatch, tmp_path):
         return None
 
     monkeypatch.setattr(superpowers_dispatch, "test_driven_development", fake_tdd)
-    monkeypatch.setattr(
-        superpowers_dispatch, "verification_before_completion", fake_verify
-    )
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", fake_verify)
     monkeypatch.setattr(auto_cmd, "_commit_mini_cycle_phase", fake_commit)
 
     auto_cmd._run_mini_cycle_for_finding(
@@ -162,10 +154,18 @@ def test_run_mini_cycle_wraps_test_driven_development(monkeypatch, tmp_path):
 
 
 def test_loop2_pre_merge_wraps_invoke_magi(monkeypatch, tmp_path):
-    """Site #5 (MAGI Loop 2 iter): each iter wraps invoke_magi via dispatch."""
+    """Site #5 (MAGI Loop 2 iter): each iter wraps invoke_magi via dispatch.
+
+    The wrap is gated on auto-mode-active (ProgressContext.phase != 0).
+    The test simulates auto-mode by setting phase=3 before invoking
+    ``_loop2`` (matching ``auto_cmd._phase3_pre_merge`` which calls
+    ``_set_progress(phase=3)`` before delegating to ``_loop2``).
+    """
     import magi_dispatch
 
     reset_current_progress()
+    # Simulate auto-mode being active (auto_cmd._phase3_pre_merge sets this).
+    auto_cmd._set_progress(phase=3)
     captured = _install_dispatch_spy(monkeypatch)
 
     fake_verdict = SimpleNamespace(
@@ -189,9 +189,7 @@ def test_loop2_pre_merge_wraps_invoke_magi(monkeypatch, tmp_path):
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke_magi)
     monkeypatch.setattr(magi_dispatch, "verdict_passes_gate", fake_verdict_passes_gate)
-    monkeypatch.setattr(
-        magi_dispatch, "verdict_is_strong_no_go", fake_strong_no_go
-    )
+    monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", fake_strong_no_go)
 
     cfg = SimpleNamespace(
         magi_threshold="GO_WITH_CAVEATS",
