@@ -594,6 +594,55 @@ def test_g6_cross_check_audit_artifact_schema(tmp_path, monkeypatch):
     assert "filtered_findings" not in audit
     assert len(audit["annotated_findings"]) == len(findings)
     assert audit["annotated_findings"][0]["cross_check_decision"] == "REJECT"
+
+
+def test_g6_audit_serializes_null_for_keep_and_reject(tmp_path, monkeypatch):
+    """G6 (melchior iter 2 WARNING): KEEP/REJECT decisions serialize
+    cross_check_recommended_severity=null in audit; only DOWNGRADE carries a value.
+
+    Annotation-only redesign promises that absence of severity recommendation
+    is encoded as JSON ``null`` (not as a missing key) so downstream tooling
+    can distinguish "reviewer had no recommendation" from "reviewer never ran".
+    """
+    from pre_merge_cmd import _loop2_cross_check
+
+    monkeypatch.setattr(
+        "pre_merge_cmd._dispatch_requesting_code_review",
+        lambda **_kw: {"decisions": [
+            {"original_index": 0, "decision": "KEEP",
+             "rationale": "valid concern, severity correct"},
+            {"original_index": 1, "decision": "REJECT",
+             "rationale": "false positive, no underlying issue"},
+            {"original_index": 2, "decision": "DOWNGRADE",
+             "rationale": "polish, not blocking",
+             "recommended_severity": "INFO"},
+        ]},
+    )
+    config = MagicMock()
+    config.magi_cross_check = True
+
+    findings = [
+        {"severity": "CRITICAL", "title": "valid", "detail": "...", "agent": "melchior"},
+        {"severity": "CRITICAL", "title": "fp", "detail": "...", "agent": "balthasar"},
+        {"severity": "WARNING", "title": "polish", "detail": "...", "agent": "caspar"},
+    ]
+    _loop2_cross_check(
+        diff="x", verdict="GO_WITH_CAVEATS", findings=findings,
+        iter_n=3, config=config, audit_dir=tmp_path,
+    )
+    audit_files = list(tmp_path.glob("iter3-*.json"))
+    assert len(audit_files) == 1
+    audit = json.loads(audit_files[0].read_text(encoding="utf-8"))
+    annotated = audit["annotated_findings"]
+    for entry in annotated:
+        decision = entry["cross_check_decision"]
+        if decision in ("KEEP", "REJECT"):
+            # Field MUST be present in serialized JSON and equal to None
+            # (i.e., null), not absent.
+            assert "cross_check_recommended_severity" in entry
+            assert entry["cross_check_recommended_severity"] is None
+        elif decision == "DOWNGRADE":
+            assert entry["cross_check_recommended_severity"] in ("WARNING", "INFO")
 ```
 
 - [ ] **Step 2: Run + verify fail**
@@ -602,7 +651,7 @@ def test_g6_cross_check_audit_artifact_schema(tmp_path, monkeypatch):
 pytest tests/test_pre_merge_cross_check.py -v
 ```
 
-Expected: 4 fail.
+Expected: 5 fail.
 
 - [ ] **Step 3: Add audit artifact + graceful failure to `_loop2_cross_check`**
 
