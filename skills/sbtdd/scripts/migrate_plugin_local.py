@@ -77,4 +77,9 @@ def migrate_to(*, target_version: int, data: dict[str, Any]) -> dict[str, Any]:
             )
         data = MIGRATIONS[current](data)
         current += 1
-    return data
+    # I2 fix (v1.0.0 O-2 Loop 1 review): always return a fresh dict object
+    # so the no-op path (target_version == data['schema_version']) does not
+    # alias the caller's input. Each migration step in the ladder already
+    # returns a new dict via dict-spread; this defensive copy guarantees
+    # the contract on the no-op branch as well.
+    return dict(data)
