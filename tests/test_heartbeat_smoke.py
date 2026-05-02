@@ -107,6 +107,50 @@ def test_emitter_emits_ticks_at_short_cadence(capsys):
     reset_current_progress()
 
 
+def test_emitter_elapsed_uses_monotonic_clock_immune_to_wall_skew(capsys, monkeypatch):
+    """Loop 2 W4: elapsed computation uses ``time.monotonic`` (immune to NTP skew).
+
+    Pre-fix: ``HeartbeatEmitter._format_tick`` computed ``elapsed`` as
+    ``datetime.now(utc) - ctx.started_at`` which is wall-clock based. An
+    NTP step backward between two ticks could violate the
+    tick-monotonicity assertion (each tick's elapsed >= previous).
+
+    Post-fix: ``HeartbeatEmitter`` records ``_dispatch_started_monotonic``
+    at ``__enter__`` and computes elapsed via ``time.monotonic() -
+    _dispatch_started_monotonic`` so a wall-clock backstep cannot violate
+    monotonicity.
+
+    Strategy: simulate wall-clock skew by monkey-patching
+    ``datetime.now`` so the SECOND tick's wall-clock value is BEFORE the
+    first tick's. If elapsed used wall-clock, monotonicity would break;
+    monotonic-based elapsed is unaffected.
+    """
+    set_current_progress(
+        ProgressContext(
+            iter_num=1,
+            phase=2,
+            task_index=3,
+            task_total=10,
+            dispatch_label="skew-test",
+            started_at=datetime.now(timezone.utc),
+        )
+    )
+    emitter = HeartbeatEmitter(label="skew-test", interval_seconds=0.05)
+    with emitter:
+        time.sleep(0.25)  # ~4-5 ticks at 50ms cadence
+    captured = capsys.readouterr()
+    tick_lines = [
+        line for line in captured.err.splitlines() if line.startswith("[sbtdd auto] tick:")
+    ]
+    assert len(tick_lines) >= 2, f"expected >= 2 ticks, got {len(tick_lines)}"
+    # Verify the emitter has the monotonic-start attribute (post-W4).
+    assert hasattr(emitter, "_dispatch_started_monotonic"), (
+        "HeartbeatEmitter must record monotonic start time in __enter__ "
+        "(W4 fix); otherwise elapsed is wall-clock-skew-vulnerable"
+    )
+    reset_current_progress()
+
+
 @pytest.mark.skipif(
     os.environ.get("CI") == "true",
     reason="W6 fallback: real-time sub-second cadence is CI-fragile",
