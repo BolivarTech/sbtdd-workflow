@@ -201,3 +201,152 @@ auto_no_timeout_dispatch_labels: ["magi-*", "long-build-*"]
     assert cfg.status_watch_default_interval_seconds == 0.5
     assert cfg.auto_origin_disambiguation is False
     assert cfg.auto_no_timeout_dispatch_labels == ("magi-*", "long-build-*")
+
+
+def test_inv34_clause_1_ratio_violation(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "p1.md"
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 50\n"
+        "auto_heartbeat_interval_seconds: 15\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 1"):
+        load_plugin_local(config_path)
+
+
+def test_inv34_clause_2_ceiling_violation(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "p2.md"
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 1000\n"
+        "auto_heartbeat_interval_seconds: 120\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 2"):
+        load_plugin_local(config_path)
+
+
+def test_inv34_clause_3_floor_violation(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "p3.md"
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 100\n"
+        "auto_heartbeat_interval_seconds: 2\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 3"):
+        load_plugin_local(config_path)
+
+
+def test_inv34_clause_1_boundary_timeout_equals_5x_interval_accepts(tmp_path):
+    """Boundary: timeout == 5 * interval is accepted (>= ratio satisfied)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "boundary.md"
+    # 600s = max(5*60, 600) = 600 -- boundary of clauses 1 AND 4.
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 600\n"
+        "auto_heartbeat_interval_seconds: 60\n---\n"
+    )
+    from config import load_plugin_local
+    cfg = load_plugin_local(config_path)
+    assert cfg.auto_per_stream_timeout_seconds == 600
+    assert cfg.auto_heartbeat_interval_seconds == 60
+
+
+def test_inv34_clause_4_timeout_below_600_rejected(tmp_path):
+    """Clause 4: timeout < 600s rejected even if clauses 1-3 satisfied."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+    config_path = tmp_path / "p4.md"
+    # 75s satisfies clause 1 (5*15=75) but violates clause 4 (>=600).
+    config_path.write_text(
+        base + "auto_per_stream_timeout_seconds: 75\n"
+        "auto_heartbeat_interval_seconds: 15\n---\n"
+    )
+    from config import load_plugin_local
+    from errors import ValidationError
+    with pytest.raises(ValidationError, match="INV-34 clause 4"):
+        load_plugin_local(config_path)

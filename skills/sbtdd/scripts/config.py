@@ -177,6 +177,52 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
         data["auto_no_timeout_dispatch_labels"] = tuple(
             data["auto_no_timeout_dispatch_labels"]
         )
+    # INV-34 (sec.2.7 of spec): timeout-vs-interval relationship + absolute
+    # floor + ceiling validations. Validation order is 1 -> 2 -> 3 -> 4
+    # because each test fixture (test_inv34_clause_N_*) varies ONE clause
+    # while keeping the others at safe defaults; the most-specific clause
+    # fires first under those fixtures so error messages name the violated
+    # invariant uniquely.
+    #
+    # W1 (Checkpoint 2 iter 4 melchior + caspar): clause 1 is mathematically
+    # subsumed by clauses 2 + 4 in the current default range
+    # (timeout >= 600 AND interval <= 60 implies 5 * interval <= 300 <= timeout).
+    # We preserve clause 1 explicitly as DEFENSE-IN-DEPTH against future
+    # weakening of clauses 2 or 4 that could make clause 1 the only barrier.
+    # See docs/v0.5.0-config-matrix.md for the worked-example table.
+    timeout = data["auto_per_stream_timeout_seconds"]
+    interval = data["auto_heartbeat_interval_seconds"]
+    if not isinstance(timeout, int) or timeout < 0:
+        raise ValidationError(
+            f"auto_per_stream_timeout_seconds must be int >= 0, got {timeout!r}"
+        )
+    if not isinstance(interval, int) or interval < 0:
+        raise ValidationError(
+            f"auto_heartbeat_interval_seconds must be int >= 0, got {interval!r}"
+        )
+    # Clause 1 (ratio) checked first so fixtures targeting the ratio
+    # report the ratio violation rather than masking it with clause 4.
+    if timeout < 5 * interval:
+        raise ValidationError(
+            f"INV-34 clause 1: auto_per_stream_timeout_seconds ({timeout}) "
+            f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
+            f"= {5 * interval}; got {timeout}"
+        )
+    if interval > 60:
+        raise ValidationError(
+            f"INV-34 clause 2: auto_heartbeat_interval_seconds must be <= 60s "
+            f"to keep operator awareness within 1-minute granularity; got {interval}"
+        )
+    if interval < 5:
+        raise ValidationError(
+            f"INV-34 clause 3: auto_heartbeat_interval_seconds must be >= 5s "
+            f"to avoid stderr spam without value; got {interval}"
+        )
+    if timeout < 600:
+        raise ValidationError(
+            f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
+            f"(caspar opus runs observed empirically up to 10min); got {timeout}"
+        )
     try:
         return PluginConfig(**data)
     except TypeError as exc:
