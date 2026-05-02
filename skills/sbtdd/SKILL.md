@@ -327,6 +327,28 @@ In all fallback modes, honor INV-0 (global CLAUDE.md prevails), INV-5..8
 (commit discipline), INV-27 (spec-base placeholder rejection), INV-28 (MAGI
 degraded non-exit), and INV-29 (receiving-code-review gate) manually.
 
+### v0.5 notes
+
+v0.5.0 adds the observability pillar:
+
+- **Heartbeat in-band**: long dispatches (MAGI, `/requesting-code-review`)
+  emit a stderr tick every 15s showing `iter / phase / task / dispatch /
+  elapsed`. Configurable via `auto_heartbeat_interval_seconds` (5-60s,
+  default 15).
+- **`/sbtdd status --watch`**: companion subcommand for out-of-band
+  monitoring. Run from a second terminal:
+  `python run_sbtdd.py status --watch`. Use `--json` for piping;
+  `--interval N` for poll cadence (>= 0.1s).
+- **Per-stream timeout** (`auto_per_stream_timeout_seconds`, default
+  900s): kills subprocess if all open streams are silent for the timeout
+  window. MAGI dispatches are exempt by default
+  (`auto_no_timeout_dispatch_labels: ["magi-*"]`). Bare `*` rejected.
+- **Origin disambiguation**: `[stdout]` / `[stderr]` prefixes when both
+  streams emit within a 100ms window (production default; tests
+  override). Gated behind `auto_origin_disambiguation` (default ON).
+
+See `docs/v0.5.0-config-matrix.md` for the full field/invariant matrix.
+
 ## Notes
 
 - The plugin is pre-1.0 (`v0.1.x`); the schema of `session-state.json` and

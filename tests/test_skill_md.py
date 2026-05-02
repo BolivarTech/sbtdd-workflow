@@ -336,3 +336,13 @@ def test_v03_flags_section_documents_exit_1_for_invalid_model_override() -> None
         "v0.3 flags section must NOT claim exit 2 (PRECONDITION_FAILED) "
         "for invalid --model-override values; the actual exit is 1"
     )
+
+
+def test_skill_md_has_v0_5_notes_section():
+    """S2-15: SKILL.md gains a v0.5 notes block describing observability."""
+    from pathlib import Path
+
+    skill_md = Path("skills/sbtdd/SKILL.md").read_text(encoding="utf-8")
+    assert "v0.5" in skill_md
+    assert "status --watch" in skill_md
+    assert "heartbeat" in skill_md.lower()
