@@ -515,6 +515,62 @@ def test_concurrent_writers_serialize_via_file_lock(tmp_path):
     assert data["heartbeat_failed_writes_total"] == 30
 
 
+def test_serialize_progress_context_iso_utc():
+    from datetime import datetime, timezone
+
+    from auto_cmd import _serialize_progress
+    from heartbeat import reset_current_progress, set_current_progress
+    from models import ProgressContext
+
+    set_current_progress(
+        ProgressContext(
+            iter_num=2,
+            phase=3,
+            task_index=14,
+            task_total=36,
+            dispatch_label="magi-loop2-iter2",
+            started_at=datetime(2026, 5, 1, 12, 34, 56, tzinfo=timezone.utc),
+        )
+    )
+    serialized = _serialize_progress()
+    assert serialized["iter_num"] == 2
+    assert serialized["phase"] == 3
+    assert serialized["task_index"] == 14
+    assert serialized["task_total"] == 36
+    assert serialized["dispatch_label"] == "magi-loop2-iter2"
+    assert serialized["started_at"] == "2026-05-01T12:34:56Z"
+    reset_current_progress()
+
+
+def test_serialize_progress_context_started_at_none_serializes_as_null():
+    from auto_cmd import _serialize_progress
+    from heartbeat import reset_current_progress, set_current_progress
+    from models import ProgressContext
+
+    set_current_progress(ProgressContext(iter_num=1, phase=2, started_at=None))
+    serialized = _serialize_progress()
+    assert serialized["started_at"] is None
+    reset_current_progress()
+
+
+def test_serialize_progress_context_naive_datetime_normalized_to_utc():
+    """Defensive: even if a naive datetime sneaks in, output is UTC-stamped."""
+    from datetime import datetime, timezone
+
+    from auto_cmd import _serialize_progress
+    from heartbeat import reset_current_progress, set_current_progress
+    from models import ProgressContext
+
+    set_current_progress(
+        ProgressContext(
+            phase=2, started_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+    )
+    serialized = _serialize_progress()
+    assert serialized["started_at"].endswith("Z")
+    reset_current_progress()
+
+
 def test_drain_helper_rejects_non_main_thread():
     """W8 fold-in: _assert_main_thread enforces single-writer rule mechanically."""
     import threading as _t

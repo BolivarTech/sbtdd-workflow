@@ -269,6 +269,35 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
             pass
 
 
+def _serialize_progress() -> dict[str, Any]:
+    """Serialize current ProgressContext to a JSON-friendly dict (ISO 8601 UTC).
+
+    The ``started_at`` datetime is normalized to UTC and rendered with the
+    ``Z`` suffix using :func:`datetime.strftime` -- NOT
+    ``str.replace('+00:00', 'Z')`` which would break if the input already
+    has ``Z`` or different ``tzinfo`` formatting (Checkpoint 2 iter 1
+    melchior fix).
+
+    Per W8 fold-in, this helper is restricted to main-thread callers.
+    """
+    _assert_main_thread()
+    ctx = get_current_progress()
+    started = ctx.started_at
+    started_str: str | None
+    if started is not None:
+        started_str = started.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        started_str = None
+    return {
+        "iter_num": ctx.iter_num,
+        "phase": ctx.phase,
+        "task_index": ctx.task_index,
+        "task_total": ctx.task_total,
+        "dispatch_label": ctx.dispatch_label,
+        "started_at": started_str,
+    }
+
+
 def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
     """Drain :data:`_heartbeat_failures_q` and persist max() counter.
 
@@ -616,6 +645,14 @@ def _update_progress(
         # JSON ``null`` rather than absent keys so future
         # ``/sbtdd status --watch`` consumers can rely on the shape and
         # treat ``null`` as the explicit "unknown" sentinel.
+        #
+        # v0.5.0 S1-12: also emit the ProgressContext-derived snapshot as
+        # ``progress_context`` (sec.3 PINNED schema:
+        # ``{iter_num, phase, task_index, task_total, dispatch_label,
+        # started_at}``). Both keys coexist during the v0.5 transition
+        # so D4.3 absent-tolerant downstream readers (status --watch
+        # consumers expecting the v0.4 shape) keep working while the
+        # new ProgressContext-aware readers can adopt the richer key.
         progress: dict[str, object | None] = {
             "phase": phase,
             "task_index": task_index,
@@ -623,6 +660,16 @@ def _update_progress(
             "sub_phase": sub_phase,
         }
         existing["progress"] = progress
+        # Best-effort: serialize the ProgressContext singleton too. If
+        # the singleton is at default (no _set_progress fired yet), we
+        # still write the snapshot so consumers see a deterministic
+        # shape.
+        try:
+            existing["progress_context"] = _serialize_progress()
+        except RuntimeError:
+            # _assert_main_thread tripped (off-thread caller); don't
+            # corrupt auto-run.json.
+            pass
         tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
         tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         # ``os.replace`` is atomic on POSIX and Windows, but on Windows it
