@@ -352,6 +352,34 @@ def run_streamed_with_timeout(
             ):
                 _emit_kill_breadcrumb(per_stream_timeout_seconds)
                 _kill_subprocess_tree(proc)
+                # W7 (caspar Loop 2 iter 3): drain residual reader-thread queue data.
+                # Reader threads may have pumped chunks into the queue between
+                # the last ``chunk_queue.get`` and the silence-check; without
+                # this drain those final chunks are silently discarded -- the
+                # very stderr lines that often explain the hang. Drain is
+                # bounded (queue is unbounded but bytes already pumped are
+                # finite) and non-blocking via ``get_nowait``.
+                while True:
+                    try:
+                        stream_name, raw = chunk_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if not stream_name or raw == b"":
+                        # EOF sentinel; stream closed before kill.
+                        if stream_name:
+                            open_streams.discard(stream_name)
+                        continue
+                    _absorb_chunk(
+                        stream_name=stream_name,
+                        raw=raw,
+                        decoders=decoders,
+                        last_write_at=last_write_at,
+                        last_chunk_at=last_chunk_at,
+                        origin_disambiguation=origin_disambiguation,
+                        origin_window_seconds=origin_window_seconds,
+                        stdout_chunks=stdout_chunks,
+                        stderr_chunks=stderr_chunks,
+                    )
                 break
             if proc.poll() is not None and chunk_queue.empty():
                 break
