@@ -88,9 +88,27 @@ por cross-check via `/requesting-code-review` antes de routear via
 INV-29 gate, salvo que `magi_cross_check: false` este set en
 `plugin.local.md`.
 
+**Cross-check semantic (CRITICAL #1+#4 redesign):** cross-check NEVER
+removes findings — it ONLY annotates each finding with
+`cross_check_decision: KEEP|DOWNGRADE|REJECT` y
+`cross_check_rationale: <text>` fields. INV-29 (operator +
+`/receiving-code-review`) is the ONLY stage that filters findings. This
+guarantees:
+- The operator at INV-29 always sees every finding MAGI emitted, plus
+  the meta-review's recommendation alongside it.
+- If the meta-review is wrong (false-positive REJECT), the real
+  CRITICAL/WARNING does NOT get silently dropped — it is still
+  presented for INV-29 evaluation, with the review's REJECT rationale
+  visible so the operator can override.
+- DOWNGRADE follows the same annotation-only pattern: the original
+  severity is preserved on the surfaced finding; the review's
+  recommended new severity lives in the annotation field
+  (`cross_check_recommended_severity`) for operator consideration at
+  INV-29.
+
 **Escenarios Given/When/Then:**
 
-**Escenario G1: cross-check filters false-positive CRITICAL**
+**Escenario G1: cross-check annotates false-positive CRITICAL with REJECT**
 
 > **Given** MAGI Loop 2 emits verdict GO_WITH_CAVEATS (3-0) con 1
 > CRITICAL marked "auto_cmd._set_progress doesn't validate phase
@@ -101,36 +119,51 @@ INV-29 gate, salvo que `magi_cross_check: false` este set en
 > **Then** `/requesting-code-review` is invoked with prompt referencing
 > spec + plan + diff + MAGI verdict; review output classifies the
 > CRITICAL as REJECT with rationale "phase arg validated at line N".
-> Filtered findings set = original minus the rejected CRITICAL.
-> Audit artifact `.claude/magi-cross-check/iter1-<timestamp>.json`
-> contains both original + filtered with per-finding decision.
+> The returned annotated_findings list has the SAME LENGTH as the
+> original findings list (the CRITICAL is NOT removed); the surfaced
+> finding has `cross_check_decision: "REJECT"` and
+> `cross_check_rationale: "phase arg validated at line N"` fields
+> attached. Audit artifact
+> `.claude/magi-cross-check/iter1-<timestamp>.json` contains both
+> `original_findings` and `annotated_findings` with the per-finding
+> decision. INV-29 (operator + `/receiving-code-review`) is the only
+> stage that may drop the finding.
 
-**Escenario G2: cross-check preserves valid CRITICAL**
+**Escenario G2: cross-check annotates valid CRITICAL with KEEP**
 
 > **Given** MAGI Loop 2 emits verdict with 1 valid CRITICAL ("missing
 > assertion at line X").
 > **When** cross-check ejecuta.
 > **Then** review output classifies the CRITICAL as KEEP with rationale.
-> Filtered findings set = original (no reduction). Audit artifact
-> records KEEP decision.
+> The annotated_findings list = original list with each finding
+> augmented by `cross_check_decision: "KEEP"` +
+> `cross_check_rationale: <text>` fields. No finding removed. Audit
+> artifact records the KEEP decision.
 
-**Escenario G3: cross-check downgrades over-cautious WARNING**
+**Escenario G3: cross-check annotates over-cautious WARNING with DOWNGRADE**
 
-> **Given** MAGI Loop 2 emits 5 WARNINGs, 2 of which review can downgrade
-> to INFO (low-impact polish issues mistakenly flagged WARNING).
+> **Given** MAGI Loop 2 emits 5 WARNINGs, 2 of which review judges
+> low-impact polish issues mistakenly flagged WARNING (review would
+> classify as INFO).
 > **When** cross-check ejecuta.
-> **Then** review output classifies 2 as DOWNGRADE (with new INFO
-> classification + rationale). Filtered findings = original modified;
-> 2 WARNINGs become INFOs. Audit records both.
+> **Then** review output classifies 2 as DOWNGRADE (with recommended
+> new severity INFO + rationale). The annotated_findings list has
+> SAME LENGTH as original; the 2 affected findings have
+> `cross_check_decision: "DOWNGRADE"`,
+> `cross_check_rationale: <text>`, and
+> `cross_check_recommended_severity: "INFO"` fields attached. The
+> finding's own `severity` field remains "WARNING" (annotation-only
+> redesign — INV-29 is the only filter). Audit records both decisions
+> and the recommended severity.
 
 **Escenario G4: opt-out via `magi_cross_check: false`**
 
 > **Given** `plugin.local.md` con `magi_cross_check: false` field set.
 > **When** Loop 2 ejecuta.
 > **Then** cross-check sub-phase short-circuits, returns `findings`
-> unchanged, audit artifact NOT written (or written with
-> `cross_check_skipped: true` flag). Behavior backwards-compatible
-> with v0.5.0 (no cross-check existed).
+> unchanged (no annotations attached), audit artifact NOT written (or
+> written with `cross_check_skipped: true` flag). Behavior
+> backwards-compatible with v0.5.0 (no cross-check existed).
 
 **Escenario G5: cross-check failure does not block Loop 2**
 
@@ -139,16 +172,18 @@ INV-29 gate, salvo que `magi_cross_check: false` este set en
 > **When** cross-check error caught.
 > **Then** stderr breadcrumb emitted: `[sbtdd magi-cross-check] failed
 > (will fall back to MAGI findings as-is): <error>`. Returns original
-> `findings` unchanged. Loop 2 continues to INV-29 routing as if
-> cross-check absent. Audit artifact records `cross_check_failed: true`
-> + error message. Defensive: cross-check is observability/quality
-> feature, never blocks pre-merge gate.
+> `findings` unchanged (no annotations attached). Loop 2 continues to
+> INV-29 routing as if cross-check absent. Audit artifact records
+> `cross_check_failed: true` + error message. Defensive: cross-check
+> is observability/quality feature, never blocks pre-merge gate.
 
 **Escenario G6: cross-check audit artifact JSON schema**
 
 > **Given** any cross-check execution completes.
 > **When** audit file written.
-> **Then** schema:
+> **Then** schema (annotation redesign — `filtered_findings` renamed to
+> `annotated_findings`; `original_findings` always preserved verbatim;
+> `cross_check_decisions` records the per-finding recommendation):
 > ```json
 > {
 >   "iter": 1,
@@ -158,12 +193,20 @@ INV-29 gate, salvo que `magi_cross_check: false` este set en
 >     {"severity": "CRITICAL", "title": "...", "detail": "...", "agent": "caspar"}
 >   ],
 >   "cross_check_decisions": [
->     {"original_index": 0, "decision": "REJECT", "rationale": "..."}
+>     {"original_index": 0, "decision": "REJECT", "rationale": "...",
+>      "recommended_severity": null}
 >   ],
->   "filtered_findings": [...]
+>   "annotated_findings": [
+>     {"severity": "CRITICAL", "title": "...", "detail": "...",
+>      "agent": "caspar", "cross_check_decision": "REJECT",
+>      "cross_check_rationale": "...",
+>      "cross_check_recommended_severity": null}
+>   ]
 > }
 > ```
-> JSON deterministic + parseable post-mortem.
+> JSON deterministic + parseable post-mortem. Length-preserved
+> invariant: `len(annotated_findings) == len(original_findings)`
+> always.
 
 **Acceptance criteria mapping:**
 

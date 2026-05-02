@@ -56,7 +56,10 @@ def compare(prev: dict[str, str], curr: dict[str, str]) -> dict[str, list[str]]:
     """Return {'added': [...], 'removed': [...], 'modified': [...]}."""
 ```
 
-### Cross-check audit artifact JSON schema
+### Cross-check audit artifact JSON schema (annotation redesign — CRITICAL #1+#4)
+
+Cross-check NEVER removes findings; it ONLY annotates. ``annotated_findings``
+has the SAME LENGTH as ``original_findings``; INV-29 is the only filter.
 
 ```json
 {
@@ -67,9 +70,14 @@ def compare(prev: dict[str, str], curr: dict[str, str]) -> dict[str, list[str]]:
     {"severity": "CRITICAL", "title": "...", "detail": "...", "agent": "caspar"}
   ],
   "cross_check_decisions": [
-    {"original_index": 0, "decision": "REJECT", "rationale": "..."}
+    {"original_index": 0, "decision": "REJECT", "rationale": "...",
+     "recommended_severity": null}
   ],
-  "filtered_findings": [...]
+  "annotated_findings": [
+    {"severity": "CRITICAL", "title": "...", "detail": "...", "agent": "caspar",
+     "cross_check_decision": "REJECT", "cross_check_rationale": "...",
+     "cross_check_recommended_severity": null}
+  ]
 }
 ```
 
@@ -326,27 +334,46 @@ def _apply_cross_check_decisions(
     findings: list[dict[str, Any]],
     decisions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Apply review decisions to filter the findings set.
+    """Annotate findings with cross-check decisions; never remove (CRITICAL #1+#4).
+
+    Per spec sec.2.1 redesign: cross-check is annotation-only. The returned
+    list has the SAME LENGTH as ``findings``. INV-29 (operator +
+    ``/receiving-code-review``) is the only stage that may filter findings.
+
+    Each annotated finding gains the following fields:
+    - ``cross_check_decision`` (KEEP | DOWNGRADE | REJECT)
+    - ``cross_check_rationale`` (review text)
+    - ``cross_check_recommended_severity`` (only set when DOWNGRADE; the
+      original ``severity`` field is preserved unchanged)
 
     Decision semantics:
-    - KEEP: finding remains as-is.
-    - DOWNGRADE: severity lowered (CRITICAL → WARNING → INFO).
-    - REJECT: finding removed entirely.
+    - KEEP: review judges the finding technically sound.
+    - DOWNGRADE: review recommends lower severity; recommended severity
+      surfaced in annotation only, original severity preserved on finding.
+    - REJECT: review thinks the finding is a false positive; operator
+      should consider rejecting at INV-29 stage but the finding REMAINS
+      visible in the returned list with the REJECT annotation attached.
     """
     decision_by_index = {d["original_index"]: d for d in decisions}
-    filtered: list[dict[str, Any]] = []
     severity_downgrade = {"CRITICAL": "WARNING", "WARNING": "INFO"}
+    annotated: list[dict[str, Any]] = []
     for idx, finding in enumerate(findings):
         decision = decision_by_index.get(idx, {"decision": "KEEP"})
         action = decision.get("decision", "KEEP")
-        if action == "REJECT":
-            continue
+        rationale = decision.get("rationale", "")
+        recommended_severity: str | None = None
         if action == "DOWNGRADE":
-            new_severity = severity_downgrade.get(finding["severity"], "INFO")
-            filtered.append({**finding, "severity": new_severity})
-        else:  # KEEP
-            filtered.append(finding)
-    return filtered
+            recommended_severity = decision.get(
+                "recommended_severity",
+                severity_downgrade.get(finding["severity"], "INFO"),
+            )
+        annotated.append({
+            **finding,
+            "cross_check_decision": action,
+            "cross_check_rationale": rationale,
+            "cross_check_recommended_severity": recommended_severity,
+        })
+    return annotated
 
 
 def _loop2_cross_check(
@@ -399,8 +426,8 @@ Append to `tests/test_pre_merge_cross_check.py`:
 import json
 
 
-def test_g2_cross_check_preserves_valid_critical(tmp_path, monkeypatch):
-    """G2: review classifies CRITICAL as KEEP -> finding preserved."""
+def test_g2_cross_check_annotates_valid_critical_with_keep(tmp_path, monkeypatch):
+    """G2: review classifies CRITICAL as KEEP -> finding annotated, not removed."""
     from pre_merge_cmd import _loop2_cross_check
 
     monkeypatch.setattr(
@@ -419,18 +446,26 @@ def test_g2_cross_check_preserves_valid_critical(tmp_path, monkeypatch):
         diff="x", verdict="GO_WITH_CAVEATS", findings=findings,
         iter_n=1, config=config, audit_dir=tmp_path,
     )
-    assert result == findings  # unchanged
+    # Length preserved (annotation-only redesign per CRITICAL #1+#4).
+    assert len(result) == len(findings)
+    # Original severity unchanged.
+    assert result[0]["severity"] == "CRITICAL"
+    # Annotation fields attached.
+    assert result[0]["cross_check_decision"] == "KEEP"
+    assert "missing assertion" in result[0]["cross_check_rationale"]
+    assert result[0]["cross_check_recommended_severity"] is None
 
 
-def test_g3_cross_check_downgrades_warning_to_info(tmp_path, monkeypatch):
-    """G3: DOWNGRADE decision lowers severity."""
+def test_g3_cross_check_annotates_warning_with_downgrade_recommendation(tmp_path, monkeypatch):
+    """G3: DOWNGRADE recorded as annotation; original severity preserved."""
     from pre_merge_cmd import _loop2_cross_check
 
     monkeypatch.setattr(
         "pre_merge_cmd._dispatch_requesting_code_review",
         lambda **_kw: {"decisions": [
             {"original_index": 0, "decision": "DOWNGRADE",
-             "rationale": "polish concern, not high-impact"}
+             "rationale": "polish concern, not high-impact",
+             "recommended_severity": "INFO"}
         ]},
     )
     config = MagicMock()
@@ -442,11 +477,17 @@ def test_g3_cross_check_downgrades_warning_to_info(tmp_path, monkeypatch):
         diff="x", verdict="GO_WITH_CAVEATS", findings=findings,
         iter_n=1, config=config, audit_dir=tmp_path,
     )
-    assert result[0]["severity"] == "INFO"
+    # Length preserved.
+    assert len(result) == len(findings)
+    # Original severity preserved (annotation-only redesign).
+    assert result[0]["severity"] == "WARNING"
+    # Recommendation surfaced via annotation, not by mutation.
+    assert result[0]["cross_check_decision"] == "DOWNGRADE"
+    assert result[0]["cross_check_recommended_severity"] == "INFO"
 
 
 def test_g5_cross_check_failure_returns_original_findings(tmp_path, monkeypatch, capsys):
-    """G5: dispatch failure -> graceful fallback, no block."""
+    """G5: dispatch failure -> graceful fallback, no block, no annotation."""
     from pre_merge_cmd import _loop2_cross_check
 
     def failing_dispatch(**_kw):
@@ -464,7 +505,7 @@ def test_g5_cross_check_failure_returns_original_findings(tmp_path, monkeypatch,
         diff="x", verdict="GO_WITH_CAVEATS", findings=findings,
         iter_n=1, config=config, audit_dir=tmp_path,
     )
-    assert result == findings  # original returned
+    assert result == findings  # original returned, no annotations attached
     captured = capsys.readouterr()
     assert "[sbtdd magi-cross-check] failed" in captured.err
     # Audit artifact records cross_check_failed
@@ -475,7 +516,7 @@ def test_g5_cross_check_failure_returns_original_findings(tmp_path, monkeypatch,
 
 
 def test_g6_cross_check_audit_artifact_schema(tmp_path, monkeypatch):
-    """G6: audit JSON has required fields per spec sec.2.1 Escenario G6."""
+    """G6: audit JSON has annotated_findings (not filtered_findings) per redesign."""
     from pre_merge_cmd import _loop2_cross_check
 
     monkeypatch.setattr(
@@ -501,7 +542,12 @@ def test_g6_cross_check_audit_artifact_schema(tmp_path, monkeypatch):
     assert audit["magi_verdict"] == "GO_WITH_CAVEATS"
     assert audit["original_findings"] == findings
     assert len(audit["cross_check_decisions"]) == 1
-    assert audit["filtered_findings"] == []
+    # Annotation redesign: annotated_findings replaces filtered_findings;
+    # length preserved (REJECT no longer drops).
+    assert "annotated_findings" in audit
+    assert "filtered_findings" not in audit
+    assert len(audit["annotated_findings"]) == len(findings)
+    assert audit["annotated_findings"][0]["cross_check_decision"] == "REJECT"
 ```
 
 - [ ] **Step 2: Run + verify fail**
@@ -529,11 +575,16 @@ def _write_cross_check_audit(
     verdict: str,
     original_findings: list[dict[str, Any]],
     decisions: list[dict[str, Any]] | None = None,
-    filtered_findings: list[dict[str, Any]] | None = None,
+    annotated_findings: list[dict[str, Any]] | None = None,
     cross_check_failed: bool = False,
     failure_reason: str | None = None,
 ) -> Path:
-    """Write cross-check audit artifact JSON (spec sec.2.1 Escenario G6 schema)."""
+    """Write cross-check audit artifact JSON atomically (spec sec.2.1 G6 schema).
+
+    Atomic write: serialize to ``<path>.tmp``, then ``Path.replace`` to
+    final name. Prevents partial-write corruption if process crashes
+    mid-write (per WARNING melchior — atomicization).
+    """
     audit_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     audit_path = audit_dir / f"iter{iter_n}-{timestamp}.json"
@@ -543,15 +594,17 @@ def _write_cross_check_audit(
         "magi_verdict": verdict,
         "original_findings": original_findings,
         "cross_check_decisions": decisions or [],
-        "filtered_findings": filtered_findings if filtered_findings is not None else original_findings,
+        "annotated_findings": annotated_findings if annotated_findings is not None else original_findings,
     }
     if cross_check_failed:
         audit_data["cross_check_failed"] = True
         if failure_reason:
             audit_data["failure_reason"] = failure_reason
-    audit_path.write_text(
+    tmp_path = audit_path.with_suffix(audit_path.suffix + ".tmp")
+    tmp_path.write_text(
         json.dumps(audit_data, indent=2, default=str), encoding="utf-8"
     )
+    tmp_path.replace(audit_path)  # atomic rename
     return audit_path
 
 
@@ -564,7 +617,16 @@ def _loop2_cross_check(
     config: Any,
     audit_dir: Path,
 ) -> list[dict[str, Any]]:
-    """Cross-check MAGI Loop 2 findings (full impl with audit + graceful failure)."""
+    """Cross-check MAGI Loop 2 findings: ANNOTATE only, never remove.
+
+    Per spec sec.2.1 redesign (CRITICAL #1+#4): the returned list has the
+    SAME LENGTH as ``findings``; each surfaced finding is augmented with
+    ``cross_check_decision``, ``cross_check_rationale``, and
+    ``cross_check_recommended_severity`` annotation fields. INV-29 (operator
+    + ``/receiving-code-review``) is the only stage that may filter
+    findings — silent drops here would hide real CRITICALs when the review
+    is wrong.
+    """
     if not config.magi_cross_check:
         return findings
     prompt = _build_cross_check_prompt(diff, verdict, findings)
@@ -582,14 +644,14 @@ def _loop2_cross_check(
         )
         return findings
     decisions = review_output.get("decisions", [])
-    filtered = _apply_cross_check_decisions(findings, decisions)
+    annotated = _apply_cross_check_decisions(findings, decisions)
     _write_cross_check_audit(
         audit_dir, iter_n=iter_n, verdict=verdict,
         original_findings=findings,
         decisions=decisions,
-        filtered_findings=filtered,
+        annotated_findings=annotated,
     )
-    return filtered
+    return annotated
 ```
 
 - [ ] **Step 4: Run + verify pass**
