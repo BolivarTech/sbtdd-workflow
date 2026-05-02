@@ -225,3 +225,76 @@ def test_t8_kill_tree_order_preserved_on_windows(monkeypatch):
     proc.kill = lambda: call_order.append("proc.kill")
     _kill_subprocess_tree(proc)
     assert call_order == ["taskkill", "proc.kill"]
+
+
+def test_o1_single_stream_no_prefix():
+    """O1: single-stream output never gets origin prefix."""
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys\n"
+        "for i in range(3):\n"
+        "    sys.stdout.write(f'line{i}\\n')\n"
+        "    sys.stdout.flush()\n"
+    )]
+    result = run_streamed_with_timeout(
+        cmd, origin_disambiguation=True, dispatch_label="test",
+    )
+    assert "[stdout]" not in result.stdout
+    assert "line0" in result.stdout
+
+
+def test_o2_dual_stream_in_window_prefixes():
+    """O2: both streams within disambig window -> at least one prefixed."""
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys\n"
+        "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
+        "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
+    )]
+    # Use a generous window (500ms) to ensure both writes land inside
+    # without scheduler-jitter flakiness on CI.
+    result = run_streamed_with_timeout(
+        cmd, origin_disambiguation=True, dispatch_label="test",
+        origin_window_seconds=0.5,
+    )
+    combined = result.stdout + result.stderr
+    assert "[stdout]" in combined or "[stderr]" in combined
+
+
+def test_o3_alternating_distant_windows_no_prefix():
+    """O3: streams emit > origin_window_seconds apart -> no prefix.
+
+    Per Checkpoint 2 iter 2 melchior fix: use 5ms test window vs the
+    100ms production default and a deterministic 100ms gap to avoid
+    Windows CI flakiness on loaded systems.
+    """
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys, time\n"
+        "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
+        "time.sleep(0.1)\n"
+        "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
+    )]
+    result = run_streamed_with_timeout(
+        cmd,
+        origin_disambiguation=True,
+        origin_window_seconds=0.005,  # 5ms test window vs 100ms production
+        dispatch_label="test",
+    )
+    assert "[stdout]" not in result.stdout
+    assert "[stderr]" not in result.stderr
+
+
+def test_o4_disabled_no_prefix_even_on_dual_stream():
+    """O4: origin_disambiguation=False forbids any prefix."""
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys\n"
+        "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
+        "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
+    )]
+    result = run_streamed_with_timeout(
+        cmd, origin_disambiguation=False, dispatch_label="test",
+    )
+    assert "[stdout]" not in result.stdout
+    assert "[stderr]" not in result.stderr
