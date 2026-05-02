@@ -283,6 +283,16 @@ transitions enumeradas en sec.3 + HeartbeatEmitter wraps long dispatches).
 **Files tocados:** `subprocess_utils.py` streaming pump (extends `last_write_at`
 tracking + kill on silent stream).
 
+> **v0.5.0 ship scope (Loop 2 WARNING #4 alignment):** v0.5.0 ships J3
+> as an **opt-in helper** (`subprocess_utils.run_streamed_with_timeout`).
+> The behavioral contract below (timeout floor, allowlist, semantics)
+> describes the helper's behavior, not the production-wired behavior of
+> existing `run_with_timeout` callers. Production wiring of the 33
+> existing dispatch sites in `auto_cmd.py` / `pre_merge_cmd.py` is
+> **deferred to v0.5.1** per CHANGELOG `[0.5.0]` Deferred section.
+> Existing callers retain their pre-v0.5.0 wall-clock-only timeout
+> until they are migrated.
+
 **Default rationale:** `auto_per_stream_timeout_seconds = 900` (15 min).
 Iter 2 review consolido el balance entre iter 1 caspar finding ("600s mata
 legitimate caspar runs >10min") y iter 2 melchior/balthasar pushback ("1800s
@@ -410,6 +420,14 @@ a stderr orchestrator NO triggerea timeout).
 **Files tocados:** `subprocess_utils.py` streaming pump (detect interleaved
 emission, prefix lines), `config.py` (+`auto_origin_disambiguation: bool = True`
 field).
+
+> **v0.5.0 ship scope (Loop 2 WARNING #4 alignment):** v0.5.0 ships J7
+> as an **opt-in helper** inside the same
+> `subprocess_utils.run_streamed_with_timeout` entry point as J3. The
+> 100ms-window prefix logic described below applies only to that
+> helper's call sites; existing pump consumers in `auto_cmd.py` /
+> `pre_merge_cmd.py` retain unprefixed streaming until v0.5.1
+> production-wires them. See CHANGELOG `[0.5.0]` Deferred section.
 
 **Config gate rationale:** post-MAGI Checkpoint 2 review v0.5.0 iter 1,
 parser-sensitive contexts (downstream tools que consumen raw subprocess
