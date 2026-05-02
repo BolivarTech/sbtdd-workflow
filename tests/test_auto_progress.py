@@ -1550,6 +1550,41 @@ def test_w8_atomic_replace_tmp_filename_includes_thread_id(tmp_path, monkeypatch
         )
 
 
+def test_i_hk1_systemexit_propagates_through_write_audit(tmp_path, monkeypatch):
+    """I-Hk1 (caspar iter 4 INFO): SystemExit MUST propagate through
+    ``_write_auto_run_audit`` rather than be captured by a too-broad
+    ``except BaseException`` and delayed.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    audit = auto_cmd.AutoRunAudit(
+        schema_version=auto_cmd._AUTO_RUN_SCHEMA_VERSION,
+        auto_started_at="2026-05-01T00:00:00Z",
+        auto_finished_at="2026-05-01T00:01:00Z",
+        status="success",
+        verdict="GO",
+        degraded=False,
+        accepted_conditions=0,
+        rejected_conditions=0,
+        tasks_completed=0,
+        error=None,
+    )
+
+    # Force SystemExit on the tmp write.
+    real_write_text = Path.write_text
+
+    def boom(self, *args, **kwargs):
+        if ".tmp." in str(self):
+            raise SystemExit(2)
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", boom)
+
+    with pytest.raises(SystemExit):
+        auto_cmd._write_auto_run_audit(auto_run_path, audit)
+
+
 def test_w7_persistence_vs_drain_breadcrumbs_use_independent_dedup(capsys):
     """W7 (caspar iter 4): persistence-failure and drain-decode-error
     breadcrumbs use SEPARATE dedup flags so neither defeats the other.

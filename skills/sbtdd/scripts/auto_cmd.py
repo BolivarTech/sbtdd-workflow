@@ -2695,7 +2695,13 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
     # External readers (``status --watch``, operator ``cat``) bypass the
     # lock; they rely on the atomic-rename semantics of ``os.replace``
     # (POSIX + Windows) to never observe a torn JSON document.
-    propagated_error: list[BaseException] = []
+    # v1.0.0 S1-21 I-Hk1 fix (caspar iter 4 INFO): typed as Exception (not
+    # BaseException) so SystemExit and KeyboardInterrupt propagate cleanly
+    # rather than being captured + re-raised on the calling thread (which
+    # delays + can mask the interrupt under nested handlers). Other
+    # exceptions still flow through the propagated_error list to preserve
+    # OSError semantics expected by callers.
+    propagated_error: list[Exception] = []
 
     def _do_write() -> None:
         try:
@@ -2727,10 +2733,10 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
                 except FileNotFoundError:
                     pass
                 raise
-        except BaseException as exc:  # noqa: BLE001
-            # _with_file_lock signature swallows fn return; capture the
-            # exception so we can re-raise on the calling thread (preserves
-            # OSError semantics expected by callers).
+        except Exception as exc:  # noqa: BLE001
+            # v1.0.0 S1-21 I-Hk1: narrowed from BaseException so SystemExit /
+            # KeyboardInterrupt propagate. Other exceptions captured for the
+            # caller-thread re-raise (preserves OSError semantics).
             propagated_error.append(exc)
 
     _with_file_lock(path, _do_write)
