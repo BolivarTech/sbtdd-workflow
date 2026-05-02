@@ -523,13 +523,26 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
 # is absent. Catches copy-paste regressions from older Loop 2 iter 2
 # docs/tests before the unit-test suite even runs. The token is split
 # at concatenation so this very line cannot trigger a self-match.
+#
+# v1.0.0 S1-23 I-Hk4 fix (caspar iter 4 INFO): wrap in try/except so
+# bytecode-only deployments (PyInstaller, frozen apps, .pyc-without-.py
+# environments) do not crash at import. ``inspect.getsource`` raises
+# ``OSError`` (no source available) or ``TypeError`` (built-in modules)
+# in those settings. The unit-test suite still covers the regression at
+# test time via ``test_with_file_lock_does_not_use_private_rlock_api``.
 _FORBIDDEN_PRIVATE_API_TOKEN = "_is" + "_owned"
-_with_file_lock_source = inspect.getsource(_with_file_lock)
-assert _FORBIDDEN_PRIVATE_API_TOKEN not in _with_file_lock_source, (
-    "_with_file_lock must not depend on threading.RLock private API "
-    "(Loop 2 iter 3 W1+W4+W6 + caspar R1)."
-)
-del _with_file_lock_source
+try:
+    _with_file_lock_source = inspect.getsource(_with_file_lock)
+    assert _FORBIDDEN_PRIVATE_API_TOKEN not in _with_file_lock_source, (
+        "_with_file_lock must not depend on threading.RLock private API "
+        "(Loop 2 iter 3 W1+W4+W6 + caspar R1)."
+    )
+    del _with_file_lock_source
+except (OSError, TypeError):
+    # Bytecode-only / frozen deployment; the runtime guard is best-effort.
+    # Source-level regression check is preserved by the unit-test suite,
+    # which always runs from .py files.
+    pass
 del _FORBIDDEN_PRIVATE_API_TOKEN
 
 
