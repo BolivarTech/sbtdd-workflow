@@ -24,6 +24,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -105,8 +106,19 @@ class HeartbeatEmitter:
         self._failed_writes = 0
         self._stop_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
+        # Loop 2 W4 fix: monotonic clock anchor for elapsed computation.
+        # Set in ``__enter__`` so each emitter has its own dispatch start;
+        # used by ``_format_tick`` to render ``elapsed=`` immune to
+        # wall-clock skew (NTP step). ``None`` until ``__enter__`` fires
+        # so direct ``_format_tick`` calls (unit tests with synthetic
+        # ProgressContext) fall back to wall-clock from
+        # ``ctx.started_at``.
+        self._dispatch_started_monotonic: float | None = None
 
     def __enter__(self) -> "HeartbeatEmitter":
+        # Loop 2 W4 fix: anchor monotonic clock BEFORE starting the thread
+        # so the first tick already has a valid reference.
+        self._dispatch_started_monotonic = time.monotonic()
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
             target=self._tick_loop,
@@ -265,7 +277,17 @@ class HeartbeatEmitter:
         return f"{mins}m{secs}s"
 
     def _format_tick(self, ctx: ProgressContext) -> str:
-        """Format a tick line per sec.2.1 H5 (full) and H6 (null omission)."""
+        """Format a tick line per sec.2.1 H5 (full) and H6 (null omission).
+
+        Loop 2 W4 fix: when the emitter is active (``__enter__`` called),
+        elapsed is computed from ``time.monotonic() -
+        _dispatch_started_monotonic`` -- immune to wall-clock skew (NTP
+        step). When the emitter has not entered (e.g. unit tests calling
+        ``_format_tick`` directly with a synthetic ProgressContext),
+        elapsed falls back to wall-clock derived from ``ctx.started_at``
+        so the existing test surface keeps working without dispatch
+        lifecycle.
+        """
         parts: list[str] = []
         if ctx.iter_num:
             parts.append(f"iter {ctx.iter_num}")
@@ -274,7 +296,12 @@ class HeartbeatEmitter:
             parts.append(f"task {ctx.task_index}/{ctx.task_total}")
         if ctx.dispatch_label:
             parts.append(f"dispatch={ctx.dispatch_label}")
-        if ctx.started_at is not None:
+        if self._dispatch_started_monotonic is not None:
+            # Active emitter: monotonic-based elapsed (W4 fix).
+            elapsed_s = time.monotonic() - self._dispatch_started_monotonic
+            parts.append(f"elapsed={self._format_elapsed(elapsed_s)}")
+        elif ctx.started_at is not None:
+            # Inactive emitter (test-only path): wall-clock fallback.
             elapsed_s = (datetime.now(timezone.utc) - ctx.started_at).total_seconds()
             parts.append(f"elapsed={self._format_elapsed(elapsed_s)}")
         return "[sbtdd auto] tick: " + " ".join(parts)
