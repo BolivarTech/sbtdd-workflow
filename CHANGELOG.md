@@ -119,14 +119,17 @@ every post-v0.1 release.
   misalignment; recurring iter exhaustion signals scope is too wide
   to evaluate coherently in a single review pass.
 
-### Deferred (rolled to v0.5.1)
+### Deferred (rolled to v0.5.1, target ship: within 2 weeks of v0.5.0 tag)
 
-- J3 + J7 production wiring: route the 33 existing `run_with_timeout`
-  callers in `auto_cmd.py` / `pre_merge_cmd.py` through
-  `subprocess_utils.run_streamed_with_timeout`. The helper itself
-  ships in v0.5.0 as opt-in; tests cover the helper's behavior, but no
-  v0.5.0 production caller invokes it. Deferral chosen to keep the
-  pre-merge surface change minimal during v0.5.0 finalisation.
+- **J3 + J7 production wiring** (LOCKED v0.5.1 blocker): route the 33
+  existing `run_with_timeout` callers in `auto_cmd.py` /
+  `pre_merge_cmd.py` through
+  `subprocess_utils.run_streamed_with_timeout`. The helper itself ships
+  in v0.5.0 as opt-in; tests cover the helper's behavior, but no v0.5.0
+  production caller invokes it. Until this lands, the J3 + J7 helpers
+  ship as opt-in infrastructure with zero production callers (Loop 2
+  iter 3 W3 fix: explicit ship-date target documented to keep the gap
+  visible).
 
 ### Deferred (rolled to v1.0.0)
 
