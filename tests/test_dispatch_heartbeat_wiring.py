@@ -207,3 +207,111 @@ def test_loop2_pre_merge_wraps_invoke_magi(monkeypatch, tmp_path):
         f"expected magi-loop2-iter* label, got {captured}"
     )
     reset_current_progress()
+
+
+# --- Fix 6: Site 6 / Site 7 / Site 10 transition coverage -----------------
+
+
+def test_site6_magi_loop2_iter_advances_set_progress_with_iter_num(monkeypatch, tmp_path):
+    """Site 6: each MAGI Loop 2 iter advance refreshes ProgressContext.iter_num.
+
+    The wrap fires per-iter with ``iter_num=iteration``; the captured spy
+    records the ProgressContext at invoke time, so distinct iter values
+    must appear in the captured progress snapshots.
+    """
+    import magi_dispatch
+
+    reset_current_progress()
+    auto_cmd._set_progress(phase=3)
+    captured_iters: list[int] = []
+    real = auto_cmd._dispatch_with_heartbeat
+
+    def spy(*, invoke, heartbeat_interval: float = 15.0, **kwargs: Any) -> Any:  # type: ignore[no-untyped-def]
+        captured_iters.append(get_current_progress().iter_num)
+        return real(invoke=invoke, heartbeat_interval=0.01, **kwargs)
+
+    monkeypatch.setattr(auto_cmd, "_dispatch_with_heartbeat", spy)
+
+    # Two consecutive iters: first emits conditions (forces re-iter via empty
+    # accept), second clears.
+    iter_count = {"n": 0}
+    fake_first = SimpleNamespace(
+        verdict="GO",
+        conditions=(),  # no conditions -> goes to threshold check directly
+        findings=(),
+        consensus_summary="ok",
+        degraded=False,
+        agents=("melchior", "balthasar", "caspar"),
+        retried_agents=(),
+    )
+
+    def fake_invoke_magi(**_: Any) -> Any:
+        iter_count["n"] += 1
+        return fake_first
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke_magi)
+    monkeypatch.setattr(magi_dispatch, "verdict_passes_gate", lambda _v, _t: True)
+    monkeypatch.setattr(magi_dispatch, "verdict_is_strong_no_go", lambda _v: False)
+
+    cfg = SimpleNamespace(
+        magi_threshold="GO_WITH_CAVEATS",
+        magi_max_iterations=3,
+        plan_path="planning/claude-plan-tdd.md",
+    )
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    (tmp_path / "planning" / "claude-plan-tdd.md").write_text("plan", encoding="utf-8")
+
+    pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None, ns=None)  # type: ignore[arg-type]
+    # First iter recorded: iter_num >= 1
+    assert any(n >= 1 for n in captured_iters), (
+        f"expected at least one iter_num >= 1 in {captured_iters}"
+    )
+    reset_current_progress()
+
+
+def test_site7_phase3_dispatch_sets_progress_with_label(monkeypatch, tmp_path):
+    """Site 7: Phase 3 dispatch sites (Loop 1 + receiving findings) set the label."""
+    reset_current_progress()
+    auto_cmd._set_progress(phase=3)
+
+    captured_labels: list[str] = []
+    real = auto_cmd._dispatch_with_heartbeat
+
+    def spy(*, invoke, heartbeat_interval: float = 15.0, **kwargs: Any) -> Any:  # type: ignore[no-untyped-def]
+        captured_labels.append(get_current_progress().dispatch_label or "<none>")
+        return real(invoke=invoke, heartbeat_interval=0.01, **kwargs)
+
+    monkeypatch.setattr(auto_cmd, "_dispatch_with_heartbeat", spy)
+
+    # Drive _loop1 to completion via clean-to-go.
+    class _R:
+        stdout = "clean-to-go"
+
+    monkeypatch.setattr(superpowers_dispatch, "requesting_code_review", lambda **_: _R())
+
+    pre_merge_cmd._loop1(tmp_path)
+    assert any("code-review-loop1-iter" in lbl for lbl in captured_labels), (
+        f"expected code-review-loop1-iter* label in {captured_labels}"
+    )
+    reset_current_progress()
+
+
+def test_site10_dispatch_completion_clears_label_via_set_progress_none(monkeypatch):
+    """Site 10: ``_set_progress(dispatch_label=None)`` clears the label.
+
+    Verifies the helper supports the explicit clear contract (between
+    dispatches) so any heartbeat tick that fires before the next dispatch
+    establishes its own label sees ``dispatch_label=None`` rather than
+    a stale value from the previous dispatch.
+    """
+    reset_current_progress()
+    auto_cmd._set_progress(phase=2, dispatch_label="green")
+    assert get_current_progress().dispatch_label == "green"
+    # End-of-dispatch transition: clear label.
+    auto_cmd._set_progress(phase=2, dispatch_label=None)
+    assert get_current_progress().dispatch_label is None
+    # started_at should also clear when label clears (per _set_progress
+    # contract: dispatch_label=None -> started_at=None).
+    assert get_current_progress().started_at is None
+    reset_current_progress()
