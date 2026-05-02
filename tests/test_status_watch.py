@@ -135,3 +135,57 @@ def test_w5_ctrl_c_returns_130(tmp_path, monkeypatch):
     monkeypatch.setattr("status_cmd._watch_render_one", raise_kbi)
     rc = watch_main(auto_run_path, interval=1.0, json_mode=False)
     assert rc == 130
+
+
+def test_watch_main_reads_auto_run_once_per_cycle(tmp_path, monkeypatch):
+    """Loop 2 WARNING #9: ``watch_main`` must read auto-run.json once per cycle.
+
+    Pre-fix the loop body called ``_watch_render_one`` (which itself calls
+    ``_read_auto_run_with_retry`` to load the dict and emit the diff line)
+    and then called ``_read_auto_run_with_retry`` AGAIN to drive the
+    ``WatchPollState`` parse-failure / parse-success counter. Two reads
+    per cycle wastes I/O and -- more importantly -- can produce
+    inconsistent state machine updates if the two reads observe different
+    on-disk payloads (one writer's atomic-replace can land between the
+    pair). Post-fix the loop reads once and shares the dict between the
+    diff check and the state update.
+
+    This test counts ``_read_auto_run_with_retry`` invocations across one
+    poll cycle by monkeypatching it; the cycle is forced to terminate
+    after a single iteration via a sentinel that raises ``KeyboardInterrupt``
+    on the second call to ``time.sleep`` (the one that gates the next
+    cycle).
+    """
+    from status_cmd import watch_main
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(json.dumps({"progress": {"phase": 1}}), encoding="utf-8")
+
+    call_counter = {"n": 0}
+    real_read = __import__("status_cmd")._read_auto_run_with_retry
+
+    def counting_read(path, *, max_retries: int = 5):
+        call_counter["n"] += 1
+        return real_read(path, max_retries=max_retries)
+
+    monkeypatch.setattr("status_cmd._read_auto_run_with_retry", counting_read)
+
+    sleeps = {"n": 0}
+
+    def fake_sleep(_seconds):
+        sleeps["n"] += 1
+        # Allow the first sleep to execute (end of cycle 1); on the
+        # second sleep break out of the poll loop so the test terminates.
+        if sleeps["n"] >= 1:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr("status_cmd.time.sleep", fake_sleep)
+
+    rc = watch_main(auto_run_path, interval=1.0, json_mode=False)
+    assert rc == 130  # KeyboardInterrupt path
+    # One full cycle ran before the sleep raised -- assert the cycle did
+    # NOT double-read auto-run.json.
+    assert call_counter["n"] == 1, (
+        f"watch_main read auto-run.json {call_counter['n']} times per cycle "
+        f"(expected 1, Loop 2 WARNING #9)"
+    )
