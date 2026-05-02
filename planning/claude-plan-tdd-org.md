@@ -2290,6 +2290,108 @@ def test_w1_sweep_no_remaining_run_with_timeout_in_production():
         f"run_with_timeout (must use run_streamed_with_timeout):\n"
         + "\n".join(f"  {s}" for s in unwired_sites)
     )
+
+
+def test_w1_run_streamed_with_timeout_callers_have_dispatch_label():
+    """W1 sweep extension (balthasar Loop 2 iter 2 WARNING):
+    every `run_streamed_with_timeout` callsite in production code MUST
+    pass `dispatch_label=` keyword argument with a value drawn from the
+    set declared in spec sec.4.1 (J3+J7 wiring contract).
+
+    Asserting absence of unwired callers (the sister test above) is
+    necessary but not sufficient: a caller could migrate to
+    `run_streamed_with_timeout` but forget to thread `dispatch_label`,
+    breaking heartbeat correlation in `auto-run.json` audit. This test
+    walks every `run_streamed_with_timeout` Call node and verifies
+    `dispatch_label` is present and falls into the documented label
+    space.
+    """
+    import ast
+    from pathlib import Path
+
+    expected_label_categories = {
+        # Static categories (exact match).
+        "verification",
+        "systematic-debugging",
+        "spec-review",
+        "spec-review-mini-cycle-red",
+        "spec-review-mini-cycle-green",
+        "spec-review-mini-cycle-refactor",
+        # Dynamic prefixes (per spec sec.4.1; iter number appended at
+        # call site via f-string). Test accepts any string starting
+        # with one of these prefixes.
+    }
+    dynamic_prefixes = (
+        "code-review-loop1-iter",
+        "magi-loop2-iter",
+        "receiving-magi-findings-iter",
+    )
+
+    production_paths = [
+        Path("skills/sbtdd/scripts/auto_cmd.py"),
+        Path("skills/sbtdd/scripts/pre_merge_cmd.py"),
+    ]
+
+    def _label_value(node: ast.keyword) -> str | None:
+        """Return string value of dispatch_label kwarg if statically known."""
+        v = node.value
+        if isinstance(v, ast.Constant) and isinstance(v.value, str):
+            return v.value
+        if isinstance(v, ast.JoinedStr):  # f-string
+            # Reconstruct the literal-string portion (FormattedValue parts
+            # become "{...}" placeholders we ignore — we only check the
+            # literal prefix).
+            parts: list[str] = []
+            for piece in v.values:
+                if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
+                    parts.append(piece.value)
+                else:
+                    parts.append("")
+            return "".join(parts)
+        return None
+
+    missing_or_invalid: list[str] = []
+    for path in production_paths:
+        assert path.exists(), f"production file missing: {path}"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_target = (
+                (isinstance(func, ast.Attribute) and func.attr == "run_streamed_with_timeout")
+                or (isinstance(func, ast.Name) and func.id == "run_streamed_with_timeout")
+            )
+            if not is_target:
+                continue
+            label_kw = next(
+                (kw for kw in node.keywords if kw.arg == "dispatch_label"),
+                None,
+            )
+            if label_kw is None:
+                missing_or_invalid.append(
+                    f"{path}:{node.lineno} — dispatch_label kwarg missing"
+                )
+                continue
+            value = _label_value(label_kw)
+            if value is None:
+                # Non-static label (variable reference); skip — runtime
+                # tests cover dynamic cases.
+                continue
+            if value in expected_label_categories:
+                continue
+            if any(value.startswith(prefix) for prefix in dynamic_prefixes):
+                continue
+            missing_or_invalid.append(
+                f"{path}:{node.lineno} — dispatch_label={value!r} "
+                f"not in {sorted(expected_label_categories)} "
+                f"or any of prefixes {dynamic_prefixes}"
+            )
+
+    assert missing_or_invalid == [], (
+        "v1.0.0 W1 dispatch_label correctness violation:\n"
+        + "\n".join(f"  {s}" for s in missing_or_invalid)
+    )
 ```
 
 - [ ] **Step 2: Run + verify pass**
