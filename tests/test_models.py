@@ -102,3 +102,49 @@ def test_valid_subcommands_rejects_mutation():
 
     with pytest.raises((TypeError, AttributeError)):
         VALID_SUBCOMMANDS[0] = "hacked"  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# ProgressContext (v0.5.0 sec.3 — heartbeat snapshot dataclass).
+# ---------------------------------------------------------------------------
+
+
+def test_progress_context_default_construction_uses_zero_and_none():
+    from models import ProgressContext
+
+    ctx = ProgressContext()
+    assert ctx.iter_num == 0
+    assert ctx.phase == 0
+    assert ctx.task_index is None
+    assert ctx.task_total is None
+    assert ctx.dispatch_label is None
+    assert ctx.started_at is None
+
+
+def test_progress_context_full_construction_preserves_fields():
+    from datetime import datetime, timezone
+
+    from models import ProgressContext
+
+    ts = datetime(2026, 5, 1, 12, 34, 56, tzinfo=timezone.utc)
+    ctx = ProgressContext(
+        iter_num=2,
+        phase=3,
+        task_index=14,
+        task_total=36,
+        dispatch_label="magi-loop2-iter2",
+        started_at=ts,
+    )
+    assert (ctx.iter_num, ctx.phase, ctx.task_index, ctx.task_total) == (2, 3, 14, 36)
+    assert ctx.dispatch_label == "magi-loop2-iter2"
+    assert ctx.started_at == ts
+
+
+def test_progress_context_is_frozen():
+    from dataclasses import FrozenInstanceError
+
+    from models import ProgressContext
+
+    ctx = ProgressContext()
+    with pytest.raises(FrozenInstanceError):
+        ctx.iter_num = 5  # type: ignore[misc]

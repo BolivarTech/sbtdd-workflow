@@ -12,6 +12,8 @@ MappingProxyType or tuple to prevent runtime mutation (sec.S.8.5).
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import datetime
 from types import MappingProxyType
 from typing import Mapping
 
@@ -126,3 +128,33 @@ INV_0_PINNED_MODEL_RE: "re.Pattern[str]" = re.compile(
     r"))\b",
     re.IGNORECASE,
 )
+
+
+@dataclass(frozen=True)
+class ProgressContext:
+    """Immutable snapshot of auto-run progress (sec.3 of v0.5.0 spec).
+
+    Reader/writer protocol pinned in spec sec.3:
+
+    - Writer (:mod:`auto_cmd` main thread) creates a NEW
+      ``ProgressContext`` per phase / task / dispatch transition and
+      assigns to the module-level singleton via the lock-protected
+      setter in :mod:`heartbeat`.
+    - Reader (HeartbeatEmitter daemon thread) calls
+      :func:`heartbeat.get_current_progress` to read; the returned
+      snapshot is immutable so no further locking is required.
+
+    The ``started_at`` field tracks the **current dispatch's** start
+    time, NOT the phase start nor the overall auto-run start.
+    Heartbeat ticks render ``elapsed=`` relative to this dispatch.
+
+    Serialization to ``.claude/auto-run.json`` uses ISO 8601 UTC with
+    the ``Z`` suffix (e.g. ``"2026-05-01T12:34:56Z"``).
+    """
+
+    iter_num: int = 0
+    phase: int = 0
+    task_index: int | None = None
+    task_total: int | None = None
+    dispatch_label: str | None = None
+    started_at: datetime | None = None
