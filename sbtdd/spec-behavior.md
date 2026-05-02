@@ -224,6 +224,24 @@ than re-emit the same annotated finding. The carry-forward block is
 lossless: serialize annotated_findings (full set) so MAGI agents see
 both their previous output and the meta-review on top.
 
+**Carry-forward annotation normalization (caspar Loop 2 iter 4 W4):**
+the "Prior triage context" block surfaces annotations to MAGI as
+context, but the next MAGI payload's `findings` array (the working set
+that the next iter's cross-check will run over) MUST be normalized
+back to the un-annotated form. Without normalization, annotation fields
+(`cross_check_decision`, `cross_check_rationale`,
+`cross_check_recommended_severity`, plus the dispatch diagnostic flags
+`_dispatch_failure` and `_failure_reason`) accumulate across iters: iter
+N+1 carries iter N's annotations, iter N+2 carries N+N+1's annotations,
+unbounded growth that pollutes the audit and confuses cross-check on
+subsequent iters. The orchestrator MUST apply
+`_normalize_findings_for_carry_forward(findings)` to strip those fields
+before re-emitting findings to the next MAGI iter. The "Prior triage
+context" block (separate from `findings`) is the canonical record of
+what cross-check + INV-29 decided in prior iters; normalizing
+`findings` keeps the working set lossless for MAGI without
+double-bookkeeping the annotations.
+
 **Acceptance criteria mapping:**
 
 | Criterion | Escenarios | Test fixtures |

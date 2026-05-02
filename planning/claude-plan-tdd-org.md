@@ -1117,12 +1117,95 @@ def _loop2_with_cross_check(
 
 Find existing `_loop2` callers in pre_merge_cmd.py and replace direct MAGI invocation with `_loop2_with_cross_check`. Pass `audit_dir = root / ".claude" / "magi-cross-check"`.
 
-- [ ] **Step 6: Run + verify pass + commit**
+- [ ] **Step 6: Add `_normalize_findings_for_carry_forward` helper (caspar iter 4 W4)**
+
+Annotation fields accumulate across MAGI iters if findings are
+re-emitted to iter N+1 with prior iter N's annotations attached. Add
+the helper next to `_loop2_with_cross_check` in `pre_merge_cmd.py`:
+
+```python
+_CROSS_CHECK_ANNOTATION_FIELDS: tuple[str, ...] = (
+    "cross_check_decision",
+    "cross_check_rationale",
+    "cross_check_recommended_severity",
+    "_dispatch_failure",
+    "_failure_reason",
+)
+
+
+def _normalize_findings_for_carry_forward(
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Strip cross-check annotation fields before re-emitting to next MAGI iter.
+
+    Per caspar Loop 2 iter 4 W4 fix: annotation fields
+    (``cross_check_decision``, ``cross_check_rationale``,
+    ``cross_check_recommended_severity``) and dispatch diagnostic flags
+    (``_dispatch_failure``, ``_failure_reason``) accumulate unbounded
+    across MAGI iters if not stripped. The "Prior triage context" block
+    (separate from ``findings``) is the canonical record; the working
+    ``findings`` set MUST be normalized back to the un-annotated form
+    for the next iter.
+    """
+    return [
+        {k: v for k, v in f.items() if k not in _CROSS_CHECK_ANNOTATION_FIELDS}
+        for f in findings
+    ]
+```
+
+Apply it at every site where findings from iter N are re-emitted to
+iter N+1's MAGI payload (search for `prior_findings` / `carry_forward`
+references in `pre_merge_cmd.py` and `auto_cmd.py`):
+
+```python
+# Before re-emitting to next MAGI iter:
+normalized = _normalize_findings_for_carry_forward(annotated_findings)
+# ... include normalized in next-iter MAGI payload `findings` field;
+# include annotated_findings (full set) in the "Prior triage context" block.
+```
+
+Add a regression test:
+
+```python
+def test_w4_normalize_strips_cross_check_annotation_fields():
+    """W4 (caspar iter 4): annotation fields stripped before carry-forward.
+
+    Prevents unbounded growth across MAGI iters.
+    """
+    from pre_merge_cmd import _normalize_findings_for_carry_forward
+
+    annotated = [
+        {
+            "severity": "CRITICAL", "title": "x", "detail": "y", "agent": "z",
+            "cross_check_decision": "REJECT",
+            "cross_check_rationale": "false positive at line N",
+            "cross_check_recommended_severity": None,
+            "_dispatch_failure": "json_parse_error",
+            "_failure_reason": "Expecting value",
+        },
+    ]
+    normalized = _normalize_findings_for_carry_forward(annotated)
+    assert len(normalized) == 1
+    f = normalized[0]
+    # Original fields preserved
+    assert f["severity"] == "CRITICAL"
+    assert f["title"] == "x"
+    assert f["detail"] == "y"
+    assert f["agent"] == "z"
+    # Annotation + diagnostic fields stripped
+    assert "cross_check_decision" not in f
+    assert "cross_check_rationale" not in f
+    assert "cross_check_recommended_severity" not in f
+    assert "_dispatch_failure" not in f
+    assert "_failure_reason" not in f
+```
+
+- [ ] **Step 7: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_pre_merge_cross_check.py -v
 git add skills/sbtdd/scripts/pre_merge_cmd.py tests/test_pre_merge_cross_check.py
-git commit -m "feat: integrate _loop2_cross_check into pre_merge_cmd._loop2 dispatch"
+git commit -m "feat: integrate _loop2_cross_check + carry-forward normalizer (W4)"
 ```
 
 ---
