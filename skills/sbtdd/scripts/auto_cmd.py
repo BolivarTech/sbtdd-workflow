@@ -189,164 +189,163 @@ def _assert_main_thread() -> None:
         )
 
 
-# Reentrancy tracking for ``_with_file_lock``. Loop 2 CRITICAL #1 fix:
-# pre-fix the helper was not reentrant on the same thread, so a nested
-# call (e.g. ``_update_progress`` -> ``_drain_heartbeat_queue_and_persist``,
-# both wrapped) deadlocked on Windows where ``msvcrt.locking`` returns
-# ``EDEADLK`` for nested locks. POSIX ``fcntl.flock`` is process-level
-# (reentrant within a process), but the Windows path needs explicit
-# reentrancy tracking; we apply the same model on both platforms for
-# uniformity. Each (path, thread_id) tracks an int counter; the OS-level
-# lock is acquired on the OUTER call only, released on the OUTER release.
-_lock_holders: dict[tuple[str, int], int] = {}
-_lock_holders_mutex = threading.Lock()
+# Loop 2 W1+W3+W6+W9 fix: replace custom reentrancy bookkeeping with
+# ``threading.RLock``. Stdlib RLock handles reentrancy natively (per-thread
+# depth tracked by the lock itself), eliminating:
+#
+# - W1: race between ``existing_depth`` check and ``_lock_holders[key] = 1``
+#   in the previous custom implementation.
+# - W3: counter leak on early-return paths (open() failure, locking failure).
+# - W6: brittleness vs. the stdlib primitive that solves the problem in
+#   ~5 lines.
+# - W9: fragile key generation via ``str(path.resolve() if path.exists()
+#   else path)`` (same logical path could yield different keys mid-call).
+#
+# Each path string maps to a single ``threading.RLock`` instance, lazily
+# created under ``_file_locks_guard`` to keep the get-or-create step
+# thread-safe. ``threading.RLock`` is reentrant on the same thread by
+# definition, so nested ``_with_file_lock`` calls from inside the locked
+# region (e.g. ``_update_progress`` -> ``_drain_heartbeat_queue_and_persist``)
+# acquire the same lock instance without self-deadlock. The Windows
+# ``msvcrt.locking`` self-deadlock that motivated the original CRITICAL #1
+# fix is bypassed entirely because the OS-level lock is now nested inside
+# the in-process RLock; only the outermost (depth=1) call attempts to
+# acquire the OS-level advisory lock on disk.
+_file_locks: dict[str, threading.RLock] = {}
+_file_locks_guard = threading.Lock()
+
+
+def _get_file_lock(path: Path) -> threading.RLock:
+    """Get-or-create a ``threading.RLock`` for the given path.
+
+    Lock identity is keyed by ``str(path)`` after a best-effort
+    ``resolve()`` if the path exists. Two callers passing equivalent
+    paths get the same RLock instance (otherwise serialization breaks).
+
+    Args:
+        path: Target filesystem path.
+
+    Returns:
+        The ``threading.RLock`` associated with ``path``.
+    """
+    try:
+        key = str(path.resolve()) if path.exists() else str(path)
+    except OSError:
+        key = str(path)
+    with _file_locks_guard:
+        lock = _file_locks.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _file_locks[key] = lock
+        return lock
 
 
 def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
-    """C4 fold-in: intra-process advisory lock around ``fn``.
+    """Serialize same-process access to ``path``.
 
-    POSIX uses ``fcntl.flock(LOCK_EX)``; Windows uses
-    ``msvcrt.locking(LK_LOCK)``. Lock is held on a sibling sentinel file
-    (``<path>.lock``) so the lock survives ``os.replace`` of the target.
+    Uses a ``threading.RLock`` for in-process reentrancy (W1+W3+W6+W9
+    fix) layered with an OS-level advisory lock (POSIX ``fcntl.flock``,
+    Windows ``msvcrt.locking``) on a sibling sentinel file
+    (``<path>.lock``).
 
-    **Scope (Loop 2 WARNING #2 fix):** the lock serialises the three
-    in-process auto-run.json writers (``_update_progress``,
-    ``_write_auto_run_audit``, ``_drain_heartbeat_queue_and_persist``)
-    against each other. **External readers** (e.g. ``status --watch``,
-    operator ``cat``, OS backup tools) read ``auto-run.json`` directly
-    without acquiring this lock; they rely on the atomic-rename semantics
-    of ``os.replace`` (POSIX + Windows) to never observe a torn JSON
-    document. The "cross-process" framing used in earlier docstrings
-    was an overclaim: the only way an external process could conflict
-    with these writers is by also using this exact lock helper, which
-    no external tool does today.
+    **Reentrancy:** ``threading.RLock`` is reentrant on the same thread,
+    so nested calls (e.g. ``_update_progress`` ->
+    ``_drain_heartbeat_queue_and_persist``) re-enter the in-process lock
+    natively; the OS-level advisory lock is acquired only on the
+    outermost (depth=1) call to avoid the Windows
+    ``msvcrt.locking`` self-deadlock that motivated the original Loop 2
+    CRITICAL #1 fix.
 
-    Best-effort: any OSError during lock acquisition logs a stderr
-    breadcrumb and proceeds without locking (intra-process contention is
-    rare; locking-related failures must not kill the auto run).
+    **Scope:** serializes the three in-process auto-run.json writers
+    (``_update_progress``, ``_write_auto_run_audit``,
+    ``_drain_heartbeat_queue_and_persist``). External readers (e.g.
+    ``status --watch``, operator ``cat``) bypass the lock and rely on
+    atomic-rename semantics of ``os.replace`` for consistency.
 
-    **Reentrant on the same thread (Loop 2 CRITICAL #1 fix).** Nested
-    invocations from the same thread on the same path skip OS-level
-    lock acquisition and proceed directly. This avoids self-deadlock
-    when ``_do_update_progress`` calls ``_drain_heartbeat_queue_and_persist``
-    inside the locked region. The OS lock is held only on the outermost
-    call; intermediate enter/exit pairs increment/decrement the counter
-    without re-entering ``msvcrt.locking`` / ``fcntl.flock``.
+    **Best-effort:** any OSError during OS-level lock acquisition logs
+    a stderr breadcrumb and proceeds without the disk lock; the
+    in-process RLock still serializes intra-process writers.
 
     Args:
-        path: The target file whose mutation is serialized.
+        path: Target file whose mutation is serialized.
         fn: Zero-argument callable that performs the mutation.
     """
-    holder_key = (str(path.resolve() if path.exists() else path), threading.get_ident())
-    # Reentrant fast path: same thread already holds the lock for this
-    # path. Skip OS-level acquisition; just bump the counter so a matched
-    # decrement on the way out keeps bookkeeping consistent.
-    with _lock_holders_mutex:
-        existing_depth = _lock_holders.get(holder_key, 0)
-        if existing_depth > 0:
-            _lock_holders[holder_key] = existing_depth + 1
-            reentrant = True
-        else:
-            reentrant = False
-
-    if reentrant:
-        try:
+    in_process_lock = _get_file_lock(path)
+    # Detect outermost-vs-reentrant entry so the OS-level disk lock is
+    # acquired only once per logical critical section. ``RLock._is_owned``
+    # is documented (CPython) and inspects the per-thread owner. We use
+    # a private fast-path: if already owned by this thread, skip the
+    # disk lock; otherwise acquire it.
+    is_outer = not in_process_lock._is_owned()  # type: ignore[attr-defined]
+    with in_process_lock:
+        if not is_outer:
+            # Reentrant call: in-process RLock has been re-acquired
+            # natively. Skip the OS-level lock (already held by the
+            # outer frame on this same thread).
             fn()
-        finally:
-            with _lock_holders_mutex:
-                _lock_holders[holder_key] -= 1
-                if _lock_holders[holder_key] <= 0:
-                    del _lock_holders[holder_key]
-        return
-
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    try:
-        lock_fd = open(lock_path, "a+b")
-    except OSError as exc:
-        sys.stderr.write(
-            f"[sbtdd] warning: could not open lock file {lock_path}: "
-            f"{exc!s}; proceeding without intra-process lock\n"
-        )
-        sys.stderr.flush()
-        fn()
-        return
-    # Mark this thread as the lock owner BEFORE entering the OS-level
-    # lock so any reentrant call from inside ``fn`` finds the holder
-    # entry and takes the fast path. We back this out on every exit
-    # path (lock-acquire failure or normal completion).
-    with _lock_holders_mutex:
-        _lock_holders[holder_key] = 1
-    try:
-        if sys.platform == "win32":
-            try:
-                import msvcrt
-
-                # 1 byte exclusive blocking lock. Seek to 0 (Loop 2
-                # WARNING #10 fix): ``open(..., "a+b")`` opens at EOF,
-                # and ``msvcrt.locking`` locks bytes from the current
-                # file position. If the sentinel file has been written
-                # to (it normally stays empty, but defensive code),
-                # the lock would cover phantom bytes past EOF. Explicit
-                # seek to 0 guarantees the lock anchors at byte 0.
-                lock_fd.seek(0)
-                msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
-            except (OSError, ImportError) as exc:
-                sys.stderr.write(
-                    f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
-                    f"proceeding without intra-process lock\n"
-                )
-                sys.stderr.flush()
-                fn()
-                return
-        else:
-            try:
-                import fcntl
-
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except (OSError, ImportError) as exc:
-                sys.stderr.write(
-                    f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
-                    f"proceeding without intra-process lock\n"
-                )
-                sys.stderr.flush()
-                fn()
-                return
+            return
+        lock_path = path.with_suffix(path.suffix + ".lock")
         try:
+            lock_fd = open(lock_path, "a+b")
+        except OSError as exc:
+            sys.stderr.write(
+                f"[sbtdd] warning: could not open lock file {lock_path}: "
+                f"{exc!s}; proceeding without intra-process lock\n"
+            )
+            sys.stderr.flush()
             fn()
-        finally:
+            return
+        try:
             if sys.platform == "win32":
                 try:
                     import msvcrt
 
-                    # Best-effort unlock; ignore errors (Windows raises if
-                    # the lock was already released by handle close).
                     lock_fd.seek(0)
-                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
-                except OSError:
-                    pass
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+                except (OSError, ImportError) as exc:
+                    sys.stderr.write(
+                        f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
+                        f"proceeding without intra-process lock\n"
+                    )
+                    sys.stderr.flush()
+                    fn()
+                    return
             else:
                 try:
                     import fcntl
 
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                except OSError:
-                    pass
-    finally:
-        try:
-            lock_fd.close()
-        except OSError:
-            pass
-        # Always clear the holder entry on the way out, including the
-        # warning paths above which return early without entering the
-        # OS lock. Use a guarded decrement so reentrant exits leave
-        # the entry intact when depth > 1 (impossible here -- outer
-        # call has depth 1 -- but defensive against future refactors).
-        with _lock_holders_mutex:
-            depth = _lock_holders.get(holder_key, 0)
-            if depth <= 1:
-                _lock_holders.pop(holder_key, None)
-            else:
-                _lock_holders[holder_key] = depth - 1
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                except (OSError, ImportError) as exc:
+                    sys.stderr.write(
+                        f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
+                        f"proceeding without intra-process lock\n"
+                    )
+                    sys.stderr.flush()
+                    fn()
+                    return
+            try:
+                fn()
+            finally:
+                if sys.platform == "win32":
+                    try:
+                        import msvcrt
+
+                        lock_fd.seek(0)
+                        msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
+                else:
+                    try:
+                        import fcntl
+
+                        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+        finally:
+            try:
+                lock_fd.close()
+            except OSError:
+                pass
 
 
 _PROGRESS_DRAIN_INTERVAL_SECONDS: int = 30
