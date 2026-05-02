@@ -2398,7 +2398,9 @@ class PluginConfig:
 In `load_plugin_local`, add default:
 
 ```python
-data.setdefault("magi_cross_check", True)
+# v1.0.0: default False (opt-in initially) — see balthasar Loop 2 iter 1
+# WARNING + sec.5.2 v1.x default-flip criteria.
+data.setdefault("magi_cross_check", False)
 ```
 
 - [ ] **Step 4: Run + verify pass + commit**
@@ -2406,7 +2408,7 @@ data.setdefault("magi_cross_check", True)
 ```bash
 pytest tests/test_config.py -k "magi_cross_check" -v
 git add skills/sbtdd/scripts/config.py tests/test_config.py
-git commit -m "feat: add PluginConfig.magi_cross_check field defaulting to True (sec.5.2)"
+git commit -m "feat: add PluginConfig.magi_cross_check field defaulting to False (sec.5.2)"
 ```
 
 ---
