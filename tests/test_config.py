@@ -543,3 +543,100 @@ def test_allowlist_rejects_question_mark_only(tmp_path):
     config_path.write_text(_W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["?"]\n---\n')
     with pytest.raises(ValidationError, match=r"(wildcard-only|bare).*rejected"):
         load_plugin_local(config_path)
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 Feature G — magi_cross_check field (sec.5.2; S2-2)
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_config_magi_cross_check_default_false(tmp_path):
+    """Feature G: magi_cross_check field defaults to False (opt-in per balthasar WARNING)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.magi_cross_check is False
+
+
+def test_plugin_config_magi_cross_check_can_be_disabled(tmp_path):
+    """G4 opt-out: magi_cross_check: false respected."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+magi_cross_check: false
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.magi_cross_check is False
+
+
+def test_plugin_config_magi_cross_check_can_be_enabled(tmp_path):
+    """Feature G dogfood: magi_cross_check: true is accepted (operator opt-in)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+magi_cross_check: true
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.magi_cross_check is True
