@@ -26,6 +26,9 @@ packages = []
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["skills/sbtdd/scripts"]
+markers = [
+    "slow: tests with wall-clock >= 5s; CI may opt out via `pytest -m 'not slow'`",
+]
 
 [tool.ruff]
 line-length = 100
