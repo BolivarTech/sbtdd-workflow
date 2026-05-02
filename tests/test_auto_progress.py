@@ -16,13 +16,66 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import sys
 import threading
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
 
 import auto_cmd
+
+
+@pytest.fixture(autouse=True)
+def _reset_auto_cmd_module_state():
+    """Loop 2 iter 3 W2 fix: drain module-level state before AND after each test.
+
+    The tests in this file directly mutate module-level mutable state
+    on ``auto_cmd``:
+
+    - ``_heartbeat_failures_q`` (queue.Queue) -- producers/tests put
+      items; drain helpers consume them. A leak of items into a later
+      test's drain() would shift its assertions.
+    - ``_drain_state.last_drain_at`` -- timestamp guard for periodic
+      drain skip logic (``_periodic_drain_if_due``).
+    - ``_drain_decode_error_emitted`` -- W14 dedup flag for stderr
+      breadcrumb.
+    - ``_observability_swallowed_count`` -- I3 swallowed counter.
+    - ``_assert_main_thread`` attribute -- some tests swap to a no-op
+      lambda to exercise concurrency code paths from worker threads.
+
+    Pre-fix individual tests drained the queue manually at their entry,
+    but if a test failed mid-run between pollute and drain (e.g. an
+    assertion error raised after ``put`` but before the next test's
+    drain loop), the leaked items would spill forward. Post-fix this
+    autouse fixture drains the queue + resets all flags + restores the
+    original ``_assert_main_thread`` reference both in setup AND
+    teardown, so test order is irrelevant and a mid-run failure
+    cannot poison downstream tests.
+    """
+    original_assert = auto_cmd._assert_main_thread
+
+    def _drain_all() -> None:
+        while not auto_cmd._heartbeat_failures_q.empty():
+            try:
+                auto_cmd._heartbeat_failures_q.get_nowait()
+            except queue.Empty:
+                break
+        auto_cmd._reset_drain_state_for_tests()
+        auto_cmd._reset_drain_decode_error_emitted_for_tests()
+        auto_cmd._reset_observability_swallowed_count_for_tests()
+
+    _drain_all()
+    try:
+        yield
+    finally:
+        _drain_all()
+        # Restore _assert_main_thread in case a test swapped it via direct
+        # attribute mutation (the legacy pattern; new tests should prefer
+        # ``monkeypatch.setattr`` so cleanup is automatic).
+        auto_cmd._assert_main_thread = original_assert
 
 
 def test_update_progress_writes_correct_schema(tmp_path):
