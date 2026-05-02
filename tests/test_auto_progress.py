@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import sys
 import threading
 from pathlib import Path
@@ -1468,7 +1467,6 @@ def test_w8_atomic_replace_tmp_filename_includes_thread_id(tmp_path, monkeypatch
 
     captured_tmp_names: list[str] = []
     real_write_text = Path.write_text
-    real_replace = os.replace
 
     def fake_write_text(self, *args, **kwargs):
         # Intercept tmp file writes to capture the filename pattern.
