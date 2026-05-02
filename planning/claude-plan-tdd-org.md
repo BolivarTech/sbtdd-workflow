@@ -3754,8 +3754,38 @@ Verify all S2-1 through S2-8 commits landed cleanly. Report `DONE: Subagent #2` 
 ### Task O-2: Pre-merge MAGI gate (Loop 1 + Loop 2)
 
 - [ ] **Loop 1**: invoke `/requesting-code-review` on diff `<base>..HEAD`. Iterate until clean-to-go (zero CRITICAL + zero high-impact WARNING) or cap=10.
+- [ ] **Pre-Loop-2 substep — activate magi_cross_check for v1.0.0 dogfood (caspar iter 4 W3 fix):**
+      Feature G ships with default `magi_cross_check: false` per
+      balthasar Loop 2 iter 1 W (recursive dogfood circular risk
+      decision). The R-Dogfood escenario (spec sec.7.3) requires the
+      flag flipped to `true` BEFORE Loop 2 iter 1 starts; without this
+      explicit substep the orchestrator could forget the activation and
+      collect zero empirical signal from the v1.0.0 cycle (caspar iter 4
+      W3). Activation steps:
+  - [ ] In the project-local `.claude/plugin.local.md` (gitignored),
+        set `magi_cross_check: true` to activate cross-check during
+        Loop 2 dogfood. **Note:** this file is project-local and
+        gitignored per CLAUDE.local.md §1; the activation is operator-
+        local and does NOT need a feature-branch commit if the flag
+        is being toggled only for the v1.0.0 dogfood window.
+        If the operator chooses to commit the toggled flag (e.g., to
+        share the dogfood activation across machines / CI),
+        commit as `chore: activate magi_cross_check for v1.0.0 Loop 2 dogfood`.
+        Either path is acceptable; pick one consistent with the
+        operator's repo conventions.
+  - [ ] Record activation timestamp in CHANGELOG `[1.0.0]` Process
+        notes: "magi_cross_check activated YYYY-MM-DD for Loop 2
+        dogfood; first empirical signal expected at iter 1 audit
+        artifact under `.claude/magi-cross-check/`".
+  - [ ] After Loop 2 completes, evaluate audit artifacts in
+        `.claude/magi-cross-check/`; if cross-check filtered any
+        findings (KEEP/DOWNGRADE/REJECT decisions ratified by INV-29
+        operator triage), log empirically in CHANGELOG against the
+        v1.x default-flip criteria (a)/(b)/(c) tally per spec sec.8.2.
+        If cross-check filtered ZERO findings, log that empirically as
+        well — null result is still data.
 - [ ] **Loop 2**: invoke `/magi:magi` on the cumulative diff. Iterate until verdict ≥ GO_WITH_CAVEATS full no-degraded, OR scope-trim per CHANGELOG `[0.5.0]` Process notes if doesn't converge in 3 iters (INV-0 override only with documented rationale).
-- [ ] **Cross-check dogfood (R-Dogfood)**: Feature G should be active during Loop 2 iter 2+ since it shipped in this cycle. Verify cross-check audit artifacts present in `.claude/magi-cross-check/`.
+- [ ] **Cross-check dogfood (R-Dogfood)**: Feature G should be active during Loop 2 iter 1+ since the pre-Loop-2 substep above flipped `magi_cross_check: true`. Verify cross-check audit artifacts present in `.claude/magi-cross-check/` after each iter.
 
 ### Task O-3: Version bump 0.5.0 → 1.0.0
 
