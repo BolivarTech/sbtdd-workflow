@@ -1494,6 +1494,39 @@ git commit -m "test: J2-2/2b INV-0 cascade order + J2-3 ResolvedModels immutabil
 5. **S1-14**: pre_merge_cmd Loop 2 MAGI dispatch (lines ~611-626)
 6. **S1-15**: pre_merge_cmd receiving-findings sites (lines ~646-657)
 
+**Step 0 (pre-implementation, run ONCE before starting S1-10):
+emit a callsite→cluster mapping checklist** (per balthasar Loop 2
+iter 3 W: catches missed sites before code changes, not late at
+S1-28 sweep).
+
+```bash
+# From repo root, BEFORE editing any file in S1-10..S1-15:
+mkdir -p .claude
+{
+  echo "# v1.0.0 J3+J7 callsite mapping (generated $(date -u +%Y-%m-%dT%H:%M:%SZ))"
+  echo ""
+  echo "## auto_cmd.py callsites"
+  grep -n "run_with_timeout(" skills/sbtdd/scripts/auto_cmd.py || echo "(none)"
+  echo ""
+  echo "## pre_merge_cmd.py callsites"
+  grep -n "run_with_timeout(" skills/sbtdd/scripts/pre_merge_cmd.py || echo "(none)"
+} > .claude/v1.0.0-callsite-mapping.txt
+
+cat .claude/v1.0.0-callsite-mapping.txt
+```
+
+Manually annotate each line with its target cluster (S1-10..S1-15) +
+proposed ``dispatch_label`` value. Total expected: 33 callsites
+distributed across the 6 clusters per the line ranges above. If the
+grep output reports a different total OR a callsite outside the
+documented line ranges, **stop and reconcile** before proceeding —
+this is the cheap upstream catch that S1-28 sweep would otherwise
+flag late in the cycle.
+
+The `.claude/v1.0.0-callsite-mapping.txt` file is **gitignored** (per
+`.claude/` already in `.gitignore`); it is human-review scratch, not
+a versioned artifact. Each subagent re-generates it locally.
+
 For each cluster, the pattern is:
 
 - [ ] **Step 1: Write failing test asserting site uses `run_streamed_with_timeout`**
