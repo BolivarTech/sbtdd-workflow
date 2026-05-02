@@ -3199,7 +3199,7 @@ git commit -m "feat: add ResolvedModels frozen dataclass (J2 sec.5.1)"
 - Modify: `skills/sbtdd/scripts/config.py`
 - Modify: `tests/test_config.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `tests/test_config.py`:
 
@@ -3265,9 +3265,9 @@ magi_cross_check: false
     assert cfg.magi_cross_check is False
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Add field to PluginConfig**
+- [x] **Step 3: Add field to PluginConfig**
 
 In `skills/sbtdd/scripts/config.py`, modify `PluginConfig`:
 
@@ -3290,7 +3290,7 @@ In `load_plugin_local`, add default:
 data.setdefault("magi_cross_check", False)
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_config.py -k "magi_cross_check" -v
