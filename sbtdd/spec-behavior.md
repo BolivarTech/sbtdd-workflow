@@ -422,14 +422,41 @@ does not exist (pre-v1.0.0 plan-approval flows).
 > (`SBTDDError + ValidationError + StateFileError + DriftError +
 > DependencyError + PreconditionError + MAGIGateError`) is unchanged.
 
-**Escenario H2-4: snapshot persisted at planning/spec-snapshot.json**
+**Escenario H2-4: snapshot persisted at planning/spec-snapshot.json + state-file watermark**
 
 > **Given** plan freshly approved (`plan_approved_at` set in state file).
 > **When** plan-approval handler emits snapshot via plan task **S1-27**
 > ``_mark_plan_approved_with_snapshot``.
-> **Then** `planning/spec-snapshot.json` written with current snapshot.
-> Committed alongside `claude-plan-tdd.md`. Pre-merge S1-26 compares
-> against this.
+> **Then** `planning/spec-snapshot.json` written with current snapshot;
+> committed alongside `claude-plan-tdd.md`. Pre-merge S1-26 compares
+> against this. Additionally, the handler writes a watermark field
+> ``spec_snapshot_emitted_at: <ISO 8601 timestamp>`` to
+> `.claude/session-state.json` so a later operator who deletes the
+> snapshot file is detected at pre-merge entry (H2-5). The watermark is
+> the canonical record that a snapshot was emitted; the file itself is
+> verified-against, not trusted-on-presence-alone.
+
+**Escenario H2-5: missing snapshot file with state-file watermark = drift detected**
+
+> **Given** plan was approved at time T (state file has
+> ``spec_snapshot_emitted_at: T`` set per H2-4) but operator manually
+> deleted ``planning/spec-snapshot.json`` between plan approval and
+> pre-merge (or an external process removed it).
+> **When** `pre_merge_cmd._check_spec_snapshot_drift` ejecuta at
+> pre-merge entry (S1-26).
+> **Then** raises `MAGIGateError("Spec snapshot file deleted; re-emit
+> via /sbtdd close-task or re-approve plan")` listing the watermark
+> timestamp from the state file as evidence the snapshot WAS emitted
+> previously. This closes the bypass-by-deletion gap surfaced by caspar
+> Loop 2 iter 4 W2: without the watermark check, an operator could
+> silently bypass the drift gate by deleting the snapshot file. The
+> state-file watermark is the canon-of-the-present record (per
+> CLAUDE.local.md §2.1 "State file is canon of the present"); the
+> drift check raises when watermark says snapshot SHOULD be present
+> but file is missing. Backward compat: pre-v1.0.0 state files
+> (without the watermark field) treat the field as absent / null,
+> preserving the H2-3 backward-compat path (missing file + missing
+> watermark → stderr breadcrumb, no block).
 
 ### 3.3 Feature H Group B option 5 — Auto-generated scenario stubs
 

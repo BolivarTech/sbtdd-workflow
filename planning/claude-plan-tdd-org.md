@@ -2249,6 +2249,7 @@ def test_h2_3_pre_merge_raises_on_spec_snapshot_drift(tmp_path, monkeypatch):
     )
     spec = tmp_path / "spec-behavior.md"
     spec.write_text("# placeholder; emit_snapshot is monkeypatched", encoding="utf-8")
+    state = tmp_path / "session-state.json"  # absent — file-based detection
 
     monkeypatch.setattr(
         "spec_snapshot.emit_snapshot",
@@ -2256,7 +2257,9 @@ def test_h2_3_pre_merge_raises_on_spec_snapshot_drift(tmp_path, monkeypatch):
     )
 
     with pytest.raises(MAGIGateError) as excinfo:
-        _check_spec_snapshot_drift(spec_path=spec, snapshot_path=persisted)
+        _check_spec_snapshot_drift(
+            spec_path=spec, snapshot_path=persisted, state_file_path=state,
+        )
     msg = str(excinfo.value)
     assert "S1: parser handles empty input" in msg
     assert "re-approve" in msg.lower() or "re-run" in msg.lower()
@@ -2270,34 +2273,70 @@ def test_h2_3_pre_merge_passes_when_no_drift(tmp_path, monkeypatch):
     persisted.write_text('{"S1": "matching"}', encoding="utf-8")
     spec = tmp_path / "spec-behavior.md"
     spec.write_text("# placeholder", encoding="utf-8")
+    state = tmp_path / "session-state.json"  # absent — file-based detection
 
     monkeypatch.setattr(
         "spec_snapshot.emit_snapshot", lambda _p: {"S1": "matching"},
     )
 
     # Returns None (no exception).
-    assert _check_spec_snapshot_drift(spec_path=spec, snapshot_path=persisted) is None
+    assert _check_spec_snapshot_drift(
+        spec_path=spec, snapshot_path=persisted, state_file_path=state,
+    ) is None
 
 
 def test_h2_3_missing_snapshot_warns_but_does_not_block(tmp_path, monkeypatch, capsys):
-    """H2-3: missing snapshot file -> stderr breadcrumb, no PreMergeError.
+    """H2-3: missing snapshot file + missing watermark -> stderr breadcrumb, no error.
 
     Backward compat: pre-v1.0.0 plan-approval flows did not emit a
-    snapshot. Pre-merge logs a warning but does not block.
+    snapshot AND did not write the watermark. Pre-merge logs a warning
+    but does not block.
     """
     from pre_merge_cmd import _check_spec_snapshot_drift
 
     spec = tmp_path / "spec-behavior.md"
     spec.write_text("# placeholder", encoding="utf-8")
     snapshot_path = tmp_path / "spec-snapshot.json"  # does not exist
+    state = tmp_path / "session-state.json"  # also does not exist
 
     monkeypatch.setattr(
         "spec_snapshot.emit_snapshot", lambda _p: {"S1": "anything"},
     )
 
-    assert _check_spec_snapshot_drift(spec_path=spec, snapshot_path=snapshot_path) is None
+    assert _check_spec_snapshot_drift(
+        spec_path=spec, snapshot_path=snapshot_path, state_file_path=state,
+    ) is None
     captured = capsys.readouterr()
     assert "spec-snapshot.json" in captured.err
+
+
+def test_h2_5_missing_snapshot_with_watermark_raises(tmp_path, monkeypatch):
+    """H2-5 (caspar iter 4 W2): watermark in state file + missing snapshot
+    file = bypass-by-deletion detected, MAGIGateError raised.
+    """
+    from pre_merge_cmd import _check_spec_snapshot_drift
+    from errors import MAGIGateError
+
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    snapshot_path = tmp_path / "spec-snapshot.json"  # does NOT exist
+    state = tmp_path / "session-state.json"
+    state.write_text(
+        json.dumps({"spec_snapshot_emitted_at": "2026-05-01T12:00:00Z"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot", lambda _p: {"S1": "anything"},
+    )
+
+    with pytest.raises(MAGIGateError) as excinfo:
+        _check_spec_snapshot_drift(
+            spec_path=spec, snapshot_path=snapshot_path, state_file_path=state,
+        )
+    msg = str(excinfo.value)
+    assert "deleted" in msg.lower() or "re-emit" in msg.lower()
+    assert "2026-05-01T12:00:00Z" in msg  # watermark surfaced as evidence
 ```
 
 - [ ] **Step 2: Run + verify fail**
@@ -2316,25 +2355,57 @@ DependencyError + PreconditionError + MAGIGateError``); no new exception
 class is added by v1.0.0.
 
 ```python
+import json
 import sys
 import spec_snapshot
 from errors import MAGIGateError
 
 
 def _check_spec_snapshot_drift(
-    *, spec_path: Path, snapshot_path: Path,
+    *, spec_path: Path, snapshot_path: Path, state_file_path: Path,
 ) -> None:
     """Verify spec scenarios have not drifted since plan approval.
 
     Raises:
         MAGIGateError: when persisted snapshot differs from current spec
-            (added, removed, or modified scenarios). Reuses the existing
+            (added, removed, or modified scenarios) — H2-3. Also raises
+            when state-file watermark says a snapshot was emitted but
+            the snapshot file is missing — H2-5 (caspar iter 4 W2 fix:
+            closes bypass-by-deletion gap). Reuses the existing
             pre-merge gate exception class (caspar iter 4 CRITICAL fix).
 
-    Backward compat: missing ``snapshot_path`` (pre-v1.0.0 plan-approval
-    flows) emits a stderr breadcrumb and returns silently.
+    Backward compat: missing ``snapshot_path`` AND missing watermark
+    (pre-v1.0.0 plan-approval flows that never emitted either) emits a
+    stderr breadcrumb and returns silently.
     """
+    # Read state-file watermark (caspar iter 4 W2): canon-of-the-present
+    # record of whether a snapshot was emitted. None when state file
+    # absent / corrupt / pre-v1.0.0.
+    watermark: str | None = None
+    if state_file_path.exists():
+        try:
+            state = json.loads(state_file_path.read_text(encoding="utf-8"))
+            watermark = state.get("spec_snapshot_emitted_at")
+        except json.JSONDecodeError:
+            sys.stderr.write(
+                f"[sbtdd pre-merge] state file corrupt at "
+                f"{state_file_path}; spec-snapshot watermark check "
+                f"skipped (drift gate degrades to file-only check).\n"
+            )
+
     if not snapshot_path.exists():
+        if watermark:
+            # H2-5: watermark says snapshot WAS emitted, but file is gone.
+            # Bypass-by-deletion attempt detected (caspar iter 4 W2).
+            raise MAGIGateError(
+                f"Spec snapshot file deleted; re-emit via /sbtdd "
+                f"close-task or re-approve plan. State file watermark "
+                f"shows snapshot was emitted at {watermark} but "
+                f"{snapshot_path} no longer exists. The drift gate "
+                f"cannot be bypassed by deleting the snapshot."
+            )
+        # H2-3 backward-compat path: pre-v1.0.0 plan approval (no file,
+        # no watermark) is non-blocking with a breadcrumb.
         sys.stderr.write(
             f"[sbtdd pre-merge] no spec-snapshot.json at {snapshot_path}; "
             f"drift check skipped (pre-v1.0.0 plan-approval flow). "
@@ -2365,7 +2436,12 @@ the drift check at entry, before any work is done:
 ```python
 spec_path = root / "sbtdd" / "spec-behavior.md"
 snapshot_path = root / "planning" / "spec-snapshot.json"
-_check_spec_snapshot_drift(spec_path=spec_path, snapshot_path=snapshot_path)
+state_file_path = root / ".claude" / "session-state.json"
+_check_spec_snapshot_drift(
+    spec_path=spec_path,
+    snapshot_path=snapshot_path,
+    state_file_path=state_file_path,  # H2-5 watermark check
+)
 ```
 
 - [ ] **Step 5: Run + verify pass + commit**
@@ -2434,12 +2510,77 @@ def test_plan_approval_emits_spec_snapshot(tmp_path, monkeypatch):
     data = json.loads(snapshot_path.read_text(encoding="utf-8"))
     assert data == {"S1: x": "hash1"}
     assert captured["spec_path"] == spec
+
+
+def test_plan_approval_writes_state_file_watermark(tmp_path, monkeypatch):
+    """H2-4 + caspar iter 4 W2: plan-approval handler writes
+    spec_snapshot_emitted_at watermark to .claude/session-state.json so
+    pre-merge can detect bypass-by-deletion (H2-5).
+    """
+    from auto_cmd import _mark_plan_approved_with_snapshot
+    import json
+
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot", lambda _p: {"S1: x": "hash1"},
+    )
+
+    _mark_plan_approved_with_snapshot(root=tmp_path)
+
+    state_file_path = tmp_path / ".claude" / "session-state.json"
+    assert state_file_path.exists()
+    state = json.loads(state_file_path.read_text(encoding="utf-8"))
+    assert "spec_snapshot_emitted_at" in state
+    # ISO 8601 timestamp shape (basic sanity).
+    assert state["spec_snapshot_emitted_at"].endswith("Z")
+    assert "T" in state["spec_snapshot_emitted_at"]
+
+
+def test_plan_approval_preserves_existing_state_file_fields(tmp_path, monkeypatch):
+    """Watermark write does NOT clobber pre-existing state file fields."""
+    from auto_cmd import _mark_plan_approved_with_snapshot
+    import json
+
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    state_file_path = tmp_path / ".claude" / "session-state.json"
+    state_file_path.write_text(
+        json.dumps({
+            "current_task_id": "3",
+            "current_phase": "red",
+            "plan_approved_at": "2026-05-01T10:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot", lambda _p: {"S1: x": "hash1"},
+    )
+
+    _mark_plan_approved_with_snapshot(root=tmp_path)
+
+    state = json.loads(state_file_path.read_text(encoding="utf-8"))
+    # Existing fields preserved
+    assert state["current_task_id"] == "3"
+    assert state["current_phase"] == "red"
+    assert state["plan_approved_at"] == "2026-05-01T10:00:00Z"
+    # New watermark added
+    assert "spec_snapshot_emitted_at" in state
 ```
 
 - [ ] **Step 3: Implement `_mark_plan_approved_with_snapshot`**
 
 ```python
 import spec_snapshot
+from datetime import datetime, timezone
 
 
 def _mark_plan_approved_with_snapshot(*, root: Path) -> None:
@@ -2451,11 +2592,46 @@ def _mark_plan_approved_with_snapshot(*, root: Path) -> None:
     snapshot and persists it to ``planning/spec-snapshot.json``. The
     pre-merge gate (S1-26 ``_check_spec_snapshot_drift``) consumes this
     snapshot.
+
+    Per caspar Loop 2 iter 4 W2 fix: the helper additionally writes
+    a watermark field ``spec_snapshot_emitted_at: <ISO 8601>`` to
+    ``.claude/session-state.json``. The watermark is the canon-of-the-
+    present record (CLAUDE.local.md §2.1) that a snapshot was emitted.
+    Pre-merge gate compares the file's existence against the watermark:
+    if the watermark says snapshot was emitted but the file is missing,
+    drift detected (H2-5 escenario). Closes the bypass-by-deletion gap.
     """
     spec_path = root / "sbtdd" / "spec-behavior.md"
     snapshot_path = root / "planning" / "spec-snapshot.json"
     snapshot = spec_snapshot.emit_snapshot(spec_path)
     spec_snapshot.persist_snapshot(snapshot_path, snapshot)
+
+    # Watermark in state file (caspar iter 4 W2): canon-of-the-present
+    # record that snapshot WAS emitted. Pre-merge S1-26 compares against
+    # this to detect bypass-by-deletion.
+    state_file_path = root / ".claude" / "session-state.json"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    state_data: dict[str, Any] = {}
+    if state_file_path.exists():
+        try:
+            state_data = json.loads(state_file_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            # Corrupt state file: leave it alone, the state-file recovery
+            # protocol (CLAUDE.local.md §2.1) handles regeneration. Do not
+            # silently overwrite with a partial dict.
+            sys.stderr.write(
+                f"[sbtdd plan-approval] state file corrupt at "
+                f"{state_file_path}; spec_snapshot_emitted_at NOT "
+                f"persisted. Resolve corruption first.\n"
+            )
+            return
+    state_data["spec_snapshot_emitted_at"] = timestamp
+    tmp_path = state_file_path.with_suffix(
+        f"{state_file_path.suffix}.tmp.{os.getpid()}.{threading.get_ident()}"
+    )
+    state_file_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path.write_text(json.dumps(state_data, indent=2), encoding="utf-8")
+    tmp_path.replace(state_file_path)
 ```
 
 - [ ] **Step 4: Wire into existing plan-approval transition**
