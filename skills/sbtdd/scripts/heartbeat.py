@@ -146,9 +146,19 @@ class HeartbeatEmitter:
                     pass
                 # C3 fold-in: if zombie count reaches the hard threshold,
                 # persist the sentinel via the failures queue (single
-                # writer to main thread) AND raise RuntimeError so the
-                # operator notices the runaway state. The sentinel is
+                # writer to main thread) and emit a FATAL fd=2
+                # breadcrumb. The sentinel is
                 # ``_ZOMBIE_SENTINEL_OFFSET + zombie_count`` (>= 1000).
+                #
+                # INV-32 (Loop 1 fix v0.5.0): __exit__ must NEVER raise.
+                # The previous ``raise RuntimeError(...)`` violated INV-32
+                # ("Heartbeat thread NEVER blocks/kills auto run") AND
+                # swallowed any pending real ``exc`` from the with-block
+                # (Python only swallows when __exit__ returns truthy, but
+                # raising from __exit__ also masks the original exc on
+                # the active stack). Operator visibility is preserved via
+                # the queue sentinel + fd=2 breadcrumb; if escalation is
+                # needed, it must happen post-dispatch on the main thread.
                 if HeartbeatEmitter._zombie_thread_count >= HeartbeatEmitter._max_zombie_threads:
                     if self._failures_queue is not None:
                         try:
@@ -171,11 +181,6 @@ class HeartbeatEmitter:
                         )
                     except OSError:
                         pass
-                    raise RuntimeError(
-                        f"heartbeat zombie threshold exceeded: "
-                        f"{HeartbeatEmitter._zombie_thread_count} blocked "
-                        f"threads (max={HeartbeatEmitter._max_zombie_threads})"
-                    )
         # Persist a zombie-alert sentinel to the failures queue even before
         # the hard threshold so main-thread monitoring (drain helper) sees
         # the state. Offset keeps it distinguishable from plain counters.
