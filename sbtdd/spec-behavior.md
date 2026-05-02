@@ -293,6 +293,23 @@ once instead.
 > wins per top-authority rule). plugin.local.md fields silently
 > overridden + stderr breadcrumb.
 
+**Escenario J2-2b: Global ~/.claude/CLAUDE.md pin wins over project <repo>/CLAUDE.md pin (INV-0 cascade order)**
+
+> **Given** Both `~/.claude/CLAUDE.md` and `<repo>/CLAUDE.md` are
+> present and BOTH contain INV-0 pinning regex matches but for
+> DIFFERENT models: global pins `claude-opus-4-7` and project pins
+> `claude-haiku-4-5`. plugin.local.md has unrelated field values.
+> **When** `_resolve_all_models_once` ejecuta the cascade.
+> **Then** the cascade reads global FIRST (per INV-0 maxima
+> precedencia from CLAUDE.local.md jerarquia: global is top
+> authority, cannot be silently overridden by project file). The
+> first regex match terminates the cascade, so global wins.
+> ResolvedModels.magi_dispatch == "claude-opus-4-7"; the project
+> pin `claude-haiku-4-5` is NEVER applied. stderr breadcrumb
+> documents the global-pin source. This is the regression guard
+> for caspar Loop 2 iter 3 CRITICAL #1 (cascade had been inverted
+> in iter 2).
+
 **Escenario J2-3: ResolvedModels immutable**
 
 > **Given** `ResolvedModels` instance returned by preflight.
@@ -607,17 +624,23 @@ class ResolvedModels:
     INV-0 cascade: CLAUDE.md model pin (per `models.INV_0_PINNED_MODEL_RE`)
     overrides plugin.local.md fields silently; stderr breadcrumb emitted.
 
-    CLAUDE.md cascade order (caspar Loop 2 iter 2 WARNING fix —
-    matches CLAUDE.local.md jerarquia §0): project-level
-    ``<repo>/CLAUDE.md`` is consulted FIRST; if it pins a model
-    (regex match), it wins. Global ``~/.claude/CLAUDE.md`` is
-    consulted SECOND only when the project file is absent or has no
-    pin. The first file with a regex match terminates the cascade,
-    so a project pin is authoritative for that auto run. If a
-    Feature E v0.3.0 helper for cascading reads already exists
-    (e.g., ``superpowers_dispatch._read_cascaded_claude_md`` or
-    similar), implementations SHOULD delegate to it rather than
-    duplicating cascade logic.
+    INV-0 cascade order (caspar Loop 2 iter 3 CRITICAL fix —
+    enforces ``~/.claude/CLAUDE.md`` *maxima precedencia* per
+    INV-0): global ``~/.claude/CLAUDE.md`` is consulted FIRST; if
+    it pins a model (regex match), it wins (INV-0 maxima
+    precedencia is non-negotiable — global cannot be silently
+    overridden by a project file). Project ``<repo>/CLAUDE.md`` is
+    consulted SECOND, only when the global file is absent or has
+    no pin (in that case the project pin applies because no global
+    rule is being contradicted). The first file with a regex match
+    terminates the cascade. Neither pinned ⇒ fall through to
+    plugin.local.md per-skill fields. If a Feature E v0.3.0 helper
+    for cascading reads already exists (e.g.,
+    ``superpowers_dispatch._read_cascaded_claude_md`` or similar),
+    implementations SHOULD delegate to it rather than duplicating
+    cascade logic, BUT the helper MUST honor the same global-first
+    order — any helper that consulted project-first would itself
+    contradict INV-0 and is unsafe to delegate to here.
     """
     implementer: str
     spec_reviewer: str

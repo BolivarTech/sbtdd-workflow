@@ -1216,35 +1216,52 @@ def _resolve_all_models_once(config: Any) -> Any:
     """
     import models  # deferred — S2-1 dependency
     from models import ResolvedModels  # noqa: PLC0415 - deferred per pre-flight Mitigation A
-    # CLAUDE.md cascade per CLAUDE.local.md jerarquia (caspar Loop 2 iter 2
-    # WARNING fix): project-level CLAUDE.md (`<repo>/CLAUDE.md`) is read
-    # FIRST and may pin a model; global ~/.claude/CLAUDE.md is read SECOND
-    # only if project did not pin. This matches the precedence rule already
-    # in CLAUDE.local.md §0 ("project file extends but never contradicts
-    # global"). If a future v0.x Feature E helper exists for this cascade
+    # INV-0 cascade order per CLAUDE.local.md jerarquia (caspar Loop 2
+    # iter 3 CRITICAL fix #1): the global ``~/.claude/CLAUDE.md`` has
+    # *maxima precedencia* per INV-0; therefore the cascade reads global
+    # FIRST. If global pins a model, INV-0 is enforced — project file
+    # cannot silently override the global rule. Project ``<repo>/CLAUDE.md``
+    # is read SECOND, only when global is absent or has no pin (in that
+    # case the project pin applies because no global rule is being
+    # contradicted). The first regex match terminates the cascade. Neither
+    # pinned ⇒ fall through to plugin.local.md per-skill fields. If a
+    # Feature E v0.3.0 helper for cascading reads exists
     # (`superpowers_dispatch._read_cascaded_claude_md` or similar), prefer
-    # delegating to it instead of duplicating logic here.
+    # delegating to it ONLY if the helper honors the same global-first
+    # order; a project-first helper would itself contradict INV-0.
     claude_md_text = ""
-    project_claude_md = Path.cwd() / "CLAUDE.md"
+    pinned_source = None  # "global" | "project" for stderr breadcrumb
     global_claude_md = Path.home() / ".claude" / "CLAUDE.md"
-    for candidate in (project_claude_md, global_claude_md):
+    project_claude_md = Path.cwd() / "CLAUDE.md"
+    for candidate, label in (
+        (global_claude_md, "global"),
+        (project_claude_md, "project"),
+    ):
         try:
-            claude_md_text = candidate.read_text(encoding="utf-8")
+            text = candidate.read_text(encoding="utf-8")
         except (FileNotFoundError, OSError):
             continue
-        if models.INV_0_PINNED_MODEL_RE.search(claude_md_text):
-            # Project pin found — stop cascade (project pin is authoritative
-            # for this run; do not let global override it).
+        if models.INV_0_PINNED_MODEL_RE.search(text):
+            # Pin found — stop cascade. Global wins over project per INV-0.
+            claude_md_text = text
+            pinned_source = label
             break
+        # No pin in this candidate: keep its text only if no later candidate
+        # exists; the loop body will overwrite if the next candidate has a
+        # pin. We retain the latest read text for the post-loop regex check
+        # so a non-pinning global file doesn't shadow a project pin.
+        claude_md_text = text
 
     # Check for INV-0 pin (after cascade selection above).
     pinned_model = None
     match = models.INV_0_PINNED_MODEL_RE.search(claude_md_text)
     if match:
         pinned_model = match.group(1)
+        source_note = f" (source: {pinned_source})" if pinned_source else ""
         sys.stderr.write(
-            f"[sbtdd] INV-0 cascade: CLAUDE.md pins {pinned_model!r}; "
-            f"plugin.local.md per-skill model fields silently overridden\n"
+            f"[sbtdd] INV-0 cascade: CLAUDE.md pins {pinned_model!r}"
+            f"{source_note}; plugin.local.md per-skill model fields "
+            f"silently overridden\n"
         )
 
     def _pick(field_value: str | None, default: str) -> str:
@@ -1320,11 +1337,52 @@ def test_j2_resolved_models_is_frozen():
     )
     with pytest.raises(FrozenInstanceError):
         rm.implementer = "z"  # type: ignore[misc]
+
+
+def test_j2_2b_global_pin_wins_over_project_pin(monkeypatch, capsys):
+    """J2-2b: Global ~/.claude/CLAUDE.md pin wins over project pin (INV-0).
+
+    Regression guard for caspar Loop 2 iter 3 CRITICAL #1: cascade had
+    been inverted (project-first) in iter 2; iter 3 inverted back to
+    global-first per INV-0 maxima precedencia.
+    """
+    from auto_cmd import _resolve_all_models_once
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+
+    def fake_read_text(self, **_kw):
+        # Global pins opus, project pins haiku — DIFFERENT models, both pin.
+        if str(self) == str(global_path):
+            return "Use claude-opus-4-7 for all sessions"
+        if str(self) == str(project_path):
+            return "Use claude-haiku-4-5 for all sessions"
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = "claude-sonnet-4-6"
+    config.spec_reviewer_model = "claude-sonnet-4-6"
+    config.code_review_model = "claude-sonnet-4-6"
+    config.magi_dispatch_model = "claude-sonnet-4-6"
+
+    resolved = _resolve_all_models_once(config)
+    # Global wins per INV-0: all fields = global pin (opus), NOT project (haiku).
+    assert resolved.implementer == "claude-opus-4-7"
+    assert resolved.spec_reviewer == "claude-opus-4-7"
+    assert resolved.code_review == "claude-opus-4-7"
+    assert resolved.magi_dispatch == "claude-opus-4-7"
+    captured = capsys.readouterr()
+    assert "INV-0 cascade" in captured.err
+    # Breadcrumb mentions source = global (regression guard for cascade order).
+    assert "global" in captured.err
 ```
 
 - [ ] **Step 2: Run + verify pass**
 
-J2-2 should already pass given S1-8 implementation. J2-3 depends on Subagent #2's `ResolvedModels(frozen=True)`.
+J2-2 should already pass given S1-8 implementation. J2-2b verifies the
+INV-0 cascade order (global-first); J2-3 depends on Subagent #2's
+`ResolvedModels(frozen=True)`.
 
 ```bash
 pytest tests/test_auto_progress.py -k "j2" -v
@@ -1334,7 +1392,7 @@ pytest tests/test_auto_progress.py -k "j2" -v
 
 ```bash
 git add tests/test_auto_progress.py
-git commit -m "test: J2-2 INV-0 override + J2-3 ResolvedModels immutability"
+git commit -m "test: J2-2/2b INV-0 cascade order + J2-3 ResolvedModels immutability"
 ```
 
 ---
