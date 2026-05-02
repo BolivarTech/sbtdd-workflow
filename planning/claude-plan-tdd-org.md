@@ -136,6 +136,43 @@ the consuming function body OR test-time `monkeypatch.setattr` of the
 consumer surface so Subagent #1 tests pass standalone before S2 commits
 land.
 
+### Subagent #1 sequential ordering (mandatory, balthasar Loop 2 iter 2 WARNING)
+
+Subagent #1 has 28 tasks. Within Subagent #1 the order is sequential
+(one task at a time, fully closed before the next), but this section
+pins the **macro phase ordering**, since spec sec.7.3 R-Dogfood
+escenario depends on Feature G shipping before any v1.0.0 final review
+loop iter starts:
+
+1. **S1-1 → S1-6 (Feature G core) MUST land FIRST**, in that exact
+   numeric order. S1-1 (`_loop2_cross_check` skeleton) → S1-2 (REJECT
+   path) → S1-3 (audit + KEEP/DOWNGRADE + graceful failure) → S1-4
+   (`/requesting-code-review` dispatch helper) → S1-5 (`_loop2`
+   integration) → S1-6 (auto_cmd phase4 integration). The Subagent #1
+   implementer **MUST NOT** start S1-7 until S1-6 is committed AND its
+   tests pass on the integration branch.
+2. **S1-7 → S1-9 (F44.3 retried_agents + J2 ResolvedModels)** —
+   Pillar 1 wrap-up.
+3. **S1-10 → S1-15 (J3+J7 per-cluster wiring)** — v0.5.1 fold-in
+   migration; S1-15 is the last per-cluster site, after which S1-28
+   sweep can pass.
+4. **S1-16 → S1-19 (Caspar W4-W7)** — narrow except + status guard +
+   monkeypatch hygiene + breadcrumb dedup.
+5. **S1-20 (Windows W8 tmp filename)** — flake fix.
+6. **S1-21 → S1-24 (5 INFOs housekeeping)**.
+7. **S1-26 → S1-27 (CRITICAL #2 spec-snapshot wiring)**.
+8. **S1-28 (CRITICAL #5 sweep test)** — final tripwire flips green
+   only after S1-15 closed.
+9. **S1-25 (final make verify)** — terminal Subagent #1 task.
+
+Rationale for the S1-1..S1-6 mandatory-first rule: the recursive
+dogfood payoff (sec.7.3 R-Dogfood) requires Feature G to be present
+on the integration branch BEFORE the orchestrator opts in via
+`magi_cross_check: true` for Loop 2 iter 1. If Subagent #1 inverts
+the order (e.g., starts J3+J7 wiring before Feature G ships), the
+final review loop has no cross-check to dogfood and the empirical
+validation goal documented in spec sec.1 + sec.7.3 collapses.
+
 ### Forbidden cross-subagent surfaces (recap)
 
 | Subagent | OWNS | FORBIDDEN |
