@@ -266,8 +266,49 @@ def _assert_main_thread() -> None:
 # fix is bypassed entirely because the OS-level lock is now nested inside
 # the in-process RLock; only the outermost (depth=1) call attempts to
 # acquire the OS-level advisory lock on disk.
+#
+# Loop 2 iter 3 W1+W4+W6 fix: replace ``_is_owned()`` private-API call
+# with a public ``threading.local`` per-thread, per-path depth counter.
+# The previous iter-2 code used ``in_process_lock._is_owned()`` (CPython
+# private API) to detect outermost-vs-reentrant entry; that method is
+# documented but not part of the public stdlib contract and may be
+# renamed/removed in future Python versions. The depth counter uses
+# only public ``threading.local`` storage.
 _file_locks: dict[str, threading.RLock] = {}
 _file_locks_guard = threading.Lock()
+
+# Per-thread, per-path depth counter. Stored on a ``threading.local()`` so
+# each thread sees its own dict; the dict is keyed by the same canonical
+# path string used by :func:`_get_file_lock`. Depth > 0 means the thread
+# is inside a ``_with_file_lock`` call for that path; outermost entry
+# observes depth == 0 and acquires the OS-level disk lock.
+_lock_depth_local = threading.local()
+
+
+def _get_lock_depth_dict() -> dict[str, int]:
+    """Return the per-thread depth dict, lazily creating it on first use.
+
+    ``threading.local`` returns a fresh attribute namespace per thread,
+    so each thread observes its own dict. The dict keys are canonical
+    path strings (matching the keys used by :func:`_get_file_lock`).
+    """
+    if not hasattr(_lock_depth_local, "depths"):
+        _lock_depth_local.depths = {}
+    return _lock_depth_local.depths  # type: ignore[no-any-return]
+
+
+def _canonical_lock_key(path: Path) -> str:
+    """Return the canonical key for a given path (stable across resolve).
+
+    Mirrors the logic in :func:`_get_file_lock` so the depth counter
+    keys match the lock-identity keys exactly. A best-effort ``resolve()``
+    is attempted when the path exists; otherwise the raw path string is
+    returned. ``OSError`` falls back to the raw path string.
+    """
+    try:
+        return str(path.resolve()) if path.exists() else str(path)
+    except OSError:
+        return str(path)
 
 
 def _get_file_lock(path: Path) -> threading.RLock:
@@ -283,10 +324,7 @@ def _get_file_lock(path: Path) -> threading.RLock:
     Returns:
         The ``threading.RLock`` associated with ``path``.
     """
-    try:
-        key = str(path.resolve()) if path.exists() else str(path)
-    except OSError:
-        key = str(path)
+    key = _canonical_lock_key(path)
     with _file_locks_guard:
         lock = _file_locks.get(key)
         if lock is None:
@@ -327,80 +365,94 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
     """
     in_process_lock = _get_file_lock(path)
     # Detect outermost-vs-reentrant entry so the OS-level disk lock is
-    # acquired only once per logical critical section. ``RLock._is_owned``
-    # is documented (CPython) and inspects the per-thread owner. We use
-    # a private fast-path: if already owned by this thread, skip the
-    # disk lock; otherwise acquire it.
-    is_outer = not in_process_lock._is_owned()  # type: ignore[attr-defined]
+    # acquired only once per logical critical section. Use a public
+    # ``threading.local`` depth counter rather than the iter-2 RLock
+    # private-API call (Loop 2 iter 3 W1+W4+W6 fix). The depth dict is
+    # per-thread (via threading.local) and keyed by the canonical path
+    # string; depth == 0 at entry means outermost.
+    depth_dict = _get_lock_depth_dict()
+    key = _canonical_lock_key(path)
+    is_outer = depth_dict.get(key, 0) == 0
     with in_process_lock:
-        if not is_outer:
-            # Reentrant call: in-process RLock has been re-acquired
-            # natively. Skip the OS-level lock (already held by the
-            # outer frame on this same thread).
-            fn()
-            return
-        lock_path = path.with_suffix(path.suffix + ".lock")
+        depth_dict[key] = depth_dict.get(key, 0) + 1
         try:
-            lock_fd = open(lock_path, "a+b")
-        except OSError as exc:
-            sys.stderr.write(
-                f"[sbtdd] warning: could not open lock file {lock_path}: "
-                f"{exc!s}; proceeding without intra-process lock\n"
-            )
-            sys.stderr.flush()
-            fn()
-            return
-        try:
-            if sys.platform == "win32":
-                try:
-                    import msvcrt
-
-                    lock_fd.seek(0)
-                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
-                except (OSError, ImportError) as exc:
-                    sys.stderr.write(
-                        f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
-                        f"proceeding without intra-process lock\n"
-                    )
-                    sys.stderr.flush()
-                    fn()
-                    return
-            else:
-                try:
-                    import fcntl
-
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-                except (OSError, ImportError) as exc:
-                    sys.stderr.write(
-                        f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
-                        f"proceeding without intra-process lock\n"
-                    )
-                    sys.stderr.flush()
-                    fn()
-                    return
-            try:
+            if not is_outer:
+                # Reentrant call: in-process RLock has been re-acquired
+                # natively. Skip the OS-level lock (already held by the
+                # outer frame on this same thread).
                 fn()
-            finally:
+                return
+            lock_path = path.with_suffix(path.suffix + ".lock")
+            try:
+                lock_fd = open(lock_path, "a+b")
+            except OSError as exc:
+                sys.stderr.write(
+                    f"[sbtdd] warning: could not open lock file {lock_path}: "
+                    f"{exc!s}; proceeding without intra-process lock\n"
+                )
+                sys.stderr.flush()
+                fn()
+                return
+            try:
                 if sys.platform == "win32":
                     try:
                         import msvcrt
 
                         lock_fd.seek(0)
-                        msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
-                    except OSError:
-                        pass
+                        msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+                    except (OSError, ImportError) as exc:
+                        sys.stderr.write(
+                            f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
+                            f"proceeding without intra-process lock\n"
+                        )
+                        sys.stderr.flush()
+                        fn()
+                        return
                 else:
                     try:
                         import fcntl
 
-                        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    except OSError:
-                        pass
+                        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                    except (OSError, ImportError) as exc:
+                        sys.stderr.write(
+                            f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
+                            f"proceeding without intra-process lock\n"
+                        )
+                        sys.stderr.flush()
+                        fn()
+                        return
+                try:
+                    fn()
+                finally:
+                    if sys.platform == "win32":
+                        try:
+                            import msvcrt
+
+                            lock_fd.seek(0)
+                            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                        except OSError:
+                            pass
+                    else:
+                        try:
+                            import fcntl
+
+                            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                        except OSError:
+                            pass
+            finally:
+                try:
+                    lock_fd.close()
+                except OSError:
+                    pass
         finally:
-            try:
-                lock_fd.close()
-            except OSError:
-                pass
+            # Decrement depth; remove key when depth returns to zero so
+            # the per-thread dict stays small even after many distinct
+            # paths have been locked.
+            new_depth = depth_dict.get(key, 0) - 1
+            if new_depth <= 0:
+                depth_dict.pop(key, None)
+            else:
+                depth_dict[key] = new_depth
 
 
 _PROGRESS_DRAIN_INTERVAL_SECONDS: int = 30
