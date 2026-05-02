@@ -62,6 +62,13 @@ class PluginConfig:
     status_watch_default_interval_seconds: float = 1.0
     auto_origin_disambiguation: bool = True
     auto_no_timeout_dispatch_labels: tuple[str, ...] = field(default_factory=lambda: ("magi-*",))
+    # v1.0.0 Feature G -- MAGI cross-check meta-reviewer (sec.5.2). Defaults
+    # OFF (opt-in) per balthasar Loop 2 iter 1 WARNING (recursive dogfood
+    # circular risk: cross-check invokes /requesting-code-review from within
+    # the pre-merge gate that may itself be evaluating Feature G's own diff).
+    # Operator opts in via ``magi_cross_check: true`` in plugin.local.md.
+    # See spec sec.8.2 for v1.x default-flip criteria (a)/(b)/(c).
+    magi_cross_check: bool = False
 
 
 #: Canonical names of the v0.3.0 Feature E model fields. Used both by the
@@ -171,6 +178,9 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     data.setdefault("status_watch_default_interval_seconds", 1.0)
     data.setdefault("auto_origin_disambiguation", True)
     data.setdefault("auto_no_timeout_dispatch_labels", ["magi-*"])
+    # v1.0.0 Feature G -- default False (opt-in initially) per balthasar
+    # Loop 2 iter 1 WARNING. See sec.5.2 for v1.x default-flip criteria.
+    data.setdefault("magi_cross_check", False)
     if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
         data["auto_no_timeout_dispatch_labels"] = tuple(data["auto_no_timeout_dispatch_labels"])
     # INV-34 (sec.2.7 of spec): timeout-vs-interval relationship + absolute
