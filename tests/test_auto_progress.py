@@ -1340,6 +1340,165 @@ def test_f44_3_records_empty_list_when_no_retries(tmp_path):
     assert data["magi_iter1_retried_agents"] == []
 
 
+# v1.0.0 J2: ResolvedModels preflight cache (S1-8 + S1-9).
+def test_j2_resolve_all_models_once_returns_resolvedmodels(monkeypatch, tmp_path):
+    """J2-1: _resolve_all_models_once returns ResolvedModels populated from config."""
+    from models import ResolvedModels
+    from unittest.mock import MagicMock
+
+    # Stub Path.read_text so neither global nor project CLAUDE.md is "pinned".
+    monkeypatch.setattr("pathlib.Path.read_text", lambda self, **_kw: "")
+
+    config = MagicMock()
+    config.implementer_model = "claude-haiku-4-5"
+    config.spec_reviewer_model = "claude-sonnet-4-6"
+    config.code_review_model = "claude-sonnet-4-6"
+    config.magi_dispatch_model = "claude-opus-4-7"
+
+    resolved = auto_cmd._resolve_all_models_once(config)
+    assert isinstance(resolved, ResolvedModels)
+    assert resolved.implementer == "claude-haiku-4-5"
+    assert resolved.spec_reviewer == "claude-sonnet-4-6"
+    assert resolved.code_review == "claude-sonnet-4-6"
+    assert resolved.magi_dispatch == "claude-opus-4-7"
+
+
+def test_j2_2_inv0_pin_overrides_plugin_local_md(monkeypatch, capsys):
+    """J2-2: CLAUDE.md INV-0 pin wins over plugin.local.md fields."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(
+        "pathlib.Path.read_text",
+        lambda self, **_kw: (
+            "Use claude-opus-4-7 for all sessions" if "CLAUDE.md" in str(self) else ""
+        ),
+    )
+    config = MagicMock()
+    config.implementer_model = "claude-haiku-4-5"
+    config.spec_reviewer_model = "claude-haiku-4-5"
+    config.code_review_model = "claude-haiku-4-5"
+    config.magi_dispatch_model = "claude-haiku-4-5"
+
+    resolved = auto_cmd._resolve_all_models_once(config)
+    # INV-0 wins: all fields = pinned model.
+    assert resolved.implementer == "claude-opus-4-7"
+    assert resolved.spec_reviewer == "claude-opus-4-7"
+    assert resolved.code_review == "claude-opus-4-7"
+    assert resolved.magi_dispatch == "claude-opus-4-7"
+    captured = capsys.readouterr()
+    assert "INV-0 cascade" in captured.err
+
+
+def test_j2_2b_global_pin_wins_over_project_pin(monkeypatch, capsys):
+    """J2-2b: global ~/.claude/CLAUDE.md pin wins over project pin (INV-0).
+
+    Regression guard for caspar Loop 2 iter 3 CRITICAL #1: cascade had
+    been inverted (project-first) in iter 2; iter 3 inverted back to
+    global-first per INV-0 maxima precedencia.
+    """
+    from unittest.mock import MagicMock
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+
+    def fake_read_text(self, **_kw):
+        if str(self) == str(global_path):
+            return "Use claude-opus-4-7 for all sessions"
+        if str(self) == str(project_path):
+            return "Use claude-haiku-4-5 for all sessions"
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = "claude-sonnet-4-6"
+    config.spec_reviewer_model = "claude-sonnet-4-6"
+    config.code_review_model = "claude-sonnet-4-6"
+    config.magi_dispatch_model = "claude-sonnet-4-6"
+
+    resolved = auto_cmd._resolve_all_models_once(config)
+    # Global wins per INV-0: all fields = global pin (opus).
+    assert resolved.implementer == "claude-opus-4-7"
+    assert resolved.spec_reviewer == "claude-opus-4-7"
+    assert resolved.code_review == "claude-opus-4-7"
+    assert resolved.magi_dispatch == "claude-opus-4-7"
+    captured = capsys.readouterr()
+    assert "INV-0 cascade" in captured.err
+    # Source explicitly identified as global.
+    assert "global" in captured.err
+
+
+def test_j2_2c_multi_pin_shadow_breadcrumb(monkeypatch, capsys):
+    """J2-2c (melchior iter 4 W7): when global AND project pin DIFFERENT
+    models, an additional shadow breadcrumb tells the operator the
+    project pin was overridden.
+    """
+    from unittest.mock import MagicMock
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+
+    def fake_read_text(self, **_kw):
+        if str(self) == str(global_path):
+            return "Use claude-opus-4-7 for all sessions"
+        if str(self) == str(project_path):
+            return "Use claude-haiku-4-5 for all sessions"
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = None
+    config.spec_reviewer_model = None
+    config.code_review_model = None
+    config.magi_dispatch_model = None
+
+    auto_cmd._resolve_all_models_once(config)
+    captured = capsys.readouterr()
+    assert "OVERRIDES" in captured.err
+    assert "claude-opus-4-7" in captured.err  # global pin
+    assert "claude-haiku-4-5" in captured.err  # project pin
+    assert "shadowed" in captured.err.lower()
+
+
+def test_j2_2d_no_shadow_breadcrumb_when_pins_match(monkeypatch, capsys):
+    """J2-2d: same-pin global+project case is silent (no shadow surprise)."""
+    from unittest.mock import MagicMock
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+    same_pin_text = "Use claude-opus-4-7 for all sessions"
+
+    def fake_read_text(self, **_kw):
+        if str(self) in (str(global_path), str(project_path)):
+            return same_pin_text
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = None
+    config.spec_reviewer_model = None
+    config.code_review_model = None
+    config.magi_dispatch_model = None
+
+    auto_cmd._resolve_all_models_once(config)
+    captured = capsys.readouterr()
+    # Single-pin breadcrumb fires.
+    assert "INV-0 cascade" in captured.err
+    # But no shadow surprise (no contradiction).
+    assert "OVERRIDES" not in captured.err
+    assert "shadowed" not in captured.err.lower()
+
+
+def test_j2_3_resolved_models_is_frozen():
+    """J2-3: ResolvedModels is immutable."""
+    from dataclasses import FrozenInstanceError
+
+    from models import ResolvedModels
+
+    rm = ResolvedModels(implementer="a", spec_reviewer="b", code_review="c", magi_dispatch="d")
+    with pytest.raises(FrozenInstanceError):
+        rm.implementer = "z"  # type: ignore[misc]
+
+
 def test_f44_3_multiple_iters_do_not_clobber_each_other(tmp_path):
     """F44.3: per-iter fields coexist."""
     auto_run_path = tmp_path / "auto-run.json"

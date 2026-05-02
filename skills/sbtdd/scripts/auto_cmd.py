@@ -2260,6 +2260,104 @@ class _ShadowCfg:
         self.__dict__.update(overrides)
 
 
+def _resolve_all_models_once(config: Any) -> Any:
+    """Preflight: resolve per-skill model IDs ONCE per auto run (J2 / S1-8).
+
+    Per spec sec.2.3 + sec.5.1: replaces ~70-150 CLAUDE.md disk reads
+    per 36-task auto run with a single read at task-loop entry. INV-0
+    cascade applies (CLAUDE.md model pin via
+    :data:`models.INV_0_PINNED_MODEL_RE` overrides plugin.local.md
+    fields silently with a stderr breadcrumb).
+
+    INV-0 cascade order (caspar Loop 2 iter 3 CRITICAL fix): the
+    global ``~/.claude/CLAUDE.md`` is consulted FIRST (INV-0 maxima
+    precedencia is non-negotiable; project file cannot silently
+    override). Project ``<repo>/CLAUDE.md`` is consulted SECOND, only
+    when global is absent or unpinned. The first regex match
+    terminates the cascade. Neither pinned ⇒ fall through to
+    plugin.local.md per-skill fields. When both files have INV-0 pins
+    for *different* models, a second "shadow" breadcrumb fires so
+    operators understand why their project-level config is silently
+    overridden (melchior iter 4 W7 fix).
+
+    Note: the deferred import of :mod:`models` (inside the function
+    body, not at module top) follows pre-flight Mitigation A: avoids
+    module-load-time coupling so Subagent #1 tests can monkeypatch
+    this helper before Subagent #2's ``ResolvedModels`` class lands
+    on the integration branch.
+
+    Args:
+        config: Plugin configuration carrying per-skill model fields
+            (``implementer_model``, ``spec_reviewer_model``,
+            ``code_review_model``, ``magi_dispatch_model``).
+
+    Returns:
+        :class:`models.ResolvedModels` instance with all four resolved
+        IDs populated (INV-0 pin wins over per-skill fields when set).
+    """
+    import models as _models  # deferred per pre-flight Mitigation A
+    from models import ResolvedModels  # noqa: PLC0415 - deferred import
+
+    global_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    project_claude_md = Path.cwd() / "CLAUDE.md"
+
+    def _read_pin(path: Path) -> str | None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (FileNotFoundError, OSError):
+            return None
+        m = _models.INV_0_PINNED_MODEL_RE.search(text)
+        return m.group(1) if m else None
+
+    global_pin = _read_pin(global_claude_md)
+    project_pin = _read_pin(project_claude_md)
+
+    # Multi-pin shadow case (melchior iter 4 W7): global pin overrides
+    # project pin, but project pin existed and was DIFFERENT. Emit
+    # diagnostic breadcrumb so operator understands why project config is
+    # silently shadowed. Same-pin case is silent (no surprise).
+    if global_pin and project_pin and global_pin != project_pin:
+        sys.stderr.write(
+            f"[sbtdd] INV-0 cascade: global pin {global_pin!r} OVERRIDES "
+            f"project pin {project_pin!r}; project pin shadowed (per "
+            f"INV-0 maxima precedencia). Resolve by removing one of the "
+            f"two pins or aligning them.\n"
+        )
+
+    # INV-0 global-first selection: global wins if pinned; otherwise
+    # project wins if pinned; otherwise fall through to plugin.local.md.
+    pinned_model: str | None
+    pinned_source: str | None
+    if global_pin:
+        pinned_model = global_pin
+        pinned_source = "global"
+    elif project_pin:
+        pinned_model = project_pin
+        pinned_source = "project"
+    else:
+        pinned_model = None
+        pinned_source = None
+
+    if pinned_model:
+        sys.stderr.write(
+            f"[sbtdd] INV-0 cascade: CLAUDE.md pins {pinned_model!r}"
+            f" (source: {pinned_source}); plugin.local.md per-skill "
+            f"model fields silently overridden\n"
+        )
+
+    def _pick(field_value: str | None, default: str) -> str:
+        if pinned_model:
+            return pinned_model
+        return field_value or default
+
+    return ResolvedModels(
+        implementer=_pick(getattr(config, "implementer_model", None), "claude-sonnet-4-6"),
+        spec_reviewer=_pick(getattr(config, "spec_reviewer_model", None), "claude-sonnet-4-6"),
+        code_review=_pick(getattr(config, "code_review_model", None), "claude-sonnet-4-6"),
+        magi_dispatch=_pick(getattr(config, "magi_dispatch_model", None), "claude-opus-4-7"),
+    )
+
+
 def _read_auto_run_audit(auto_run_path: Path) -> dict[str, Any]:
     """Read ``auto-run.json`` into a dict (F44.3-2 backward compat).
 
