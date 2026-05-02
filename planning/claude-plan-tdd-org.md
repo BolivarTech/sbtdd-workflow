@@ -720,6 +720,44 @@ def test_g6_audit_serializes_null_for_keep_and_reject(tmp_path, monkeypatch):
             assert entry["cross_check_recommended_severity"] is None
         elif decision == "DOWNGRADE":
             assert entry["cross_check_recommended_severity"] in ("WARNING", "INFO")
+
+
+def test_g6_json_parse_failure_distinct_from_dispatch_failure(tmp_path, monkeypatch):
+    """G6 (melchior iter 4 W): JSON parse failure surfaces as
+    _dispatch_failure='json_parse_error' in audit, distinct from
+    cross_check_failed (full-dispatch-failure).
+
+    S1-4 wires _dispatch_requesting_code_review to return
+    {"decisions": [], "_dispatch_failure": "json_parse_error",
+     "_failure_reason": "..."} when the skill's output is malformed JSON.
+    The audit writer surfaces this as a top-level dispatch_failure block,
+    NOT under cross_check_failed (reserved for subprocess error /
+    unhandled exception). Findings are unchanged because parse failed —
+    each carries KEEP annotation with empty rationale (no review ran).
+    """
+    from pre_merge_cmd import _loop2_cross_check
+
+    monkeypatch.setattr(
+        "pre_merge_cmd._dispatch_requesting_code_review",
+        lambda **_kw: {"decisions": [], "_dispatch_failure": "json_parse_error",
+                       "_failure_reason": "Expecting value: line 1 column 1"},
+    )
+    config = MagicMock()
+    config.magi_cross_check = True
+    findings = [{"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "z"}]
+    _loop2_cross_check(diff="x", verdict="GO_WITH_CAVEATS", findings=findings,
+                       iter_n=1, config=config, audit_dir=tmp_path)
+    audit_files = list(tmp_path.glob("iter1-*.json"))
+    assert len(audit_files) == 1
+    audit = json.loads(audit_files[0].read_text(encoding="utf-8"))
+    # dispatch_failure block surfaces the json_parse_error mode separately
+    # from cross_check_failed (reserved for full-dispatch failure).
+    assert audit.get("dispatch_failure", {}).get("kind") == "json_parse_error"
+    assert "Expecting value" in audit["dispatch_failure"]["reason"]
+    # cross_check_failed must NOT be set for this distinct mode.
+    assert audit.get("cross_check_failed") is not True
+    # Findings unchanged because parse failed (no review ran).
+    assert audit["original_findings"] == findings
 ```
 
 - [ ] **Step 2: Run + verify fail**
@@ -728,7 +766,7 @@ def test_g6_audit_serializes_null_for_keep_and_reject(tmp_path, monkeypatch):
 pytest tests/test_pre_merge_cross_check.py -v
 ```
 
-Expected: 5 fail.
+Expected: 6 fail (5 original + the new G6 json_parse distinct test).
 
 - [ ] **Step 3: Add audit artifact + graceful failure to `_loop2_cross_check`**
 
