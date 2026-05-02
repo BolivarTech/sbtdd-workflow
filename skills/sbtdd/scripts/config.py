@@ -69,6 +69,11 @@ class PluginConfig:
     # Operator opts in via ``magi_cross_check: true`` in plugin.local.md.
     # See spec sec.8.2 for v1.x default-flip criteria (a)/(b)/(c).
     magi_cross_check: bool = False
+    # v1.0.0 Feature I (INV-36) -- plugin.local.md schema version. Defaults
+    # to 1 when absent (backward compat with v0.5.0 files; NF21). Future
+    # schema bumps increment this and add a migration entry to
+    # :mod:`migrate_plugin_local`.
+    schema_version: int = 1
 
 
 #: Canonical names of the v0.3.0 Feature E model fields. Used both by the
@@ -181,6 +186,10 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     # v1.0.0 Feature G -- default False (opt-in initially) per balthasar
     # Loop 2 iter 1 WARNING. See sec.5.2 for v1.x default-flip criteria.
     data.setdefault("magi_cross_check", False)
+    # v1.0.0 Feature I (INV-36) -- default schema_version 1 = v0.5.0 backward
+    # compat. Future schema bumps require a migration entry in
+    # :mod:`migrate_plugin_local`.
+    data.setdefault("schema_version", 1)
     if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
         data["auto_no_timeout_dispatch_labels"] = tuple(data["auto_no_timeout_dispatch_labels"])
     # INV-34 (sec.2.7 of spec): timeout-vs-interval relationship + absolute
