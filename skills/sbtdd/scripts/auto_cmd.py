@@ -189,6 +189,19 @@ def _assert_main_thread() -> None:
         )
 
 
+# Reentrancy tracking for ``_with_file_lock``. Loop 2 CRITICAL #1 fix:
+# pre-fix the helper was not reentrant on the same thread, so a nested
+# call (e.g. ``_update_progress`` -> ``_drain_heartbeat_queue_and_persist``,
+# both wrapped) deadlocked on Windows where ``msvcrt.locking`` returns
+# ``EDEADLK`` for nested locks. POSIX ``fcntl.flock`` is process-level
+# (reentrant within a process), but the Windows path needs explicit
+# reentrancy tracking; we apply the same model on both platforms for
+# uniformity. Each (path, thread_id) tracks an int counter; the OS-level
+# lock is acquired on the OUTER call only, released on the OUTER release.
+_lock_holders: dict[tuple[str, int], int] = {}
+_lock_holders_mutex = threading.Lock()
+
+
 def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
     """C4 fold-in: cross-process advisory lock around ``fn``.
 
@@ -199,10 +212,40 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
     breadcrumb and proceeds without locking (cross-process contention is
     rare; locking-related failures must not kill the auto run).
 
+    **Reentrant on the same thread (Loop 2 CRITICAL #1 fix).** Nested
+    invocations from the same thread on the same path skip OS-level
+    lock acquisition and proceed directly. This avoids self-deadlock
+    when ``_do_update_progress`` calls ``_drain_heartbeat_queue_and_persist``
+    inside the locked region. The OS lock is held only on the outermost
+    call; intermediate enter/exit pairs increment/decrement the counter
+    without re-entering ``msvcrt.locking`` / ``fcntl.flock``.
+
     Args:
         path: The target file whose mutation is serialized.
         fn: Zero-argument callable that performs the mutation.
     """
+    holder_key = (str(path.resolve() if path.exists() else path), threading.get_ident())
+    # Reentrant fast path: same thread already holds the lock for this
+    # path. Skip OS-level acquisition; just bump the counter so a matched
+    # decrement on the way out keeps bookkeeping consistent.
+    with _lock_holders_mutex:
+        existing_depth = _lock_holders.get(holder_key, 0)
+        if existing_depth > 0:
+            _lock_holders[holder_key] = existing_depth + 1
+            reentrant = True
+        else:
+            reentrant = False
+
+    if reentrant:
+        try:
+            fn()
+        finally:
+            with _lock_holders_mutex:
+                _lock_holders[holder_key] -= 1
+                if _lock_holders[holder_key] <= 0:
+                    del _lock_holders[holder_key]
+        return
+
     lock_path = path.with_suffix(path.suffix + ".lock")
     try:
         lock_fd = open(lock_path, "a+b")
@@ -214,12 +257,25 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
         sys.stderr.flush()
         fn()
         return
+    # Mark this thread as the lock owner BEFORE entering the OS-level
+    # lock so any reentrant call from inside ``fn`` finds the holder
+    # entry and takes the fast path. We back this out on every exit
+    # path (lock-acquire failure or normal completion).
+    with _lock_holders_mutex:
+        _lock_holders[holder_key] = 1
     try:
         if sys.platform == "win32":
             try:
                 import msvcrt
 
-                # 1 byte exclusive blocking lock.
+                # 1 byte exclusive blocking lock. Seek to 0 (Loop 2
+                # WARNING #10 fix): ``open(..., "a+b")`` opens at EOF,
+                # and ``msvcrt.locking`` locks bytes from the current
+                # file position. If the sentinel file has been written
+                # to (it normally stays empty, but defensive code),
+                # the lock would cover phantom bytes past EOF. Explicit
+                # seek to 0 guarantees the lock anchors at byte 0.
+                lock_fd.seek(0)
                 msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
             except (OSError, ImportError) as exc:
                 sys.stderr.write(
@@ -265,6 +321,17 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
             lock_fd.close()
         except OSError:
             pass
+        # Always clear the holder entry on the way out, including the
+        # warning paths above which return early without entering the
+        # OS lock. Use a guarded decrement so reentrant exits leave
+        # the entry intact when depth > 1 (impossible here -- outer
+        # call has depth 1 -- but defensive against future refactors).
+        with _lock_holders_mutex:
+            depth = _lock_holders.get(holder_key, 0)
+            if depth <= 1:
+                _lock_holders.pop(holder_key, None)
+            else:
+                _lock_holders[holder_key] = depth - 1
 
 
 _PROGRESS_DRAIN_INTERVAL_SECONDS: int = 30
