@@ -800,6 +800,21 @@ git commit -m "feat: wire _dispatch_requesting_code_review to superpowers_dispat
 - Modify: `skills/sbtdd/scripts/pre_merge_cmd.py`
 - Modify: `tests/test_pre_merge_cross_check.py`
 
+**Concrete site references (per balthasar Loop 2 iter 1 WARNING — file:line precision):**
+- ``pre_merge_cmd.py:568`` — existing ``def _loop2(root, cfg, threshold_override, ns=None)`` definition. Returns ``magi_dispatch.MAGIVerdict``. This is the function whose body needs the cross-check sub-phase wired in (or wrapped by ``_loop2_with_cross_check`` per Step 3 below).
+- ``pre_merge_cmd.py:808`` — single existing caller in ``main()``: ``verdict = _loop2(root, cfg, ns.magi_threshold, ns)``. After Step 5 wiring, this caller passes ``audit_dir = root / ".claude" / "magi-cross-check"`` through the wrapper.
+
+Verify locally before editing:
+
+```bash
+grep -n "def _loop2\|_loop2(" skills/sbtdd/scripts/pre_merge_cmd.py
+# Expected lines: 568 (def), 808 (caller in main)
+```
+
+The wrapper ``_loop2_with_cross_check`` either replaces the body of
+``_loop2`` (preferred — preserves caller signature) OR introduces a new
+function called from line 808 (if signature change is necessary).
+
 - [ ] **Step 1: Write failing test for _loop2 integration**
 
 Append to `tests/test_pre_merge_cross_check.py`:
