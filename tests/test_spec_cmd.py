@@ -413,9 +413,7 @@ def test_spec_main_emits_snapshot_and_watermark_on_approval(
 
     _seed_spec_flow_env(tmp_path, monkeypatch)
 
-    def fake_magi(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
-    ) -> object:
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
         return _make_verdict("GO", degraded=False)
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
@@ -426,9 +424,7 @@ def test_spec_main_emits_snapshot_and_watermark_on_approval(
         "planning/spec-snapshot.json must be emitted at plan approval (R10)"
     )
 
-    state = json.loads(
-        (tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8")
-    )
+    state = json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
     assert state.get("spec_snapshot_emitted_at") is not None, (
         "state file must record spec_snapshot_emitted_at watermark (R10)"
     )

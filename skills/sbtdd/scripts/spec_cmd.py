@@ -352,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     # H2-5 bypass-by-deletion gate has a non-null watermark to compare
     # against. Deferred-import per cross-subagent Mitigation A.
     import auto_cmd
+
     auto_cmd._mark_plan_approved_with_snapshot(root=root)
     _commit_approved_artifacts(root)
     return 0

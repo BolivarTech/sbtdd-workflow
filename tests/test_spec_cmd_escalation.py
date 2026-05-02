@@ -94,8 +94,12 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     def fake_brainstorming(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
+        # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\nContent goes here\n", encoding="utf-8"
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
         )
         return None
 

@@ -76,16 +76,20 @@ def bootstrapped_project(tmp_path, monkeypatch):
     _seed_spec_base(tmp_path)
     _seed_plugin_local(tmp_path)
 
-    sp = StubSuperpowers()
-    # Emulate artifacts produced by /brainstorming and /writing-plans.
-    (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-        "# behavior\nsomething\n", encoding="utf-8"
+    # Minimal §4 stub so spec_snapshot.emit_snapshot finds a section
+    # at plan-approval time (R10 caspar Checkpoint 2 iter 5).
+    _SPEC_STUB = (
+        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "**Escenario 1: stub**\n\n"
+        "> **Given** g.\n> **When** w.\n> **Then** t.\n"
     )
 
+    sp = StubSuperpowers()
+    # Emulate artifacts produced by /brainstorming and /writing-plans.
+    (tmp_path / "sbtdd" / "spec-behavior.md").write_text(_SPEC_STUB, encoding="utf-8")
+
     def fake_brainstorming(args=None, timeout=600, cwd=None):
-        (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\nContent\n", encoding="utf-8"
-        )
+        (tmp_path / "sbtdd" / "spec-behavior.md").write_text(_SPEC_STUB, encoding="utf-8")
         sp.calls.append(("brainstorming", list(args or []), cwd or ""))
         return None
 
