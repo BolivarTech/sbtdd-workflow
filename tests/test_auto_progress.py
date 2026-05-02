@@ -771,6 +771,15 @@ def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
     process; this test uses threads as the closest available proxy and
     relies on the lock-acquisition path being executed even though the
     advisory POSIX/Windows lock is per-process.
+
+    NOTE (Loop 2 iter 3 W5): this test deliberately bypasses
+    ``_assert_main_thread()`` via direct attribute swap to exercise the
+    concurrency code path. Coverage gap acknowledged: no test exercises
+    BOTH the main-thread assertion AND the concurrent-writer code path
+    together; that combination is impossible by construction (the assert
+    raises on non-main-thread entry, blocking the very path under test).
+    The W13 main-thread guard is covered separately by
+    ``test_update_progress_asserts_main_thread_at_entry``.
     """
     import sys
 
@@ -883,6 +892,14 @@ def test_update_progress_with_nonempty_queue_does_not_deadlock(tmp_path):
     actually fires (skipping the early ``if not drained: return`` branch).
     The whole call must complete in well under 3 seconds; a deadlock would
     block forever.
+
+    NOTE (Loop 2 iter 3 W5): this test deliberately bypasses
+    ``_assert_main_thread()`` via direct attribute swap to run
+    ``_update_progress`` from a worker thread (so the test thread can
+    enforce a deadlock timeout via ``threading.Event.wait``). Coverage
+    gap acknowledged: no test exercises BOTH the main-thread assertion
+    AND the concurrent-writer code path together; that combination is
+    impossible by construction.
     """
     auto_run_path = tmp_path / "auto-run.json"
     auto_run_path.write_text('{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8")
@@ -989,6 +1006,15 @@ def test_concurrent_writers_with_threading_rlock_serialize(tmp_path):
     and asserts the final on-disk JSON is well-formed (no torn document)
     AND that all writers reached completion (no thread hangs because
     of bookkeeping leak).
+
+    NOTE (Loop 2 iter 3 W5): this test deliberately bypasses
+    ``_assert_main_thread()`` via direct attribute swap to exercise the
+    concurrency code path. Coverage gap acknowledged: no test exercises
+    BOTH the main-thread assertion AND the concurrent-writer code path
+    together; that combination is impossible by construction (the assert
+    raises on non-main-thread entry, blocking the very path under test).
+    The W13 main-thread guard is covered separately by
+    ``test_update_progress_asserts_main_thread_at_entry``.
     """
     auto_run = tmp_path / "auto-run.json"
     auto_run.write_text("{}", encoding="utf-8")
