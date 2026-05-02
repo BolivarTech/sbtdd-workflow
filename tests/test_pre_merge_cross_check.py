@@ -368,6 +368,56 @@ def test_g6_json_parse_failure_distinct_from_dispatch_failure(tmp_path, monkeypa
     assert audit["original_findings"] == findings
 
 
+def test_dispatch_invokes_superpowers_requesting_code_review(monkeypatch):
+    """S1-4: _dispatch_requesting_code_review delegates to superpowers wrapper.
+
+    Real wiring: parses the skill's stdout as JSON. Returns decisions dict.
+    """
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    captured: dict = {}
+
+    class _FakeResult:
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = 0
+
+    def fake_invoke(args=None, timeout=None, cwd=None, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _FakeResult(
+            '{"decisions": [{"original_index": 0, "decision": "KEEP", "rationale": "ok"}]}'
+        )
+
+    monkeypatch.setattr("superpowers_dispatch.requesting_code_review", fake_invoke)
+    result = _dispatch_requesting_code_review(diff="diff", prompt="meta-prompt")
+    assert "decisions" in result
+    assert result["decisions"][0]["decision"] == "KEEP"
+
+
+def test_dispatch_returns_json_parse_error_marker_on_malformed_output(monkeypatch, capsys):
+    """S1-4: dispatch surfaces _dispatch_failure='json_parse_error' when stdout malformed."""
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    class _FakeResult:
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = 0
+
+    monkeypatch.setattr(
+        "superpowers_dispatch.requesting_code_review",
+        lambda **_kw: _FakeResult("not json at all"),
+    )
+    result = _dispatch_requesting_code_review(diff="x", prompt="y")
+    assert result["_dispatch_failure"] == "json_parse_error"
+    assert "decisions" in result
+    assert result["decisions"] == []
+    captured = capsys.readouterr()
+    assert "malformed JSON" in captured.err
+
+
 def test_w4_normalize_strips_cross_check_annotation_fields():
     """W4 (caspar iter 4): annotation fields stripped before carry-forward."""
     from pre_merge_cmd import _normalize_findings_for_carry_forward

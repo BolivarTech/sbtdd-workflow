@@ -880,30 +880,68 @@ def _dispatch_requesting_code_review(
     *,
     diff: str,
     prompt: str,
+    cwd: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Dispatch ``/requesting-code-review`` skill with cross-check meta-prompt.
 
-    Stub implementation returning ``NotImplementedError``; the real
-    superpowers wiring lands in S1-4. Tests monkeypatch this function to
-    inject canned review decisions.
+    Parses the skill's stdout as JSON. Returns decisions dict per
+    :func:`_build_cross_check_prompt` contract. Tests monkeypatch this
+    function (or the underlying ``superpowers_dispatch.requesting_code_review``)
+    to inject canned review decisions.
+
+    Per melchior Loop 2 iter 3 WARNING fix: distinguish JSON-parse-failure
+    from full-dispatch-failure for audit visibility. Two distinct failure
+    modes surface separately:
+
+    - dispatch itself fails (subprocess error / timeout) -> caller in
+      :func:`_loop2_cross_check` catches the exception and writes
+      ``cross_check_failed: true`` to the audit artifact with reason.
+    - dispatch succeeds but output is malformed JSON -> we return an
+      empty-decisions dict with the diagnostic flag
+      ``_dispatch_failure: "json_parse_error"`` and ``_failure_reason``
+      explaining the parse error. Audit writer surfaces this as a
+      separate ``dispatch_failure`` field (NOT under ``cross_check_failed``).
+
+    Either failure mode degrades to "no findings filtered" (original
+    MAGI findings flow through to INV-29 routing unchanged), but
+    operators have the audit signal to investigate.
 
     Args:
-        diff: Cumulative diff context (currently unused by the stub but
-            forwarded by ``_loop2_cross_check``).
+        diff: Cumulative diff context (forwarded for callers that wire
+            it through ``args``; current minimal impl passes only the
+            prompt as a positional arg).
         prompt: Meta-review prompt built by :func:`_build_cross_check_prompt`.
-        **kwargs: Reserved for future signature additions.
+        cwd: Working directory for the skill invocation (typically
+            project root).
+        **kwargs: Forwarded to the wrapper.
 
     Returns:
         Dict with ``decisions`` key (list of per-finding decision dicts).
-
-    Raises:
-        NotImplementedError: Real wiring lands in S1-4.
+        On JSON parse failure, additionally carries ``_dispatch_failure``
+        and ``_failure_reason`` markers.
     """
-    raise NotImplementedError(
-        "Real /requesting-code-review wiring lands in S1-4; tests must "
-        "monkeypatch _dispatch_requesting_code_review"
+    result = superpowers_dispatch.requesting_code_review(
+        args=[prompt],
+        cwd=cwd,
     )
+    output_text = getattr(result, "stdout", "") or "{}"
+    try:
+        parsed: dict[str, Any] = json.loads(output_text)
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(
+            f"[sbtdd magi-cross-check] /requesting-code-review returned "
+            f"malformed JSON (meta-review skipped, findings unchanged): "
+            f"{exc}\n"
+        )
+        sys.stderr.flush()
+        return {
+            "decisions": [],
+            "_dispatch_failure": "json_parse_error",
+            "_failure_reason": str(exc),
+        }
+    parsed.setdefault("decisions", [])
+    return parsed
 
 
 def _apply_cross_check_decisions(
