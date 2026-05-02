@@ -856,6 +856,46 @@ INV-0 override authorizations were per-iter, not blanket; the
 pre-dispatch commitment is intended to make scope-trim the path of
 least resistance when iter 3 ends without convergence.
 
+#### 7.1.2 INV-0 override rationale (Checkpoint 2 iter 4 acceptance, if reached)
+
+Per caspar Loop 2 iter 4 W14: if user accepts the iter 4 (or later)
+Checkpoint 2 verdict via INV-0 override despite the cap=3 process
+commitment, the rationale MUST be documented HERE and in the cycle's
+CHANGELOG draft so the override is auditable and does not silently
+become the new normal.
+
+- **Trigger**: 4 (or more) MAGI Checkpoint 2 iters consumed (cap=3
+  was the design point per CHANGELOG `[0.5.0]` Process commitment
+  shipped 2026-05-02). Iter 4 acceptance is the EXCEPTION, not the
+  rule.
+- **Pattern observed (v1.0.0)**: 3 consecutive Melchior APPROVE
+  (78→82→80→85, trend up); Balthasar+Caspar CONDITIONAL throughout
+  (process risk concerns persist on bundle width and procedural
+  deadlock).
+- **Architectural soundness check**: zero CRITICAL findings
+  classified as architectural defect; remaining concerns are
+  bundle-width process risk (Balthasar) + procedural deadlock
+  (Caspar W14 itself, which observes that iter 4 acceptance
+  contradicts the cap=3 commitment shipped one cycle ago).
+- **Justification for override**: pattern matches v0.5.0 spec/plan
+  iter 4 acceptance precedent (4-iter convergence with
+  2-APPROVE-1-CONDITIONAL signal). User explicitly authorized
+  cycle override at iter 3 + iter 4 (per-instance authorization,
+  consistent with the manual-synthesis acceptance precedent rule).
+- **Risk acceptance**: Loop 2 (post-impl) may again trigger
+  scope-trim signal; the pre-dispatch commitment in 7.1.1 (option
+  A scope-trim default) honors that path-of-least-resistance if it
+  occurs. The v1.0.0 cycle does NOT preempt scope-trim at Loop 2
+  by accepting Checkpoint 2 iter 4.
+- **Cross-reference**: this is the SECOND INV-0 override in the
+  v0.5.0+ era (v0.5.0 = first; v1.0.0 = second). v0.6.0+ cycles
+  should treat 2-override-streak as a scope-trim signal rather
+  than a continued override pattern. If v1.1.0 also reaches iter
+  4, that becomes a 3-streak and the process commitment itself
+  needs revisiting (cap=3 has either become wrong or is being
+  systematically ignored — neither is acceptable without
+  explicit re-ratification).
+
 ### 7.2 Loop 1 (`/requesting-code-review`)
 
 Cap=10. Clean-to-go criterion (zero CRITICAL + zero high-impact WARNING).
