@@ -120,7 +120,7 @@ Shortcut: `make verify`. NF-A budget: <= 120s.
 
 ---
 
-## Subagent #1 — Dispatchers + observability completion (25 tasks)
+## Subagent #1 — Dispatchers + observability completion (27 tasks)
 
 ### Task S1-1: Feature G — `_loop2_cross_check` skeleton in pre_merge_cmd
 
@@ -1821,6 +1821,251 @@ git commit -m "docs: document Windows kill-path race as accepted risk (I-Hk5)"
 
 ---
 
+### Task S1-26: Spec-snapshot drift check at pre-merge entry (CRITICAL #2)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/pre_merge_cmd.py`
+- Modify: `tests/test_pre_merge_streaming.py` (or extend a more apt
+  pre_merge test module)
+
+**Background (CRITICAL #2 fix):** spec sec.3.2 / Escenario H2-3 promises
+that pre-merge fails when scenarios drifted between plan approval and
+merge. Subagent #2 ships the helpers (`spec_snapshot.emit_snapshot`,
+`compare`, `load_snapshot`) but NO task wires them into the pre-merge
+gate entry. This task closes the wiring gap on the consumer side.
+
+- [ ] **Step 1: Write failing test for H2-3 drift detection**
+
+```python
+def test_h2_3_pre_merge_raises_on_spec_snapshot_drift(tmp_path, monkeypatch):
+    """H2-3: pre_merge_cmd._check_spec_snapshot_drift raises PreMergeError when scenarios changed."""
+    from pre_merge_cmd import _check_spec_snapshot_drift
+    from errors import PreMergeError
+
+    # Persisted snapshot at plan-approval time.
+    persisted = tmp_path / "spec-snapshot.json"
+    persisted.write_text(
+        '{"S1: parser handles empty input": "old-hash"}', encoding="utf-8"
+    )
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder; emit_snapshot is monkeypatched", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1: parser handles empty input": "new-hash"},
+    )
+
+    with pytest.raises(PreMergeError) as excinfo:
+        _check_spec_snapshot_drift(spec_path=spec, snapshot_path=persisted)
+    msg = str(excinfo.value)
+    assert "S1: parser handles empty input" in msg
+    assert "re-approve" in msg.lower() or "re-run" in msg.lower()
+
+
+def test_h2_3_pre_merge_passes_when_no_drift(tmp_path, monkeypatch):
+    """H2-3: no drift -> _check_spec_snapshot_drift returns None silently."""
+    from pre_merge_cmd import _check_spec_snapshot_drift
+
+    persisted = tmp_path / "spec-snapshot.json"
+    persisted.write_text('{"S1": "matching"}', encoding="utf-8")
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot", lambda _p: {"S1": "matching"},
+    )
+
+    # Returns None (no exception).
+    assert _check_spec_snapshot_drift(spec_path=spec, snapshot_path=persisted) is None
+
+
+def test_h2_3_missing_snapshot_warns_but_does_not_block(tmp_path, monkeypatch, capsys):
+    """H2-3: missing snapshot file -> stderr breadcrumb, no PreMergeError.
+
+    Backward compat: pre-v1.0.0 plan-approval flows did not emit a
+    snapshot. Pre-merge logs a warning but does not block.
+    """
+    from pre_merge_cmd import _check_spec_snapshot_drift
+
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    snapshot_path = tmp_path / "spec-snapshot.json"  # does not exist
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot", lambda _p: {"S1": "anything"},
+    )
+
+    assert _check_spec_snapshot_drift(spec_path=spec, snapshot_path=snapshot_path) is None
+    captured = capsys.readouterr()
+    assert "spec-snapshot.json" in captured.err
+```
+
+- [ ] **Step 2: Run + verify fail**
+
+Expected: `ImportError` for `_check_spec_snapshot_drift` not yet defined.
+
+- [ ] **Step 3: Implement `_check_spec_snapshot_drift` in pre_merge_cmd.py**
+
+```python
+import sys
+import spec_snapshot
+from errors import PreMergeError
+
+
+def _check_spec_snapshot_drift(
+    *, spec_path: Path, snapshot_path: Path,
+) -> None:
+    """Verify spec scenarios have not drifted since plan approval.
+
+    Raises:
+        PreMergeError: when persisted snapshot differs from current spec
+            (added, removed, or modified scenarios).
+
+    Backward compat: missing ``snapshot_path`` (pre-v1.0.0 plan-approval
+    flows) emits a stderr breadcrumb and returns silently.
+    """
+    if not snapshot_path.exists():
+        sys.stderr.write(
+            f"[sbtdd pre-merge] no spec-snapshot.json at {snapshot_path}; "
+            f"drift check skipped (pre-v1.0.0 plan-approval flow). "
+            f"Re-approve plan to enable drift detection.\n"
+        )
+        sys.stderr.flush()
+        return
+
+    prev = spec_snapshot.load_snapshot(snapshot_path)
+    curr = spec_snapshot.emit_snapshot(spec_path)
+    diff = spec_snapshot.compare(prev, curr)
+    if diff["added"] or diff["removed"] or diff["modified"]:
+        raise PreMergeError(
+            f"Spec scenarios changed since plan approval; re-approve plan "
+            f"via /writing-plans + Checkpoint 2.\n"
+            f"  added: {diff['added']}\n"
+            f"  removed: {diff['removed']}\n"
+            f"  modified: {diff['modified']}"
+        )
+```
+
+- [ ] **Step 4: Wire `_check_spec_snapshot_drift` into pre-merge entry**
+
+Locate the existing pre-merge entrypoint (the function that runs before
+Loop 1; near the top of `_loop2`'s caller, or the CLI handler) and add
+the drift check at entry, before any work is done:
+
+```python
+spec_path = root / "sbtdd" / "spec-behavior.md"
+snapshot_path = root / "planning" / "spec-snapshot.json"
+_check_spec_snapshot_drift(spec_path=spec_path, snapshot_path=snapshot_path)
+```
+
+- [ ] **Step 5: Run + verify pass + commit**
+
+```bash
+pytest tests/test_pre_merge_streaming.py -k "h2_3" -v
+git add skills/sbtdd/scripts/pre_merge_cmd.py tests/test_pre_merge_streaming.py
+git commit -m "feat: add spec-snapshot drift check at pre-merge entry (CRITICAL #2)"
+```
+
+---
+
+### Task S1-27: Plan-approval snapshot emit hook (CRITICAL #2)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (and/or
+  `skills/sbtdd/scripts/state_file.py` if plan-approval transitions live
+  there; pre-flight grep to locate)
+- Modify: `tests/test_auto_progress.py`
+
+**Background (CRITICAL #2 fix):** the spec-snapshot drift check at
+pre-merge entry (S1-26) requires a persisted ``planning/spec-snapshot.json``
+emitted at plan-approval time. This task wires the emit hook to fire when
+``plan_approved_at`` is set in the state file (template sec.5 "Excepcion
+bajo plan aprobado" trigger).
+
+- [ ] **Step 1: Survey plan-approval handler location**
+
+```bash
+grep -n "plan_approved_at\b" skills/sbtdd/scripts/*.py | head -20
+```
+
+Locate the helper that sets ``plan_approved_at`` on the state file.
+Likely candidates: ``state_file.set_plan_approved`` (Subagent #1 surface
+indirectly via ``auto_cmd``) or ``auto_cmd._mark_plan_approved`` if it
+exists. If the helper lives in ``state_file.py`` (Subagent #2-adjacent),
+adapt by adding the snapshot emit at the auto_cmd-level wrapper that
+calls it; never reach into Subagent #2 surfaces.
+
+- [ ] **Step 2: Write failing test asserting snapshot emitted on plan approval**
+
+```python
+def test_plan_approval_emits_spec_snapshot(tmp_path, monkeypatch):
+    """CRITICAL #2: when plan_approved_at is set, spec-snapshot.json written."""
+    from auto_cmd import _mark_plan_approved_with_snapshot
+    import json
+
+    # Create minimal repo skeleton.
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+
+    captured = {}
+    def fake_emit(p):
+        captured["spec_path"] = p
+        return {"S1: x": "hash1"}
+
+    monkeypatch.setattr("spec_snapshot.emit_snapshot", fake_emit)
+
+    _mark_plan_approved_with_snapshot(root=tmp_path)
+
+    snapshot_path = tmp_path / "planning" / "spec-snapshot.json"
+    assert snapshot_path.exists()
+    data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert data == {"S1: x": "hash1"}
+    assert captured["spec_path"] == spec
+```
+
+- [ ] **Step 3: Implement `_mark_plan_approved_with_snapshot`**
+
+```python
+import spec_snapshot
+
+
+def _mark_plan_approved_with_snapshot(*, root: Path) -> None:
+    """Persist spec-snapshot at plan-approval time (CRITICAL #2).
+
+    Wired into the plan-approval transition: when the state file gets
+    ``plan_approved_at`` set (template sec.5 "Excepcion bajo plan
+    aprobado" trigger), this helper emits the current spec scenarios
+    snapshot and persists it to ``planning/spec-snapshot.json``. The
+    pre-merge gate (S1-26 ``_check_spec_snapshot_drift``) consumes this
+    snapshot.
+    """
+    spec_path = root / "sbtdd" / "spec-behavior.md"
+    snapshot_path = root / "planning" / "spec-snapshot.json"
+    snapshot = spec_snapshot.emit_snapshot(spec_path)
+    spec_snapshot.persist_snapshot(snapshot_path, snapshot)
+```
+
+- [ ] **Step 4: Wire into existing plan-approval transition**
+
+Find the call site that currently sets ``plan_approved_at`` in
+``state_file.session-state.json`` (per pre-flight grep in Step 1) and
+invoke ``_mark_plan_approved_with_snapshot(root=...)`` immediately
+afterwards. Idempotent: re-approving the plan re-emits the snapshot
+(``persist_snapshot`` overwrites).
+
+- [ ] **Step 5: Run + verify pass + commit**
+
+```bash
+pytest tests/test_auto_progress.py -k "plan_approval_emits" -v
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "feat: emit spec-snapshot on plan approval (CRITICAL #2)"
+```
+
+---
+
 ### Task S1-25: Final make verify pass for Subagent #1
 
 - [ ] **Step 1: Run full make verify**
@@ -2668,7 +2913,7 @@ Verify all S2-1 through S2-8 commits landed cleanly. Report `DONE: Subagent #2` 
   - F44.3 (sec.2.2, F44.3-1/2) → S1-7
   - J2 (sec.2.3, J2-1/2/3) → S1-8 + S1-9 + S2-1 (dataclass)
   - Feature I (sec.3.1, I1-I4) → S2-3 + S2-4
-  - Feature H option 2 (sec.3.2, H2-1/2/3/4) → S2-5 + S2-6 (+ S1 integration in cross-check pipeline)
+  - Feature H option 2 (sec.3.2, H2-1/2/3/4) → S2-5 + S2-6 (helpers) + **S1-26** (pre-merge drift check wiring) + **S1-27** (plan-approval emit hook wiring)
   - Feature H option 5 (sec.3.3, H5-1/2) → S2-7
   - J3+J7 wiring (sec.4.1, W1-W3) → S1-10 through S1-15 (6 site clusters)
   - Caspar W4-W7 → S1-16 through S1-19

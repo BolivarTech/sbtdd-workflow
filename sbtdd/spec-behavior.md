@@ -334,11 +334,23 @@ files); migrations tracked in `scripts/migrate_plugin_local.py` ladder.
 
 **Files tocados:**
 - `scripts/spec_snapshot.py` (NEW — Subagent #2 owned)
-- `pre_merge_cmd.py` (Subagent #1 owned — integration call)
+- `pre_merge_cmd.py` (Subagent #1 owned — integration call wired by plan
+  task **S1-26** ``_check_spec_snapshot_drift``)
+- `auto_cmd.py` (Subagent #1 owned — plan-approval emit hook wired by
+  plan task **S1-27** ``_mark_plan_approved_with_snapshot``)
 
-**Cross-subagent contract:** `spec_snapshot.emit_snapshot(spec_path) -> dict`
-y `spec_snapshot.compare(prev: dict, curr: dict) -> diff_dict` shapes
-pinned in spec sec.5.
+**Cross-subagent contract:** `spec_snapshot.emit_snapshot(spec_path) -> dict`,
+`spec_snapshot.compare(prev: dict, curr: dict) -> diff_dict`,
+`spec_snapshot.persist_snapshot(path, snapshot) -> None`, and
+`spec_snapshot.load_snapshot(path) -> dict` shapes pinned in spec sec.5.
+
+**Integration contract (CRITICAL #2 fix):** the helpers shipped by
+Subagent #2 are wired into the consumer surface by Subagent #1 via two
+explicit plan tasks — without these, the spec H2-3 escenario is not
+reachable in production. S1-26 wires the drift check at pre-merge entry;
+S1-27 wires the emit hook at plan-approval transition. Backward compat:
+S1-26 silently skips drift check when ``planning/spec-snapshot.json``
+does not exist (pre-v1.0.0 plan-approval flows).
 
 **Escenarios:**
 
@@ -360,9 +372,12 @@ pinned in spec sec.5.
 
 **Escenario H2-3: pre-merge fails when scenarios drifted**
 
-> **Given** plan approved at commit X with snapshot S_X. Pre-merge
-> at HEAD has different snapshot S_HEAD (modified Given/When/Then).
-> **When** `pre_merge_cmd._check_spec_snapshot_drift` ejecuta.
+> **Given** plan approved at commit X with snapshot S_X (persisted to
+> `planning/spec-snapshot.json` by plan task **S1-27**
+> ``_mark_plan_approved_with_snapshot``). Pre-merge at HEAD has
+> different spec snapshot S_HEAD (modified Given/When/Then).
+> **When** `pre_merge_cmd._check_spec_snapshot_drift` ejecuta at
+> pre-merge entry (wired by plan task **S1-26**).
 > **Then** raises `PreMergeError("Spec scenarios changed since plan
 > approval; re-approve plan via /writing-plans + Checkpoint 2")`.
 > Lists modified scenarios in error message.
@@ -370,9 +385,11 @@ pinned in spec sec.5.
 **Escenario H2-4: snapshot persisted at planning/spec-snapshot.json**
 
 > **Given** plan freshly approved (`plan_approved_at` set in state file).
-> **When** plan-approval handler emits snapshot.
+> **When** plan-approval handler emits snapshot via plan task **S1-27**
+> ``_mark_plan_approved_with_snapshot``.
 > **Then** `planning/spec-snapshot.json` written with current snapshot.
-> Committed alongside `claude-plan-tdd.md`. Pre-merge compares against this.
+> Committed alongside `claude-plan-tdd.md`. Pre-merge S1-26 compares
+> against this.
 
 ### 3.3 Feature H Group B option 5 — Auto-generated scenario stubs
 
