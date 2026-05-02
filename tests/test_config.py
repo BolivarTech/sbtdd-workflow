@@ -137,3 +137,67 @@ worktree_policy: "optional"
     with pytest.raises(ValidationError) as exc_info:
         load_plugin_local(path)
     assert "auto_magi_max_iterations" in str(exc_info.value)
+
+
+def test_plugin_config_new_observability_fields_have_defaults(tmp_path):
+    """v0.5.0: 5 new PluginConfig fields with documented defaults."""
+    config_path = tmp_path / "plugin.local.md"
+    config_path.write_text("""---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest, "ruff check ."]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+---
+""")
+    from config import load_plugin_local
+    cfg = load_plugin_local(config_path)
+    assert cfg.auto_per_stream_timeout_seconds == 900
+    assert cfg.auto_heartbeat_interval_seconds == 15
+    assert cfg.status_watch_default_interval_seconds == 1.0
+    assert cfg.auto_origin_disambiguation is True
+    assert cfg.auto_no_timeout_dispatch_labels == ("magi-*",)
+
+
+def test_plugin_config_observability_fields_overridable(tmp_path):
+    config_path = tmp_path / "plugin.local.md"
+    config_path.write_text("""---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 600
+auto_heartbeat_interval_seconds: 30
+status_watch_default_interval_seconds: 0.5
+auto_origin_disambiguation: false
+auto_no_timeout_dispatch_labels: ["magi-*", "long-build-*"]
+---
+""")
+    from config import load_plugin_local
+    cfg = load_plugin_local(config_path)
+    assert cfg.auto_per_stream_timeout_seconds == 600
+    assert cfg.auto_heartbeat_interval_seconds == 30
+    assert cfg.status_watch_default_interval_seconds == 0.5
+    assert cfg.auto_origin_disambiguation is False
+    assert cfg.auto_no_timeout_dispatch_labels == ("magi-*", "long-build-*")

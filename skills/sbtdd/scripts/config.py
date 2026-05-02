@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -54,6 +54,16 @@ class PluginConfig:
     spec_reviewer_model: str | None = None
     code_review_model: str | None = None
     magi_dispatch_model: str | None = None
+    # v0.5.0 observability fields (sec.4.3 of spec). Defaults documented in
+    # docs/v0.5.0-config-matrix.md (R9 single-source-of-truth doc) and
+    # cross-validated against INV-34 four-clause checks in load_plugin_local.
+    auto_per_stream_timeout_seconds: int = 900
+    auto_heartbeat_interval_seconds: int = 15
+    status_watch_default_interval_seconds: float = 1.0
+    auto_origin_disambiguation: bool = True
+    auto_no_timeout_dispatch_labels: tuple[str, ...] = field(
+        default_factory=lambda: ("magi-*",)
+    )
 
 
 #: Canonical names of the v0.3.0 Feature E model fields. Used both by the
@@ -157,6 +167,16 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
             raise ValidationError(
                 f"{field_name} must be a string or null, got {type(val).__name__}"
             )
+    # v0.5.0 observability defaults applied if absent (sec.4.3 of spec).
+    data.setdefault("auto_per_stream_timeout_seconds", 900)
+    data.setdefault("auto_heartbeat_interval_seconds", 15)
+    data.setdefault("status_watch_default_interval_seconds", 1.0)
+    data.setdefault("auto_origin_disambiguation", True)
+    data.setdefault("auto_no_timeout_dispatch_labels", ["magi-*"])
+    if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
+        data["auto_no_timeout_dispatch_labels"] = tuple(
+            data["auto_no_timeout_dispatch_labels"]
+        )
     try:
         return PluginConfig(**data)
     except TypeError as exc:
