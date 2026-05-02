@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -51,7 +52,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Callable
 
 import close_task_cmd
 import commits
@@ -76,6 +77,7 @@ from errors import (
     VerificationIrremediableError,
 )
 from heartbeat import (
+    HeartbeatEmitter,
     get_current_progress,
     set_current_progress,
 )
@@ -157,6 +159,64 @@ def _set_progress(
             started_at=new_started,
         )
     )
+
+
+# Module-level queue: heartbeat thread -> main thread (sec.3 single-writer rule).
+# ``maxsize=0`` (UNBOUNDED) is a hard contract per Checkpoint 2 iter 3 melchior
+# CRITICAL #3: a bounded queue + ``queue.Full`` silently loses heartbeat audit
+# data. Memory cost is negligible (single int per push, bounded by failed-write
+# count + N=10 batching).
+_heartbeat_failures_q: "queue.Queue[int]" = queue.Queue(maxsize=0)
+
+
+def _dispatch_with_heartbeat(
+    *,
+    invoke: Callable[..., Any],
+    heartbeat_interval: float = 15.0,
+    **invoke_kwargs: Any,
+) -> Any:
+    """Wrap a long subprocess invocation in a HeartbeatEmitter.
+
+    The dispatch label is **derived from the current ProgressContext**
+    (set by :func:`_set_progress` immediately before this call). This
+    eliminates the iter-1 Checkpoint 2 caspar finding: dispatch_label
+    drift between the writer hook and the heartbeat wrapper.
+
+    **Fail-loud (Checkpoint 2 iter 2 melchior fix)**: raises
+    ``ValueError`` if ``dispatch_label`` is ``None`` at call time.
+    Silent fallback to ``"unlabeled-dispatch"`` was rejected per
+    fail-loud principle -- caller MUST establish dispatch context
+    before invoking the wrapper.
+
+    The failures queue is the module-level ``_heartbeat_failures_q``
+    drained by :func:`_drain_heartbeat_queue_and_persist` (single-
+    writer rule per sec.3 of spec).
+
+    Args:
+        invoke: The callable performing the actual subprocess work.
+        heartbeat_interval: Tick cadence in seconds.
+        **invoke_kwargs: Forwarded verbatim to ``invoke``.
+
+    Returns:
+        Whatever ``invoke`` returns.
+
+    Raises:
+        ValueError: When ``ProgressContext.dispatch_label`` is None.
+    """
+    ctx = get_current_progress()
+    if ctx.dispatch_label is None:
+        raise ValueError(
+            "_dispatch_with_heartbeat called without dispatch_label set. "
+            "Caller must invoke `_set_progress(..., dispatch_label='...')` "
+            "BEFORE this wrapper. Silent fallback rejected per fail-loud "
+            "(Checkpoint 2 iter 2 melchior CRITICAL #1)."
+        )
+    with HeartbeatEmitter(
+        label=ctx.dispatch_label,
+        interval_seconds=heartbeat_interval,
+        failures_queue=_heartbeat_failures_q,
+    ):
+        return invoke(**invoke_kwargs)
 
 
 def _stream_subprocess(

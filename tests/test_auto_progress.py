@@ -402,6 +402,66 @@ def test_set_progress_clears_started_at_when_label_none():
     reset_current_progress()
 
 
+def test_long_dispatch_wrapped_with_heartbeat_emits_ticks(capsys):
+    import time
+
+    from auto_cmd import _dispatch_with_heartbeat, _set_progress
+    from heartbeat import reset_current_progress
+
+    reset_current_progress()
+    # Per Checkpoint 2 iter 2 melchior fix: caller MUST set dispatch_label
+    # before invoking the wrapper (fail-loud); no silent fallback.
+    _set_progress(phase=2, dispatch_label="test-dispatch")
+
+    def fake_invoke():
+        time.sleep(0.5)
+        return 0
+
+    rc = _dispatch_with_heartbeat(
+        invoke=fake_invoke,
+        heartbeat_interval=0.15,
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    tick_lines = [
+        line for line in captured.err.splitlines() if line.startswith("[sbtdd auto] tick:")
+    ]
+    assert len(tick_lines) >= 2  # 0.5s / 0.15s ~ 3 ticks
+    reset_current_progress()
+
+
+def test_dispatch_with_heartbeat_fails_loud_when_no_dispatch_label():
+    """Per Checkpoint 2 iter 2 melchior CRITICAL #1: silent fallback rejected."""
+    import pytest as _pytest
+
+    from auto_cmd import _dispatch_with_heartbeat
+    from heartbeat import reset_current_progress
+
+    reset_current_progress()
+    with _pytest.raises(ValueError, match="dispatch_label"):
+        _dispatch_with_heartbeat(invoke=lambda: 0, heartbeat_interval=0.5)
+
+
+def test_dispatch_with_heartbeat_derives_label_from_progress():
+    from auto_cmd import _dispatch_with_heartbeat, _set_progress
+    from heartbeat import reset_current_progress
+
+    reset_current_progress()
+    _set_progress(phase=2, dispatch_label="green")
+    captured_label = {}
+
+    def fake_invoke():
+        from heartbeat import get_current_progress
+
+        captured_label["label"] = get_current_progress().dispatch_label
+        return 0
+
+    rc = _dispatch_with_heartbeat(invoke=fake_invoke, heartbeat_interval=0.1)
+    assert rc == 0
+    assert captured_label["label"] == "green"
+    reset_current_progress()
+
+
 def test_set_progress_first_dispatch_from_none_label_refreshes_started_at():
     """W2 fold-in: None -> label first dispatch must set started_at.
 
