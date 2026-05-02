@@ -23,6 +23,27 @@ Cross-subagent contract: ResolvedModels dataclass + 2 PluginConfig fields + spec
 - Working tree must be clean before each task starts. Verify via `git status` returns empty.
 - Implementation commits land on the dev branch; merge to main only after pre-merge gate passes.
 
+### NF-A runtime budget + `@pytest.mark.slow` opt-out (melchior+balthasar Loop 2 iter 3 W)
+
+NF-A budget for `make verify` is **150s** (raised from 120s; v0.5.0
+baseline ~131s + ~30-40 new v1.0.0 tests). Both subagents SHOULD:
+
+- Mark any new test wall-clock **≥ 5s** with `@pytest.mark.slow`.
+  Register the marker once in `pyproject.toml`
+  (`[tool.pytest.ini_options].markers`) if not already present —
+  Subagent #2 owns the `pyproject.toml` edit if it isn't there yet
+  (zero-risk additive change; coordinate via integration check).
+- Default `make verify` runs slow + non-slow tests so local dev
+  catches regressions. CI may opt out via `pytest -m "not slow"` if
+  the 150s budget is later exceeded; this is documented as the
+  escape valve, not the default.
+- A test exceeding 5s without the marker is a code-review nit, not
+  a hard block; reviewer flags via WARNING.
+
+If NF-A is blown by > 10% (>165s) at integration, the orchestrator
+must scope-trim or apply the `@pytest.mark.slow` marker to the
+heaviest tests before merge — do not bump NF-A again silently.
+
 ### ResolvedModels schema (spec sec.5.1)
 
 ```python

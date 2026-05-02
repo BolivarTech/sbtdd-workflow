@@ -56,7 +56,9 @@
 
 **Criterio de exito:**
 - Tests baseline 930 + 1 skipped preservados + ~30-40 nuevos = 960-970.
-- `make verify` clean (pytest + ruff + mypy --strict, runtime <= 120s).
+- `make verify` clean (pytest + ruff + mypy --strict, runtime <= 150s
+  per melchior+balthasar Loop 2 iter 3 WARNING; v0.5.0 baseline ~131s
+  + ~30-40 new tests warranted budget bump from 120s to 150s).
 - MAGI Loop 2 reliability sostenida; cross-check (Feature G) catches
   false-positive CRITICALs during own ship cycle (recursive payoff).
 - 33 J3+J7 callers wired; heartbeat fires in all production long
@@ -954,7 +956,14 @@ v1.0.0 ship-ready cuando:
 ### 10.4 No-functional
 
 - **NF-A**. `make verify` clean: pytest + ruff + mypy --strict, runtime
-  ≤ 120s.
+  ≤ 150s. Rationale (melchior+balthasar Loop 2 iter 3 WARNING fix):
+  v0.5.0 baseline observed ~131s; v1.0.0 adds ~30-40 tests primarily
+  via new escenarios (J2-2b regression guard, Group B option 2/5
+  introductions, J3+J7 sweep test, F-Hk1..Hk5 housekeeping). Budget
+  150s preserves headroom while remaining tight. Long-running tests
+  (>5s wall) SHOULD be marked `@pytest.mark.slow`; default
+  `make verify` runs everything; CI may opt out via
+  `pytest -m "not slow"` if the budget is later exceeded.
 - **NF-B**. Tests baseline 930 + 1 skipped preservados + 30-40 nuevos
   = ~960-970.
 - **NF-C**. Cross-platform. Windows-specific tests pass empirically.
