@@ -161,6 +161,7 @@ worktree_policy: optional
 ---
 """)
     from config import load_plugin_local
+
     cfg = load_plugin_local(config_path)
     assert cfg.auto_per_stream_timeout_seconds == 900
     assert cfg.auto_heartbeat_interval_seconds == 15
@@ -195,6 +196,7 @@ auto_no_timeout_dispatch_labels: ["magi-*", "long-build-*"]
 ---
 """)
     from config import load_plugin_local
+
     cfg = load_plugin_local(config_path)
     assert cfg.auto_per_stream_timeout_seconds == 600
     assert cfg.auto_heartbeat_interval_seconds == 30
@@ -223,11 +225,11 @@ worktree_policy: optional
 """
     config_path = tmp_path / "p1.md"
     config_path.write_text(
-        base + "auto_per_stream_timeout_seconds: 50\n"
-        "auto_heartbeat_interval_seconds: 15\n---\n"
+        base + "auto_per_stream_timeout_seconds: 50\nauto_heartbeat_interval_seconds: 15\n---\n"
     )
     from config import load_plugin_local
     from errors import ValidationError
+
     with pytest.raises(ValidationError, match="INV-34 clause 1"):
         load_plugin_local(config_path)
 
@@ -252,11 +254,11 @@ worktree_policy: optional
 """
     config_path = tmp_path / "p2.md"
     config_path.write_text(
-        base + "auto_per_stream_timeout_seconds: 1000\n"
-        "auto_heartbeat_interval_seconds: 120\n---\n"
+        base + "auto_per_stream_timeout_seconds: 1000\nauto_heartbeat_interval_seconds: 120\n---\n"
     )
     from config import load_plugin_local
     from errors import ValidationError
+
     with pytest.raises(ValidationError, match="INV-34 clause 2"):
         load_plugin_local(config_path)
 
@@ -281,11 +283,11 @@ worktree_policy: optional
 """
     config_path = tmp_path / "p3.md"
     config_path.write_text(
-        base + "auto_per_stream_timeout_seconds: 100\n"
-        "auto_heartbeat_interval_seconds: 2\n---\n"
+        base + "auto_per_stream_timeout_seconds: 100\nauto_heartbeat_interval_seconds: 2\n---\n"
     )
     from config import load_plugin_local
     from errors import ValidationError
+
     with pytest.raises(ValidationError, match="INV-34 clause 3"):
         load_plugin_local(config_path)
 
@@ -312,10 +314,10 @@ worktree_policy: optional
     config_path = tmp_path / "boundary.md"
     # 600s = max(5*60, 600) = 600 -- boundary of clauses 1 AND 4.
     config_path.write_text(
-        base + "auto_per_stream_timeout_seconds: 600\n"
-        "auto_heartbeat_interval_seconds: 60\n---\n"
+        base + "auto_per_stream_timeout_seconds: 600\nauto_heartbeat_interval_seconds: 60\n---\n"
     )
     from config import load_plugin_local
+
     cfg = load_plugin_local(config_path)
     assert cfg.auto_per_stream_timeout_seconds == 600
     assert cfg.auto_heartbeat_interval_seconds == 60
@@ -343,11 +345,11 @@ worktree_policy: optional
     config_path = tmp_path / "p4.md"
     # 75s satisfies clause 1 (5*15=75) but violates clause 4 (>=600).
     config_path.write_text(
-        base + "auto_per_stream_timeout_seconds: 75\n"
-        "auto_heartbeat_interval_seconds: 15\n---\n"
+        base + "auto_per_stream_timeout_seconds: 75\nauto_heartbeat_interval_seconds: 15\n---\n"
     )
     from config import load_plugin_local
     from errors import ValidationError
+
     with pytest.raises(ValidationError, match="INV-34 clause 4"):
         load_plugin_local(config_path)
 
@@ -374,6 +376,7 @@ auto_heartbeat_interval_seconds: 15
 """
     from config import load_plugin_local
     from errors import ValidationError
+
     config_path = tmp_path / "p.md"
     config_path.write_text(base + 'auto_no_timeout_dispatch_labels: ["*"]\n---\n')
     with pytest.raises(ValidationError, match=r"bare '\*' rejected"):
@@ -403,6 +406,7 @@ auto_heartbeat_interval_seconds: 15
 """
     from config import load_plugin_local
     from errors import ValidationError
+
     config_path = tmp_path / "p.md"
     config_path.write_text(base + 'auto_no_timeout_dispatch_labels: ["", "magi-*"]\n---\n')
     with pytest.raises(ValidationError, match=r"bare '\*' rejected"):

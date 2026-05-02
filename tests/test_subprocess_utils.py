@@ -97,14 +97,21 @@ def test_kill_tree_posix_sends_sigterm_then_sigkill(monkeypatch):
 
 def test_streamed_with_timeout_returns_stdout_and_stderr_separately():
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys, time\n"
-        "for i in range(3):\n"
-        "    sys.stdout.write(f'out{i}\\n'); sys.stdout.flush()\n"
-        "    time.sleep(0.05)\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys, time\n"
+            "for i in range(3):\n"
+            "    sys.stdout.write(f'out{i}\\n'); sys.stdout.flush()\n"
+            "    time.sleep(0.05)\n"
+        ),
+    ]
     result = run_streamed_with_timeout(
-        cmd, per_stream_timeout_seconds=10.0, dispatch_label="test",
+        cmd,
+        per_stream_timeout_seconds=10.0,
+        dispatch_label="test",
     )
     assert result.returncode == 0
     assert "out0" in result.stdout
@@ -120,15 +127,22 @@ def test_pump_handles_partial_utf8_split_at_chunk_boundary():
     incremental decoder must reassemble all sequences cleanly.
     """
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys\n"
-        "data = ('hello cafe' + chr(0xE9) + ' euro' + chr(0x20AC) +\n"
-        "        ' emoji' + chr(0x1F600) + ' done').encode('utf-8')\n"
-        "sys.stdout.buffer.write(data)\n"
-        "sys.stdout.buffer.flush()\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys\n"
+            "data = ('hello cafe' + chr(0xE9) + ' euro' + chr(0x20AC) +\n"
+            "        ' emoji' + chr(0x1F600) + ' done').encode('utf-8')\n"
+            "sys.stdout.buffer.write(data)\n"
+            "sys.stdout.buffer.flush()\n"
+        ),
+    ]
     result = run_streamed_with_timeout(
-        cmd, per_stream_timeout_seconds=10.0, dispatch_label="test",
+        cmd,
+        per_stream_timeout_seconds=10.0,
+        dispatch_label="test",
     )
     assert result.returncode == 0
     assert chr(0xE9) in result.stdout
@@ -143,14 +157,21 @@ def test_pump_handles_partial_utf8_split_at_chunk_boundary():
 def test_streaming_pump_works_on_windows_subprocess():
     """C2 fold-in: Windows threaded-reader fallback delivers chunks."""
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys, time\n"
-        "for i in range(5):\n"
-        "    sys.stdout.write(f'win{i}\\n'); sys.stdout.flush()\n"
-        "    time.sleep(0.02)\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys, time\n"
+            "for i in range(5):\n"
+            "    sys.stdout.write(f'win{i}\\n'); sys.stdout.flush()\n"
+            "    time.sleep(0.02)\n"
+        ),
+    ]
     result = run_streamed_with_timeout(
-        cmd, per_stream_timeout_seconds=10.0, dispatch_label="test-win",
+        cmd,
+        per_stream_timeout_seconds=10.0,
+        dispatch_label="test-win",
     )
     assert result.returncode == 0
     assert "win0" in result.stdout
@@ -160,9 +181,12 @@ def test_streaming_pump_works_on_windows_subprocess():
 def test_t1_all_streams_silent_kills_subprocess(capsys):
     """T1: silence on all open streams beyond timeout triggers kill."""
     from subprocess_utils import run_streamed_with_timeout
+
     cmd = [sys.executable, "-c", "import time; time.sleep(10)"]
     result = run_streamed_with_timeout(
-        cmd, per_stream_timeout_seconds=0.5, dispatch_label="test-hang",
+        cmd,
+        per_stream_timeout_seconds=0.5,
+        dispatch_label="test-hang",
     )
     assert result.returncode != 0
     captured = capsys.readouterr()
@@ -173,9 +197,12 @@ def test_t1_all_streams_silent_kills_subprocess(capsys):
 def test_t5_allowlist_exempts_dispatch_label():
     """T5: dispatch_label matching allowlist -> no kill, full output captured."""
     from subprocess_utils import run_streamed_with_timeout
+
     cmd = [sys.executable, "-c", "import time; time.sleep(1.0)"]
     result = run_streamed_with_timeout(
-        cmd, per_stream_timeout_seconds=0.3, dispatch_label="magi-loop2-iter1",
+        cmd,
+        per_stream_timeout_seconds=0.3,
+        dispatch_label="magi-loop2-iter1",
         no_timeout_labels=("magi-*",),
     )
     assert result.returncode == 0
@@ -184,22 +211,29 @@ def test_t5_allowlist_exempts_dispatch_label():
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="os.close(sys.stdout.fileno()) has Windows-specific failure modes; "
-           "T7 verified via integration on POSIX (Checkpoint 2 iter 1 caspar finding)",
+    "T7 verified via integration on POSIX (Checkpoint 2 iter 1 caspar finding)",
 )
 def test_t7_closed_stream_excluded_from_timeout():
     """T7: an EOF'd stream is dropped from the open set -- timeout uses
     only the still-open streams."""
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys, os, time\n"
-        "os.close(sys.stdout.fileno())\n"
-        "for i in range(3):\n"
-        "    sys.stderr.write(f'err{i}\\n')\n"
-        "    sys.stderr.flush()\n"
-        "    time.sleep(0.1)\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys, os, time\n"
+            "os.close(sys.stdout.fileno())\n"
+            "for i in range(3):\n"
+            "    sys.stderr.write(f'err{i}\\n')\n"
+            "    sys.stderr.flush()\n"
+            "    time.sleep(0.1)\n"
+        ),
+    ]
     result = run_streamed_with_timeout(
-        cmd, per_stream_timeout_seconds=0.3, dispatch_label="test-closed",
+        cmd,
+        per_stream_timeout_seconds=0.3,
+        dispatch_label="test-closed",
     )
     assert result.returncode == 0
     assert "err0" in result.stderr
@@ -212,11 +246,13 @@ def test_t8_kill_tree_order_preserved_on_windows(monkeypatch):
     from unittest.mock import MagicMock
 
     from subprocess_utils import _kill_subprocess_tree
+
     call_order: list[str] = []
 
     def fake_run(*args, **kwargs):
         call_order.append("taskkill")
         from subprocess import CompletedProcess
+
         return CompletedProcess(args=args[0], returncode=0)
 
     monkeypatch.setattr("subprocess_utils.subprocess.run", fake_run)
@@ -230,14 +266,21 @@ def test_t8_kill_tree_order_preserved_on_windows(monkeypatch):
 def test_o1_single_stream_no_prefix():
     """O1: single-stream output never gets origin prefix."""
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys\n"
-        "for i in range(3):\n"
-        "    sys.stdout.write(f'line{i}\\n')\n"
-        "    sys.stdout.flush()\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys\n"
+            "for i in range(3):\n"
+            "    sys.stdout.write(f'line{i}\\n')\n"
+            "    sys.stdout.flush()\n"
+        ),
+    ]
     result = run_streamed_with_timeout(
-        cmd, origin_disambiguation=True, dispatch_label="test",
+        cmd,
+        origin_disambiguation=True,
+        dispatch_label="test",
     )
     assert "[stdout]" not in result.stdout
     assert "line0" in result.stdout
@@ -246,15 +289,22 @@ def test_o1_single_stream_no_prefix():
 def test_o2_dual_stream_in_window_prefixes():
     """O2: both streams within disambig window -> at least one prefixed."""
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys\n"
-        "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
-        "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys\n"
+            "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
+            "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
+        ),
+    ]
     # Use a generous window (500ms) to ensure both writes land inside
     # without scheduler-jitter flakiness on CI.
     result = run_streamed_with_timeout(
-        cmd, origin_disambiguation=True, dispatch_label="test",
+        cmd,
+        origin_disambiguation=True,
+        dispatch_label="test",
         origin_window_seconds=0.5,
     )
     combined = result.stdout + result.stderr
@@ -269,12 +319,17 @@ def test_o3_alternating_distant_windows_no_prefix():
     Windows CI flakiness on loaded systems.
     """
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys, time\n"
-        "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
-        "time.sleep(0.1)\n"
-        "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys, time\n"
+            "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
+            "time.sleep(0.1)\n"
+            "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
+        ),
+    ]
     result = run_streamed_with_timeout(
         cmd,
         origin_disambiguation=True,
@@ -288,13 +343,20 @@ def test_o3_alternating_distant_windows_no_prefix():
 def test_o4_disabled_no_prefix_even_on_dual_stream():
     """O4: origin_disambiguation=False forbids any prefix."""
     from subprocess_utils import run_streamed_with_timeout
-    cmd = [sys.executable, "-c", (
-        "import sys\n"
-        "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
-        "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
-    )]
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys\n"
+            "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
+            "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
+        ),
+    ]
     result = run_streamed_with_timeout(
-        cmd, origin_disambiguation=False, dispatch_label="test",
+        cmd,
+        origin_disambiguation=False,
+        dispatch_label="test",
     )
     assert "[stdout]" not in result.stdout
     assert "[stderr]" not in result.stderr

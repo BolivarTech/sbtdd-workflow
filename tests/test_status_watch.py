@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -115,9 +114,7 @@ def test_w2_json_mode_emits_progress(tmp_path, capsys):
     from status_cmd import _watch_render_one
 
     auto_run_path = tmp_path / "auto-run.json"
-    auto_run_path.write_text(
-        json.dumps({"progress": {"phase": 2}}), encoding="utf-8"
-    )
+    auto_run_path.write_text(json.dumps({"progress": {"phase": 2}}), encoding="utf-8")
     _watch_render_one(auto_run_path, json_mode=True, last_progress=None)
     captured = capsys.readouterr()
     line = json.loads(captured.out.strip())
@@ -130,9 +127,7 @@ def test_w5_ctrl_c_returns_130(tmp_path, monkeypatch):
     from status_cmd import watch_main
 
     auto_run_path = tmp_path / "auto-run.json"
-    auto_run_path.write_text(
-        json.dumps({"progress": {"phase": 1}}), encoding="utf-8"
-    )
+    auto_run_path.write_text(json.dumps({"progress": {"phase": 1}}), encoding="utf-8")
 
     def raise_kbi(*args, **kwargs):
         raise KeyboardInterrupt()

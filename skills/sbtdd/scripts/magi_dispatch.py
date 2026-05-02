@@ -493,9 +493,7 @@ def invoke_magi(
                     # / impl can be cross-checked via whitespace-normalised
                     # substring search (tests/test_changelog.py).
                     _msg = "[sbtdd magi] synthesizer failed; manual synthesis recovery applied"
-                    sys.stderr.write(
-                        f"{_msg} ({len(rescued.findings)} findings)\n"
-                    )
+                    sys.stderr.write(f"{_msg} ({len(rescued.findings)} findings)\n")
                     sys.stderr.flush()
                     return rescued
             raise MAGIGateError(

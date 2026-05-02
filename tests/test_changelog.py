@@ -56,12 +56,8 @@ def test_hf2_marker_schema_docs_match_impl():
     changelog = _read("CHANGELOG.md")
     expected_fields = ["verdict", "iteration", "agents", "timestamp"]
     for field_name in expected_fields:
-        assert (
-            f'"{field_name}"' in impl
-        ), f"impl missing marker field {field_name!r}"
-        assert (
-            field_name in changelog
-        ), f"CHANGELOG missing marker field doc {field_name!r}"
+        assert f'"{field_name}"' in impl, f"impl missing marker field {field_name!r}"
+        assert field_name in changelog, f"CHANGELOG missing marker field doc {field_name!r}"
 
 
 def test_hf3_f45_verdict_set_delta_documented():

@@ -164,9 +164,7 @@ def validate_watch_interval(interval: float) -> None:
         ValidationError: When ``interval`` is below the 0.1s floor.
     """
     if interval < 0.1:
-        raise ValidationError(
-            f"--interval must be >= 0.1s (sub-100ms spins CPU); got {interval}"
-        )
+        raise ValidationError(f"--interval must be >= 0.1s (sub-100ms spins CPU); got {interval}")
 
 
 def _watch_render_tty(progress: dict[str, Any]) -> str:
@@ -175,10 +173,7 @@ def _watch_render_tty(progress: dict[str, Any]) -> str:
     if progress.get("iter_num"):
         parts.append(f"iter {progress['iter_num']}")
     parts.append(f"phase {progress.get('phase', 0)}")
-    if (
-        progress.get("task_index") is not None
-        and progress.get("task_total") is not None
-    ):
+    if progress.get("task_index") is not None and progress.get("task_total") is not None:
         parts.append(f"task {progress['task_index']}/{progress['task_total']}")
     if progress.get("dispatch_label"):
         parts.append(f"dispatch={progress['dispatch_label']}")
@@ -267,9 +262,7 @@ def _watch_render_one(
     progress = data.get("progress", {}) or {}
     if progress != last_progress:
         if json_mode:
-            sys.stdout.write(
-                json.dumps({"timestamp": time.time(), "progress": progress}) + "\n"
-            )
+            sys.stdout.write(json.dumps({"timestamp": time.time(), "progress": progress}) + "\n")
         else:
             sys.stdout.write("\r" + _watch_render_tty(progress) + " ")
         sys.stdout.flush()
@@ -302,8 +295,7 @@ def watch_main(
             # contention.
             if not auto_run_path.exists():
                 sys.stderr.write(
-                    "\n[sbtdd status] auto run ended "
-                    "(auto-run.json no longer present)\n"
+                    "\n[sbtdd status] auto run ended (auto-run.json no longer present)\n"
                 )
                 sys.stderr.flush()
                 return 0

@@ -61,9 +61,7 @@ class PluginConfig:
     auto_heartbeat_interval_seconds: int = 15
     status_watch_default_interval_seconds: float = 1.0
     auto_origin_disambiguation: bool = True
-    auto_no_timeout_dispatch_labels: tuple[str, ...] = field(
-        default_factory=lambda: ("magi-*",)
-    )
+    auto_no_timeout_dispatch_labels: tuple[str, ...] = field(default_factory=lambda: ("magi-*",))
 
 
 #: Canonical names of the v0.3.0 Feature E model fields. Used both by the
@@ -174,9 +172,7 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     data.setdefault("auto_origin_disambiguation", True)
     data.setdefault("auto_no_timeout_dispatch_labels", ["magi-*"])
     if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
-        data["auto_no_timeout_dispatch_labels"] = tuple(
-            data["auto_no_timeout_dispatch_labels"]
-        )
+        data["auto_no_timeout_dispatch_labels"] = tuple(data["auto_no_timeout_dispatch_labels"])
     # INV-34 (sec.2.7 of spec): timeout-vs-interval relationship + absolute
     # floor + ceiling validations. Validation order is 1 -> 2 -> 3 -> 4
     # because each test fixture (test_inv34_clause_N_*) varies ONE clause
@@ -193,13 +189,9 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     timeout = data["auto_per_stream_timeout_seconds"]
     interval = data["auto_heartbeat_interval_seconds"]
     if not isinstance(timeout, int) or timeout < 0:
-        raise ValidationError(
-            f"auto_per_stream_timeout_seconds must be int >= 0, got {timeout!r}"
-        )
+        raise ValidationError(f"auto_per_stream_timeout_seconds must be int >= 0, got {timeout!r}")
     if not isinstance(interval, int) or interval < 0:
-        raise ValidationError(
-            f"auto_heartbeat_interval_seconds must be int >= 0, got {interval!r}"
-        )
+        raise ValidationError(f"auto_heartbeat_interval_seconds must be int >= 0, got {interval!r}")
     # Clause 1 (ratio) checked first so fixtures targeting the ratio
     # report the ratio violation rather than masking it with clause 4.
     if timeout < 5 * interval:
@@ -231,8 +223,8 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
         for label in labels:
             if label == "*" or label == "":
                 raise ValidationError(
-                    f"auto_no_timeout_dispatch_labels: bare '*' rejected "
-                    f"(would defeat timeout); use specific glob like 'magi-*'"
+                    "auto_no_timeout_dispatch_labels: bare '*' rejected "
+                    "(would defeat timeout); use specific glob like 'magi-*'"
                 )
     try:
         return PluginConfig(**data)
