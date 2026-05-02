@@ -95,9 +95,7 @@ class HeartbeatEmitter:
         failures_queue: "queue.Queue[int] | None" = None,
     ) -> None:
         if interval_seconds <= 0:
-            raise ValueError(
-                f"interval_seconds must be > 0, got {interval_seconds!r}"
-            )
+            raise ValueError(f"interval_seconds must be > 0, got {interval_seconds!r}")
         self.label = label
         self.interval_seconds = interval_seconds
         self._failures_queue = failures_queue
@@ -151,10 +149,7 @@ class HeartbeatEmitter:
                 # writer to main thread) AND raise RuntimeError so the
                 # operator notices the runaway state. The sentinel is
                 # ``_ZOMBIE_SENTINEL_OFFSET + zombie_count`` (>= 1000).
-                if (
-                    HeartbeatEmitter._zombie_thread_count
-                    >= HeartbeatEmitter._max_zombie_threads
-                ):
+                if HeartbeatEmitter._zombie_thread_count >= HeartbeatEmitter._max_zombie_threads:
                     if self._failures_queue is not None:
                         try:
                             self._failures_queue.put_nowait(
@@ -187,8 +182,7 @@ class HeartbeatEmitter:
         if zombie_alert and self._failures_queue is not None:
             try:
                 self._failures_queue.put_nowait(
-                    HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET
-                    + HeartbeatEmitter._zombie_thread_count
+                    HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET + HeartbeatEmitter._zombie_thread_count
                 )
             except queue.Full:
                 pass
@@ -242,10 +236,7 @@ class HeartbeatEmitter:
             self._failed_writes += 1
             # Periodic queue report every N=10 increments (incremental
             # persistence to main thread per sec.3 single-writer rule).
-            if (
-                self._failures_queue is not None
-                and self._failed_writes % 10 == 0
-            ):
+            if self._failures_queue is not None and self._failed_writes % 10 == 0:
                 try:
                     self._failures_queue.put_nowait(self._failed_writes)
                 except queue.Full:
@@ -253,8 +244,7 @@ class HeartbeatEmitter:
             if self._failed_writes == 1:
                 try:
                     sys.stderr.write(
-                        f"[sbtdd auto] heartbeat write failed "
-                        f"(will continue silently): {exc}\n"
+                        f"[sbtdd auto] heartbeat write failed (will continue silently): {exc}\n"
                     )
                     sys.stderr.flush()
                 except OSError:

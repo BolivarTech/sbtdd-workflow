@@ -223,8 +223,7 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
                 msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
             except (OSError, ImportError) as exc:
                 sys.stderr.write(
-                    f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
-                    f"proceeding without lock\n"
+                    f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; proceeding without lock\n"
                 )
                 sys.stderr.flush()
                 fn()
@@ -236,8 +235,7 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
                 fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             except (OSError, ImportError) as exc:
                 sys.stderr.write(
-                    f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
-                    f"proceeding without lock\n"
+                    f"[sbtdd] warning: fcntl.flock failed: {exc!s}; proceeding without lock\n"
                 )
                 sys.stderr.flush()
                 fn()
@@ -397,13 +395,9 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
                 existing_z_int = int(existing_z)
             except (TypeError, ValueError):
                 existing_z_int = 0
-            data["heartbeat_zombie_thread_count"] = max(
-                existing_z_int, zombie_count
-            )
+            data["heartbeat_zombie_thread_count"] = max(existing_z_int, zombie_count)
         # Atomic rename (preserve existing _update_progress mechanism).
-        tmp_path = auto_run_path.with_suffix(
-            auto_run_path.suffix + f".tmp.{os.getpid()}"
-        )
+        tmp_path = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
         try:
             tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             os.replace(tmp_path, auto_run_path)

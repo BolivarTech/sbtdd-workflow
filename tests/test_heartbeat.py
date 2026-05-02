@@ -98,7 +98,7 @@ def test_heartbeat_exit_join_returns_within_timeout_when_thread_sleeping():
         time.sleep(0.1)
     t1 = time.monotonic()
     assert t1 - t0 < 2.5, (
-        f"exit took {t1-t0:.2f}s; thread loop is using time.sleep instead of "
+        f"exit took {t1 - t0:.2f}s; thread loop is using time.sleep instead of "
         f"threading.Event.wait()"
     )
     # Make sure sys is referenced so import isn't unused.
@@ -177,7 +177,9 @@ def test_heartbeat_reports_failure_counter_via_queue_every_n10(monkeypatch):
     monkeypatch.setattr(sys.stderr, "write", always_fail)
     q: "_q.Queue[int]" = _q.Queue()
     emitter = HeartbeatEmitter(
-        label="x", interval_seconds=0.01, failures_queue=q,
+        label="x",
+        interval_seconds=0.01,
+        failures_queue=q,
     )
     with emitter:
         deadline = time.monotonic() + 2.0
@@ -187,9 +189,7 @@ def test_heartbeat_reports_failure_counter_via_queue_every_n10(monkeypatch):
     drained: list[int] = []
     while not q.empty():
         drained.append(q.get_nowait())
-    assert any(c >= 10 for c in drained), (
-        f"expected counter >= 10 in queue, got {drained}"
-    )
+    assert any(c >= 10 for c in drained), f"expected counter >= 10 in queue, got {drained}"
 
 
 def test_heartbeat_exit_pushes_final_counter_to_queue():

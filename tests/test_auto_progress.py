@@ -364,9 +364,7 @@ def test_set_progress_preserves_started_at_within_same_dispatch():
     # Same dispatch_label, intra-dispatch progress refinement.
     _set_progress(phase=2, task_index=1, task_total=10, dispatch_label="green")
     second_started = get_current_progress().started_at
-    assert second_started == first_started, (
-        "started_at must NOT refresh within same dispatch"
-    )
+    assert second_started == first_started, "started_at must NOT refresh within same dispatch"
     reset_current_progress()
 
 
@@ -563,7 +561,8 @@ def test_serialize_progress_context_naive_datetime_normalized_to_utc():
 
     set_current_progress(
         ProgressContext(
-            phase=2, started_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc),
+            phase=2,
+            started_at=datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc),
         )
     )
     serialized = _serialize_progress()
