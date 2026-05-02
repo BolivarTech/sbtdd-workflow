@@ -189,3 +189,51 @@ def test_watch_main_reads_auto_run_once_per_cycle(tmp_path, monkeypatch):
         f"watch_main read auto-run.json {call_counter['n']} times per cycle "
         f"(expected 1, Loop 2 WARNING #9)"
     )
+
+
+def test_watch_main_parse_failure_does_not_double_read(tmp_path, monkeypatch):
+    """Loop 2 W10: parse-failure path must not double-read.
+
+    Pre-fix W9 consolidated the success path to read once per cycle, but
+    when the read returned ``None`` (5x retry exhausted), the fall-through
+    invoked ``_watch_render_one`` with ``data=None`` -- and
+    ``_watch_render_one`` re-runs ``_read_auto_run_with_retry`` itself
+    when ``data is None``. So on parse failure the cycle did 2x reads,
+    not 1x. Post-fix: the parse-failure path passes the ``None`` sentinel
+    through to ``_watch_render_one`` which now also short-circuits on
+    explicit ``None`` rather than re-reading.
+
+    Strategy: monkey-patch ``_read_auto_run_with_retry`` to always return
+    ``None`` (simulating contention). Count calls per cycle; expected 1.
+    """
+    from status_cmd import watch_main
+
+    auto_run_path = tmp_path / "auto-run.json"
+    # Write CORRUPT payload so any real read would also return None
+    # (defensive vs. mock fall-through).
+    auto_run_path.write_text("not-json{{{", encoding="utf-8")
+
+    call_counter = {"n": 0}
+
+    def always_none(_path, *, max_retries: int = 5):
+        call_counter["n"] += 1
+        return None
+
+    monkeypatch.setattr("status_cmd._read_auto_run_with_retry", always_none)
+
+    sleeps = {"n": 0}
+
+    def fake_sleep(_seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 1:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr("status_cmd.time.sleep", fake_sleep)
+
+    rc = watch_main(auto_run_path, interval=1.0, json_mode=False)
+    assert rc == 130
+    # One cycle ran with parse failure; assert single read (not double).
+    assert call_counter["n"] == 1, (
+        f"watch_main parse-failure path read auto-run.json {call_counter['n']} "
+        f"times per cycle (expected 1, Loop 2 WARNING #10)"
+    )
