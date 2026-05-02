@@ -66,6 +66,9 @@ def _reset_auto_cmd_module_state():
         auto_cmd._reset_drain_state_for_tests()
         auto_cmd._reset_drain_decode_error_emitted_for_tests()
         auto_cmd._reset_observability_swallowed_count_for_tests()
+        # v1.0.0 S1-19 W7: also reset the new persistence dedup flag.
+        if hasattr(auto_cmd, "_reset_persistence_error_emitted_for_tests"):
+            auto_cmd._reset_persistence_error_emitted_for_tests()
 
     _drain_all()
     try:
@@ -1495,6 +1498,36 @@ def test_j2_3_resolved_models_is_frozen():
     rm = ResolvedModels(implementer="a", spec_reviewer="b", code_review="c", magi_dispatch="d")
     with pytest.raises(FrozenInstanceError):
         rm.implementer = "z"  # type: ignore[misc]
+
+
+def test_w7_persistence_vs_drain_breadcrumbs_use_independent_dedup(capsys):
+    """W7 (caspar iter 4): persistence-failure and drain-decode-error
+    breadcrumbs use SEPARATE dedup flags so neither defeats the other.
+    """
+    # Reset both flags.
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_persistence_error_emitted_for_tests()
+    auto_cmd._reset_observability_swallowed_count_for_tests()
+
+    # Drain decode error fires.
+    auto_cmd._emit_drain_decode_error_breadcrumb("decode failure")
+    captured1 = capsys.readouterr()
+    assert "[sbtdd auto] drain JSON decode error" in captured1.err
+
+    # Persistence error fires SEPARATELY (not deduped against drain).
+    auto_cmd._emit_persistence_error_breadcrumb("persistence failure")
+    captured2 = capsys.readouterr()
+    assert "[sbtdd auto] persistence error" in captured2.err
+
+    # Repeating each: NO further output (per-flag dedup).
+    auto_cmd._emit_drain_decode_error_breadcrumb("decode failure 2")
+    auto_cmd._emit_persistence_error_breadcrumb("persistence failure 2")
+    captured3 = capsys.readouterr()
+    assert captured3.err == ""
+
+    # Cleanup.
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_persistence_error_emitted_for_tests()
 
 
 def test_f44_3_multiple_iters_do_not_clobber_each_other(tmp_path):

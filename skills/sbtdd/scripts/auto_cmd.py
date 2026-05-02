@@ -210,6 +210,67 @@ def _reset_drain_decode_error_emitted_for_tests() -> None:
     _drain_decode_error_emitted = False
 
 
+# v1.0.0 S1-19 (Loop 2 iter 4 W7 caspar): separate dedup flag for the
+# persistence-failure breadcrumb. Pre-fix the drain-decode-error and
+# persistence-failure breadcrumbs shared a single ``_drain_decode_error_emitted``
+# flag, which self-defeated when persistence itself was the failing path
+# (the drain breadcrumb fired first, deduped, then a real persistence
+# failure went unreported). Post-fix each class has its own dedup flag.
+_persistence_error_emitted: bool = False
+
+
+def _reset_persistence_error_emitted_for_tests() -> None:
+    """Test-only helper: reset the W7 persistence dedup flag."""
+    global _persistence_error_emitted
+    _persistence_error_emitted = False
+
+
+def _emit_drain_decode_error_breadcrumb(reason: str) -> None:
+    """Per W7: separate dedup for drain JSON-decode failures.
+
+    Emits once per process; subsequent failures bump the swallowed-
+    observability counter silently.
+    """
+    global _drain_decode_error_emitted
+    if _drain_decode_error_emitted:
+        _bump_observability_swallowed_count()
+        return
+    _drain_decode_error_emitted = True
+    try:
+        sys.stderr.write(
+            f"[sbtdd auto] drain JSON decode error (will continue silently; "
+            f"see heartbeat_observability_swallowed in auto-run.json): "
+            f"{reason}\n"
+        )
+        sys.stderr.flush()
+    except OSError:
+        pass
+
+
+def _emit_persistence_error_breadcrumb(reason: str) -> None:
+    """Per W7 (caspar iter 4): separate dedup for auto-run.json persistence failures.
+
+    Self-defeat fix: pre-W7 a persistence failure that fired AFTER a
+    drain breadcrumb was deduped silently because the shared flag was
+    set. Distinct dedup ensures the operator hears about persistence
+    failures even when the drain has previously bailed.
+    """
+    global _persistence_error_emitted
+    if _persistence_error_emitted:
+        _bump_observability_swallowed_count()
+        return
+    _persistence_error_emitted = True
+    try:
+        sys.stderr.write(
+            f"[sbtdd auto] persistence error (will continue silently; "
+            f"see heartbeat_observability_swallowed in auto-run.json): "
+            f"{reason}\n"
+        )
+        sys.stderr.flush()
+    except OSError:
+        pass
+
+
 # Loop 2 I3 (informational): swallowed observability counter. Increments
 # whenever a best-effort observability path silently absorbs an error
 # (heartbeat write fail, drain decode error, etc.). Surfaced in
