@@ -309,6 +309,10 @@ def _commit_approved_artifacts(root: Path) -> None:
         "sbtdd/spec-behavior.md",
         "planning/claude-plan-tdd-org.md",
         "planning/claude-plan-tdd.md",
+        # R10: spec-snapshot is emitted by _mark_plan_approved_with_snapshot
+        # and committed alongside the plan so the pre-merge drift check
+        # has a baseline persisted in git.
+        "planning/spec-snapshot.json",
     )
     for rel in artifacts:
         subprocess_utils.run_with_timeout(["git", "add", rel], timeout=10, cwd=str(root))
@@ -342,6 +346,13 @@ def main(argv: list[str] | None = None) -> int:
     # the commit itself fails mid-way (state = canon of the present;
     # git = canon of the past; CLAUDE.local.md §2.1).
     _create_state_file(root, cfg, root / "planning" / "claude-plan-tdd.md")
+    # R10 (caspar Checkpoint 2 iter 5 W): the plan-approval handler is the
+    # SOLE writer of plan_approved_at AND spec_snapshot_emitted_at. Route
+    # the snapshot emit + watermark write through auto_cmd's helper so the
+    # H2-5 bypass-by-deletion gate has a non-null watermark to compare
+    # against. Deferred-import per cross-subagent Mitigation A.
+    import auto_cmd
+    auto_cmd._mark_plan_approved_with_snapshot(root=root)
     _commit_approved_artifacts(root)
     return 0
 

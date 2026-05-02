@@ -100,8 +100,12 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         calls.append({"skill": "brainstorming", "args": args})
+        # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# Feature spec behavior\nContent\n", encoding="utf-8"
+            "# Feature spec behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
         )
         return None
 
@@ -147,8 +151,12 @@ def test_spec_invokes_writing_plans_after_spec_generated(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         calls.append("brainstorming")
+        # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\nContent\n", encoding="utf-8"
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
         )
         return None
 
@@ -250,8 +258,13 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     def fake_brainstorming(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
+        # Minimal §4 Escenarios section so spec_snapshot.emit_snapshot
+        # finds a non-empty snapshot at plan-approval time (R10).
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\nContent goes here\n", encoding="utf-8"
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: minimal stub**\n\n"
+            "> **Given** a stub.\n> **When** parsed.\n> **Then** present.\n",
+            encoding="utf-8",
         )
         return None
 
