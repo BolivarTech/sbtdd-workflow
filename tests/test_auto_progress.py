@@ -1019,3 +1019,49 @@ def test_concurrent_writers_with_threading_rlock_serialize(tmp_path):
     assert isinstance(data, dict)
     assert "progress" in data
     assert data["progress"]["sub_phase"].startswith("label-")
+
+
+def test_drain_separates_failed_writes_from_zombie_via_tagged_tuple(tmp_path):
+    """Loop 2 W2+W7: tagged-tuple queue protocol.
+
+    Pre-fix: the heartbeat failures queue multiplexed two unrelated counters
+    (``failed_writes`` and ``zombie_thread_count``) on a single channel using
+    ``+1000`` numeric offset as the discriminator. This had two problems:
+
+    - W2: ``+1000`` collides with legitimate ``failed_writes`` values if a
+      long-lived emitter accumulates >1000 failed writes (rare but
+      pathological); the drain would mis-classify the value as zombie.
+    - W7: multiplexing two semantically distinct counters on one channel via
+      numeric offset is hard to maintain and read.
+
+    Post-fix: producer emits ``("failed_writes", N)`` or ``("zombie", N)``
+    tuples on the same queue. Drain dispatches by tag. This test pushes a
+    mix of tuples and asserts both fields are persisted correctly with
+    no cross-contamination, including a tuple with N >> 1000 in the
+    ``failed_writes`` channel that pre-fix would have been mis-classified.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    # Drain leftover items.
+    while not auto_cmd._heartbeat_failures_q.empty():
+        try:
+            auto_cmd._heartbeat_failures_q.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
+
+    # Push tagged tuples: failed_writes 5 + 1500 (would be mis-classified
+    # as zombie under +1000 sentinel scheme), zombie 3.
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 5))
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 1500))
+    auto_cmd._heartbeat_failures_q.put(("zombie", 3))
+
+    auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    # max() of failed_writes channel:
+    assert data["heartbeat_failed_writes_total"] == 1500, (
+        "failed_writes max() must be 1500 (tuple-tagged), pre-fix "
+        "+1000 sentinel scheme would mis-classify as zombie"
+    )
+    # zombie field:
+    assert data["heartbeat_zombie_thread_count"] == 3
