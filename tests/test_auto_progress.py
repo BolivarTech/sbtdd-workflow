@@ -860,4 +860,79 @@ def test_concurrent_write_audit_writers_serialize_via_file_lock(tmp_path):
     data = json.loads(auto_run.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     assert "tasks_completed" in data
+
+
+def test_update_progress_with_nonempty_queue_does_not_deadlock(tmp_path):
+    """Loop 2 CRITICAL #1: ``_update_progress`` + drain must not self-deadlock.
+
+    Pre-fix: ``_do_update_progress`` ran inside ``_with_file_lock`` and then
+    invoked ``_drain_heartbeat_queue_and_persist`` which itself acquired
+    ``_with_file_lock`` on the same path. On Windows ``msvcrt.locking``
+    returns ``OSError`` for nested locks (no reentrancy); on POSIX
+    ``fcntl.flock(LOCK_EX)`` is reentrant per-process so the deadlock would
+    only manifest under specific kernel configs. The fix makes
+    ``_with_file_lock`` reentrant on the same thread (RLock-style) so any
+    nested call from inside the locked region completes immediately.
+
+    The test pre-loads the heartbeat failures queue so the drain path
+    actually fires (skipping the early ``if not drained: return`` branch).
+    The whole call must complete in well under 3 seconds; a deadlock would
+    block forever.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        '{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8"
+    )
+
+    # Drain any leftover queue items from earlier tests so we control the state.
+    while not auto_cmd._heartbeat_failures_q.empty():
+        try:
+            auto_cmd._heartbeat_failures_q.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
+    auto_cmd._heartbeat_failures_q.put(5)
+    auto_cmd._heartbeat_failures_q.put(15)
+
+    completed = threading.Event()
+    error_holder: list[BaseException] = []
+
+    def call() -> None:
+        try:
+            auto_cmd._update_progress(
+                auto_run_path,
+                phase=2,
+                task_index=3,
+                task_total=10,
+                sub_phase="green",
+            )
+        except BaseException as exc:  # noqa: BLE001
+            error_holder.append(exc)
+        finally:
+            completed.set()
+
+    # Run on the main thread is the production path -- but to detect a
+    # deadlock we must time-bound the call; running it on a worker thread
+    # lets the test thread enforce the timeout. Use the main-thread mode
+    # of the writer (which checks ``_assert_main_thread`` only inside
+    # ``_serialize_progress``; if that asserts, the test still observes
+    # the OSError-or-similar surfacing through the auto-run write).
+    # However, ``_assert_main_thread`` raises RuntimeError unconditionally
+    # off-thread. Bypass by spy-patching it for this test only.
+    original_assert = auto_cmd._assert_main_thread
+    auto_cmd._assert_main_thread = lambda: None
+    try:
+        worker = threading.Thread(target=call)
+        worker.start()
+        worker.join(timeout=3.0)
+    finally:
+        auto_cmd._assert_main_thread = original_assert
+
+    assert completed.is_set(), (
+        "deadlock detected: _update_progress did not return within 3s "
+        "with non-empty heartbeat queue (CRITICAL #1)"
+    )
+    if error_holder:
+        # Any error is acceptable -- the test guards specifically against
+        # deadlock. But surface unexpected errors so they are not silenced.
+        raise error_holder[0]
     assert isinstance(data["tasks_completed"], int)
