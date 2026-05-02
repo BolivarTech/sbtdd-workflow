@@ -53,7 +53,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Callable
+from typing import IO, Any, Callable, cast
 
 import close_task_cmd
 import commits
@@ -2258,6 +2258,71 @@ class _ShadowCfg:
     def __init__(self, base: PluginConfig, overrides: dict[str, object]) -> None:
         self.__dict__.update(base.__dict__)
         self.__dict__.update(overrides)
+
+
+def _read_auto_run_audit(auto_run_path: Path) -> dict[str, Any]:
+    """Read ``auto-run.json`` into a dict (F44.3-2 backward compat).
+
+    Helper used by post-mortem tests + future status renderers. Returns
+    an empty dict when the file is missing or contains invalid JSON so
+    callers don't need to defensively wrap each access.
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+
+    Returns:
+        Parsed dict, or ``{}`` when missing / invalid.
+    """
+    try:
+        return cast(dict[str, Any], json.loads(auto_run_path.read_text(encoding="utf-8")))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+
+
+def _record_magi_retried_agents(
+    auto_run_path: Path,
+    *,
+    iter_n: int,
+    retried_agents: list[str] | tuple[str, ...],
+) -> None:
+    """Persist ``magi_iter{N}_retried_agents`` to auto-run.json (F44.3).
+
+    Per spec sec.2.2 + plan task S1-7: MAGI Loop 2 retried_agents
+    telemetry (already parsed into :class:`magi_dispatch.MAGIVerdict`
+    in v0.4.0 Feature F) propagates into the audit trail under a
+    per-iter key. Backward compat: pre-v1.0.0 audit files lack the
+    field; readers that need the field treat its absence as ``[]``.
+
+    Uses :func:`_with_file_lock` to serialize against the other in-process
+    writers (per the single-writer assumption documented on
+    :func:`_update_progress`). Atomic rename via tmp file with
+    ``{pid}.{tid}`` suffix to dodge the Windows PID-collision flake
+    (per W8 fix in S1-20; same pattern preserved here for cross-platform
+    safety).
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+        iter_n: MAGI Loop 2 iteration number (1-based).
+        retried_agents: List of agent names that were retried in this
+            iteration (e.g. ``["balthasar"]``). Empty list when no
+            retries fired.
+    """
+
+    def _do_record() -> None:
+        try:
+            data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        data[f"magi_iter{iter_n}_retried_agents"] = list(retried_agents)
+        tmp_path = auto_run_path.parent / (
+            auto_run_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+        )
+        tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp_path.replace(auto_run_path)
+
+    _with_file_lock(auto_run_path, _do_record)
 
 
 def _phase4_pre_merge_audit_dir(root: Path) -> Path:

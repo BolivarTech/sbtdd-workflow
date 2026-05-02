@@ -1299,3 +1299,56 @@ def test_module_state_is_clean_at_test_entry():
     )
     # Pollute -- the fixture's teardown must drain.
     auto_cmd._heartbeat_failures_q.put(("failed_writes", 999))
+
+
+# v1.0.0 F44.3: MAGI retried_agents propagation to auto-run.json audit.
+def test_f44_3_retried_agents_persisted_to_auto_run_json(tmp_path):
+    """F44.3-1: MAGI iter retried_agents written to auto-run.json."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"started_at": "2026-05-01T12:00:00Z"}),
+        encoding="utf-8",
+    )
+
+    auto_cmd._record_magi_retried_agents(auto_run_path, iter_n=2, retried_agents=["balthasar"])
+
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["magi_iter2_retried_agents"] == ["balthasar"]
+    # Existing field preserved.
+    assert data["started_at"] == "2026-05-01T12:00:00Z"
+
+
+def test_f44_3_backward_compat_with_v0_5_0_files(tmp_path):
+    """F44.3-2: v0.5.0 auto-run.json (no field) parses cleanly."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"started_at": "2026-05-01T12:00:00Z"}),
+        encoding="utf-8",
+    )
+    audit = auto_cmd._read_auto_run_audit(auto_run_path)
+    # Field absent -> empty list per F44.3-2 contract.
+    assert audit.get("magi_iter1_retried_agents", []) == []
+
+
+def test_f44_3_records_empty_list_when_no_retries(tmp_path):
+    """F44.3 corner case: empty retried_agents tuple persists as []."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    auto_cmd._record_magi_retried_agents(auto_run_path, iter_n=1, retried_agents=[])
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["magi_iter1_retried_agents"] == []
+
+
+def test_f44_3_multiple_iters_do_not_clobber_each_other(tmp_path):
+    """F44.3: per-iter fields coexist."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    auto_cmd._record_magi_retried_agents(auto_run_path, iter_n=1, retried_agents=["caspar"])
+    auto_cmd._record_magi_retried_agents(
+        auto_run_path, iter_n=2, retried_agents=["balthasar", "melchior"]
+    )
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["magi_iter1_retried_agents"] == ["caspar"]
+    assert data["magi_iter2_retried_agents"] == ["balthasar", "melchior"]

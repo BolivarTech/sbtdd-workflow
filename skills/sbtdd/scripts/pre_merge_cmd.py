@@ -696,6 +696,17 @@ def _loop2(
             dispatch_label=f"magi-loop2-iter{iteration}",
         )
         verdict_history.append(verdict)
+        # v1.0.0 F44.3 (S1-7): persist retried_agents telemetry to
+        # auto-run.json (iff present, i.e. running under auto). Interactive
+        # pre-merge skips silently because no audit file exists.
+        try:
+            _persist_retried_agents_to_audit(root, iteration, verdict)
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(
+                f"[sbtdd pre-merge] warning: failed to record retried_agents "
+                f"for iter {iteration}: {exc}\n"
+            )
+            sys.stderr.flush()
         if magi_dispatch.verdict_is_strong_no_go(verdict):
             raise MAGIGateError(
                 f"MAGI STRONG_NO_GO at iter {iteration}",
@@ -795,6 +806,41 @@ def _loop2(
         )
     return _handle_safety_valve_exhaustion(
         root, cfg, verdict_history, last_accepted, last_rejected, ns
+    )
+
+
+def _persist_retried_agents_to_audit(
+    root: Path,
+    iteration: int,
+    verdict: magi_dispatch.MAGIVerdict,
+) -> None:
+    """F44.3 hook: persist verdict.retried_agents to auto-run.json if present.
+
+    Called from :func:`_loop2` after each MAGI iteration. Skips silently
+    when the audit file does not exist (interactive pre-merge mode runs
+    standalone and has no audit trail).
+
+    Tests monkeypatch this function to verify the wiring fires.
+
+    Args:
+        root: Project root directory.
+        iteration: 1-based MAGI Loop 2 iteration index.
+        verdict: :class:`magi_dispatch.MAGIVerdict` whose ``retried_agents``
+            tuple is propagated.
+    """
+    auto_run_path = root / ".claude" / "auto-run.json"
+    if not auto_run_path.exists():
+        return
+    # Defer the import: ``auto_cmd`` may also import ``pre_merge_cmd``,
+    # so a top-level circular ``import auto_cmd`` would break in some
+    # test orderings. The deferred import follows the same pattern as
+    # ``_wrap_with_heartbeat_if_auto`` above.
+    import auto_cmd as _auto
+
+    _auto._record_magi_retried_agents(
+        auto_run_path,
+        iter_n=iteration,
+        retried_agents=list(getattr(verdict, "retried_agents", ())),
     )
 
 
