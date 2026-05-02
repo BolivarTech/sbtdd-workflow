@@ -4,13 +4,16 @@
 # Date: 2026-05-02
 """Mechanical smoke fixture for HeartbeatEmitter (sec.5.2 R2.3).
 
-W6 fold-in: monkey-patched clock is PRIMARY fixture strategy (not fallback).
-Sub-second sleep introduces CI jitter; we drive ticks deterministically by
-patching ``time.monotonic`` so ``threading.Event.wait(timeout)`` advances
-predictably while the test thread controls cadence.
-
-A short real-time fallback test is retained (skipped when CI=true) to
-exercise the actual thread+sleep path on developer workstations.
+W6 fold-in: ships a real-time short-window primary fixture (sub-second
+cadence, ~0.3s wall-clock window) plus a longer real-time fallback variant
+that is skipped on CI (``CI=true``) to avoid sub-second jitter flakiness.
+The primary fixture exercises the actual thread + ``threading.Event.wait``
+path -- monkey-patching ``time.monotonic`` was considered but the daemon
+thread internally calls ``Event.wait(timeout)`` which is OS-scheduled,
+so a faked clock alone does not deterministically advance the loop. The
+real-time short-window approach gives a permissive lower-bound assertion
+(``>= 2`` ticks in 0.3s at 50ms cadence) which is robust enough for both
+local and CI runs without flakiness on observed CI variance.
 """
 
 from __future__ import annotations
@@ -25,14 +28,17 @@ from heartbeat import HeartbeatEmitter, reset_current_progress, set_current_prog
 from models import ProgressContext
 
 
-def test_emitter_emits_ticks_via_monkeypatched_clock(monkeypatch, capsys):
-    """W6 PRIMARY: deterministic cadence via monkeypatched ``time.monotonic``.
+def test_emitter_emits_ticks_at_short_cadence(capsys):
+    """W6 PRIMARY: real-time short-window cadence (sub-second).
 
-    Strategy: drive the daemon-thread loop by replacing ``time.monotonic``
-    so ``Event.wait(timeout)`` is bounded by the patched clock's progress;
-    the wall-clock latency for the test is just enough to give the daemon
-    thread CPU time to emit each tick. With a 0.05s interval we get
-    deterministic 5-tick output in <1s wall time.
+    Strategy: drive the daemon-thread loop with a 50ms interval over a
+    ~0.3s wall-clock window. Permissive lower bound (>= 2 ticks) tolerates
+    OS scheduler jitter; on CI variance the assertion still holds because
+    the window is long enough to comfortably fit several intervals.
+
+    The longer 2.5s real-time variant below is skipped on CI to avoid
+    sub-second-cadence flakiness; it is retained as a developer-workstation
+    sanity check.
     """
     reset_current_progress()
     set_current_progress(
@@ -67,10 +73,13 @@ def test_emitter_emits_ticks_via_monkeypatched_clock(monkeypatch, capsys):
     reason="W6 fallback: real-time sub-second cadence is CI-fragile",
 )
 def test_emitter_emits_ticks_real_time_fallback(capsys):
-    """W6 FALLBACK: real-time sleep cadence; skipped on CI.
+    """W6 FALLBACK: longer real-time sleep cadence; skipped on CI.
 
     Retained for developer-workstation verification of the actual
-    thread + sleep path. CI relies on the monkey-patched primary above.
+    thread + sleep path with a wider window (2.5s, 4-6 ticks expected
+    at 0.5s cadence). CI relies on the short-window primary above
+    which is robust to scheduler jitter; this longer variant tightens
+    the upper bound and is therefore CI-fragile.
     """
     reset_current_progress()
     set_current_progress(
