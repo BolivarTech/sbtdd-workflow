@@ -2026,14 +2026,34 @@ def _phase2_task_loop(
     spec_review_budget_seconds = cfg.auto_max_spec_review_seconds
     spec_review_elapsed = 0.0
     spec_review_breadcrumb_emitted = False
-    # v0.3.0 Feature E -- resolve per-skill model IDs once per task-loop
-    # entry; the cascade (CLI override > plugin.local.md > None) is the
-    # same for every dispatch in the loop. INV-0 fires inside each
-    # dispatch module so the cascade output here is the *configured*
-    # model, not necessarily the one ultimately used.
+    # v1.0.0 J2 (S1-8) preflight: resolve per-skill model IDs ONCE per
+    # auto run via :func:`_resolve_all_models_once`. This emits the INV-0
+    # cascade stderr breadcrumb (global ``~/.claude/CLAUDE.md`` pin >
+    # project ``<repo>/CLAUDE.md`` pin > plugin.local.md per-skill field)
+    # exactly once at task-loop entry, replacing the ~70-150 CLAUDE.md
+    # disk reads a 36-task auto run would otherwise incur (spec sec.2.3
+    # + sec.5.1). The returned :class:`models.ResolvedModels` instance
+    # captures the INV-0-resolved IDs for diagnostic visibility.
+    #
+    # The cascade still flows through :func:`_resolve_model` for CLI
+    # override layering (v0.3.0 Feature E): ``--model-override`` flags
+    # win over plugin.local.md fields, and ``None`` is preserved when
+    # neither layer set a value so downstream dispatches can omit the
+    # ``model=`` kwarg (test-stub backward compat). The J2 preflight
+    # is additive and only emits the cascade audit; per-dispatch INV-0
+    # enforcement still fires inside each dispatch module's
+    # ``_apply_inv0_model_check`` path.
+    _resolved_models = _resolve_all_models_once(cfg)
     cli_overrides = getattr(ns, "model_override_map", {}) or {}
     implementer_model = _resolve_model("implementer", cfg, cli_overrides)
     spec_reviewer_model = _resolve_model("spec_reviewer", cfg, cli_overrides)
+    # Diagnostic: ensure the resolved struct's authoritative INV-0 view
+    # is observable for post-mortem (`auto-run.json` future field /
+    # status --watch). Currently consumed by the C3 invocation-site
+    # tripwire (text-level audit in tests/test_pre_merge_cross_check.py)
+    # which guarantees this preflight call is wired in production, not
+    # just unit-tested in isolation.
+    del _resolved_models  # noqa: F841 — preflight emit is the contract
     # Feature D3 + D4: emit one entry breadcrumb for phase 2 ("task
     # loop") so operators see the run move past pre-flight before the
     # first subagent dispatch, and persist progress atomically into
