@@ -241,22 +241,22 @@ git commit -m "chore: mark task A0 complete"
 
 **Per-spec scenarios to satisfy**: A2-1, A2-2, A2-3, A2-4, A2-5.
 
-- [ ] **Step 1: Write failing test for A2-1**
+- [x] **Step 1: Write failing test for A2-1**
 
 Add test asserting `invoke_skill(skill="brainstorming", args=[...])` raises `PreconditionError` with message containing "es interactivo".
 
-- [ ] **Step 2: Run test — should FAIL**
+- [x] **Step 2: Run test — should FAIL**
 
 Expected: FAIL — currently invoke_skill spawns subprocess regardless.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_superpowers_dispatch.py
 git commit -m "test: A2-1 brainstorming headless detection (Red)"
 ```
 
-- [ ] **Step 4: Add `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + safe-by-default gate with `allow_interactive_skill` kwarg**
+- [x] **Step 4: Add `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + safe-by-default gate with `allow_interactive_skill` kwarg**
 
 Modify `superpowers_dispatch.py`:
 1. Module-level: `_SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset({"brainstorming", "writing-plans"})`. Renamed from the working-name `_INTERACTIVE_ONLY_SKILLS` per /receiving-code-review iter 1 W1 triage — the new name reflects the actual cause (subprocess transport is incompatible) rather than the symptom (interactivity).
@@ -270,29 +270,29 @@ Modify `superpowers_dispatch.py`:
 
 **Note**: this step assumes Task Pre-A2 has already migrated the 3 production callsites + 4 test callsites to pass `allow_interactive_skill=True`. If Pre-A2 was skipped or partial, A2's gate will silently break those callsites at this step — verify Pre-A2 is fully landed before proceeding.
 
-- [ ] **Step 5: Run test — should PASS**
+- [x] **Step 5: Run test — should PASS**
 
-- [ ] **Step 6: Add 4 more A2 tests**
+- [x] **Step 6: Add 4 more A2 tests**
 
 Tests for A2-2 (writing-plans), A2-3 (regression: magi:magi or other non-interactive), A2-4 (whitelist semantic — unknown skill passes through), A2-5 (wrapper functions pass `allow_interactive_skill=True` internally so direct wrapper call still works — regression-guards against blanket-raise pattern).
 
-- [ ] **Step 7: Update existing tests that direct-call `invoke_skill(skill="brainstorming")`**
+- [x] **Step 7: Update existing tests that direct-call `invoke_skill(skill="brainstorming")`**
 
 Review test suite for direct calls. Replace with calls to wrapper functions (`brainstorming()`, `writing_plans()`) that monkeypatch the wrapper itself, not the underlying `invoke_skill`.
 
-- [ ] **Step 8: Run full test suite**
+- [x] **Step 8: Run full test suite**
 
 Run: `make verify`
 Expected: ALL pass, runtime <= 150s.
 
-- [ ] **Step 9: Commit Green + Refactor**
+- [x] **Step 9: Commit Green + Refactor**
 
 ```bash
 git add skills/sbtdd/scripts/superpowers_dispatch.py tests/test_superpowers_dispatch.py tests/...
 git commit -m "feat: A2 _INTERACTIVE_ONLY_SKILLS headless detection"
 ```
 
-- [ ] **Step 10: Mark task complete**
+- [x] **Step 10: Mark task complete**
 
 ```bash
 git commit -m "chore: mark task A2 complete"
