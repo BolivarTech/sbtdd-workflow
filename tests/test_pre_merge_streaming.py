@@ -356,9 +356,7 @@ def _seed_basic_pre_merge_env(tmp_path):
         "last_verification_result": "passed",
         "plan_approved_at": "2026-04-20T03:30:00Z",
     }
-    (tmp_path / ".claude" / "session-state.json").write_text(
-        _json.dumps(state), encoding="utf-8"
-    )
+    (tmp_path / ".claude" / "session-state.json").write_text(_json.dumps(state), encoding="utf-8")
 
     # plan with all checkboxes done
     (tmp_path / "planning").mkdir(exist_ok=True)
@@ -368,29 +366,35 @@ def _seed_basic_pre_merge_env(tmp_path):
 
     # spec
     (tmp_path / "sbtdd").mkdir(exist_ok=True)
-    (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-        "# placeholder spec\n", encoding="utf-8"
-    )
+    (tmp_path / "sbtdd" / "spec-behavior.md").write_text("# placeholder spec\n", encoding="utf-8")
 
     # git repo
     _sp.run(["git", "init", "-q"], cwd=str(tmp_path), check=True, capture_output=True)
     _sp.run(
         ["git", "config", "user.email", "tester@example.com"],
-        cwd=str(tmp_path), check=True, capture_output=True,
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
     )
     _sp.run(
         ["git", "config", "user.name", "Tester"],
-        cwd=str(tmp_path), check=True, capture_output=True,
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
     )
     _sp.run(
         ["git", "config", "commit.gpgsign", "false"],
-        cwd=str(tmp_path), check=True, capture_output=True,
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
     )
     (tmp_path / "README.md").write_text("initial\n", encoding="utf-8")
     _sp.run(["git", "add", "README.md"], cwd=str(tmp_path), check=True, capture_output=True)
     _sp.run(
         ["git", "commit", "-m", "chore: initial"],
-        cwd=str(tmp_path), check=True, capture_output=True,
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
     )
 
 
@@ -451,9 +455,7 @@ def test_c2_pre_merge_main_aborts_on_spec_drift_before_loop1(tmp_path, monkeypat
     _seed_basic_pre_merge_env(tmp_path)
     # Persisted snapshot at plan-approval time.
     persisted = tmp_path / "planning" / "spec-snapshot.json"
-    persisted.write_text(
-        '{"S1: parser handles empty input": "old-hash"}', encoding="utf-8"
-    )
+    persisted.write_text('{"S1: parser handles empty input": "old-hash"}', encoding="utf-8")
     # Force the spec_snapshot.emit_snapshot to return a different hash so drift fires.
     monkeypatch.setattr(
         "spec_snapshot.emit_snapshot",

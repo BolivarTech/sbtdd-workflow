@@ -587,14 +587,10 @@ def test_c1_loop2_invokes_cross_check_when_magi_cross_check_true(tmp_path, monke
 
     pre_merge_cmd._reset_cross_check_breadcrumb_for_tests()
 
-    findings_t = (
-        {"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "caspar"},
-    )
+    findings_t = ({"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "caspar"},)
     fake_verdict = _make_magi_verdict_with_findings("GO", findings_t)
 
-    monkeypatch.setattr(
-        magi_dispatch, "invoke_magi", lambda **_kw: fake_verdict
-    )
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", lambda **_kw: fake_verdict)
 
     spy = {"calls": 0, "kwargs": None}
 
@@ -613,9 +609,7 @@ def test_c1_loop2_invokes_cross_check_when_magi_cross_check_true(tmp_path, monke
 
     monkeypatch.setattr(pre_merge_cmd, "_loop2_cross_check", fake_cross_check)
     # Skip the F44.3 retried_agents persistence (no auto-run.json present).
-    monkeypatch.setattr(
-        pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None
-    )
+    monkeypatch.setattr(pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None)
 
     cfg = _make_pluginconfig_for_loop2(magi_cross_check=True, root=tmp_path)
     result = pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)
@@ -656,9 +650,7 @@ def test_c1_loop2_skips_cross_check_when_magi_cross_check_false(tmp_path, monkey
         raise AssertionError("cross-check must not run when magi_cross_check=False")
 
     monkeypatch.setattr(pre_merge_cmd, "_loop2_cross_check", fake_cross_check)
-    monkeypatch.setattr(
-        pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None
-    )
+    monkeypatch.setattr(pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None)
 
     cfg = _make_pluginconfig_for_loop2(magi_cross_check=False, root=tmp_path)
     result = pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)
@@ -691,9 +683,7 @@ def test_c1_loop2_emits_off_breadcrumb_once_per_invocation(tmp_path, monkeypatch
     )
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", lambda **_kw: next(sequence))
-    monkeypatch.setattr(
-        pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None
-    )
+    monkeypatch.setattr(pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None)
 
     cfg = _make_pluginconfig_for_loop2(magi_cross_check=False, root=tmp_path)
     pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)

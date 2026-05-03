@@ -730,9 +730,7 @@ def _loop2(
                 config=cfg,
                 audit_dir=audit_dir,
             )
-            verdict = dataclasses.replace(
-                verdict, findings=tuple(annotated_findings)
-            )
+            verdict = dataclasses.replace(verdict, findings=tuple(annotated_findings))
         verdict_history.append(verdict)
         # v1.0.0 F44.3 (S1-7): persist retried_agents telemetry to
         # auto-run.json (iff present, i.e. running under auto). Interactive
