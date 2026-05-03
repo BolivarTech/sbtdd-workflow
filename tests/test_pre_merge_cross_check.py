@@ -987,11 +987,17 @@ def test_c2_compute_loop2_diff_handles_subprocess_failure(tmp_path, monkeypatch,
 
 
 def test_c2_compute_loop2_diff_truncates_oversized(tmp_path, monkeypatch):
-    """C2: ``_compute_loop2_diff`` truncates output >200KB with marker."""
+    """Loop 2 iter 2->3 W3/W7: diff cap raised to 1MB; >1MB triggers truncation.
+
+    v0.5.0 cap was 200KB, but cumulative v1.0.0 diff observed at 918KB
+    silently truncated 78% of the patch threaded into the cross-check
+    meta-reviewer. The cap was raised to 1MB to match observed plan
+    bundle sizes; 500KB no longer triggers truncation.
+    """
     import subprocess_utils
     from pre_merge_cmd import _compute_loop2_diff
 
-    huge_diff = "x" * (500 * 1024)  # 500KB
+    huge_diff = "x" * (1_500 * 1024)  # 1.5MB triggers truncation under 1MB cap
 
     def fake_run(cmd, timeout=None, cwd=None):
         result = MagicMock()
@@ -1002,7 +1008,65 @@ def test_c2_compute_loop2_diff_truncates_oversized(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
     out = _compute_loop2_diff(tmp_path)
-    assert len(out) <= 200 * 1024 + 100  # 200KB + truncation marker overhead
+    assert len(out) <= 1024 * 1024 + 100  # 1MB + truncation marker overhead
+    assert "[... truncated for prompt budget ...]" in out
+
+
+def test_compute_loop2_diff_cap_raised_to_1mb(tmp_path, monkeypatch):
+    """Task 2 (W3/W7): 900KB diff fits under raised 1MB cap (no truncation).
+
+    Pre-fix the cap was 200KB, so a 900KB cumulative diff (observed
+    empirically as ~918KB during v1.0.0 cycle) was silently truncated to
+    22% of its content. The fix raises the cap to 1MB so realistic
+    bundle diffs fit untruncated and the meta-reviewer evaluates the
+    full patch.
+    """
+    import subprocess_utils
+    from pre_merge_cmd import _compute_loop2_diff
+
+    # 900KB: realistic cumulative diff size at v1.0.0; under the new 1MB cap.
+    diff = "x" * (900 * 1024)
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = diff
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    out = _compute_loop2_diff(tmp_path)
+    # No truncation: full diff content present, no marker.
+    assert len(out) == len(diff), (
+        "900KB diff must NOT be truncated under the raised 1MB cap"
+    )
+    assert "[... truncated for prompt budget ...]" not in out
+
+
+def test_compute_loop2_diff_truncates_at_1mb(tmp_path, monkeypatch):
+    """Task 2 (W3/W7): >1MB diff triggers truncation marker.
+
+    Sanity-check the boundary: bumping the cap above 1MB still preserves
+    the truncation contract for genuinely-oversized bundles.
+    """
+    import subprocess_utils
+    from pre_merge_cmd import _compute_loop2_diff
+
+    diff = "y" * (2 * 1024 * 1024)  # 2MB exceeds 1MB cap
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = diff
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    out = _compute_loop2_diff(tmp_path)
+    assert len(out) <= 1024 * 1024 + 100, (
+        f"2MB diff must be truncated to <=1MB+marker, got {len(out)} bytes"
+    )
+    assert "[... truncated for prompt budget ...]" in out
     assert "[... truncated for prompt budget ...]" in out
 
 
@@ -1033,6 +1097,72 @@ def test_c2_build_cross_check_prompt_embeds_diff():
     ]
     prompt = _build_cross_check_prompt(diff, "GO_WITH_CAVEATS", findings)
     assert "Cumulative diff under review" in prompt
+
+
+def test_cross_check_audit_records_truncation_metadata(tmp_path, monkeypatch):
+    """Task 2 (W3/W7): when diff is truncated, audit JSON records the metadata.
+
+    The pre-fix audit JSON had no diff_truncated / original_bytes / cap_bytes
+    fields, so post-mortem readers had no way to tell whether the meta-
+    reviewer had evaluated the full diff or a silently-truncated subset.
+    The fix threads the truncation flag + sizes through ``_loop2`` ->
+    ``_loop2_cross_check`` -> ``_write_cross_check_audit`` so audit
+    artifacts surface the truncation context.
+    """
+    import subprocess_utils
+    import pre_merge_cmd
+    import magi_dispatch
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    (tmp_path / "planning" / "claude-plan-tdd.md").write_text("# plan\n", encoding="utf-8")
+
+    pre_merge_cmd._reset_cross_check_breadcrumb_for_tests()
+
+    # Force _compute_loop2_diff to surface a >1MB diff so truncation triggers.
+    huge_diff = "z" * (2 * 1024 * 1024)
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = huge_diff
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+
+    findings_t = ({"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "caspar"},)
+    fake_verdict = _make_magi_verdict_with_findings("GO", findings_t)
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", lambda **_kw: fake_verdict)
+
+    def fake_dispatch(*, diff, prompt, **_kw):
+        return {
+            "decisions": [
+                {"original_index": 0, "decision": "KEEP", "rationale": "ok"},
+            ],
+        }
+
+    monkeypatch.setattr(pre_merge_cmd, "_dispatch_requesting_code_review", fake_dispatch)
+    monkeypatch.setattr(pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None)
+
+    cfg = _make_pluginconfig_for_loop2(magi_cross_check=True, root=tmp_path)
+    pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)
+
+    # Read the cross-check audit artifact.
+    audit_dir = tmp_path / ".claude" / "magi-cross-check"
+    assert audit_dir.exists(), "cross-check audit dir must be created"
+    artifacts = sorted(audit_dir.glob("iter*.json"))
+    assert len(artifacts) >= 1, "at least one cross-check audit artifact must exist"
+    audit = json.loads(artifacts[-1].read_text(encoding="utf-8"))
+    assert audit.get("diff_truncated") is True, (
+        "audit JSON must record diff_truncated when diff exceeded the cap"
+    )
+    assert audit.get("diff_original_bytes") == len(huge_diff), (
+        "audit JSON must record the original (pre-truncation) byte count"
+    )
+    assert audit.get("diff_cap_bytes") == 1024 * 1024, (
+        "audit JSON must record the cap (1MB) used during truncation"
+    )
 
 
 def test_phase4_pre_merge_audit_dir_invoked_from_loop2(tmp_path, monkeypatch):
