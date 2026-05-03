@@ -382,11 +382,12 @@ secuencialmente. Sin embargo, los siguientes contratos preservados
 > **Then** Composite signature `(T0, N, H)` equals
 > `spec_sig_before == (T0, N, H)`. Tuple equality detected → raises
 > `PreconditionError` flagging the no-op rewrite. Bare-mtime check
-> would have ALSO caught this case here (mtime equal), but the
-> rationale extends to the case where mtime advances by 1ns but
-> content is identical — composite catches that too. This escenario
-> guards against the FS-precision regression class documented in
-> spec sec.2.1 composite-signature rationale.
+> would have caught this specific instance (mtime equal), but the
+> rationale extends to coarse-clock cases where two distinct write
+> ticks may yield identical mtime tuples while content also matches —
+> composite signature catches that via size + sha256 corroboration.
+> This escenario guards against the FS-precision regression class
+> documented in spec sec.2.1 composite-signature rationale.
 
 ### Item A1 — Permissive escenario regex
 

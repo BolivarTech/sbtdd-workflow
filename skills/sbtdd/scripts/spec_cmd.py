@@ -147,6 +147,27 @@ def _file_signature(path: Path) -> tuple[int, int, str]:
     specs are <1MB but the v1.0.1 spec-behavior.md is ~30KB and the
     helper must remain robust if specs grow.
 
+    **Known asymmetry modes** (W4 caspar Loop 2 iter 1):
+
+    - **False-positive (no-op detected when subprocess DID change content)**:
+      a deterministic regenerator that writes identical bytes (e.g.,
+      autoformat-then-rewrite a stable spec) within a tick will produce
+      an identical signature ``(mtime_ns, size, sha256)`` and trip
+      ``_run_spec_flow`` even though the subprocess "did its work" — the
+      work was simply a no-op at the byte level. This is the intentional
+      semantic: A0 detects "the FILE did not change", not "the subprocess
+      did not run".
+    - **False-negative (no-op missed when subprocess touched file but
+      content matches)**: a subprocess that calls ``utime`` to advance
+      mtime without writing AND the new content matches the old
+      content will produce different mtime + same size + same sha256 —
+      composite signature TUPLE differs (mtime field differs) so A0
+      treats this as a change. This is correct from a "did the file
+      change" perspective even though the operator may consider it a
+      semantic no-op. Operators relying on touch-without-content
+      semantics should use ``--resume-from-magi`` to bypass A0
+      altogether.
+
     Args:
         path: Path to the file to fingerprint. Must exist; the caller is
             responsible for the existence check (``_run_spec_flow``

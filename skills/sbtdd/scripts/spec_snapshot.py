@@ -210,9 +210,13 @@ def persist_snapshot(path: Path, snapshot: dict[str, str]) -> None:
     try:
         tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp, path)
-    except BaseException:
-        # If anything goes wrong before the atomic rename completes, drop
-        # the temp file so we do not leak it into the destination dir.
+    except Exception:
+        # W7 caspar Loop 2 iter 1 fix: narrowed from BaseException to
+        # Exception so KeyboardInterrupt and SystemExit propagate to
+        # the operator without delay. Tmp cleanup still runs for the
+        # bounded subset of errors callers expect to handle (OSError,
+        # PermissionError, JSONEncodeError). Same housekeeping pattern
+        # as v1.0.0 W7 fix in auto_cmd._write_auto_run_audit.
         if tmp.exists():
             try:
                 tmp.unlink()

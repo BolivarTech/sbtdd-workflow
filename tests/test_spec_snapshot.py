@@ -304,6 +304,38 @@ def test_h2_4_persist_snapshot_uses_atomic_rename(tmp_path: Path) -> None:
     assert leftover == [], f"atomic rename did not consume tmp files: {leftover}"
 
 
+def test_w7_persist_snapshot_propagates_keyboard_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W7 caspar Loop 2 iter 1: BaseException narrowed to Exception so
+    KeyboardInterrupt and SystemExit propagate to the operator.
+
+    Pre-fix: ``except BaseException:`` swallowed Ctrl-C during the brief
+    tmp-cleanup window between tmp.write_text and os.replace.
+    Post-fix: ``except Exception:`` lets KeyboardInterrupt bubble up.
+    """
+    import os
+
+    from spec_snapshot import persist_snapshot
+
+    target = tmp_path / "snap.json"
+    snapshot = {"S1": "h1"}
+
+    # Simulate Ctrl-C during os.replace by monkeypatching the function.
+    def raise_keyboard_interrupt(*args, **kwargs):
+        raise KeyboardInterrupt("simulated Ctrl-C during atomic rename")
+
+    monkeypatch.setattr(os, "replace", raise_keyboard_interrupt)
+
+    with pytest.raises(KeyboardInterrupt, match="simulated Ctrl-C"):
+        persist_snapshot(target, snapshot)
+
+    # Tmp file cleanup is best-effort and may not run when KeyboardInterrupt
+    # propagates through the narrow Exception catch — that is intentional;
+    # operator gets fast Ctrl-C response, leftover cleanup is operator
+    # concern. We assert the propagation happened, not the cleanup state.
+
+
 def test_load_snapshot_round_trip(tmp_path: Path) -> None:
     """Sanity: persist then load round-trip."""
     from spec_snapshot import load_snapshot, persist_snapshot

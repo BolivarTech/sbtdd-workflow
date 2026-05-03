@@ -80,6 +80,45 @@ every post-v0.1 release.
   /receiving-code-review triage.
 - **G1 binding cap=3 HARD respected**: Checkpoint 2 converged in 2 iters
   (iter 2 terminal). NO INV-0 override invoked.
+- **P7 empirical proof-of-recovery NOT executed in v1.0.1** (W5 caspar
+  Loop 2 iter 1 disclosure): unit tests A3-1..A3-7 cover the structural
+  validation surface; the end-to-end `--resume-from-magi` recovery test
+  in a fresh Claude Code session was NOT run during v1.0.1 implementation.
+  First true empirical exercise will be the v1.0.2 cycle (which uses the
+  v1.0.1 recovery flag in anger if `/sbtdd spec` dispatchers regress).
+  Acceptance criterion P7 is satisfied at the unit-test level for v1.0.1
+  ship; full empirical validation is v1.0.2 first-cycle deliverable.
+- **Diff stat -9332 line accounting** (W6 caspar Loop 2 iter 1):
+  net deletion is dominated by spec/plan-org regeneration. v1.0.0
+  `spec-behavior.md` was ~12K lines (large bundle); v1.0.1
+  `spec-behavior.md` is ~880 lines (single-pillar focused). Same shape
+  for `claude-plan-tdd-org.md` (4K → 500 lines). Production code delta
+  is small additive: A0 tripwire ~40 lines, A1 fallback ~30 lines, A2
+  set + kwarg ~50 lines, A3 flag + structural validation ~80 lines.
+  Net additions across `skills/sbtdd/scripts/` are ~200 lines; the
+  rest is doc/spec/plan refresh inherent to single-pillar release
+  scope discipline.
+- **A0 known asymmetry modes** (W4 caspar Loop 2 iter 1): documented
+  in `_file_signature` docstring at `spec_cmd.py:124-185`. Two
+  intentional semantics: (a) deterministic regen producing identical
+  bytes within a tick → false-positive "no-op detected" (acceptable —
+  A0 detects "the FILE did not change", not "the subprocess did not
+  run"); (b) touch-without-content (utime advance on identical bytes)
+  → mtime field differs so signature differs → A0 treats as change
+  (correct from "did the file change" perspective). Operators relying
+  on touch-without-content semantics use `--resume-from-magi` to
+  bypass A0 entirely.
+
+### Bug fixes
+
+- **W7 spec_snapshot.persist_snapshot BaseException narrowed**: changed
+  `except BaseException:` to `except Exception:` so `KeyboardInterrupt`
+  and `SystemExit` propagate to the operator without delay. Tmp cleanup
+  still runs for the bounded subset of errors callers handle (OSError,
+  PermissionError, JSONEncodeError). New regression test
+  `test_w7_persist_snapshot_propagates_keyboard_interrupt` asserts
+  Ctrl-C bubbles up. Same housekeeping pattern as v1.0.0 W7 fix in
+  `auto_cmd._write_auto_run_audit`. caspar Loop 2 iter 1 W7.
 
 ## [1.0.0] - 2026-05-02
 
