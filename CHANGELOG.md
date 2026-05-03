@@ -319,6 +319,24 @@ every post-v0.1 release.
   production exposure (W2 balthasar v1.0.1 iter 2). Depends on v1.0.1
   (whitelist + override hatch shipped as baseline) + v1.0.2 (so
   v1.0.3 can iterate on top of own-cycle dogfood evidence from v1.0.2).
+- **MAGI gate template alignment audit (v1.0.3 LOCKED, user directive
+  2026-05-03)**: verify the plugin's MAGI cycle implementation
+  (`pre_merge_cmd._loop2` + `magi_dispatch` + cross-check sub-phase
+  + carry-forward block format + review summary artifact + cost
+  awareness via `auto_skill_models`) matches the canonical procedure
+  documented in `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md`
+  (411 lines synthesized 2026-05-01 from SBTDD-workflow + MAGI plugin
+  empirical learnings). Deliverable: section-by-section GAP audit
+  document `docs/audits/v1.0.3-magi-gate-template-alignment.md` +
+  cross-artifact alignment test (similar to v0.4.x HF1 canonical
+  wording test) + remediation commits per GAP. Sections to verify:
+  trigger criteria, pass threshold + verdict actions table,
+  carry-forward format for iter N+1 payload, review summary artifact
+  per-feature emission, cost awareness + per-skill model selection,
+  per-project setup checklist `{placeholder}` markers in
+  `templates/CLAUDE.local.md.template`. Estimated 1-2 days. Depends on
+  v1.0.2 (cross-check completion) so the audit runs against a
+  fully-functional plugin pipeline.
 - INV-31 default flip dedicated cycle (separate field-data doc).
 - Group B options 1, 3, 4, 6, 7 (opt-in flags only; not core deliverable).
 - GitHub Actions CI workflow.
