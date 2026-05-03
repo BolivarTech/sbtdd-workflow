@@ -122,18 +122,39 @@ every post-v0.1 release.
   `_emit_persistence_error_breadcrumb`, `_phase4_pre_merge_audit_dir`). All
   wired in respective iter fix packages. v1.1.0 plan-task default: every
   helper has invocation-site tripwire BEFORE close-task.
-- **Cross-check own-cycle dogfood deferred**: v1.0.0 ships Feature G + INV-35
-  but the own-cycle dogfood (running v1.0.0 `/sbtdd pre-merge` against v1.1.0
-  cycle) requires v1.1.0 to use v1.0.0's pre-merge orchestration. v1.0.0
-  Loop 2 iters 1+2 ran with `magi_cross_check: false` (default-OFF posture
-  per spec sec.5.2 + balthasar Loop 2 iter 1 recursive-circular-risk
-  WARNING). G3 manual sign-off vacuous for these iters (no audit artifact
-  generated). Iter 3+ flips `magi_cross_check: true` to exercise the helpers.
+- **G3 sign-off vacuous-by-construction for v1.0.0**: per spec sec.7.1.3 G3,
+  iter N+1 cross-check audit JSON should be manually diffed against G6 schema
+  before iter N+2 dispatch. v1.0.0 cycle's MAGI Loop 2 was dispatched directly
+  via `python skills/magi/scripts/run_magi.py code-review <payload>` (the
+  available entrypoint for arbitrary loop runs), not via `/sbtdd pre-merge`
+  which is where `_loop2_cross_check` actually fires. The cross-check helpers
+  shipping in v1.0.0 are therefore NOT exercised during this cycle's own Loop 2.
+  G3 sign-off is vacuous-by-construction for v1.0.0. **LOCKED commitment for
+  v1.0.1 cycle**: invoke `/sbtdd pre-merge` (not `run_magi.py` direct) to
+  generate `.claude/magi-cross-check/iter*.json` audit artifacts and exercise
+  the recursive payoff signal for the first time.
 - **Pre-dispatch commitment for Loop 2 iter 3 (G2 binding)**: per spec
   sec.7.1.3 G2, if iter 3 does not converge cleanly, **default = option-A
   scope-trim** (defer Pillar 2 = Feature I + Group B option 2 + 5 to
   v1.0.1; ship v1.0.0 = Pillar 1 + v0.5.1 fold-in only). INV-0 override
   available ONLY with explicit user authorization phrase per G2.
+- **G2 trigger criterion (orchestrator interpretation for this cycle)**:
+  spec sec.7.1.3 G2 says "if iter 3 verdict does not converge cleanly". Spec
+  does not define "convergence cleanly". v1.0.0 Loop 2 iter 3 verdict =
+  GO_WITH_CAVEATS (3-0) full no-degraded with 0 CRITICAL + 9 WARNING (all
+  CONDITIONAL). Per spec sec.6 Gate MAGI table, GO_WITH_CAVEATS full no-
+  degraded MEETS the minimum threshold (`>= GO_WITH_CAVEATS full no-
+  degraded`). The orchestrator's interpretation: **iter 3 converged
+  at-threshold; G2 default scope-trim does NOT auto-fire.** However, because
+  the verdict is at minimum (not above) and 9 WARNINGs persist (most
+  doc-level, applied via /receiving-code-review iter 3 triage), the user
+  retains explicit choice between (i) accept full-bundle ship at-threshold,
+  or (ii) invoke option-A scope-trim per the G2 pre-commitment. The
+  orchestrator does NOT assume the user's choice; G2's intentional friction
+  is preserved by surfacing the decision rather than silently overriding.
+  v1.x spec amendment: explicitly define "convergence cleanly" in sec.7.1.3
+  G2 (proposal: APPROVE-or-better verdict from at least 2 of 3 agents +
+  zero CRITICAL findings remaining).
 - **Diff cap raised to 1MB (W3/W7 sweep)**: v0.5.0 cap was 200KB; cumulative
   v1.0.0 diff measured ~918KB silently truncated at 78%. The cap was raised
   to 1MB so realistic plan-bundle diffs reach the cross-check meta-reviewer
@@ -144,6 +165,34 @@ every post-v0.1 release.
   future status renderers; deferred to v1.0.1+ when an actual status
   renderer needs to consume the audit JSON. Documented in the helper's
   module-level docstring so removal is gated on intentional follow-through.
+
+### Loop 2 close-out summary
+
+- **Iter sequence (verdicts)**: iter 1 (3 CRITICAL + 12 WARNING) -> iter 2
+  (2 CRITICAL + 11 WARNING) -> iter 3 (0 CRITICAL + 9 WARNING) all
+  GO_WITH_CAVEATS (3-0) full no-degraded. Convergence pattern: CRITICAL
+  count strictly decreasing (3 -> 2 -> 0), WARNING count steadily declining
+  (12 -> 11 -> 9), agent verdict full-no-degraded held across all 3 iters.
+- **Dead helpers swept (R11)**: 5 dead helpers caught at iter 1
+  (Feature G + drift gate suite), 5 caught at iter 2 (J2
+  `_resolve_all_models_once`, W4 `_normalize_findings_for_carry_forward`,
+  `_emit_drain_decode_error_breadcrumb`, `_emit_persistence_error_breadcrumb`,
+  `_phase4_pre_merge_audit_dir`), 0 caught at iter 3. Cumulative R11 sweep
+  reached clean (zero dead helpers added by iter 2->3 fix package).
+- **`/receiving-code-review` triage discipline**: applied iter 2 onwards
+  (iter 1 bypass = one-time exception, recorded in Process notes).
+  v1.x process commitment: every Loop 2 iter MUST run
+  `/receiving-code-review` on findings — no exceptions, no override flag.
+- **Iter 3 close-out triage breakdown**: 5 ACCEPT (doc fixes applied this
+  iteration: G3 vacuous-by-construction, G2 trigger-criterion
+  documentation, slow-marker audit, diff-cap empirical-validation
+  tracking, this close-out summary), 4 REJECT (re-raised closed
+  decisions / math reframes already evaluated in prior iters), 4 DEFER
+  (deferrables rolled to v1.0.1+ backlog).
+- **Final verdict**: GO_WITH_CAVEATS (3-0) full no-degraded — at-threshold
+  convergence per spec sec.6 Gate MAGI table. User G2 decision pending:
+  full-bundle ship at-threshold OR option-A scope-trim per the G2
+  pre-commitment (Process notes above).
 
 ### Deferred (rolled to v1.x)
 
@@ -162,6 +211,15 @@ every post-v0.1 release.
   + symbol grep through skill tool access. v1.0.1+ either wires a real
   cumulative-diff helper into the prompt or removes the misleading
   "diff context" wording in `_build_cross_check_prompt`.
+- **Diff cap empirical validation tracking (v1.x)**: the
+  `_compute_loop2_diff` 1MB cap chosen at iter 2->3 fix is based on a single
+  empirical measurement (v1.0.0 cumulative diff = 918KB, 13% headroom under
+  1MB). v1.x cycles MUST track per-cycle cumulative diff size at pre-merge
+  entry; if observed > 800KB, raise cap to 2MB OR scope-trim the bundle.
+  v1.0.1+ may codify this as a `--diff-cap-bytes` CLI flag with default 1MB
+  + observability log. Track in cross-check audit JSON
+  (`diff_truncated/diff_original_bytes/diff_cap_bytes` fields shipped this
+  cycle).
 
 ## [0.5.0] - 2026-05-02
 
