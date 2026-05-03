@@ -407,10 +407,15 @@ def test_w1_sweep_run_with_timeout_callsite_count_does_not_grow(monkeypatch=None
     import ast
     from pathlib import Path
 
-    # v1.0.0 baseline: 6 callers in auto_cmd + 1 in pre_merge_cmd = 7
+    # v1.0.0 baseline: 6 callers in auto_cmd + 3 in pre_merge_cmd = 9
     # total. All are short-budget git utility commands (timeout 10-30s).
+    # pre_merge_cmd grew from 1 to 3 in C2 (W-NEW1 fix): _compute_loop2_diff
+    # adds two ``git diff`` / ``git merge-base`` calls (30s + 10s timeouts)
+    # in the cumulative-diff resolution chain. Both are explicitly short-
+    # budget per spec sec.2.1 W-NEW1 -- not subagent dispatches that would
+    # warrant ``run_streamed_with_timeout``.
     BASELINE_AUTO_CMD = 6
-    BASELINE_PRE_MERGE_CMD = 1
+    BASELINE_PRE_MERGE_CMD = 3
 
     repo_root = Path(__file__).parent.parent
     targets = {

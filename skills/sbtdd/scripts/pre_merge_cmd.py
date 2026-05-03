@@ -1125,9 +1125,7 @@ def _compute_loop2_diff(root: Path, base_ref: str = "origin/main") -> str:
 
     # Truncate to prompt budget (spec sec.2.1 W-NEW1: 200KB cap).
     if len(diff) > _CROSS_CHECK_DIFF_MAX_BYTES:
-        diff = (
-            diff[:_CROSS_CHECK_DIFF_MAX_BYTES] + _CROSS_CHECK_DIFF_TRUNCATION_MARKER
-        )
+        diff = diff[:_CROSS_CHECK_DIFF_MAX_BYTES] + _CROSS_CHECK_DIFF_TRUNCATION_MARKER
     return diff
 
 
@@ -1166,8 +1164,7 @@ def _build_cross_check_prompt(
     diff_section = ""
     if diff:
         diff_section = (
-            "\n\n## Cumulative diff under review (truncated to 200KB)\n\n"
-            f"```diff\n{diff}\n```\n"
+            f"\n\n## Cumulative diff under review (truncated to 200KB)\n\n```diff\n{diff}\n```\n"
         )
     return (
         f"Evaluate if the following MAGI Loop 2 findings are technically "
