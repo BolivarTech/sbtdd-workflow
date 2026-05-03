@@ -54,6 +54,9 @@ def test_spec_accepts_lowercase_todos_spanish_prose(
     # flow; INV-27 validation is what we exercise here, not the dispatcher.
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", lambda *a, **kw: None)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", lambda *a, **kw: None)
+    # v1.0.0 Loop 2 iter 2->3 R11: production routes through
+    # ``invoke_writing_plans``; stub it too so test stays subprocess-free.
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", lambda **kw: None)
     # Lowercase must not trigger INV-27; downstream precondition failures
     # (e.g. missing plugin.local.md, unseeded planning/ dir) are the
     # expected escape hatch.
@@ -100,8 +103,12 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         calls.append({"skill": "brainstorming", "args": args})
+        # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# Feature spec behavior\nContent\n", encoding="utf-8"
+            "# Feature spec behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
         )
         return None
 
@@ -114,8 +121,19 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
         )
         return None
 
+    def spy_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        # v1.0.0 Loop 2 iter 2->3 R11: production now routes through
+        # invoke_writing_plans wrapper; record under the same skill tag
+        # so existing call-order assertions continue to match.
+        calls.append({"skill": "writing-plans", "args": [spec_path]})
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+        )
+        return None
+
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", spy_invoke_writing_plans)
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
@@ -147,8 +165,12 @@ def test_spec_invokes_writing_plans_after_spec_generated(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         calls.append("brainstorming")
+        # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\nContent\n", encoding="utf-8"
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
         )
         return None
 
@@ -162,8 +184,19 @@ def test_spec_invokes_writing_plans_after_spec_generated(
         assert args is not None and any("spec-behavior.md" in tok for tok in args)
         return None
 
+    def spy_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        # v1.0.0 Loop 2 iter 2->3 R11: production now routes through
+        # invoke_writing_plans; mirror the spy contract on the wrapper.
+        calls.append("writing-plans")
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+        )
+        assert "spec-behavior.md" in spec_path
+        return None
+
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", spy_invoke_writing_plans)
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
@@ -250,8 +283,13 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     def fake_brainstorming(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
+        # Minimal §4 Escenarios section so spec_snapshot.emit_snapshot
+        # finds a non-empty snapshot at plan-approval time (R10).
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\nContent goes here\n", encoding="utf-8"
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: minimal stub**\n\n"
+            "> **Given** a stub.\n> **When** parsed.\n> **Then** present.\n",
+            encoding="utf-8",
         )
         return None
 
@@ -263,8 +301,17 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         )
         return None
 
+    def fake_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        # v1.0.0 Loop 2 iter 2->3 R11: mirror fake_writing_plans on the
+        # invoke_writing_plans wrapper that production uses.
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+        )
+        return None
+
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", fake_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", fake_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", fake_invoke_writing_plans)
 
 
 def _make_verdict(
@@ -382,6 +429,41 @@ def test_spec_creates_state_file_on_approval(
     assert state["current_task_id"] == "1"
 
 
+def test_spec_main_emits_snapshot_and_watermark_on_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R10 plan-approval handler interception (caspar Checkpoint 2 iter 5 W).
+
+    spec_cmd.main MUST route plan-approval through
+    auto_cmd._mark_plan_approved_with_snapshot so the spec-snapshot file
+    AND the state-file watermark are persisted at the same transition
+    that sets plan_approved_at. Without this, H2-5 bypass-by-deletion
+    gate degrades to false-negative because the watermark is missing.
+    """
+    import json
+
+    import magi_dispatch
+    import spec_cmd
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    spec_cmd.main(["--project-root", str(tmp_path)])
+
+    snapshot_path = tmp_path / "planning" / "spec-snapshot.json"
+    assert snapshot_path.exists(), (
+        "planning/spec-snapshot.json must be emitted at plan approval (R10)"
+    )
+
+    state = json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
+    assert state.get("spec_snapshot_emitted_at") is not None, (
+        "state file must record spec_snapshot_emitted_at watermark (R10)"
+    )
+
+
 def test_spec_commits_approved_artifacts_after_state_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -462,3 +544,73 @@ def test_spec_does_not_commit_artifacts_when_magi_rejects(
         check=True,
     )
     assert "MAGI-approved" not in result.stdout
+
+
+def test_spec_routes_writing_plans_through_invoke_writing_plans_wrapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 3 (Loop 2 iter 2->3 R11): spec flow must use invoke_writing_plans.
+
+    Pre-fix ``spec_cmd._run_spec_flow`` called the bare
+    ``superpowers_dispatch.writing_plans`` wrapper, leaving the H5-1
+    scenario-stub directive in ``invoke_writing_plans`` actually-dead.
+    The fix routes the call through ``invoke_writing_plans(spec_path=...)``
+    so the H5-1 prompt extension is exercised at plan-generation time.
+    """
+    import magi_dispatch
+    import spec_cmd
+    import superpowers_dispatch
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _setup_git_repo(tmp_path)
+
+    def spy_brainstorming(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
+        )
+        return None
+
+    invoke_calls: list[dict] = []
+
+    def spy_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        invoke_calls.append({"spec_path": spec_path, "kwargs": kwargs})
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+        )
+        return None
+
+    # Bare wrapper must NOT be called -- spec_cmd should route through
+    # the prompt-extending wrapper instead.
+    bare_calls: list[dict] = []
+
+    def spy_bare_writing_plans(*args, **kwargs) -> object:
+        bare_calls.append({"args": args, "kwargs": kwargs})
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", spy_invoke_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_bare_writing_plans)
+    monkeypatch.setattr(
+        magi_dispatch,
+        "invoke_magi",
+        lambda context_paths, timeout=1800, cwd=None: _make_verdict("GO"),
+    )
+
+    spec_cmd.main(["--project-root", str(tmp_path)])
+
+    assert len(invoke_calls) == 1, (
+        "spec flow must invoke superpowers_dispatch.invoke_writing_plans exactly once"
+    )
+    assert "spec-behavior.md" in invoke_calls[0]["spec_path"], (
+        "spec_path must point at sbtdd/spec-behavior.md"
+    )
+    assert bare_calls == [], (
+        "bare superpowers_dispatch.writing_plans MUST NOT be called -- the "
+        "H5-1 scenario-stub directive lives in invoke_writing_plans"
+    )

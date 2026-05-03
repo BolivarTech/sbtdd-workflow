@@ -323,42 +323,59 @@ def watch_main(
     last_progress: dict[str, Any] | None = None
     try:
         while True:
-            # Re-check existence each poll: file may disappear mid-watch
-            # (auto-run completed + .claude/ cleanup). Distinguish from
-            # contention.
-            if not auto_run_path.exists():
-                sys.stderr.write(
-                    "\n[sbtdd status] auto run ended (auto-run.json no longer present)\n"
-                )
-                sys.stderr.flush()
-                return 0
-            # Loop 2 WARNING #9 fix: read auto-run.json ONCE per cycle
-            # and share the result between the render/diff path and the
-            # state-machine update path. Pre-fix this loop called
-            # ``_read_auto_run_with_retry`` twice per cycle (once inside
-            # ``_watch_render_one`` and once here), wasting I/O and
-            # risking inconsistent state-machine updates if the two
-            # reads observed different on-disk payloads.
-            data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
-            new_progress = _watch_render_one(
-                auto_run_path,
-                json_mode=json_mode,
-                last_progress=last_progress,
-                data=data,
-            )
-            if data is None:
-                state.record_parse_failure()
-                # Per Checkpoint 2 iter 3 caspar W9 fix: align breadcrumb
-                # cadence with slow-poll trigger threshold (3) rather than 5.
-                if state.consecutive_parse_failures % 3 == 0:
+            # Per Loop 2 iter 4 W5 fix (caspar): wrap the cycle body in a
+            # try/except so transient errors (a render bug, an unexpected
+            # file-state, a partial OSError on read) do not kill the poll
+            # loop. KeyboardInterrupt still propagates to the outer handler
+            # so Ctrl+C exits cleanly with rc=130.
+            try:
+                # Re-check existence each poll: file may disappear mid-watch
+                # (auto-run completed + .claude/ cleanup). Distinguish from
+                # contention.
+                if not auto_run_path.exists():
                     sys.stderr.write(
-                        f"[sbtdd status] contention: JSON parse failed after "
-                        f"5 retries (cumulative={state.consecutive_parse_failures})\n"
+                        "\n[sbtdd status] auto run ended (auto-run.json no longer present)\n"
                     )
                     sys.stderr.flush()
-            else:
-                state.record_parse_success()
-                last_progress = new_progress
+                    return 0
+                # Loop 2 WARNING #9 fix: read auto-run.json ONCE per cycle
+                # and share the result between the render/diff path and the
+                # state-machine update path. Pre-fix this loop called
+                # ``_read_auto_run_with_retry`` twice per cycle (once inside
+                # ``_watch_render_one`` and once here), wasting I/O and
+                # risking inconsistent state-machine updates if the two
+                # reads observed different on-disk payloads.
+                data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+                new_progress = _watch_render_one(
+                    auto_run_path,
+                    json_mode=json_mode,
+                    last_progress=last_progress,
+                    data=data,
+                )
+                if data is None:
+                    state.record_parse_failure()
+                    # Per Checkpoint 2 iter 3 caspar W9 fix: align breadcrumb
+                    # cadence with slow-poll trigger threshold (3) rather than 5.
+                    if state.consecutive_parse_failures % 3 == 0:
+                        sys.stderr.write(
+                            f"[sbtdd status] contention: JSON parse failed "
+                            f"after 5 retries "
+                            f"(cumulative={state.consecutive_parse_failures})\n"
+                        )
+                        sys.stderr.flush()
+                else:
+                    state.record_parse_success()
+                    last_progress = new_progress
+            except KeyboardInterrupt:
+                # Let outer handler exit with rc=130.
+                raise
+            except Exception as exc:  # noqa: BLE001 - W5 cycle guard
+                # Loop 2 iter 4 W5 (caspar): transient error in cycle body
+                # MUST NOT kill the watch. Log + continue polling so the
+                # watch survives bad-frame conditions (render bug, mid-write
+                # OSError, decode glitch) while the auto run is still active.
+                sys.stderr.write(f"[sbtdd watch] cycle error (will continue): {exc}\n")
+                sys.stderr.flush()
             time.sleep(state.current_interval)
     except KeyboardInterrupt:
         sys.stdout.write("\n")

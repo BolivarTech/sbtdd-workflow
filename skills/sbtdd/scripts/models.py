@@ -158,3 +158,46 @@ class ProgressContext:
     task_total: int | None = None
     dispatch_label: str | None = None
     started_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedModels:
+    """Cached preflight resolution of per-skill model IDs (spec sec.5.1).
+
+    Resolved once at task-loop entry per auto run via
+    :func:`auto_cmd._resolve_all_models_once`. All dispatches read from
+    this cache instead of re-resolving CLAUDE.md + plugin.local.md
+    (~70-150 disk reads per 36-task run reduced to 1).
+
+    INV-0 cascade order (caspar Loop 2 iter 3 CRITICAL fix -- enforces
+    ``~/.claude/CLAUDE.md`` *maxima precedencia* per INV-0): the global
+    ``~/.claude/CLAUDE.md`` is consulted FIRST; if it pins a model
+    (regex match against :data:`INV_0_PINNED_MODEL_RE`), it wins (INV-0
+    *maxima precedencia* is non-negotiable -- the global rule cannot be
+    silently overridden by a project file). The project ``<repo>/CLAUDE.md``
+    is consulted SECOND, only when the global file is absent or has no
+    pin. The first file with a regex match terminates the cascade.
+    Neither pinned ⇒ fall through to ``plugin.local.md`` per-skill
+    fields. When both files have INV-0 pins for *different* models, two
+    stderr breadcrumbs fire: the regular cascade message documenting
+    the global-pin source AND a shadow message
+    ``[sbtdd] INV-0 cascade: global pin <X> OVERRIDES project pin <Y>;
+    project pin shadowed (per INV-0 maxima precedencia)``. Same-pin
+    case suppresses the shadow message (no surprise to surface).
+
+    The dataclass is frozen so resolved IDs cannot be mutated after
+    preflight; consumers in :mod:`auto_cmd` and :mod:`pre_merge_cmd`
+    rely on the immutability invariant for thread-safety during the
+    task-loop.
+
+    Cross-subagent contract (spec sec.5.1, sec.9.1): this dataclass is
+    OWNED by Subagent #2; consumers under Subagent #1 (``auto_cmd``,
+    ``pre_merge_cmd``, ``magi_dispatch``, ``status_cmd``) MUST NOT be
+    imported by this module at module-load time -- the deferred-import
+    test in :mod:`tests.test_models` enforces the contract.
+    """
+
+    implementer: str
+    spec_reviewer: str
+    code_review: str
+    magi_dispatch: str

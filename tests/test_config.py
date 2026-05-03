@@ -543,3 +543,276 @@ def test_allowlist_rejects_question_mark_only(tmp_path):
     config_path.write_text(_W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["?"]\n---\n')
     with pytest.raises(ValidationError, match=r"(wildcard-only|bare).*rejected"):
         load_plugin_local(config_path)
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 Feature G — magi_cross_check field (sec.5.2; S2-2)
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_config_magi_cross_check_default_false(tmp_path):
+    """Feature G: magi_cross_check field defaults to False (opt-in per balthasar WARNING)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.magi_cross_check is False
+
+
+def test_plugin_config_magi_cross_check_can_be_disabled(tmp_path):
+    """G4 opt-out: magi_cross_check: false respected."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+magi_cross_check: false
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.magi_cross_check is False
+
+
+def test_plugin_config_magi_cross_check_can_be_enabled(tmp_path):
+    """Feature G dogfood: magi_cross_check: true is accepted (operator opt-in)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+magi_cross_check: true
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.magi_cross_check is True
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 Feature I — schema_version field + INV-36 (sec.3.1; S2-3)
+# ---------------------------------------------------------------------------
+
+
+def test_i1_v0_5_0_files_load_as_schema_version_1(tmp_path):
+    """I1: plugin.local.md without schema_version field defaults to 1 (NF21 backward compat)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.schema_version == 1
+
+
+def test_i2_v1_0_0_files_declare_schema_version_2(tmp_path):
+    """I2: plugin.local.md with schema_version: 2 parses correctly."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+schema_version: 2
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.schema_version == 2
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 I-Hk2 — INV-34 messages append 's' unit suffix (sec.4.4 housekeeping; S2-8)
+# ---------------------------------------------------------------------------
+
+
+def _inv34_base() -> str:
+    """Reusable plugin.local.md frontmatter that satisfies all but INV-34 clauses."""
+    return """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+"""
+
+
+def test_i_hk2_inv34_clause_4_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 4 timeout floor): ValidationError message includes 's' suffix."""
+    base = _inv34_base() + (
+        "auto_per_stream_timeout_seconds: 50\nauto_heartbeat_interval_seconds: 5\n---\n"
+    )
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    with pytest.raises(ValidationError) as excinfo:
+        load_plugin_local(config_path)
+    msg = str(excinfo.value)
+    assert "INV-34 clause 4" in msg
+    # I-Hk2: 'got 50' must include 's' unit suffix.
+    assert "got 50s" in msg
+
+
+def test_i_hk2_inv34_clause_2_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 2 interval ceiling): ValidationError message includes 's' suffix."""
+    base = _inv34_base() + (
+        "auto_per_stream_timeout_seconds: 900\n"
+        "auto_heartbeat_interval_seconds: 75\n"  # > 60 ⇒ clause 2
+        "---\n"
+    )
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    with pytest.raises(ValidationError) as excinfo:
+        load_plugin_local(config_path)
+    msg = str(excinfo.value)
+    assert "INV-34 clause 2" in msg
+    assert "got 75s" in msg
+
+
+def test_i_hk2_inv34_clause_3_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 3 interval floor): ValidationError message includes 's' suffix."""
+    base = _inv34_base() + (
+        "auto_per_stream_timeout_seconds: 900\n"
+        "auto_heartbeat_interval_seconds: 2\n"  # < 5 ⇒ clause 3
+        "---\n"
+    )
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    with pytest.raises(ValidationError) as excinfo:
+        load_plugin_local(config_path)
+    msg = str(excinfo.value)
+    assert "INV-34 clause 3" in msg
+    assert "got 2s" in msg
+
+
+def test_i_hk2_inv34_clause_1_message_appends_unit_suffix(tmp_path):
+    """I-Hk2 (clause 1 ratio): ValidationError message includes 's' suffix on timeout.
+
+    Clause 1 is defense-in-depth and only fires when clauses 2 + 4 are
+    artificially weakened. We synthesize a scenario where timeout is
+    exactly 600 (passes clause 4) but interval is set so that
+    5 * interval > timeout. With clause 4 floor = 600, clause 2 ceiling
+    = 60, both pass, but a hand-crafted ratio violation (timeout=600,
+    interval=60) does NOT trigger clause 1 either. Clause 1 is
+    unreachable through plugin.local.md inputs given the current 4 +
+    2 + 3 mathematical subsumption (clause 1 is preserved as guard for
+    future weakening per Loop 2 W1). We assert the suffix is present in
+    the source code instead via a string match -- same intent without
+    crafting an unreachable input.
+    """
+    import inspect
+
+    import config as config_mod
+
+    src = inspect.getsource(config_mod)
+    # Find the clause-1 ValidationError raise (line ~250 pre-fix). The
+    # I-Hk2 fix appends 's' to the {timeout} interpolation in that raise.
+    # The exact source-level fragment must exist:
+    assert "= {5 * interval}; got {timeout}s" in src or (
+        "= {5 * interval}; got {timeout} s" in src.lower()
+    ), "INV-34 clause 1 message missing 's' unit suffix on {timeout}"

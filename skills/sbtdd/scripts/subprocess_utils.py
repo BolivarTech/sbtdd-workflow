@@ -229,6 +229,20 @@ def _spawn_thread_reader(
 
     Each chunk is pushed onto ``out_queue`` as ``(stream_name, bytes)``.
     Empty bytes signal EOF and the thread exits.
+
+    .. note:: **Loop 2 iter 4 I-Hk5 (caspar) — accepted-risk: kill-path race**
+
+       The Windows reader-thread fallback design has an inherent race
+       window between ``_kill_subprocess_tree`` issuing the kill and the
+       reader thread observing EOF on the now-closed pipe. Despite the
+       W7 drain after kill, residual reader-thread chunks may arrive
+       between the kill and EOF. Pre-existing single-thread auto_cmd
+       invariant means this race is theoretical under current usage
+       (the only producer of streaming subprocess output is auto's main
+       thread). v1.x re-evaluation: if observable in field, evaluate
+       locked reader-thread shutdown (synchronization on
+       ``_shutdown_requested`` flag + reader checks before each
+       ``out_queue.put``). Documented as accepted-risk for now.
     """
 
     def _pump() -> None:

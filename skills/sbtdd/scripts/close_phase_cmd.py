@@ -164,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         last_verification_at=_now_iso(),
         last_verification_result="passed",
         plan_approved_at=state.plan_approved_at,
+        spec_snapshot_emitted_at=state.spec_snapshot_emitted_at,
     )
     save_state(new_state, root / ".claude" / "session-state.json")
     if state.current_phase == "refactor":

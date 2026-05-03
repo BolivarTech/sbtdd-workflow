@@ -148,3 +148,60 @@ def test_progress_context_is_frozen():
     ctx = ProgressContext()
     with pytest.raises(FrozenInstanceError):
         ctx.iter_num = 5  # type: ignore[misc]
+
+
+def test_resolved_models_dataclass_shape():
+    """Spec sec.5.1: ResolvedModels has implementer/spec_reviewer/code_review/magi_dispatch fields."""
+    from models import ResolvedModels
+
+    rm = ResolvedModels(
+        implementer="claude-sonnet-4-6",
+        spec_reviewer="claude-sonnet-4-6",
+        code_review="claude-sonnet-4-6",
+        magi_dispatch="claude-opus-4-7",
+    )
+    assert rm.implementer == "claude-sonnet-4-6"
+    assert rm.spec_reviewer == "claude-sonnet-4-6"
+    assert rm.code_review == "claude-sonnet-4-6"
+    assert rm.magi_dispatch == "claude-opus-4-7"
+
+
+def test_resolved_models_is_frozen():
+    """Spec sec.5.1: ResolvedModels frozen dataclass (J2-3)."""
+    from dataclasses import FrozenInstanceError
+
+    from models import ResolvedModels
+
+    rm = ResolvedModels(implementer="a", spec_reviewer="b", code_review="c", magi_dispatch="d")
+    with pytest.raises(FrozenInstanceError):
+        rm.implementer = "z"  # type: ignore[misc]
+
+
+def test_models_module_does_not_import_consumer_modules():
+    """Sec.9.1 deferred-import contract: models.py must not import consumer modules.
+
+    auto_cmd, pre_merge_cmd, magi_dispatch, status_cmd are all DOWNSTREAM consumers
+    of ResolvedModels. If models.py imports any of them at module-load time, the
+    cross-subagent contract for parallel dispatch (Mitigation A) breaks: any cycle
+    that depends on import order fails when subagent commits land in opposite
+    sequences. See spec sec.9.1.
+    """
+    import inspect
+
+    import models
+
+    source = inspect.getsource(models)
+    forbidden = ("auto_cmd", "pre_merge_cmd", "magi_dispatch", "status_cmd")
+    for name in forbidden:
+        # Look for import-statement patterns -- "import X" or "from X import"
+        # at the top level. Substring search is sufficient because models.py is
+        # small enough for any false-positive (e.g. a docstring mention) to be
+        # caught by manual review.
+        assert f"import {name}" not in source, (
+            f"models.py must not import {name} at module-load time "
+            f"(spec sec.9.1 deferred-import contract)"
+        )
+        assert f"from {name}" not in source, (
+            f"models.py must not import from {name} at module-load time "
+            f"(spec sec.9.1 deferred-import contract)"
+        )

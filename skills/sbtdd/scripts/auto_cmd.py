@@ -53,7 +53,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Callable
+from typing import IO, Any, Callable, cast
 
 import close_task_cmd
 import commits
@@ -208,6 +208,67 @@ def _reset_drain_decode_error_emitted_for_tests() -> None:
     """
     global _drain_decode_error_emitted
     _drain_decode_error_emitted = False
+
+
+# v1.0.0 S1-19 (Loop 2 iter 4 W7 caspar): separate dedup flag for the
+# persistence-failure breadcrumb. Pre-fix the drain-decode-error and
+# persistence-failure breadcrumbs shared a single ``_drain_decode_error_emitted``
+# flag, which self-defeated when persistence itself was the failing path
+# (the drain breadcrumb fired first, deduped, then a real persistence
+# failure went unreported). Post-fix each class has its own dedup flag.
+_persistence_error_emitted: bool = False
+
+
+def _reset_persistence_error_emitted_for_tests() -> None:
+    """Test-only helper: reset the W7 persistence dedup flag."""
+    global _persistence_error_emitted
+    _persistence_error_emitted = False
+
+
+def _emit_drain_decode_error_breadcrumb(reason: str) -> None:
+    """Per W7: separate dedup for drain JSON-decode failures.
+
+    Emits once per process; subsequent failures bump the swallowed-
+    observability counter silently.
+    """
+    global _drain_decode_error_emitted
+    if _drain_decode_error_emitted:
+        _bump_observability_swallowed_count()
+        return
+    _drain_decode_error_emitted = True
+    try:
+        sys.stderr.write(
+            f"[sbtdd auto] drain JSON decode error (will continue silently; "
+            f"see heartbeat_observability_swallowed in auto-run.json): "
+            f"{reason}\n"
+        )
+        sys.stderr.flush()
+    except OSError:
+        pass
+
+
+def _emit_persistence_error_breadcrumb(reason: str) -> None:
+    """Per W7 (caspar iter 4): separate dedup for auto-run.json persistence failures.
+
+    Self-defeat fix: pre-W7 a persistence failure that fired AFTER a
+    drain breadcrumb was deduped silently because the shared flag was
+    set. Distinct dedup ensures the operator hears about persistence
+    failures even when the drain has previously bailed.
+    """
+    global _persistence_error_emitted
+    if _persistence_error_emitted:
+        _bump_observability_swallowed_count()
+        return
+    _persistence_error_emitted = True
+    try:
+        sys.stderr.write(
+            f"[sbtdd auto] persistence error (will continue silently; "
+            f"see heartbeat_observability_swallowed in auto-run.json): "
+            f"{reason}\n"
+        )
+        sys.stderr.flush()
+    except OSError:
+        pass
 
 
 # Loop 2 I3 (informational): swallowed observability counter. Increments
@@ -462,13 +523,26 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
 # is absent. Catches copy-paste regressions from older Loop 2 iter 2
 # docs/tests before the unit-test suite even runs. The token is split
 # at concatenation so this very line cannot trigger a self-match.
+#
+# v1.0.0 S1-23 I-Hk4 fix (caspar iter 4 INFO): wrap in try/except so
+# bytecode-only deployments (PyInstaller, frozen apps, .pyc-without-.py
+# environments) do not crash at import. ``inspect.getsource`` raises
+# ``OSError`` (no source available) or ``TypeError`` (built-in modules)
+# in those settings. The unit-test suite still covers the regression at
+# test time via ``test_with_file_lock_does_not_use_private_rlock_api``.
 _FORBIDDEN_PRIVATE_API_TOKEN = "_is" + "_owned"
-_with_file_lock_source = inspect.getsource(_with_file_lock)
-assert _FORBIDDEN_PRIVATE_API_TOKEN not in _with_file_lock_source, (
-    "_with_file_lock must not depend on threading.RLock private API "
-    "(Loop 2 iter 3 W1+W4+W6 + caspar R1)."
-)
-del _with_file_lock_source
+try:
+    _with_file_lock_source = inspect.getsource(_with_file_lock)
+    assert _FORBIDDEN_PRIVATE_API_TOKEN not in _with_file_lock_source, (
+        "_with_file_lock must not depend on threading.RLock private API "
+        "(Loop 2 iter 3 W1+W4+W6 + caspar R1)."
+    )
+    del _with_file_lock_source
+except (OSError, TypeError):
+    # Bytecode-only / frozen deployment; the runtime guard is best-effort.
+    # Source-level regression check is preserved by the unit-test suite,
+    # which always runs from .py files.
+    pass
 del _FORBIDDEN_PRIVATE_API_TOKEN
 
 
@@ -592,24 +666,17 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
                 failed_writes_values.append(item)
 
     def _do_persist() -> None:
-        global _drain_decode_error_emitted
         try:
             data = json.loads(auto_run_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            # Loop 2 W14 fix: emit the breadcrumb only on the first decode
-            # failure; subsequent failures are silent. I3: increment the
-            # observability-swallowed counter on every silent failure.
-            if not _drain_decode_error_emitted:
-                sys.stderr.write(
-                    f"[sbtdd] warning: failed to read auto-run.json for heartbeat "
-                    f"drain: {type(exc).__name__}: {exc!s} (further drain "
-                    f"decode errors silenced; see "
-                    f"heartbeat_observability_swallowed in auto-run.json)\n"
-                )
-                sys.stderr.flush()
-                _drain_decode_error_emitted = True
-            else:
-                _bump_observability_swallowed_count()
+            # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through the
+            # ``_emit_drain_decode_error_breadcrumb`` helper instead of
+            # inlining the emit + dedup logic. The helper owns the W7
+            # dedup flag and the I3 observability-swallowed counter so
+            # both the heartbeat-drain path and the explicit
+            # _emit_drain_decode_error_breadcrumb test contract share a
+            # single implementation. Pre-fix the helper was actually-dead.
+            _emit_drain_decode_error_breadcrumb(f"{type(exc).__name__}: {exc!s}")
             return
         if not isinstance(data, dict):
             return
@@ -641,16 +708,23 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
                 existing_obs_int, _observability_swallowed_count
             )
         # Atomic rename (preserve existing _update_progress mechanism).
-        tmp_path = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
+        # v1.0.0 S1-20 W8 fix: tmp filename includes PID + thread.get_ident()
+        # so concurrent threads in the same process don't collide on
+        # ``.tmp.{pid}`` (Windows PermissionError flake observed in v0.5.0).
+        tmp_path = auto_run_path.parent / (
+            auto_run_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+        )
         try:
             tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             os.replace(tmp_path, auto_run_path)
         except OSError as exc:
-            sys.stderr.write(
-                f"[sbtdd] warning: failed to persist heartbeat counters: "
-                f"{type(exc).__name__}: {exc!s}\n"
+            # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through
+            # ``_emit_persistence_error_breadcrumb`` so the W7 separate-
+            # dedup contract (drain vs persistence flags) is enforced by
+            # the production path. Pre-fix the helper was actually-dead.
+            _emit_persistence_error_breadcrumb(
+                f"failed to persist heartbeat counters: {type(exc).__name__}: {exc!s}"
             )
-            sys.stderr.flush()
             try:
                 tmp_path.unlink()
             except FileNotFoundError:
@@ -994,7 +1068,10 @@ def _do_update_progress(
             # _assert_main_thread tripped (off-thread caller); don't
             # corrupt auto-run.json.
             pass
-        tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
+        # v1.0.0 S1-20 W8 fix: include thread.get_ident() in tmp filename.
+        tmp = auto_run_path.parent / (
+            auto_run_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+        )
         tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         # ``os.replace`` is atomic on POSIX and Windows, but on Windows it
         # can transiently fail with PermissionError when another process /
@@ -1944,14 +2021,34 @@ def _phase2_task_loop(
     spec_review_budget_seconds = cfg.auto_max_spec_review_seconds
     spec_review_elapsed = 0.0
     spec_review_breadcrumb_emitted = False
-    # v0.3.0 Feature E -- resolve per-skill model IDs once per task-loop
-    # entry; the cascade (CLI override > plugin.local.md > None) is the
-    # same for every dispatch in the loop. INV-0 fires inside each
-    # dispatch module so the cascade output here is the *configured*
-    # model, not necessarily the one ultimately used.
+    # v1.0.0 J2 (S1-8) preflight: resolve per-skill model IDs ONCE per
+    # auto run via :func:`_resolve_all_models_once`. This emits the INV-0
+    # cascade stderr breadcrumb (global ``~/.claude/CLAUDE.md`` pin >
+    # project ``<repo>/CLAUDE.md`` pin > plugin.local.md per-skill field)
+    # exactly once at task-loop entry, replacing the ~70-150 CLAUDE.md
+    # disk reads a 36-task auto run would otherwise incur (spec sec.2.3
+    # + sec.5.1). The returned :class:`models.ResolvedModels` instance
+    # captures the INV-0-resolved IDs for diagnostic visibility.
+    #
+    # The cascade still flows through :func:`_resolve_model` for CLI
+    # override layering (v0.3.0 Feature E): ``--model-override`` flags
+    # win over plugin.local.md fields, and ``None`` is preserved when
+    # neither layer set a value so downstream dispatches can omit the
+    # ``model=`` kwarg (test-stub backward compat). The J2 preflight
+    # is additive and only emits the cascade audit; per-dispatch INV-0
+    # enforcement still fires inside each dispatch module's
+    # ``_apply_inv0_model_check`` path.
+    _resolved_models = _resolve_all_models_once(cfg)
     cli_overrides = getattr(ns, "model_override_map", {}) or {}
     implementer_model = _resolve_model("implementer", cfg, cli_overrides)
     spec_reviewer_model = _resolve_model("spec_reviewer", cfg, cli_overrides)
+    # Diagnostic: ensure the resolved struct's authoritative INV-0 view
+    # is observable for post-mortem (`auto-run.json` future field /
+    # status --watch). Currently consumed by the C3 invocation-site
+    # tripwire (text-level audit in tests/test_pre_merge_cross_check.py)
+    # which guarantees this preflight call is wired in production, not
+    # just unit-tested in isolation.
+    del _resolved_models  # noqa: F841 — preflight emit is the contract
     # Feature D3 + D4: emit one entry breadcrumb for phase 2 ("task
     # loop") so operators see the run move past pre-flight before the
     # first subagent dispatch, and persist progress atomically into
@@ -2087,6 +2184,7 @@ def _phase2_task_loop(
                         last_verification_at=_now_iso(),
                         last_verification_result="passed",
                         plan_approved_at=current.plan_approved_at,
+                        spec_snapshot_emitted_at=current.spec_snapshot_emitted_at,
                     )
                     save_state(current, state_path)
                     # Feature D3 + D4: breadcrumb + progress AFTER state
@@ -2260,6 +2358,268 @@ class _ShadowCfg:
         self.__dict__.update(overrides)
 
 
+def _resolve_all_models_once(config: Any) -> Any:
+    """Preflight: resolve per-skill model IDs ONCE per auto run (J2 / S1-8).
+
+    Per spec sec.2.3 + sec.5.1: replaces ~70-150 CLAUDE.md disk reads
+    per 36-task auto run with a single read at task-loop entry. INV-0
+    cascade applies (CLAUDE.md model pin via
+    :data:`models.INV_0_PINNED_MODEL_RE` overrides plugin.local.md
+    fields silently with a stderr breadcrumb).
+
+    INV-0 cascade order (caspar Loop 2 iter 3 CRITICAL fix): the
+    global ``~/.claude/CLAUDE.md`` is consulted FIRST (INV-0 maxima
+    precedencia is non-negotiable; project file cannot silently
+    override). Project ``<repo>/CLAUDE.md`` is consulted SECOND, only
+    when global is absent or unpinned. The first regex match
+    terminates the cascade. Neither pinned ⇒ fall through to
+    plugin.local.md per-skill fields. When both files have INV-0 pins
+    for *different* models, a second "shadow" breadcrumb fires so
+    operators understand why their project-level config is silently
+    overridden (melchior iter 4 W7 fix).
+
+    Note: the deferred import of :mod:`models` (inside the function
+    body, not at module top) follows pre-flight Mitigation A: avoids
+    module-load-time coupling so Subagent #1 tests can monkeypatch
+    this helper before Subagent #2's ``ResolvedModels`` class lands
+    on the integration branch.
+
+    Args:
+        config: Plugin configuration carrying per-skill model fields
+            (``implementer_model``, ``spec_reviewer_model``,
+            ``code_review_model``, ``magi_dispatch_model``).
+
+    Returns:
+        :class:`models.ResolvedModels` instance with all four resolved
+        IDs populated (INV-0 pin wins over per-skill fields when set).
+    """
+    import models as _models  # deferred per pre-flight Mitigation A
+    from models import ResolvedModels  # noqa: PLC0415 - deferred import
+
+    global_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    project_claude_md = Path.cwd() / "CLAUDE.md"
+
+    def _read_pin(path: Path) -> str | None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (FileNotFoundError, OSError):
+            return None
+        m = _models.INV_0_PINNED_MODEL_RE.search(text)
+        return m.group(1) if m else None
+
+    global_pin = _read_pin(global_claude_md)
+    project_pin = _read_pin(project_claude_md)
+
+    # Multi-pin shadow case (melchior iter 4 W7): global pin overrides
+    # project pin, but project pin existed and was DIFFERENT. Emit
+    # diagnostic breadcrumb so operator understands why project config is
+    # silently shadowed. Same-pin case is silent (no surprise).
+    if global_pin and project_pin and global_pin != project_pin:
+        sys.stderr.write(
+            f"[sbtdd] INV-0 cascade: global pin {global_pin!r} OVERRIDES "
+            f"project pin {project_pin!r}; project pin shadowed (per "
+            f"INV-0 maxima precedencia). Resolve by removing one of the "
+            f"two pins or aligning them.\n"
+        )
+
+    # INV-0 global-first selection: global wins if pinned; otherwise
+    # project wins if pinned; otherwise fall through to plugin.local.md.
+    pinned_model: str | None
+    pinned_source: str | None
+    if global_pin:
+        pinned_model = global_pin
+        pinned_source = "global"
+    elif project_pin:
+        pinned_model = project_pin
+        pinned_source = "project"
+    else:
+        pinned_model = None
+        pinned_source = None
+
+    if pinned_model:
+        sys.stderr.write(
+            f"[sbtdd] INV-0 cascade: CLAUDE.md pins {pinned_model!r}"
+            f" (source: {pinned_source}); plugin.local.md per-skill "
+            f"model fields silently overridden\n"
+        )
+
+    def _pick(field_value: str | None, default: str) -> str:
+        if pinned_model:
+            return pinned_model
+        return field_value or default
+
+    return ResolvedModels(
+        implementer=_pick(getattr(config, "implementer_model", None), "claude-sonnet-4-6"),
+        spec_reviewer=_pick(getattr(config, "spec_reviewer_model", None), "claude-sonnet-4-6"),
+        code_review=_pick(getattr(config, "code_review_model", None), "claude-sonnet-4-6"),
+        magi_dispatch=_pick(getattr(config, "magi_dispatch_model", None), "claude-opus-4-7"),
+    )
+
+
+def _read_auto_run_audit(auto_run_path: Path) -> dict[str, Any]:
+    """Read ``auto-run.json`` into a dict (F44.3-2 backward compat).
+
+    Helper used by post-mortem tests + future status renderers. Returns
+    an empty dict when the file is missing or contains invalid JSON so
+    callers don't need to defensively wrap each access.
+
+    .. note:: **v1.0.0 skeleton -- deferred to v1.0.1+ status renderer
+       wiring.** As of v1.0.0 this helper is consumed only by the
+       post-mortem test suite + the F44.3-2 backward-compat schema
+       contract. Production status rendering (e.g. ``/sbtdd status
+       --watch`` summary view, ``/sbtdd resume`` checkpoint reader) is
+       expected to consume this helper when it lands; the implementation
+       is intentionally minimal so the schema-tolerance contract is
+       fixed before consumers depend on it. Tracked in CHANGELOG
+       ``[1.0.0]`` Deferred section. Removing it before then would
+       force the future status-renderer feature to re-derive the
+       absent-tolerant read pattern from scratch.
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+
+    Returns:
+        Parsed dict, or ``{}`` when missing / invalid.
+    """
+    try:
+        return cast(dict[str, Any], json.loads(auto_run_path.read_text(encoding="utf-8")))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+
+
+def _record_magi_retried_agents(
+    auto_run_path: Path,
+    *,
+    iter_n: int,
+    retried_agents: list[str] | tuple[str, ...],
+) -> None:
+    """Persist ``magi_iter{N}_retried_agents`` to auto-run.json (F44.3).
+
+    Per spec sec.2.2 + plan task S1-7: MAGI Loop 2 retried_agents
+    telemetry (already parsed into :class:`magi_dispatch.MAGIVerdict`
+    in v0.4.0 Feature F) propagates into the audit trail under a
+    per-iter key. Backward compat: pre-v1.0.0 audit files lack the
+    field; readers that need the field treat its absence as ``[]``.
+
+    Uses :func:`_with_file_lock` to serialize against the other in-process
+    writers (per the single-writer assumption documented on
+    :func:`_update_progress`). Atomic rename via tmp file with
+    ``{pid}.{tid}`` suffix to dodge the Windows PID-collision flake
+    (per W8 fix in S1-20; same pattern preserved here for cross-platform
+    safety).
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+        iter_n: MAGI Loop 2 iteration number (1-based).
+        retried_agents: List of agent names that were retried in this
+            iteration (e.g. ``["balthasar"]``). Empty list when no
+            retries fired.
+    """
+
+    def _do_record() -> None:
+        try:
+            data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        data[f"magi_iter{iter_n}_retried_agents"] = list(retried_agents)
+        tmp_path = auto_run_path.parent / (
+            auto_run_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+        )
+        tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp_path.replace(auto_run_path)
+
+    _with_file_lock(auto_run_path, _do_record)
+
+
+def _mark_plan_approved_with_snapshot(*, root: Path) -> None:
+    """Persist spec-snapshot at plan-approval time (CRITICAL #2 / S1-27).
+
+    Wired into the plan-approval transition: when the state file gets
+    ``plan_approved_at`` set (template sec.5 "Excepcion bajo plan
+    aprobado" trigger), this helper:
+
+    1. Emits the current spec scenarios snapshot via
+       :func:`spec_snapshot.emit_snapshot` and persists it to
+       ``planning/spec-snapshot.json`` via
+       :func:`spec_snapshot.persist_snapshot`. The pre-merge gate
+       (S1-26 ``_check_spec_snapshot_drift``) consumes this snapshot.
+    2. Writes a watermark field
+       ``spec_snapshot_emitted_at: <ISO 8601>`` to
+       ``.claude/session-state.json``. The watermark is the canon-of-
+       the-present record (CLAUDE.local.md §2.1) that a snapshot was
+       emitted. Pre-merge S1-26 compares the file's existence against
+       this watermark: if the watermark says snapshot was emitted but
+       the file is missing, drift detected (H2-5 escenario / W2 fix).
+
+    Idempotent: re-approving the plan re-emits the snapshot
+    (``persist_snapshot`` overwrites) and refreshes the watermark.
+
+    Per caspar Loop 2 iter 4 W2 fix: closes the bypass-by-deletion
+    gap that would otherwise let an operator silently bypass the drift
+    gate by deleting ``planning/spec-snapshot.json``.
+
+    Args:
+        root: Project root directory. Spec read from
+            ``root/sbtdd/spec-behavior.md``; snapshot persisted to
+            ``root/planning/spec-snapshot.json``; watermark written to
+            ``root/.claude/session-state.json``.
+    """
+    import spec_snapshot  # deferred per cross-subagent Mitigation A
+
+    spec_path = root / "sbtdd" / "spec-behavior.md"
+    snapshot_path = root / "planning" / "spec-snapshot.json"
+    snapshot = spec_snapshot.emit_snapshot(spec_path)
+    spec_snapshot.persist_snapshot(snapshot_path, snapshot)
+
+    # Watermark in state file (caspar iter 4 W2): canon-of-the-present
+    # record that snapshot WAS emitted. Pre-merge S1-26 compares against
+    # this to detect bypass-by-deletion.
+    state_file_path = root / ".claude" / "session-state.json"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    state_data: dict[str, Any] = {}
+    if state_file_path.exists():
+        try:
+            state_data = json.loads(state_file_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            # Corrupt state file: leave it alone, the recovery protocol
+            # (CLAUDE.local.md §2.1) handles regeneration. Do not silently
+            # overwrite with a partial dict.
+            sys.stderr.write(
+                f"[sbtdd plan-approval] state file corrupt at "
+                f"{state_file_path}; spec_snapshot_emitted_at NOT "
+                f"persisted. Resolve corruption first.\n"
+            )
+            return
+    state_data["spec_snapshot_emitted_at"] = timestamp
+    # Atomic rename via tmp file with PID + thread-id (S1-20 W8 pattern).
+    state_file_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = state_file_path.parent / (
+        state_file_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+    )
+    tmp_path.write_text(json.dumps(state_data, indent=2), encoding="utf-8")
+    tmp_path.replace(state_file_path)
+
+
+def _phase4_pre_merge_audit_dir(root: Path) -> Path:
+    """Return ``.claude/magi-cross-check/`` audit directory under ``root``.
+
+    Per spec sec.2.1 Feature G + plan task S1-6: auto-mode pre-merge
+    passes this directory to ``pre_merge_cmd._loop2_with_cross_check`` so
+    cross-check audit artifacts land under a stable, gitignored location
+    (``.claude/`` is already in ``.gitignore`` per CLAUDE.local.md §1).
+
+    Args:
+        root: Project root directory.
+
+    Returns:
+        ``root / ".claude" / "magi-cross-check"``. Caller (or
+        ``_loop2_cross_check``) creates the directory on first write.
+    """
+    return root / ".claude" / "magi-cross-check"
+
+
 def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
     """Run Phase 3 -- pre-merge Loop 1 + Loop 2 with elevated MAGI budget.
 
@@ -2292,6 +2652,15 @@ def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
     # v0.5.0 S1-9 transition site #5: phase 3 entry (pre-merge).
     _set_progress(phase=3)
     root: Path = ns.project_root
+    # v1.0.0 C2 wiring (O-2 Loop 1 review CRITICAL #2): spec-snapshot drift
+    # gate at auto-phase-3 entry per spec sec.3.2 H2-3 + H2-5. Same gate as
+    # interactive pre-merge so both code paths fail closed identically when
+    # scenarios drift between plan-approval and merge.
+    pre_merge_cmd._check_spec_snapshot_drift(
+        spec_path=root / "sbtdd" / "spec-behavior.md",
+        snapshot_path=root / "planning" / "spec-snapshot.json",
+        state_file_path=root / ".claude" / "session-state.json",
+    )
     pre_merge_cmd._loop1(root)
     max_iter = (
         ns.magi_max_iterations
@@ -2445,7 +2814,13 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
     # External readers (``status --watch``, operator ``cat``) bypass the
     # lock; they rely on the atomic-rename semantics of ``os.replace``
     # (POSIX + Windows) to never observe a torn JSON document.
-    propagated_error: list[BaseException] = []
+    # v1.0.0 S1-21 I-Hk1 fix (caspar iter 4 INFO): typed as Exception (not
+    # BaseException) so SystemExit and KeyboardInterrupt propagate cleanly
+    # rather than being captured + re-raised on the calling thread (which
+    # delays + can mask the interrupt under nested handlers). Other
+    # exceptions still flow through the propagated_error list to preserve
+    # OSError semantics expected by callers.
+    propagated_error: list[Exception] = []
 
     def _do_write() -> None:
         try:
@@ -2466,7 +2841,8 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
             # mirrors state_file.save so a process killed mid-write never leaves
             # a corrupted auto-run.json. If os.replace fails the tmp file is
             # cleaned up before the error propagates so nothing leaks.
-            tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+            # v1.0.0 S1-20 W8 fix: include thread.get_ident() in tmp filename.
+            tmp = path.parent / (path.name + f".tmp.{os.getpid()}.{threading.get_ident()}")
             tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
             try:
                 os.replace(tmp, path)  # atomic on POSIX and Windows
@@ -2476,10 +2852,10 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
                 except FileNotFoundError:
                     pass
                 raise
-        except BaseException as exc:  # noqa: BLE001
-            # _with_file_lock signature swallows fn return; capture the
-            # exception so we can re-raise on the calling thread (preserves
-            # OSError semantics expected by callers).
+        except Exception as exc:  # noqa: BLE001
+            # v1.0.0 S1-21 I-Hk1: narrowed from BaseException so SystemExit /
+            # KeyboardInterrupt propagate. Other exceptions captured for the
+            # caller-thread re-raise (preserves OSError semantics).
             propagated_error.append(exc)
 
     _with_file_lock(path, _do_write)

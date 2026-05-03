@@ -41,16 +41,16 @@ def test_plugin_version_is_semver() -> None:
     assert re.match(r"^\d+\.\d+\.\d+$", d["version"]), f"version must be semver: {d['version']}"
 
 
-def test_plugin_version_is_current_v0_4_patch() -> None:
-    """Plugin must ship a 0.4.x patch on the v0.4 series until the v0.5 / v1.0 bump.
+def test_plugin_version_is_current_v1_x() -> None:
+    """Plugin must ship a 1.x patch on the v1 series until the v2.0 bump.
 
     Tripwire: this test forces updating the pinned series when bumping the
-    major/minor version, preventing accidental patch bumps that cross a series
+    major version, preventing accidental patch bumps that cross a series
     boundary without updating the contract.
     """
     d = _load_plugin()
-    assert re.match(r"^0\.4\.\d+$", d["version"]), (
-        f"version must be on the v0.4.x patch series until v0.5 / v1.0 bump, got {d['version']}"
+    assert re.match(r"^1\.\d+\.\d+$", d["version"]), (
+        f"version must be on the v1.x series until v2.0 bump, got {d['version']}"
     )
 
 

@@ -210,3 +210,326 @@ def test_loop2_finding_dispatch_passes_phase_specific_stream_prefix(tmp_path, mo
         f"Loop 2 finding-remediation dispatch must include 'fix-finding-' tag "
         f"in stream_prefix; got {sp!r}"
     )
+
+
+# v1.0.0 S1-26 + S1-27: spec-snapshot drift check + plan-approval emit hook.
+def test_h2_3_pre_merge_raises_on_spec_snapshot_drift(tmp_path, monkeypatch):
+    """H2-3: _check_spec_snapshot_drift raises MAGIGateError when scenarios changed."""
+    import pytest
+    from errors import MAGIGateError
+
+    # Persisted snapshot at plan-approval time.
+    persisted = tmp_path / "spec-snapshot.json"
+    persisted.write_text('{"S1: parser handles empty input": "old-hash"}', encoding="utf-8")
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder; emit_snapshot is monkeypatched", encoding="utf-8")
+    state = tmp_path / "session-state.json"  # absent — file-based detection
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1: parser handles empty input": "new-hash"},
+    )
+
+    with pytest.raises(MAGIGateError) as excinfo:
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=persisted,
+            state_file_path=state,
+        )
+    msg = str(excinfo.value)
+    assert "S1: parser handles empty input" in msg
+    assert "re-approve" in msg.lower() or "re-run" in msg.lower()
+
+
+def test_h2_3_pre_merge_passes_when_no_drift(tmp_path, monkeypatch):
+    """H2-3: no drift -> _check_spec_snapshot_drift returns None silently."""
+    persisted = tmp_path / "spec-snapshot.json"
+    persisted.write_text('{"S1": "matching"}', encoding="utf-8")
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    state = tmp_path / "session-state.json"  # absent
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1": "matching"},
+    )
+
+    assert (
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=persisted,
+            state_file_path=state,
+        )
+        is None
+    )
+
+
+def test_h2_3_missing_snapshot_warns_but_does_not_block(tmp_path, monkeypatch, capsys):
+    """H2-3: missing snapshot file + missing watermark -> stderr breadcrumb, no error.
+
+    Backward compat: pre-v1.0.0 plan-approval flows did not emit a snapshot
+    AND did not write the watermark. Pre-merge logs a warning but does not
+    block.
+    """
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    snapshot_path = tmp_path / "spec-snapshot.json"  # does not exist
+    state = tmp_path / "session-state.json"  # also does not exist
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1": "anything"},
+    )
+
+    assert (
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=snapshot_path,
+            state_file_path=state,
+        )
+        is None
+    )
+    captured = capsys.readouterr()
+    assert "spec-snapshot.json" in captured.err
+
+
+def test_h2_5_missing_snapshot_with_watermark_raises(tmp_path, monkeypatch):
+    """H2-5 (caspar iter 4 W2): watermark in state file + missing snapshot
+    file = bypass-by-deletion detected, MAGIGateError raised.
+    """
+    import json as _json
+    import pytest
+    from errors import MAGIGateError
+
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    snapshot_path = tmp_path / "spec-snapshot.json"  # does NOT exist
+    state = tmp_path / "session-state.json"
+    state.write_text(
+        _json.dumps({"spec_snapshot_emitted_at": "2026-05-01T12:00:00Z"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1": "anything"},
+    )
+
+    with pytest.raises(MAGIGateError) as excinfo:
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=snapshot_path,
+            state_file_path=state,
+        )
+    msg = str(excinfo.value)
+    assert "deleted" in msg.lower() or "re-emit" in msg.lower()
+    assert "2026-05-01T12:00:00Z" in msg  # watermark surfaced as evidence
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 O-2 Loop 1 review CRITICAL #2 (C2): Wire _check_spec_snapshot_drift
+# at pre-merge entry. Spec sec.3.2 H2-3 + H2-5 escenarios unreachable in
+# production without the wiring; the helper is unit-tested but never called.
+# ---------------------------------------------------------------------------
+
+
+def _seed_basic_pre_merge_env(tmp_path):
+    """Seed minimal valid env for pre_merge_cmd.main: state, plan, plugin.local.md, repo."""
+    import json as _json
+    import shutil
+    import subprocess as _sp
+    from pathlib import Path as _P
+
+    # plugin.local.md
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    fixture = _P(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md"
+    shutil.copy(fixture, tmp_path / ".claude" / "plugin.local.md")
+
+    # state
+    state = {
+        "plan_path": "planning/claude-plan-tdd.md",
+        "current_task_id": None,
+        "current_task_title": None,
+        "current_phase": "done",
+        "phase_started_at_commit": "abc1234",
+        "last_verification_at": "2026-04-20T03:30:00Z",
+        "last_verification_result": "passed",
+        "plan_approved_at": "2026-04-20T03:30:00Z",
+    }
+    (tmp_path / ".claude" / "session-state.json").write_text(_json.dumps(state), encoding="utf-8")
+
+    # plan with all checkboxes done
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    (tmp_path / "planning" / "claude-plan-tdd.md").write_text(
+        "# Plan\n\n### Task 1: done\n- [x] step\n", encoding="utf-8"
+    )
+
+    # spec
+    (tmp_path / "sbtdd").mkdir(exist_ok=True)
+    (tmp_path / "sbtdd" / "spec-behavior.md").write_text("# placeholder spec\n", encoding="utf-8")
+
+    # git repo
+    _sp.run(["git", "init", "-q"], cwd=str(tmp_path), check=True, capture_output=True)
+    _sp.run(
+        ["git", "config", "user.email", "tester@example.com"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    _sp.run(
+        ["git", "config", "user.name", "Tester"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    _sp.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "README.md").write_text("initial\n", encoding="utf-8")
+    _sp.run(["git", "add", "README.md"], cwd=str(tmp_path), check=True, capture_output=True)
+    _sp.run(
+        ["git", "commit", "-m", "chore: initial"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_c2_pre_merge_main_invokes_spec_snapshot_drift_check(tmp_path, monkeypatch):
+    """C2: pre_merge_cmd.main() calls _check_spec_snapshot_drift before Loop 1.
+
+    Spy on _check_spec_snapshot_drift; assert it's called once with the three
+    expected paths (spec, snapshot, state file).
+    """
+    import magi_dispatch
+    import pre_merge_cmd
+
+    _seed_basic_pre_merge_env(tmp_path)
+
+    spy = {"calls": 0, "kwargs": None}
+
+    def fake_drift_check(*, spec_path, snapshot_path, state_file_path):
+        spy["calls"] += 1
+        spy["kwargs"] = {
+            "spec_path": spec_path,
+            "snapshot_path": snapshot_path,
+            "state_file_path": state_file_path,
+        }
+
+    monkeypatch.setattr(pre_merge_cmd, "_check_spec_snapshot_drift", fake_drift_check)
+    # Stub Loop 1 + Loop 2 to keep the test focused on the wiring.
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+
+    def fake_loop2(root, cfg, override, ns):
+        return magi_dispatch.MAGIVerdict(
+            verdict="GO",
+            degraded=False,
+            conditions=(),
+            findings=(),
+            raw_output='{"verdict": "GO"}',
+        )
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **kw: None)
+    monkeypatch.setattr(pre_merge_cmd, "detect_drift", lambda *a, **kw: None)
+
+    rc = pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert spy["calls"] == 1
+    # Three expected paths (the wiring contract).
+    assert spy["kwargs"]["spec_path"] == tmp_path / "sbtdd" / "spec-behavior.md"
+    assert spy["kwargs"]["snapshot_path"] == tmp_path / "planning" / "spec-snapshot.json"
+    assert spy["kwargs"]["state_file_path"] == tmp_path / ".claude" / "session-state.json"
+
+
+def test_c2_pre_merge_main_aborts_on_spec_drift_before_loop1(tmp_path, monkeypatch):
+    """C2: drift detected -> MAGIGateError raised BEFORE Loop 1 runs."""
+    import pytest as _pytest
+    import magi_dispatch
+    import pre_merge_cmd
+    from errors import MAGIGateError
+
+    _seed_basic_pre_merge_env(tmp_path)
+    # Persisted snapshot at plan-approval time.
+    persisted = tmp_path / "planning" / "spec-snapshot.json"
+    persisted.write_text('{"S1: parser handles empty input": "old-hash"}', encoding="utf-8")
+    # Force the spec_snapshot.emit_snapshot to return a different hash so drift fires.
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1: parser handles empty input": "new-hash"},
+    )
+
+    loop1_calls = {"count": 0}
+
+    def fake_loop1(root):
+        loop1_calls["count"] += 1
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", fake_loop1)
+    # Stub Loop 2 to keep the test fast; if drift gate fires correctly, this
+    # stub is never reached (the gate must abort before Loop 1 / Loop 2).
+    monkeypatch.setattr(
+        pre_merge_cmd,
+        "_loop2",
+        lambda *a, **kw: magi_dispatch.MAGIVerdict(
+            verdict="GO",
+            degraded=False,
+            conditions=(),
+            findings=(),
+            raw_output='{"verdict": "GO"}',
+        ),
+    )
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **kw: None)
+    monkeypatch.setattr(pre_merge_cmd, "detect_drift", lambda *a, **kw: None)
+
+    with _pytest.raises(MAGIGateError) as excinfo:
+        pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    msg = str(excinfo.value)
+    assert "S1: parser handles empty input" in msg
+    # Loop 1 must NOT have run (the drift gate fires before Loop 1).
+    assert loop1_calls["count"] == 0
+
+
+def test_c2_auto_phase3_invokes_spec_snapshot_drift_check(tmp_path, monkeypatch):
+    """C2: auto_cmd._phase3_pre_merge invokes _check_spec_snapshot_drift before Loop 1."""
+    import auto_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    from config import load_plugin_local
+
+    _seed_basic_pre_merge_env(tmp_path)
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    spy = {"calls": 0, "kwargs": None}
+
+    def fake_drift_check(*, spec_path, snapshot_path, state_file_path):
+        spy["calls"] += 1
+        spy["kwargs"] = {
+            "spec_path": spec_path,
+            "snapshot_path": snapshot_path,
+            "state_file_path": state_file_path,
+        }
+
+    monkeypatch.setattr(pre_merge_cmd, "_check_spec_snapshot_drift", fake_drift_check)
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+
+    def fake_loop2(root, cfg2, threshold):
+        return magi_dispatch.MAGIVerdict(
+            verdict="GO",
+            degraded=False,
+            conditions=(),
+            findings=(),
+            raw_output='{"verdict": "GO"}',
+        )
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", lambda *a, **kw: None)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    auto_cmd._phase3_pre_merge(ns, cfg)
+    assert spy["calls"] == 1
+    assert spy["kwargs"]["spec_path"] == tmp_path / "sbtdd" / "spec-behavior.md"
+    assert spy["kwargs"]["snapshot_path"] == tmp_path / "planning" / "spec-snapshot.json"
+    assert spy["kwargs"]["state_file_path"] == tmp_path / ".claude" / "session-state.json"

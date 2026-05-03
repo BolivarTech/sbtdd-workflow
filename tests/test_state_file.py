@@ -30,7 +30,11 @@ def test_session_state_is_frozen_dataclass():
         state.current_phase = "red"  # type: ignore[misc]
 
 
-def test_session_state_has_eight_fields():
+def test_session_state_has_nine_fields():
+    """v1.0.0: schema gains spec_snapshot_emitted_at (R10 caspar
+    Checkpoint 2 iter 5 W). Optional with default None for backward
+    compatibility with v0.5.0 state files.
+    """
     from state_file import SessionState
 
     fields = [f for f in SessionState.__dataclass_fields__]
@@ -43,6 +47,7 @@ def test_session_state_has_eight_fields():
         "last_verification_at",
         "last_verification_result",
         "plan_approved_at",
+        "spec_snapshot_emitted_at",
     }
     assert set(fields) == expected
 

@@ -32,6 +32,12 @@ class SessionState:
     last_verification_at: str | None
     last_verification_result: str | None  # Literal["passed","failed", None]
     plan_approved_at: str | None
+    # R10 / H2-4 (caspar Checkpoint 2 iter 4 W2 + iter 5 W): canon-of-the-
+    # present record that ``planning/spec-snapshot.json`` was emitted at
+    # plan-approval time. Pre-merge S1-26 compares against this to detect
+    # bypass-by-deletion. Optional with default None for backward
+    # compatibility with v0.5.0 state files (loader treats absent = None).
+    spec_snapshot_emitted_at: str | None = None
 
 
 _REQUIRED_FIELDS: tuple[str, ...] = (
@@ -120,6 +126,10 @@ def load(path: Path | str) -> SessionState:
     # Per MAGI Checkpoint 2 iter 1 — caspar finding: validate timestamp ISO format
     _validate_iso8601("plan_approved_at", data.get("plan_approved_at"))
     _validate_iso8601("last_verification_at", data.get("last_verification_at"))
+    # R10 (caspar Checkpoint 2 iter 5 W): optional watermark field — validate
+    # ISO 8601 if present; absent treated as None for v0.5.0 backward compat.
+    if "spec_snapshot_emitted_at" in data:
+        _validate_iso8601("spec_snapshot_emitted_at", data.get("spec_snapshot_emitted_at"))
 
     # Per MAGI Checkpoint 2 iter 1 — caspar finding: wrap TypeError (wrong field types
     # or extra fields) as StateFileError so callers see a uniform exception.

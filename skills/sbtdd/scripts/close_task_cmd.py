@@ -134,6 +134,7 @@ def mark_and_advance(state: SessionState, root: Path) -> SessionState:
         last_verification_at=state.last_verification_at,
         last_verification_result=state.last_verification_result,
         plan_approved_at=state.plan_approved_at,
+        spec_snapshot_emitted_at=state.spec_snapshot_emitted_at,
     )
     save_state(new_state, root / ".claude" / "session-state.json")
     return new_state

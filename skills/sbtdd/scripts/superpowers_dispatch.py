@@ -308,3 +308,84 @@ dispatching_parallel_agents = _make_wrapper("dispatching-parallel-agents")
 systematic_debugging = _make_wrapper("systematic-debugging")
 using_git_worktrees = _make_wrapper("using-git-worktrees")
 finishing_a_development_branch = _make_wrapper("finishing-a-development-branch")
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 Feature H option 5 -- /writing-plans prompt extension (sec.3.3 H5-1).
+#
+# Per spec sec.3.3 the SBTDD pipeline invokes ``/writing-plans`` with an
+# extended prompt directing the sub-session to auto-generate scenario stub
+# tests for every Escenario in ``sbtdd/spec-behavior.md`` sec.4. Stub bodies
+# use ``pytest.skip("Scenario stub: replace with real assertions")`` so a
+# missing implementation never silently passes -- per H5-2 (deferred to
+# v1.0.1+) Checkpoint 2 will reject plans missing any stub.
+#
+# v1.0.0 ships H5-1 (auto-generation in the prompt) only; the H5-2 enforcing
+# spec_lint at Checkpoint 2 is deferred per CHANGELOG `[1.0.0]` Deferred to
+# collect empirical data on stub-gen quality first.
+# ---------------------------------------------------------------------------
+
+_WRITING_PLANS_STUB_DIRECTIVE = """
+
+## Auto-generated scenario stubs (Feature H option 5)
+
+For each scenario in the spec's §4 Escenarios BDD section, generate a
+stub test in the plan's task list with:
+
+- Function name: ``test_scenario_<N>_<slug>()`` where ``N`` is the scenario
+  number (or letter-prefixed identifier like ``S1``) and ``slug`` is a
+  snake_case version of the title.
+- Body: ``pytest.skip("Scenario stub: replace with real assertions")``.
+- Docstring: reference the scenario number + title verbatim.
+
+Plan authors replace stub bodies with real assertions before MAGI
+Checkpoint 2. Missing any stub at Checkpoint 2 will be flagged as a
+plan-quality failure (v1.0.1+ ``spec_lint``); for v1.0.0 the convention
+is enforced by reviewer eye + manual ``/sbtdd close-task`` discipline.
+"""
+
+
+def _invoke_skill(*, prompt: str, skill: str, **kwargs: Any) -> Any:
+    """Invoke a skill with a free-form prompt (used by Feature H option 5).
+
+    The standard :func:`invoke_skill` formats the prompt as
+    ``"/<skill> <args joined>"``; H5-1 needs to inject a multi-paragraph
+    directive into the prompt instead, so this helper packs ``prompt``
+    as the single args entry and delegates to :func:`invoke_skill` with
+    ``skill`` for argv-shape compatibility. Tests monkeypatch this
+    function to capture the prompt without invoking ``claude -p``.
+
+    Args:
+        prompt: Full free-form prompt body (without leading slash; the
+            slash command is added by :func:`_build_skill_cmd`).
+        skill: Skill name without leading slash (e.g. ``writing-plans``).
+        **kwargs: Forwarded to :func:`invoke_skill` (``timeout``, ``cwd``,
+            ``model``, ``stream_prefix``, ...).
+
+    Returns:
+        :class:`SkillResult` from the underlying :func:`invoke_skill`.
+    """
+    module = _sys.modules[__name__]
+    fn = module.invoke_skill  # late-bound so tests can replace via monkeypatch.
+    return fn(skill, args=[prompt], **kwargs)
+
+
+def invoke_writing_plans(*, spec_path: str, **kwargs: Any) -> Any:
+    """Invoke ``/writing-plans`` with the H5-1 scenario-stub directive injected.
+
+    Per spec sec.3.3 H5-1: the extended prompt directs the sub-session to
+    auto-generate one scenario stub test per spec §4 Escenario. Stub
+    bodies use ``pytest.skip("Scenario stub: replace with real
+    assertions")`` so a missing implementation never silently passes.
+
+    Args:
+        spec_path: Path to ``sbtdd/spec-behavior.md`` for the
+            sub-session to read scenarios from.
+        **kwargs: Forwarded to :func:`_invoke_skill`.
+
+    Returns:
+        Result of the underlying :func:`_invoke_skill` call.
+    """
+    base_prompt = f"Generate TDD plan from {spec_path}"
+    extended_prompt = base_prompt + _WRITING_PLANS_STUB_DIRECTIVE
+    return _invoke_skill(prompt=extended_prompt, skill="writing-plans", **kwargs)

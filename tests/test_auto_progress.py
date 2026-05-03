@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import sys
 import threading
 from pathlib import Path
@@ -28,54 +27,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scri
 import auto_cmd
 
 
-@pytest.fixture(autouse=True)
-def _reset_auto_cmd_module_state():
-    """Loop 2 iter 3 W2 fix: drain module-level state before AND after each test.
-
-    The tests in this file directly mutate module-level mutable state
-    on ``auto_cmd``:
-
-    - ``_heartbeat_failures_q`` (queue.Queue) -- producers/tests put
-      items; drain helpers consume them. A leak of items into a later
-      test's drain() would shift its assertions.
-    - ``_drain_state.last_drain_at`` -- timestamp guard for periodic
-      drain skip logic (``_periodic_drain_if_due``).
-    - ``_drain_decode_error_emitted`` -- W14 dedup flag for stderr
-      breadcrumb.
-    - ``_observability_swallowed_count`` -- I3 swallowed counter.
-    - ``_assert_main_thread`` attribute -- some tests swap to a no-op
-      lambda to exercise concurrency code paths from worker threads.
-
-    Pre-fix individual tests drained the queue manually at their entry,
-    but if a test failed mid-run between pollute and drain (e.g. an
-    assertion error raised after ``put`` but before the next test's
-    drain loop), the leaked items would spill forward. Post-fix this
-    autouse fixture drains the queue + resets all flags + restores the
-    original ``_assert_main_thread`` reference both in setup AND
-    teardown, so test order is irrelevant and a mid-run failure
-    cannot poison downstream tests.
-    """
-    original_assert = auto_cmd._assert_main_thread
-
-    def _drain_all() -> None:
-        while not auto_cmd._heartbeat_failures_q.empty():
-            try:
-                auto_cmd._heartbeat_failures_q.get_nowait()
-            except queue.Empty:
-                break
-        auto_cmd._reset_drain_state_for_tests()
-        auto_cmd._reset_drain_decode_error_emitted_for_tests()
-        auto_cmd._reset_observability_swallowed_count_for_tests()
-
-    _drain_all()
-    try:
-        yield
-    finally:
-        _drain_all()
-        # Restore _assert_main_thread in case a test swapped it via direct
-        # attribute mutation (the legacy pattern; new tests should prefer
-        # ``monkeypatch.setattr`` so cleanup is automatic).
-        auto_cmd._assert_main_thread = original_assert
+# NOTE (v1.0.0 S1-22 / I-Hk3): the ``_reset_auto_cmd_module_state``
+# autouse fixture was promoted to top-level ``tests/conftest.py`` so it
+# applies to all test files (heartbeat, status_watch, pre_merge_cross_check,
+# ...). The duplicated body that previously lived here is removed; the
+# behavioural contract is unchanged.
 
 
 def test_update_progress_writes_correct_schema(tmp_path):
@@ -808,7 +764,7 @@ def test_write_auto_run_audit_routes_through_with_file_lock(tmp_path, monkeypatc
     )
 
 
-def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
+def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path, monkeypatch):
     """C4 extension: ``_update_progress`` writes serialize through ``_with_file_lock``.
 
     Pre-fix: ``_with_file_lock`` only wrapped ``_drain_heartbeat_queue_and_persist``.
@@ -858,16 +814,14 @@ def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
     # which by definition must run from worker threads. Bypass the W13
     # assert for the duration of this test (production callers stay on
     # the main thread; the assertion guards them).
-    original_assert = auto_cmd._assert_main_thread
-    auto_cmd._assert_main_thread = lambda: None
-    try:
-        threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10.0)
-    finally:
-        auto_cmd._assert_main_thread = original_assert
+    # Per Loop 2 iter 4 W6 fix (S1-18): use monkeypatch.setattr instead of
+    # direct mutation so cleanup is automatic on test failure.
+    monkeypatch.setattr(auto_cmd, "_assert_main_thread", lambda: None)
+    threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
 
     if errors:
         # Re-raise the first error so the test failure is informative.
@@ -1140,10 +1094,13 @@ def test_drain_decode_error_breadcrumb_is_dedup(tmp_path, capsys):
     auto_cmd._heartbeat_failures_q.put(("failed_writes", 6))
     auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
     captured = capsys.readouterr()
+    # v1.0.0 Loop 2 iter 2->3 R11 sweep: the inline emit was replaced by
+    # ``_emit_drain_decode_error_breadcrumb`` whose text is
+    # ``[sbtdd auto] drain JSON decode error ...``. The dedup contract
+    # (one breadcrumb across 2+ drains with persistent corruption) is
+    # unchanged; only the surface phrase moved (single source of truth).
     breadcrumbs = [
-        line
-        for line in captured.err.splitlines()
-        if "failed to read auto-run.json for heartbeat" in line
+        line for line in captured.err.splitlines() if "[sbtdd auto] drain JSON decode error" in line
     ]
     assert len(breadcrumbs) == 1, (
         f"expected exactly 1 dedup'd breadcrumb across 2 drains with "
@@ -1299,3 +1256,501 @@ def test_module_state_is_clean_at_test_entry():
     )
     # Pollute -- the fixture's teardown must drain.
     auto_cmd._heartbeat_failures_q.put(("failed_writes", 999))
+
+
+# v1.0.0 F44.3: MAGI retried_agents propagation to auto-run.json audit.
+def test_f44_3_retried_agents_persisted_to_auto_run_json(tmp_path):
+    """F44.3-1: MAGI iter retried_agents written to auto-run.json."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"started_at": "2026-05-01T12:00:00Z"}),
+        encoding="utf-8",
+    )
+
+    auto_cmd._record_magi_retried_agents(auto_run_path, iter_n=2, retried_agents=["balthasar"])
+
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["magi_iter2_retried_agents"] == ["balthasar"]
+    # Existing field preserved.
+    assert data["started_at"] == "2026-05-01T12:00:00Z"
+
+
+def test_f44_3_backward_compat_with_v0_5_0_files(tmp_path):
+    """F44.3-2: v0.5.0 auto-run.json (no field) parses cleanly."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"started_at": "2026-05-01T12:00:00Z"}),
+        encoding="utf-8",
+    )
+    audit = auto_cmd._read_auto_run_audit(auto_run_path)
+    # Field absent -> empty list per F44.3-2 contract.
+    assert audit.get("magi_iter1_retried_agents", []) == []
+
+
+def test_f44_3_records_empty_list_when_no_retries(tmp_path):
+    """F44.3 corner case: empty retried_agents tuple persists as []."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    auto_cmd._record_magi_retried_agents(auto_run_path, iter_n=1, retried_agents=[])
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["magi_iter1_retried_agents"] == []
+
+
+# v1.0.0 J2: ResolvedModels preflight cache (S1-8 + S1-9).
+def test_j2_resolve_all_models_once_returns_resolvedmodels(monkeypatch, tmp_path):
+    """J2-1: _resolve_all_models_once returns ResolvedModels populated from config."""
+    from models import ResolvedModels
+    from unittest.mock import MagicMock
+
+    # Stub Path.read_text so neither global nor project CLAUDE.md is "pinned".
+    monkeypatch.setattr("pathlib.Path.read_text", lambda self, **_kw: "")
+
+    config = MagicMock()
+    config.implementer_model = "claude-haiku-4-5"
+    config.spec_reviewer_model = "claude-sonnet-4-6"
+    config.code_review_model = "claude-sonnet-4-6"
+    config.magi_dispatch_model = "claude-opus-4-7"
+
+    resolved = auto_cmd._resolve_all_models_once(config)
+    assert isinstance(resolved, ResolvedModels)
+    assert resolved.implementer == "claude-haiku-4-5"
+    assert resolved.spec_reviewer == "claude-sonnet-4-6"
+    assert resolved.code_review == "claude-sonnet-4-6"
+    assert resolved.magi_dispatch == "claude-opus-4-7"
+
+
+def test_j2_2_inv0_pin_overrides_plugin_local_md(monkeypatch, capsys):
+    """J2-2: CLAUDE.md INV-0 pin wins over plugin.local.md fields."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(
+        "pathlib.Path.read_text",
+        lambda self, **_kw: (
+            "Use claude-opus-4-7 for all sessions" if "CLAUDE.md" in str(self) else ""
+        ),
+    )
+    config = MagicMock()
+    config.implementer_model = "claude-haiku-4-5"
+    config.spec_reviewer_model = "claude-haiku-4-5"
+    config.code_review_model = "claude-haiku-4-5"
+    config.magi_dispatch_model = "claude-haiku-4-5"
+
+    resolved = auto_cmd._resolve_all_models_once(config)
+    # INV-0 wins: all fields = pinned model.
+    assert resolved.implementer == "claude-opus-4-7"
+    assert resolved.spec_reviewer == "claude-opus-4-7"
+    assert resolved.code_review == "claude-opus-4-7"
+    assert resolved.magi_dispatch == "claude-opus-4-7"
+    captured = capsys.readouterr()
+    assert "INV-0 cascade" in captured.err
+
+
+def test_j2_2b_global_pin_wins_over_project_pin(monkeypatch, capsys):
+    """J2-2b: global ~/.claude/CLAUDE.md pin wins over project pin (INV-0).
+
+    Regression guard for caspar Loop 2 iter 3 CRITICAL #1: cascade had
+    been inverted (project-first) in iter 2; iter 3 inverted back to
+    global-first per INV-0 maxima precedencia.
+    """
+    from unittest.mock import MagicMock
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+
+    def fake_read_text(self, **_kw):
+        if str(self) == str(global_path):
+            return "Use claude-opus-4-7 for all sessions"
+        if str(self) == str(project_path):
+            return "Use claude-haiku-4-5 for all sessions"
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = "claude-sonnet-4-6"
+    config.spec_reviewer_model = "claude-sonnet-4-6"
+    config.code_review_model = "claude-sonnet-4-6"
+    config.magi_dispatch_model = "claude-sonnet-4-6"
+
+    resolved = auto_cmd._resolve_all_models_once(config)
+    # Global wins per INV-0: all fields = global pin (opus).
+    assert resolved.implementer == "claude-opus-4-7"
+    assert resolved.spec_reviewer == "claude-opus-4-7"
+    assert resolved.code_review == "claude-opus-4-7"
+    assert resolved.magi_dispatch == "claude-opus-4-7"
+    captured = capsys.readouterr()
+    assert "INV-0 cascade" in captured.err
+    # Source explicitly identified as global.
+    assert "global" in captured.err
+
+
+def test_j2_2c_multi_pin_shadow_breadcrumb(monkeypatch, capsys):
+    """J2-2c (melchior iter 4 W7): when global AND project pin DIFFERENT
+    models, an additional shadow breadcrumb tells the operator the
+    project pin was overridden.
+    """
+    from unittest.mock import MagicMock
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+
+    def fake_read_text(self, **_kw):
+        if str(self) == str(global_path):
+            return "Use claude-opus-4-7 for all sessions"
+        if str(self) == str(project_path):
+            return "Use claude-haiku-4-5 for all sessions"
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = None
+    config.spec_reviewer_model = None
+    config.code_review_model = None
+    config.magi_dispatch_model = None
+
+    auto_cmd._resolve_all_models_once(config)
+    captured = capsys.readouterr()
+    assert "OVERRIDES" in captured.err
+    assert "claude-opus-4-7" in captured.err  # global pin
+    assert "claude-haiku-4-5" in captured.err  # project pin
+    assert "shadowed" in captured.err.lower()
+
+
+def test_j2_2d_no_shadow_breadcrumb_when_pins_match(monkeypatch, capsys):
+    """J2-2d: same-pin global+project case is silent (no shadow surprise)."""
+    from unittest.mock import MagicMock
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+    same_pin_text = "Use claude-opus-4-7 for all sessions"
+
+    def fake_read_text(self, **_kw):
+        if str(self) in (str(global_path), str(project_path)):
+            return same_pin_text
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = None
+    config.spec_reviewer_model = None
+    config.code_review_model = None
+    config.magi_dispatch_model = None
+
+    auto_cmd._resolve_all_models_once(config)
+    captured = capsys.readouterr()
+    # Single-pin breadcrumb fires.
+    assert "INV-0 cascade" in captured.err
+    # But no shadow surprise (no contradiction).
+    assert "OVERRIDES" not in captured.err
+    assert "shadowed" not in captured.err.lower()
+
+
+def test_j2_3_resolved_models_is_frozen():
+    """J2-3: ResolvedModels is immutable."""
+    from dataclasses import FrozenInstanceError
+
+    from models import ResolvedModels
+
+    rm = ResolvedModels(implementer="a", spec_reviewer="b", code_review="c", magi_dispatch="d")
+    with pytest.raises(FrozenInstanceError):
+        rm.implementer = "z"  # type: ignore[misc]
+
+
+def test_w8_atomic_replace_tmp_filename_includes_thread_id(tmp_path, monkeypatch):
+    """W8 (caspar iter 4): tmp filename in atomic-rename pattern includes
+    threading.get_ident() so concurrent threads don't collide on
+    ``.tmp.{pid}`` (Windows PermissionError flake).
+
+    Spies on Path.write_text + os.replace to capture the tmp filenames
+    used by ``_update_progress`` from N=4 worker threads. Each tmp path
+    must include both the PID and a unique thread-id segment.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    captured_tmp_names: list[str] = []
+    real_write_text = Path.write_text
+
+    def fake_write_text(self, *args, **kwargs):
+        # Intercept tmp file writes to capture the filename pattern.
+        s = str(self)
+        if ".tmp." in s:
+            captured_tmp_names.append(self.name)
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fake_write_text)
+    monkeypatch.setattr(auto_cmd, "_assert_main_thread", lambda: None)
+
+    def writer(label: str) -> None:
+        auto_cmd._update_progress(auto_run, phase=2, task_index=1, task_total=10, sub_phase=label)
+
+    threads = [threading.Thread(target=writer, args=(f"l-{i}",)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
+
+    assert captured_tmp_names, "no tmp filenames captured"
+    # Per W8: each tmp filename's suffix is `.tmp.<pid>.<tid>` (TWO dot
+    # segments after `.tmp.`).
+    for name in captured_tmp_names:
+        assert ".tmp." in name, f"missing .tmp. infix in {name!r}"
+        # Strip everything before `.tmp.` then split.
+        suffix = name.split(".tmp.")[1]
+        parts = suffix.split(".")
+        # Must have at least pid + tid segments (>= 2).
+        assert len(parts) >= 2, (
+            f"W8 regression: tmp suffix {suffix!r} expected pid.tid pattern "
+            f"(>= 2 dot-separated segments)"
+        )
+
+
+def test_s1_27_plan_approval_emits_spec_snapshot(tmp_path, monkeypatch):
+    """CRITICAL #2 / S1-27: when plan_approved_at is set, spec-snapshot.json written."""
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+
+    captured = {}
+
+    def fake_emit(p):
+        captured["spec_path"] = p
+        return {"S1: x": "hash1"}
+
+    monkeypatch.setattr("spec_snapshot.emit_snapshot", fake_emit)
+
+    auto_cmd._mark_plan_approved_with_snapshot(root=tmp_path)
+
+    snapshot_path = tmp_path / "planning" / "spec-snapshot.json"
+    assert snapshot_path.exists()
+    data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert data == {"S1: x": "hash1"}
+    assert captured["spec_path"] == spec
+
+
+def test_s1_27_plan_approval_writes_state_file_watermark(tmp_path, monkeypatch):
+    """H2-4 + caspar iter 4 W2: plan-approval handler writes
+    spec_snapshot_emitted_at watermark to .claude/session-state.json so
+    pre-merge can detect bypass-by-deletion (H2-5).
+    """
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+
+    monkeypatch.setattr("spec_snapshot.emit_snapshot", lambda _p: {"S1: x": "hash1"})
+
+    auto_cmd._mark_plan_approved_with_snapshot(root=tmp_path)
+
+    state_file_path = tmp_path / ".claude" / "session-state.json"
+    assert state_file_path.exists()
+    state = json.loads(state_file_path.read_text(encoding="utf-8"))
+    assert "spec_snapshot_emitted_at" in state
+    assert state["spec_snapshot_emitted_at"].endswith("Z")
+    assert "T" in state["spec_snapshot_emitted_at"]
+
+
+def test_s1_27_plan_approval_preserves_existing_state_file_fields(tmp_path, monkeypatch):
+    """Watermark write does NOT clobber pre-existing state file fields."""
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    state_file_path = tmp_path / ".claude" / "session-state.json"
+    state_file_path.write_text(
+        json.dumps(
+            {
+                "current_task_id": "3",
+                "current_phase": "red",
+                "plan_approved_at": "2026-05-01T10:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("spec_snapshot.emit_snapshot", lambda _p: {"S1: x": "hash1"})
+
+    auto_cmd._mark_plan_approved_with_snapshot(root=tmp_path)
+
+    state = json.loads(state_file_path.read_text(encoding="utf-8"))
+    # Existing fields preserved.
+    assert state["current_task_id"] == "3"
+    assert state["current_phase"] == "red"
+    assert state["plan_approved_at"] == "2026-05-01T10:00:00Z"
+    # New watermark added.
+    assert "spec_snapshot_emitted_at" in state
+
+
+def test_i_hk1_systemexit_propagates_through_write_audit(tmp_path, monkeypatch):
+    """I-Hk1 (caspar iter 4 INFO): SystemExit MUST propagate through
+    ``_write_auto_run_audit`` rather than be captured by a too-broad
+    ``except BaseException`` and delayed.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    audit = auto_cmd.AutoRunAudit(
+        schema_version=auto_cmd._AUTO_RUN_SCHEMA_VERSION,
+        auto_started_at="2026-05-01T00:00:00Z",
+        auto_finished_at="2026-05-01T00:01:00Z",
+        status="success",
+        verdict="GO",
+        degraded=False,
+        accepted_conditions=0,
+        rejected_conditions=0,
+        tasks_completed=0,
+        error=None,
+    )
+
+    # Force SystemExit on the tmp write.
+    real_write_text = Path.write_text
+
+    def boom(self, *args, **kwargs):
+        if ".tmp." in str(self):
+            raise SystemExit(2)
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", boom)
+
+    with pytest.raises(SystemExit):
+        auto_cmd._write_auto_run_audit(auto_run_path, audit)
+
+
+def test_w7_persistence_vs_drain_breadcrumbs_use_independent_dedup(capsys):
+    """W7 (caspar iter 4): persistence-failure and drain-decode-error
+    breadcrumbs use SEPARATE dedup flags so neither defeats the other.
+    """
+    # Reset both flags.
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_persistence_error_emitted_for_tests()
+    auto_cmd._reset_observability_swallowed_count_for_tests()
+
+    # Drain decode error fires.
+    auto_cmd._emit_drain_decode_error_breadcrumb("decode failure")
+    captured1 = capsys.readouterr()
+    assert "[sbtdd auto] drain JSON decode error" in captured1.err
+
+    # Persistence error fires SEPARATELY (not deduped against drain).
+    auto_cmd._emit_persistence_error_breadcrumb("persistence failure")
+    captured2 = capsys.readouterr()
+    assert "[sbtdd auto] persistence error" in captured2.err
+
+    # Repeating each: NO further output (per-flag dedup).
+    auto_cmd._emit_drain_decode_error_breadcrumb("decode failure 2")
+    auto_cmd._emit_persistence_error_breadcrumb("persistence failure 2")
+    captured3 = capsys.readouterr()
+    assert captured3.err == ""
+
+    # Cleanup.
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_persistence_error_emitted_for_tests()
+
+
+def test_f44_3_multiple_iters_do_not_clobber_each_other(tmp_path):
+    """F44.3: per-iter fields coexist."""
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    auto_cmd._record_magi_retried_agents(auto_run_path, iter_n=1, retried_agents=["caspar"])
+    auto_cmd._record_magi_retried_agents(
+        auto_run_path, iter_n=2, retried_agents=["balthasar", "melchior"]
+    )
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["magi_iter1_retried_agents"] == ["caspar"]
+    assert data["magi_iter2_retried_agents"] == ["balthasar", "melchior"]
+
+
+# v1.0.0 Loop 2 iter 2->3 fix package -- R11 sweep dead-helper wiring.
+
+
+def test_drain_decode_error_breadcrumb_invoked_from_persist(monkeypatch, tmp_path):
+    """Task 1a: persistence drain path must route through the helper.
+
+    Pre-fix the persist path inlined the breadcrumb emission with global
+    state mutation, leaving ``_emit_drain_decode_error_breadcrumb``
+    actually-dead. The fix replaces the inline write with a helper call
+    so future refactors of the breadcrumb format / dedup contract have
+    one site to update, not two divergent ones.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    # Corrupt JSON forces the json.JSONDecodeError branch in _do_persist.
+    auto_run_path.write_text("{not json", encoding="utf-8")
+
+    # Reset state; seed the failure queue so drain has work to do.
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_observability_swallowed_count_for_tests()
+    # Drain anything previously enqueued so the test does not race with
+    # other tests that touched the global queue.
+    while True:
+        try:
+            auto_cmd._heartbeat_failures_q.get_nowait()
+        except Exception:  # noqa: BLE001 - queue.Empty + fallback
+            break
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 1))
+
+    calls: list[str] = []
+
+    def _spy(reason: str) -> None:
+        calls.append(reason)
+
+    monkeypatch.setattr(auto_cmd, "_emit_drain_decode_error_breadcrumb", _spy)
+
+    auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
+
+    assert len(calls) == 1, (
+        "drain decode error path must invoke _emit_drain_decode_error_breadcrumb"
+    )
+
+
+def test_persistence_error_breadcrumb_invoked_on_write_failure(monkeypatch, tmp_path):
+    """Task 1b: persistence write-failure path must route through the helper.
+
+    Pre-fix the persist-tmp-write OSError branch inlined an
+    ``[sbtdd] warning: failed to persist heartbeat counters: ...``
+    write to stderr while ``_emit_persistence_error_breadcrumb`` (with
+    its own dedup flag and observability counter) was actually-dead.
+    The fix routes the failure through the helper so the W7 separate-
+    dedup contract is honoured by the production path.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    # Valid JSON so we get past the read step; the failure must be on
+    # the tmp-write stage.
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_persistence_error_emitted_for_tests()
+    auto_cmd._reset_observability_swallowed_count_for_tests()
+    while True:
+        try:
+            auto_cmd._heartbeat_failures_q.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 7))
+
+    # Force write_text to raise on the .tmp file write.
+    real_write_text = Path.write_text
+
+    def boom(self, *args, **kwargs):
+        if ".tmp." in str(self):
+            raise OSError("simulated tmp write failure")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", boom)
+
+    calls: list[str] = []
+
+    def _spy(reason: str) -> None:
+        calls.append(reason)
+
+    monkeypatch.setattr(auto_cmd, "_emit_persistence_error_breadcrumb", _spy)
+
+    auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
+
+    assert len(calls) == 1, (
+        "persistence write-failure path must invoke _emit_persistence_error_breadcrumb"
+    )
+    assert "OSError" in calls[0] or "simulated tmp write failure" in calls[0]

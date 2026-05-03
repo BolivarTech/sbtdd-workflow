@@ -237,3 +237,52 @@ def test_watch_main_parse_failure_does_not_double_read(tmp_path, monkeypatch):
         f"watch_main parse-failure path read auto-run.json {call_counter['n']} "
         f"times per cycle (expected 1, Loop 2 WARNING #10)"
     )
+
+
+# v1.0.0 S1-17 W5: status_cmd.watch_main exception guard.
+def test_w5_watch_main_survives_cycle_body_exception(tmp_path, monkeypatch, capsys):
+    """W5 (caspar iter 4): transient exception in cycle does NOT kill watch.
+
+    The poll loop wraps cycle body in try/except so unexpected errors
+    log + continue. KeyboardInterrupt still propagates cleanly.
+    """
+    from status_cmd import watch_main
+
+    cycle_calls = {"count": 0}
+
+    def flaky_render(*args, **kwargs):
+        cycle_calls["count"] += 1
+        if cycle_calls["count"] == 2:
+            raise RuntimeError("transient error")
+        if cycle_calls["count"] >= 4:
+            raise KeyboardInterrupt()
+        return None
+
+    monkeypatch.setattr("status_cmd._watch_render_one", flaky_render)
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"progress": {}}', encoding="utf-8")
+
+    monkeypatch.setattr("status_cmd.time.sleep", lambda _s: None)
+
+    rc = watch_main(auto_run_path, interval=0.1, json_mode=False)
+    assert rc == 130  # SIGINT exit
+    assert cycle_calls["count"] >= 4
+    captured = capsys.readouterr()
+    assert "[sbtdd watch] cycle error" in captured.err
+
+
+def test_w5_keyboardinterrupt_during_cycle_propagates(tmp_path, monkeypatch):
+    """W5: KeyboardInterrupt from inside cycle body propagates (rc=130)."""
+    from status_cmd import watch_main
+
+    def render_with_kbint(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("status_cmd._watch_render_one", render_with_kbint)
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"progress": {}}', encoding="utf-8")
+
+    monkeypatch.setattr("status_cmd.time.sleep", lambda _s: None)
+
+    rc = watch_main(auto_run_path, interval=0.1, json_mode=False)
+    assert rc == 130

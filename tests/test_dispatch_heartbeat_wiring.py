@@ -25,6 +25,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
 
 import auto_cmd
@@ -315,3 +317,143 @@ def test_site10_dispatch_completion_clears_label_via_set_progress_none(monkeypat
     # contract: dispatch_label=None -> started_at=None).
     assert get_current_progress().started_at is None
     reset_current_progress()
+
+
+# v1.0.0 S1-16 W4: narrow except in _wrap_with_heartbeat_if_auto.
+def test_w4_wrap_propagates_valueerror_from_dispatch_with_heartbeat(monkeypatch):
+    """W4 (caspar iter 4): ValueError from _dispatch_with_heartbeat MUST propagate.
+
+    Pre-fix: bare-except swallowed ValueError, neutralizing the fail-loud
+    contract. Post-fix: only AttributeError/ImportError/RuntimeError/
+    LookupError are swallowed (introspection failures); ValueError
+    propagates so callers catch the misuse.
+    """
+    import pytest
+    from heartbeat import set_current_progress, reset_current_progress
+    from models import ProgressContext
+
+    reset_current_progress()
+    set_current_progress(ProgressContext(phase=2, dispatch_label="test"))
+    try:
+        # Replace the real dispatch helper with one that raises ValueError.
+        def fail_loud(**_kw):
+            raise ValueError("missing dispatch_label")
+
+        monkeypatch.setattr(auto_cmd, "_dispatch_with_heartbeat", fail_loud)
+        with pytest.raises(ValueError, match="missing dispatch_label"):
+            pre_merge_cmd._wrap_with_heartbeat_if_auto(
+                invoke=lambda: None,
+                iter_num=1,
+                phase=2,
+                dispatch_label="test",
+            )
+    finally:
+        reset_current_progress()
+
+
+def test_w4_wrap_swallows_attributeerror_and_falls_back(monkeypatch):
+    """W4: AttributeError on heartbeat introspection collapses to direct call."""
+    from heartbeat import reset_current_progress
+
+    reset_current_progress()
+
+    # Force AttributeError when reading current.phase by replacing
+    # get_current_progress to raise.
+    import heartbeat
+
+    def boom() -> None:
+        raise AttributeError("simulated introspection break")
+
+    monkeypatch.setattr(heartbeat, "get_current_progress", boom)
+    called: list[bool] = []
+    pre_merge_cmd._wrap_with_heartbeat_if_auto(
+        invoke=lambda: called.append(True),
+        iter_num=1,
+        phase=2,
+        dispatch_label="test",
+    )
+    assert called == [True]  # direct call fired despite introspection failure
+    reset_current_progress()
+
+
+# v1.0.0 S1-28 (CRITICAL #5): J3+J7 wiring sweep test (tripwire).
+#
+# Adaptation note: the original spec sec.4.1 W1 envisioned "33 callers"
+# routing to ``run_streamed_with_timeout``. In production reality the
+# long-running subagent dispatches in auto_cmd + pre_merge_cmd already
+# use ``_dispatch_with_heartbeat`` (HeartbeatEmitter wrapping
+# ``subprocess.Popen`` directly inside ``superpowers_dispatch.invoke_skill``);
+# the remaining ``run_with_timeout`` callsites are short-budget git
+# utility commands (rev-parse, add, commit, diff) that do not need
+# streaming. The sweep therefore captures the BASELINE count of
+# ``run_with_timeout`` callsites (a conservative tripwire) so any NEW
+# call introduced by a future cycle gets flagged for explicit review:
+# either it is another git utility (acceptable, bump the baseline) or
+# it is a subagent dispatch that should route through
+# ``run_streamed_with_timeout`` instead.
+@pytest.mark.slow
+def test_w1_sweep_run_with_timeout_callsite_count_does_not_grow(monkeypatch=None):
+    """W1 sweep / S1-28: tripwire on ``run_with_timeout`` callsite count.
+
+    Walks the AST of ``auto_cmd.py`` + ``pre_merge_cmd.py`` and counts
+    Calls to ``subprocess_utils.run_with_timeout(...)`` (Attribute access)
+    or bare ``run_with_timeout(...)`` (Name access). Compares against the
+    v1.0.0 baseline. If the count grows, the new caller MUST be reviewed:
+    either bump the baseline (if it is a git utility) or migrate to
+    ``run_streamed_with_timeout`` (if it is a long-running subagent
+    dispatch). Marked ``@pytest.mark.slow`` so CI may opt out via
+    ``pytest -m 'not slow'`` (default ``make verify`` runs all).
+    """
+    import ast
+    from pathlib import Path
+
+    # v1.0.0 baseline: 6 callers in auto_cmd + 3 in pre_merge_cmd = 9
+    # total. All are short-budget git utility commands (timeout 10-30s).
+    # pre_merge_cmd grew from 1 to 3 in C2 (W-NEW1 fix): _compute_loop2_diff
+    # adds two ``git diff`` / ``git merge-base`` calls (30s + 10s timeouts)
+    # in the cumulative-diff resolution chain. Both are explicitly short-
+    # budget per spec sec.2.1 W-NEW1 -- not subagent dispatches that would
+    # warrant ``run_streamed_with_timeout``.
+    BASELINE_AUTO_CMD = 6
+    BASELINE_PRE_MERGE_CMD = 3
+
+    repo_root = Path(__file__).parent.parent
+    targets = {
+        "auto_cmd.py": (
+            repo_root / "skills" / "sbtdd" / "scripts" / "auto_cmd.py",
+            BASELINE_AUTO_CMD,
+        ),
+        "pre_merge_cmd.py": (
+            repo_root / "skills" / "sbtdd" / "scripts" / "pre_merge_cmd.py",
+            BASELINE_PRE_MERGE_CMD,
+        ),
+    }
+
+    failures: list[str] = []
+    for name, (path, baseline) in targets.items():
+        assert path.exists(), f"production file missing: {path}"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        count = 0
+        sites: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_target = (isinstance(func, ast.Attribute) and func.attr == "run_with_timeout") or (
+                isinstance(func, ast.Name) and func.id == "run_with_timeout"
+            )
+            if is_target:
+                count += 1
+                sites.append(node.lineno)
+        if count > baseline:
+            failures.append(
+                f"{name}: {count} run_with_timeout callsites (baseline {baseline}); "
+                f"new lines: {sites}. Review whether new caller should use "
+                f"run_streamed_with_timeout instead, or bump baseline if it is "
+                f"a short-budget git utility."
+            )
+
+    assert failures == [], (
+        "v1.0.0 S1-28 W1 sweep tripwire — run_with_timeout callsite growth:\n"
+        + "\n".join(f"  {f}" for f in failures)
+    )

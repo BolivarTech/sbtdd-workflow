@@ -62,6 +62,18 @@ class PluginConfig:
     status_watch_default_interval_seconds: float = 1.0
     auto_origin_disambiguation: bool = True
     auto_no_timeout_dispatch_labels: tuple[str, ...] = field(default_factory=lambda: ("magi-*",))
+    # v1.0.0 Feature G -- MAGI cross-check meta-reviewer (sec.5.2). Defaults
+    # OFF (opt-in) per balthasar Loop 2 iter 1 WARNING (recursive dogfood
+    # circular risk: cross-check invokes /requesting-code-review from within
+    # the pre-merge gate that may itself be evaluating Feature G's own diff).
+    # Operator opts in via ``magi_cross_check: true`` in plugin.local.md.
+    # See spec sec.8.2 for v1.x default-flip criteria (a)/(b)/(c).
+    magi_cross_check: bool = False
+    # v1.0.0 Feature I (INV-36) -- plugin.local.md schema version. Defaults
+    # to 1 when absent (backward compat with v0.5.0 files; NF21). Future
+    # schema bumps increment this and add a migration entry to
+    # :mod:`migrate_plugin_local`.
+    schema_version: int = 1
 
 
 #: Canonical names of the v0.3.0 Feature E model fields. Used both by the
@@ -171,6 +183,13 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     data.setdefault("status_watch_default_interval_seconds", 1.0)
     data.setdefault("auto_origin_disambiguation", True)
     data.setdefault("auto_no_timeout_dispatch_labels", ["magi-*"])
+    # v1.0.0 Feature G -- default False (opt-in initially) per balthasar
+    # Loop 2 iter 1 WARNING. See sec.5.2 for v1.x default-flip criteria.
+    data.setdefault("magi_cross_check", False)
+    # v1.0.0 Feature I (INV-36) -- default schema_version 1 = v0.5.0 backward
+    # compat. Future schema bumps require a migration entry in
+    # :mod:`migrate_plugin_local`.
+    data.setdefault("schema_version", 1)
     if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
         data["auto_no_timeout_dispatch_labels"] = tuple(data["auto_no_timeout_dispatch_labels"])
     # INV-34 (sec.2.7 of spec): timeout-vs-interval relationship + absolute
@@ -205,21 +224,21 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     if timeout < 600:
         raise ValidationError(
             f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
-            f"(caspar opus runs observed empirically up to 10min); got {timeout}"
+            f"(caspar opus runs observed empirically up to 10min); got {timeout}s"
         )
     # Clause 2 (interval ceiling) -- single-field bound, prevents loss
     # of operator awareness on intervals exceeding 1 minute.
     if interval > 60:
         raise ValidationError(
             f"INV-34 clause 2: auto_heartbeat_interval_seconds must be <= 60s "
-            f"to keep operator awareness within 1-minute granularity; got {interval}"
+            f"to keep operator awareness within 1-minute granularity; got {interval}s"
         )
     # Clause 3 (interval floor) -- single-field bound, prevents stderr
     # spam at sub-5s cadences without observable value.
     if interval < 5:
         raise ValidationError(
             f"INV-34 clause 3: auto_heartbeat_interval_seconds must be >= 5s "
-            f"to avoid stderr spam without value; got {interval}"
+            f"to avoid stderr spam without value; got {interval}s"
         )
     # Clause 1 (ratio multiplier) -- two-field invariant, defense-in-depth
     # against future weakening of clauses 2 + 4 that would make clause 1
@@ -228,7 +247,7 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
         raise ValidationError(
             f"INV-34 clause 1: auto_per_stream_timeout_seconds ({timeout}) "
             f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
-            f"= {5 * interval}; got {timeout}"
+            f"= {5 * interval}; got {timeout}s"
         )
     # W11 (sec.11.1) + Loop 2 W12 hardening: reject any allowlist label
     # that would defeat the timeout. The allowlist is meant for narrow

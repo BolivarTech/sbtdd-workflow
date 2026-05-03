@@ -296,3 +296,23 @@ def test_plugin_local_template_has_all_required_keys():
     ]
     for key in required:
         assert key in raw, f"plugin.local.md.template missing key {key}"
+
+
+def test_plugin_local_template_documents_v100_fields():
+    """I1 (v1.0.0 O-2 Loop 1 review): template must document Feature G + I fields.
+
+    Per v1.0.0 spec sec.5.2 the plugin.local.md schema gained two new fields:
+
+      - ``magi_cross_check`` (Feature G, opt-in cross-check meta-reviewer)
+      - ``schema_version`` (Feature I, default 1 for backward compat)
+
+    Template-installed projects must surface these as commented exemplars so
+    operators discover the new knobs without reading the spec or scripts.
+    """
+    raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
+    assert "magi_cross_check" in raw, (
+        "plugin.local.md.template must document magi_cross_check (Feature G)"
+    )
+    assert "schema_version" in raw, (
+        "plugin.local.md.template must document schema_version (Feature I)"
+    )

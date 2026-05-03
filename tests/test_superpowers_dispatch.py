@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -314,3 +315,56 @@ def test_writing_plans_explicit_timeout_still_overrides(monkeypatch):
     monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
     writing_plans(["@spec.md"], timeout=3600)
     assert captured["timeout"] == 3600
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 Feature H option 5 — invoke_writing_plans prompt extension
+# (sec.3.3 H5-1; S2-7).
+# ---------------------------------------------------------------------------
+
+
+def test_h5_1_invoke_writing_plans_prompt_includes_scenario_stub_directive(monkeypatch):
+    """H5-1: invoke_writing_plans prompt instructs auto-generate scenario stubs."""
+    from superpowers_dispatch import invoke_writing_plans
+
+    captured: dict[str, Any] = {}
+
+    def fake_invoke(*, prompt: str, **kwargs: Any) -> dict[str, Any]:
+        captured["prompt"] = prompt
+        captured["kwargs"] = kwargs
+        return {"output": "stub plan content"}
+
+    monkeypatch.setattr("superpowers_dispatch._invoke_skill", fake_invoke)
+    invoke_writing_plans(spec_path="sbtdd/spec-behavior.md")
+    assert "scenario stub" in captured["prompt"].lower()
+    assert "pytest.skip" in captured["prompt"]
+
+
+def test_h5_1_invoke_writing_plans_prompt_references_spec_path(monkeypatch):
+    """H5-1: prompt names the spec_path so the sub-session knows where to read scenarios."""
+    from superpowers_dispatch import invoke_writing_plans
+
+    captured: dict[str, Any] = {}
+
+    def fake_invoke(*, prompt: str, **kwargs: Any) -> dict[str, Any]:
+        captured["prompt"] = prompt
+        return {"output": ""}
+
+    monkeypatch.setattr("superpowers_dispatch._invoke_skill", fake_invoke)
+    invoke_writing_plans(spec_path="sbtdd/spec-behavior.md")
+    assert "sbtdd/spec-behavior.md" in captured["prompt"]
+
+
+def test_h5_1_invoke_writing_plans_passes_skill_kwarg(monkeypatch):
+    """H5-1: invoke_writing_plans tells the wrapper which skill to invoke."""
+    from superpowers_dispatch import invoke_writing_plans
+
+    captured: dict[str, Any] = {}
+
+    def fake_invoke(*, prompt: str, skill: str, **kwargs: Any) -> dict[str, Any]:
+        captured["skill"] = skill
+        return {"output": ""}
+
+    monkeypatch.setattr("superpowers_dispatch._invoke_skill", fake_invoke)
+    invoke_writing_plans(spec_path="sbtdd/spec-behavior.md")
+    assert captured["skill"] == "writing-plans"

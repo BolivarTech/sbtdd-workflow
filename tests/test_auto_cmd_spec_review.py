@@ -266,10 +266,17 @@ def test_auto_phase2_reviewer_runs_before_mark_and_advance(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_auto_phase2_spec_review_error_writes_audit_and_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """SpecReviewError from dispatcher -> audit records error + raise propagates."""
+    """SpecReviewError from dispatcher -> audit records error + raise propagates.
+
+    Marked ``@pytest.mark.slow`` (wall-clock ~30s on baseline hardware): the
+    test exercises the full ``_phase2_task_loop`` failure path including
+    SpecReviewError audit + propagation. CI may opt out via
+    ``pytest -m 'not slow'``; default ``make verify`` runs all.
+    """
     import auto_cmd
     import close_task_cmd
     import spec_review_dispatch
@@ -317,10 +324,18 @@ def test_auto_phase2_spec_review_error_writes_audit_and_propagates(
     assert audit["tasks_completed"] == 0
 
 
+@pytest.mark.slow
 def test_auto_phase2_spec_review_error_mid_plan_records_completed_tasks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two tasks approved, third raises -> audit shows tasks_completed=2."""
+    """Two tasks approved, third raises -> audit shows tasks_completed=2.
+
+    Marked ``@pytest.mark.slow`` (wall-clock ~18s on baseline hardware): the
+    test exercises the full ``_phase2_task_loop`` mid-plan failure path
+    including reviewer success on N-1 tasks then SpecReviewError on task N.
+    CI may opt out via ``pytest -m 'not slow'``; default ``make verify``
+    runs all.
+    """
     import auto_cmd
     import spec_review_dispatch
     import superpowers_dispatch

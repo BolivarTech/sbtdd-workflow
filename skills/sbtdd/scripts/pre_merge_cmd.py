@@ -21,11 +21,13 @@ loop breaker preserved from iter-1.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 import escalation_prompt
 import magi_dispatch
@@ -90,22 +92,28 @@ def _wrap_with_heartbeat_if_auto(
         import auto_cmd as _auto
 
         current = get_current_progress()
-        if current.phase != 0:
-            # auto-mode active; wrap with heartbeat emitter.
-            _auto._set_progress(
-                iter_num=iter_num or current.iter_num,
-                phase=phase,
-                task_index=current.task_index,
-                task_total=current.task_total,
-                dispatch_label=dispatch_label,
-            )
-            result: _T = _auto._dispatch_with_heartbeat(invoke=invoke)
-            return result
-    except Exception:  # noqa: BLE001
-        # Defensive: any failure to import / introspect collapses to
-        # the direct call -- the heartbeat is observability, NEVER a
-        # blocker for the actual dispatch (INV-32 spirit).
-        pass
+        is_auto_mode = current.phase != 0
+    except (AttributeError, ImportError, RuntimeError, LookupError):
+        # Per Loop 2 iter 4 W4 fix (caspar): narrow except to introspection
+        # failures only. AttributeError covers None / duck-typing misses,
+        # ImportError covers missing optional deps, RuntimeError covers
+        # heartbeat-state breakage, LookupError covers ContextVar.get()
+        # without a default. ValueError (the fail-loud signal from
+        # ``_dispatch_with_heartbeat`` when ``dispatch_label`` is None)
+        # MUST propagate so the operator catches the misuse rather than
+        # silently degrading to a direct call.
+        is_auto_mode = False
+    if is_auto_mode:
+        # auto-mode active; wrap with heartbeat emitter.
+        _auto._set_progress(
+            iter_num=iter_num or current.iter_num,
+            phase=phase,
+            task_index=current.task_index,
+            task_total=current.task_total,
+            dispatch_label=dispatch_label,
+        )
+        result: _T = _auto._dispatch_with_heartbeat(invoke=invoke)
+        return result
     return invoke()
 
 
@@ -639,6 +647,11 @@ def _loop2(
         raise ValidationError(
             f"--magi-threshold can only elevate; {threshold} < config {cfg.magi_threshold}"
         )
+    # v1.0.0 C1 wiring (O-2 Loop 1 review): emit the G4 cross-check-disabled
+    # stderr breadcrumb once per Loop 2 invocation so operators see the
+    # sub-phase is OFF rather than silently inactive. No-op (early return)
+    # when ``cfg.magi_cross_check`` is True.
+    _emit_cross_check_disabled_breadcrumb_once(cfg)
     # MAGI Loop 2 D iter 1 Caspar: unlink any stale ``magi-conditions.md``
     # from a previous exit-8 run before starting this loop. If the gate
     # later reaches GO we leave no spurious artifact behind; if it exits
@@ -694,7 +707,85 @@ def _loop2(
             phase=3,
             dispatch_label=f"magi-loop2-iter{iteration}",
         )
+        # v1.0.0 C1 wiring (O-2 Loop 1 review CRITICAL #1): when
+        # ``cfg.magi_cross_check`` is True, route MAGI findings through the
+        # ``/requesting-code-review`` meta-reviewer (Feature G, INV-35).
+        # Annotation-only redesign per CRITICAL #1+#4: cross-check NEVER
+        # removes findings -- it tags each with ``cross_check_decision``
+        # (KEEP|DOWNGRADE|REJECT) + rationale. INV-29 (operator +
+        # ``/receiving-code-review``) is the only stage that may filter.
+        # Reconstruct the verdict via ``dataclasses.replace`` so downstream
+        # consumers (``_write_magi_findings_file``, audit emit) see the
+        # annotated set without breaking the frozen-dataclass contract.
+        # ``getattr`` default keeps backward-compat with pre-v1.0.0 duck-typed
+        # shadow configs (e.g. _ShadowCfg from auto_cmd) that may lack the
+        # field; absence is treated as opted-out.
+        if getattr(cfg, "magi_cross_check", False):
+            # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through the
+            # ``auto_cmd._phase4_pre_merge_audit_dir`` helper so the
+            # audit-directory path has a single source of truth shared
+            # between pre-merge and auto-mode call sites. Deferred import
+            # honors the cross-subagent boundary (pre_merge_cmd is the
+            # dispatcher; auto_cmd owns the helper).
+            import auto_cmd  # noqa: PLC0415 - deferred to honor cross-module boundary
+
+            audit_dir = auto_cmd._phase4_pre_merge_audit_dir(root)
+            # v1.0.0 W4 (caspar Loop 2 iter 4): normalize findings before
+            # they enter the cross-check meta-reviewer. In iter 1, MAGI's
+            # consensus.findings list is fresh and carries no annotation
+            # fields, so this call is a no-op; in iter 2+, if a future
+            # refactor were to thread prior-iter annotated findings into
+            # the MAGI payload (e.g., as context), the normalizer strips
+            # ``cross_check_decision`` / ``cross_check_rationale`` /
+            # ``cross_check_recommended_severity`` plus the dispatch
+            # diagnostic flags ``_dispatch_failure`` / ``_failure_reason``
+            # so the working set stays lossless for MAGI without
+            # double-bookkeeping (spec sec.2.1 W4). Defensive wiring per
+            # the C3 invocation-site tripwire: keeps the contract live
+            # even if iter coupling changes downstream.
+            findings_for_cross_check = _normalize_findings_for_carry_forward(
+                [dict(f) for f in (verdict.findings or ())]
+            )
+            # v1.0.0 C2 (caspar Loop 2 iter 1 CRITICAL): compute the real
+            # cumulative diff so the meta-reviewer can ground its
+            # KEEP/DOWNGRADE/REJECT decisions in production code rather
+            # than evaluating findings text in isolation. Failure modes
+            # (no origin/main, shallow clone, detached HEAD) gracefully
+            # degrade to empty string with a stderr breadcrumb -- the
+            # cross-check still runs, just with reduced fidelity (spec
+            # sec.2.1 W-NEW1).
+            #
+            # v1.0.0 Loop 2 iter 2->3 W3: thread the (possibly truncated)
+            # diff plus its metadata so the audit JSON records whether
+            # the cap fired and what the original raw size was. Pre-fix
+            # post-mortem readers had no signal that 78% of the patch had
+            # been silently dropped.
+            cross_check_diff, diff_original_bytes, diff_truncated = _compute_loop2_diff_with_meta(
+                root
+            )
+            annotated_findings = _loop2_cross_check(
+                diff=cross_check_diff,
+                verdict=verdict.verdict,
+                findings=findings_for_cross_check,
+                iter_n=iteration,
+                config=cfg,
+                audit_dir=audit_dir,
+                diff_original_bytes=diff_original_bytes,
+                diff_truncated=diff_truncated,
+            )
+            verdict = dataclasses.replace(verdict, findings=tuple(annotated_findings))
         verdict_history.append(verdict)
+        # v1.0.0 F44.3 (S1-7): persist retried_agents telemetry to
+        # auto-run.json (iff present, i.e. running under auto). Interactive
+        # pre-merge skips silently because no audit file exists.
+        try:
+            _persist_retried_agents_to_audit(root, iteration, verdict)
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(
+                f"[sbtdd pre-merge] warning: failed to record retried_agents "
+                f"for iter {iteration}: {exc}\n"
+            )
+            sys.stderr.flush()
         if magi_dispatch.verdict_is_strong_no_go(verdict):
             raise MAGIGateError(
                 f"MAGI STRONG_NO_GO at iter {iteration}",
@@ -797,6 +888,757 @@ def _loop2(
     )
 
 
+def _check_spec_snapshot_drift(
+    *,
+    spec_path: Path,
+    snapshot_path: Path,
+    state_file_path: Path,
+) -> None:
+    """Verify spec scenarios have not drifted since plan approval (CRITICAL #2).
+
+    Per spec sec.3.2 H2-3 + H2-5: pre-merge fails when scenarios drifted
+    between plan approval and merge.
+
+    Two distinct drift surfaces guarded:
+
+    - **H2-3** (file present but content drifted): persisted snapshot at
+      ``snapshot_path`` no longer matches the current spec; raises
+      :class:`MAGIGateError` listing added/removed/modified scenarios.
+    - **H2-5** (file deleted bypass): state-file watermark
+      (``spec_snapshot_emitted_at``) says a snapshot WAS emitted but the
+      file is missing -- bypass-by-deletion attempt detected, raises
+      :class:`MAGIGateError`.
+
+    Backward compat: pre-v1.0.0 plan-approval flows neither emitted a
+    snapshot nor wrote the watermark; a stderr breadcrumb fires and the
+    gate proceeds.
+
+    Per caspar Loop 2 iter 4 CRITICAL fix: reuses the existing
+    :class:`MAGIGateError` (no new exception class added by v1.0.0).
+
+    Args:
+        spec_path: Path to ``sbtdd/spec-behavior.md``.
+        snapshot_path: Path to ``planning/spec-snapshot.json`` (the
+            previously persisted snapshot).
+        state_file_path: Path to ``.claude/session-state.json`` (read
+            for the H2-5 watermark check).
+
+    Raises:
+        MAGIGateError: scenarios drifted (H2-3) or bypass-by-deletion
+            detected via watermark (H2-5).
+    """
+    # Read state-file watermark (caspar iter 4 W2): canon-of-the-present
+    # record of whether a snapshot was emitted.
+    watermark: str | None = None
+    if state_file_path.exists():
+        try:
+            state = json.loads(state_file_path.read_text(encoding="utf-8"))
+            watermark = state.get("spec_snapshot_emitted_at")
+        except json.JSONDecodeError:
+            sys.stderr.write(
+                f"[sbtdd pre-merge] state file corrupt at "
+                f"{state_file_path}; spec-snapshot watermark check "
+                f"skipped (drift gate degrades to file-only check).\n"
+            )
+
+    if not snapshot_path.exists():
+        if watermark:
+            # H2-5: watermark says snapshot WAS emitted, but file is gone.
+            raise MAGIGateError(
+                f"Spec snapshot file deleted; re-emit via /sbtdd "
+                f"close-task or re-approve plan. State file watermark "
+                f"shows snapshot was emitted at {watermark} but "
+                f"{snapshot_path} no longer exists. The drift gate "
+                f"cannot be bypassed by deleting the snapshot."
+            )
+        # H2-3 backward-compat path: pre-v1.0.0 plan approval (no file,
+        # no watermark) is non-blocking with a breadcrumb.
+        sys.stderr.write(
+            f"[sbtdd pre-merge] no spec-snapshot.json at {snapshot_path}; "
+            f"drift check skipped (pre-v1.0.0 plan-approval flow). "
+            f"Re-approve plan to enable drift detection.\n"
+        )
+        sys.stderr.flush()
+        return
+
+    # Deferred import: spec_snapshot is owned by Subagent #2; deferring
+    # the import follows the cross-subagent Mitigation A pattern.
+    import spec_snapshot
+
+    prev = spec_snapshot.load_snapshot(snapshot_path)
+    curr = spec_snapshot.emit_snapshot(spec_path)
+    diff = spec_snapshot.compare(prev, curr)
+    if diff["added"] or diff["removed"] or diff["modified"]:
+        raise MAGIGateError(
+            f"Spec scenarios changed since plan approval; re-approve plan "
+            f"via /writing-plans + Checkpoint 2.\n"
+            f"  added: {diff['added']}\n"
+            f"  removed: {diff['removed']}\n"
+            f"  modified: {diff['modified']}"
+        )
+
+
+def _persist_retried_agents_to_audit(
+    root: Path,
+    iteration: int,
+    verdict: magi_dispatch.MAGIVerdict,
+) -> None:
+    """F44.3 hook: persist verdict.retried_agents to auto-run.json if present.
+
+    Called from :func:`_loop2` after each MAGI iteration. Skips silently
+    when the audit file does not exist (interactive pre-merge mode runs
+    standalone and has no audit trail).
+
+    Tests monkeypatch this function to verify the wiring fires.
+
+    Args:
+        root: Project root directory.
+        iteration: 1-based MAGI Loop 2 iteration index.
+        verdict: :class:`magi_dispatch.MAGIVerdict` whose ``retried_agents``
+            tuple is propagated.
+    """
+    auto_run_path = root / ".claude" / "auto-run.json"
+    if not auto_run_path.exists():
+        return
+    # Defer the import: ``auto_cmd`` may also import ``pre_merge_cmd``,
+    # so a top-level circular ``import auto_cmd`` would break in some
+    # test orderings. The deferred import follows the same pattern as
+    # ``_wrap_with_heartbeat_if_auto`` above.
+    import auto_cmd as _auto
+
+    _auto._record_magi_retried_agents(
+        auto_run_path,
+        iter_n=iteration,
+        retried_agents=list(getattr(verdict, "retried_agents", ())),
+    )
+
+
+#: Annotation/diagnostic fields stripped from MAGI findings before re-emitting
+#: them as ``findings`` in the next MAGI iter payload (caspar Loop 2 iter 4 W4).
+#: The "Prior triage context" block (separate from ``findings``) is the
+#: canonical record of cross-check + INV-29 decisions; the working ``findings``
+#: set MUST be normalized back to the un-annotated form so annotations don't
+#: accumulate unbounded across iters.
+_CROSS_CHECK_ANNOTATION_FIELDS: tuple[str, ...] = (
+    "cross_check_decision",
+    "cross_check_rationale",
+    "cross_check_recommended_severity",
+    "_dispatch_failure",
+    "_failure_reason",
+)
+
+
+def _normalize_findings_for_carry_forward(
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Strip cross-check annotation fields before re-emitting to next MAGI iter.
+
+    Per caspar Loop 2 iter 4 W4 fix: annotation fields
+    (``cross_check_decision``, ``cross_check_rationale``,
+    ``cross_check_recommended_severity``) and dispatch diagnostic flags
+    (``_dispatch_failure``, ``_failure_reason``) accumulate unbounded
+    across MAGI iters if not stripped. The "Prior triage context" block
+    (separate from ``findings``) is the canonical record; the working
+    ``findings`` set MUST be normalized back to the un-annotated form
+    for the next iter.
+
+    Args:
+        findings: Annotated findings list (from a prior cross-check pass).
+
+    Returns:
+        New list of finding dicts with annotation fields removed; original
+        agent/severity/title/detail fields preserved.
+    """
+    return [
+        {k: v for k, v in f.items() if k not in _CROSS_CHECK_ANNOTATION_FIELDS} for f in findings
+    ]
+
+
+#: Maximum diff size threaded into the cross-check prompt before truncation.
+#: v0.5.0 W-NEW1 introduced a 200KB cap; v1.0.0 Loop 2 iter 2->3 R11/W3
+#: empirical sweep observed cumulative v1.0.0 diffs at ~918KB, so the cap
+#: was raised to 1MB to keep realistic plan-bundle diffs untruncated. MAGI
+#: agents + the meta-reviewer still have finite context budgets, so the
+#: hard ceiling stays in place; truncation metadata is now surfaced in
+#: the cross-check audit JSON for post-mortem visibility (spec sec.2.1 W3).
+_CROSS_CHECK_DIFF_MAX_BYTES: int = 1024 * 1024
+
+#: Marker appended to truncated diffs so the meta-reviewer knows the diff
+#: is partial and adjusts its evaluation accordingly.
+_CROSS_CHECK_DIFF_TRUNCATION_MARKER: str = "\n[... truncated for prompt budget ...]\n"
+
+
+def _compute_loop2_diff(root: Path, base_ref: str = "origin/main") -> str:
+    """Compute the cumulative diff threaded into the cross-check meta-review.
+
+    Per spec sec.2.1 W-NEW1 (Loop 2 iter 1 caspar CRITICAL fix): the
+    meta-reviewer evaluates MAGI findings against the cumulative diff
+    under review, NOT the empty placeholder used during initial Feature G
+    plumbing. Without a real diff, the recursive payoff of the cross-check
+    is invalidated -- the reviewer has no production code to ground its
+    KEEP/DOWNGRADE/REJECT decisions in.
+
+    Resolution chain (defensive against detached HEAD / shallow clone):
+
+    1. ``git diff <base_ref>..HEAD`` (default ``origin/main``).
+    2. ``git diff main..HEAD`` (when ``origin/main`` is missing).
+    3. ``git diff $(git merge-base HEAD~50 HEAD)..HEAD`` (last-resort
+       walking history; bounded by 50 commits to stay fast).
+
+    On any subprocess failure the helper returns the empty string and
+    emits a stderr breadcrumb so the operator sees that the cross-check
+    meta-reviewer is falling back to findings-text-only evaluation.
+
+    Output is capped at :data:`_CROSS_CHECK_DIFF_MAX_BYTES` (1MB as of
+    v1.0.0; raised from the v0.5.0 200KB ceiling per the W3 sweep) and
+    truncated with :data:`_CROSS_CHECK_DIFF_TRUNCATION_MARKER` when the
+    raw diff exceeds the budget. Truncation metadata is exposed via
+    :func:`_compute_loop2_diff_with_meta` for audit-trail consumers.
+
+    Args:
+        root: Project root directory (used as ``cwd`` for git invocations).
+        base_ref: Initial git ref to diff against. Defaults to
+            ``origin/main`` per the SBTDD plan-branch convention.
+
+    Returns:
+        Cumulative diff text, or ``""`` on any subprocess / fallback
+        failure (graceful degradation -- never raises).
+    """
+    diff, _, _ = _compute_loop2_diff_with_meta(root, base_ref=base_ref)
+    return diff
+
+
+def _compute_loop2_diff_with_meta(
+    root: Path, base_ref: str = "origin/main"
+) -> tuple[str, int, bool]:
+    """Compute the cumulative cross-check diff plus truncation metadata.
+
+    Companion to :func:`_compute_loop2_diff` that surfaces the
+    pre-truncation byte count + a truncation flag so callers (the
+    cross-check audit writer) can record the metadata in the audit JSON.
+    The truncated diff itself is identical to what :func:`_compute_loop2_diff`
+    returns -- single source of truth for the truncation decision.
+
+    Args:
+        root: Project root directory.
+        base_ref: Initial git ref to diff against (default ``origin/main``).
+
+    Returns:
+        Tuple ``(diff, original_bytes, truncated)`` where ``diff`` is the
+        possibly-truncated text, ``original_bytes`` is the pre-truncation
+        size (``len(diff)`` when no truncation occurred), and
+        ``truncated`` indicates whether the cap was applied.
+    """
+    raw = _compute_loop2_diff_raw(root, base_ref=base_ref)
+    original_bytes = len(raw)
+    if original_bytes > _CROSS_CHECK_DIFF_MAX_BYTES:
+        truncated = True
+        diff = raw[:_CROSS_CHECK_DIFF_MAX_BYTES] + _CROSS_CHECK_DIFF_TRUNCATION_MARKER
+    else:
+        truncated = False
+        diff = raw
+    return diff, original_bytes, truncated
+
+
+def _compute_loop2_diff_raw(root: Path, base_ref: str = "origin/main") -> str:
+    """Internal helper that returns the *un-truncated* cumulative diff.
+
+    Shared by :func:`_compute_loop2_diff` and
+    :func:`_compute_loop2_diff_with_meta` so the resolution chain
+    (``origin/main`` -> ``main`` -> merge-base fallback) is owned in one
+    place. The public truncation logic lives in the two callers.
+    """
+
+    def _try(cmd: list[str]) -> str | None:
+        try:
+            r = subprocess_utils.run_with_timeout(cmd, timeout=30, cwd=str(root))
+        except Exception as exc:  # noqa: BLE001 - graceful fallback per W-NEW1
+            sys.stderr.write(
+                f"[sbtdd magi-cross-check] failed to compute diff "
+                f"({' '.join(cmd)}): {exc}; meta-reviewer falls back to "
+                f"findings text only\n"
+            )
+            sys.stderr.flush()
+            return ""
+        if r.returncode != 0:
+            return None
+        return str(r.stdout)
+
+    diff = _try(["git", "diff", f"{base_ref}..HEAD"])
+    if diff is None:
+        diff = _try(["git", "diff", "main..HEAD"])
+    if diff is None:
+        try:
+            r = subprocess_utils.run_with_timeout(
+                ["git", "merge-base", "HEAD~50", "HEAD"], timeout=10, cwd=str(root)
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                diff = _try(["git", "diff", f"{r.stdout.strip()}..HEAD"]) or ""
+            else:
+                diff = ""
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(
+                f"[sbtdd magi-cross-check] failed to compute diff "
+                f"(merge-base fallback): {exc}; meta-reviewer falls back to "
+                f"findings text only\n"
+            )
+            sys.stderr.flush()
+            diff = ""
+    if diff is None:
+        diff = ""
+    return diff
+
+
+def _build_cross_check_prompt(
+    diff: str,
+    verdict: str,
+    findings: list[dict[str, Any]],
+) -> str:
+    """Build the meta-review prompt for ``/requesting-code-review``.
+
+    The prompt asks the reviewer to evaluate each MAGI finding for
+    technical soundness given the spec + plan + diff context. Output
+    format: structured JSON with one decision per finding.
+
+    Per spec sec.2.1 W-NEW1 (caspar Loop 2 iter 1 CRITICAL fix): when
+    ``diff`` is non-empty, the prompt embeds it under a
+    ``## Cumulative diff under review (truncated to 200KB)`` section so
+    the reviewer can ground decisions in the actual production code,
+    not just finding-text-only heuristics. Empty diff (subprocess
+    fallback) omits the section so the reviewer doesn't waste budget
+    on a stub.
+
+    Args:
+        diff: Cumulative diff under MAGI Loop 2 review.
+        verdict: MAGI consensus verdict string (e.g. ``"GO_WITH_CAVEATS"``).
+        findings: List of MAGI finding dicts.
+
+    Returns:
+        Prompt string suitable for ``superpowers_dispatch.invoke_requesting_code_review``.
+    """
+    findings_text = "\n".join(
+        f"- [{f.get('severity', '?')}] ({f.get('agent', '?')}): "
+        f"{f.get('title', '')}: {f.get('detail', '')}"
+        for f in findings
+    )
+    diff_section = ""
+    if diff:
+        diff_section = (
+            f"\n\n## Cumulative diff under review (truncated to 200KB)\n\n```diff\n{diff}\n```\n"
+        )
+    return (
+        f"Evaluate if the following MAGI Loop 2 findings are technically "
+        f"sound or false positives given the spec + plan + diff context.\n\n"
+        f"MAGI verdict: {verdict}\n"
+        f"MAGI findings:\n{findings_text}\n\n"
+        f"For each finding output JSON: "
+        f'{{"decisions": [{{"original_index": N, '
+        f'"decision": "KEEP"|"DOWNGRADE"|"REJECT", '
+        f'"rationale": "...", '
+        f'"recommended_severity": "WARNING"|"INFO"|null}}, ...]}}'
+        f"{diff_section}"
+    )
+
+
+def _dispatch_requesting_code_review(
+    *,
+    diff: str,
+    prompt: str,
+    cwd: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Dispatch ``/requesting-code-review`` skill with cross-check meta-prompt.
+
+    Parses the skill's stdout as JSON. Returns decisions dict per
+    :func:`_build_cross_check_prompt` contract. Tests monkeypatch this
+    function (or the underlying ``superpowers_dispatch.requesting_code_review``)
+    to inject canned review decisions.
+
+    Per melchior Loop 2 iter 3 WARNING fix: distinguish JSON-parse-failure
+    from full-dispatch-failure for audit visibility. Two distinct failure
+    modes surface separately:
+
+    - dispatch itself fails (subprocess error / timeout) -> caller in
+      :func:`_loop2_cross_check` catches the exception and writes
+      ``cross_check_failed: true`` to the audit artifact with reason.
+    - dispatch succeeds but output is malformed JSON -> we return an
+      empty-decisions dict with the diagnostic flag
+      ``_dispatch_failure: "json_parse_error"`` and ``_failure_reason``
+      explaining the parse error. Audit writer surfaces this as a
+      separate ``dispatch_failure`` field (NOT under ``cross_check_failed``).
+
+    Either failure mode degrades to "no findings filtered" (original
+    MAGI findings flow through to INV-29 routing unchanged), but
+    operators have the audit signal to investigate.
+
+    Args:
+        diff: Cumulative diff context (forwarded for callers that wire
+            it through ``args``; current minimal impl passes only the
+            prompt as a positional arg).
+        prompt: Meta-review prompt built by :func:`_build_cross_check_prompt`.
+        cwd: Working directory for the skill invocation (typically
+            project root).
+        **kwargs: Forwarded to the wrapper.
+
+    Returns:
+        Dict with ``decisions`` key (list of per-finding decision dicts).
+        On JSON parse failure, additionally carries ``_dispatch_failure``
+        and ``_failure_reason`` markers.
+    """
+    result = superpowers_dispatch.requesting_code_review(
+        args=[prompt],
+        cwd=cwd,
+    )
+    output_text = getattr(result, "stdout", "") or "{}"
+    try:
+        parsed: dict[str, Any] = json.loads(output_text)
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(
+            f"[sbtdd magi-cross-check] /requesting-code-review returned "
+            f"malformed JSON (meta-review skipped, findings unchanged): "
+            f"{exc}\n"
+        )
+        sys.stderr.flush()
+        return {
+            "decisions": [],
+            "_dispatch_failure": "json_parse_error",
+            "_failure_reason": str(exc),
+        }
+    parsed.setdefault("decisions", [])
+    return parsed
+
+
+def _apply_cross_check_decisions(
+    findings: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Annotate findings with cross-check decisions; never remove (CRITICAL #1+#4).
+
+    Per spec sec.2.1 redesign: cross-check is annotation-only. The returned
+    list has the SAME LENGTH as ``findings``. INV-29 (operator +
+    ``/receiving-code-review``) is the only stage that may filter findings.
+
+    Each annotated finding gains the following fields:
+    - ``cross_check_decision`` (KEEP | DOWNGRADE | REJECT)
+    - ``cross_check_rationale`` (review text)
+    - ``cross_check_recommended_severity`` (only set when DOWNGRADE; the
+      original ``severity`` field is preserved unchanged; KEEP/REJECT
+      surface ``None``).
+
+    Args:
+        findings: Original MAGI finding dicts.
+        decisions: Per-finding decision dicts with ``original_index`` and
+            ``decision`` keys (rationale + recommended_severity optional).
+
+    Returns:
+        Length-preserved list of annotated finding dicts.
+    """
+    decision_by_index = {d["original_index"]: d for d in decisions}
+    severity_downgrade = {"CRITICAL": "WARNING", "WARNING": "INFO"}
+    annotated: list[dict[str, Any]] = []
+    for idx, finding in enumerate(findings):
+        decision = decision_by_index.get(idx, {"decision": "KEEP"})
+        action = decision.get("decision", "KEEP")
+        rationale = decision.get("rationale", "")
+        recommended_severity: str | None = None
+        if action == "DOWNGRADE":
+            recommended_severity = decision.get(
+                "recommended_severity",
+                severity_downgrade.get(finding.get("severity", ""), "INFO"),
+            )
+        annotated.append(
+            {
+                **finding,
+                "cross_check_decision": action,
+                "cross_check_rationale": rationale,
+                "cross_check_recommended_severity": recommended_severity,
+            }
+        )
+    return annotated
+
+
+def _write_cross_check_audit(
+    audit_dir: Path,
+    *,
+    iter_n: int,
+    verdict: str,
+    original_findings: list[dict[str, Any]],
+    decisions: list[dict[str, Any]] | None = None,
+    annotated_findings: list[dict[str, Any]] | None = None,
+    cross_check_failed: bool = False,
+    failure_reason: str | None = None,
+    json_parse_failure: str | None = None,
+    diff_truncated: bool = False,
+    diff_original_bytes: int | None = None,
+    diff_cap_bytes: int | None = None,
+) -> Path:
+    """Write cross-check audit artifact JSON atomically (spec sec.2.1 G6 schema).
+
+    Atomic write: serialize to ``<path>.tmp.<pid>.<tid>``, then ``Path.replace``
+    to final name. Prevents partial-write corruption if process crashes
+    mid-write (per WARNING melchior — atomicization).
+
+    Per melchior W iter 3: ``cross_check_failed`` is reserved for full-
+    dispatch failures (subprocess error / unhandled exception);
+    ``json_parse_failure`` surfaces as a separate ``dispatch_failure`` block
+    so post-mortem can distinguish the two modes.
+
+    Args:
+        audit_dir: Directory for cross-check audit artifacts (created if absent).
+        iter_n: Current MAGI Loop 2 iteration number.
+        verdict: MAGI consensus verdict string.
+        original_findings: Verbatim MAGI findings (always preserved).
+        decisions: Per-finding cross-check decisions (None when skipped/failed).
+        annotated_findings: Annotated findings (defaults to original_findings).
+        cross_check_failed: True when the dispatch itself raised.
+        failure_reason: Free-form failure description (only when ``cross_check_failed``).
+        json_parse_failure: Reason string from JSON parse failure mode.
+
+    Returns:
+        Path to the written audit artifact.
+    """
+    import os
+    import threading
+
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    audit_path = audit_dir / f"iter{iter_n}-{timestamp}.json"
+    audit_data: dict[str, Any] = {
+        "iter": iter_n,
+        "timestamp": timestamp,
+        "magi_verdict": verdict,
+        "original_findings": original_findings,
+        "cross_check_decisions": decisions or [],
+        "annotated_findings": (
+            annotated_findings if annotated_findings is not None else original_findings
+        ),
+    }
+    if cross_check_failed:
+        audit_data["cross_check_failed"] = True
+        if failure_reason:
+            audit_data["failure_reason"] = failure_reason
+    if json_parse_failure is not None:
+        audit_data["dispatch_failure"] = {
+            "kind": "json_parse_error",
+            "reason": json_parse_failure,
+        }
+    # v1.0.0 Loop 2 iter 2->3 W3: surface diff-truncation metadata so
+    # post-mortem readers can tell whether the meta-reviewer evaluated
+    # the full patch or a truncated subset. Pre-fix the audit JSON had
+    # no signal for the W3 sweep finding (78% silent loss).
+    if diff_truncated:
+        audit_data["diff_truncated"] = True
+        if diff_original_bytes is not None:
+            audit_data["diff_original_bytes"] = diff_original_bytes
+        if diff_cap_bytes is not None:
+            audit_data["diff_cap_bytes"] = diff_cap_bytes
+    tmp_path = audit_path.parent / (audit_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}")
+    tmp_path.write_text(json.dumps(audit_data, indent=2, default=str), encoding="utf-8")
+    tmp_path.replace(audit_path)  # atomic rename
+    return audit_path
+
+
+def _loop2_cross_check(
+    *,
+    diff: str,
+    verdict: str,
+    findings: list[dict[str, Any]],
+    iter_n: int,
+    config: Any,
+    audit_dir: Path,
+    diff_original_bytes: int | None = None,
+    diff_truncated: bool = False,
+) -> list[dict[str, Any]]:
+    """Cross-check MAGI Loop 2 findings via /requesting-code-review meta-review.
+
+    Per spec sec.2.1 Feature G + INV-35: annotate MAGI findings with
+    KEEP/DOWNGRADE/REJECT decisions BEFORE routing to INV-29 triage. Opt-
+    out via ``config.magi_cross_check=False`` (default).
+
+    Annotation-only redesign (CRITICAL #1+#4): the returned list has the
+    SAME LENGTH as ``findings``; each surfaced finding is augmented with
+    ``cross_check_decision``, ``cross_check_rationale``, and
+    ``cross_check_recommended_severity`` fields. INV-29 (operator +
+    ``/receiving-code-review``) is the only stage that may filter
+    findings — silent drops here would hide real CRITICALs when the
+    review is wrong.
+
+    G4 stderr breadcrumb (spec sec.2.1 impl note): when opted out, emit
+    a one-time stderr breadcrumb at Loop 2 entry so operators see the
+    cross-check is OFF rather than silently inactive.
+
+    Args:
+        diff: Full diff under review (string).
+        verdict: MAGI consensus verdict (e.g. ``"GO_WITH_CAVEATS"``).
+        findings: List of MAGI findings dicts.
+        iter_n: Current MAGI Loop 2 iteration number.
+        config: PluginConfig (or duck-typed) with ``magi_cross_check`` field.
+        audit_dir: Directory for cross-check audit artifacts.
+
+    Returns:
+        Annotated findings list (same length as input). On dispatch failure,
+        returns the original findings unchanged (graceful fallback per G5).
+    """
+    if not config.magi_cross_check:
+        return findings
+    prompt = _build_cross_check_prompt(diff, verdict, findings)
+    # v1.0.0 W3: forward the diff-truncation metadata to every audit-
+    # write call site below so post-mortem readers can distinguish
+    # full-diff evaluations from truncated-diff evaluations.
+    audit_diff_meta: dict[str, Any] = {
+        "diff_truncated": diff_truncated,
+        "diff_original_bytes": diff_original_bytes,
+        "diff_cap_bytes": _CROSS_CHECK_DIFF_MAX_BYTES if diff_truncated else None,
+    }
+    try:
+        review_output = _dispatch_requesting_code_review(diff=diff, prompt=prompt)
+    except Exception as exc:  # noqa: BLE001 - graceful fallback per G5
+        sys.stderr.write(
+            f"[sbtdd magi-cross-check] failed (will fall back to MAGI findings as-is): {exc}\n"
+        )
+        sys.stderr.flush()
+        _write_cross_check_audit(
+            audit_dir,
+            iter_n=iter_n,
+            verdict=verdict,
+            original_findings=findings,
+            cross_check_failed=True,
+            failure_reason=str(exc),
+            **audit_diff_meta,
+        )
+        return findings
+
+    # Per melchior W iter 3: surface JSON-parse-failure as a distinct audit
+    # field, separate from cross_check_failed (full-dispatch-fail).
+    if review_output.get("_dispatch_failure") == "json_parse_error":
+        _write_cross_check_audit(
+            audit_dir,
+            iter_n=iter_n,
+            verdict=verdict,
+            original_findings=findings,
+            decisions=[],
+            annotated_findings=findings,
+            json_parse_failure=str(review_output.get("_failure_reason", "")),
+            **audit_diff_meta,
+        )
+        return findings  # original findings unchanged
+
+    decisions = review_output.get("decisions", [])
+    annotated = _apply_cross_check_decisions(findings, decisions)
+    _write_cross_check_audit(
+        audit_dir,
+        iter_n=iter_n,
+        verdict=verdict,
+        original_findings=findings,
+        decisions=decisions,
+        annotated_findings=annotated,
+        **audit_diff_meta,
+    )
+    return annotated
+
+
+#: One-time dedup flag for the G4 cross-check-disabled stderr breadcrumb.
+#: Reset at process start; not per-Loop-2-invocation so a single auto run
+#: emits the breadcrumb at most once even across multiple pre-merge calls.
+_cross_check_disabled_breadcrumb_emitted: bool = False
+
+
+def _reset_cross_check_breadcrumb_for_tests() -> None:
+    """Test-only helper; resets the G4 dedup flag."""
+    global _cross_check_disabled_breadcrumb_emitted
+    _cross_check_disabled_breadcrumb_emitted = False
+
+
+def _emit_cross_check_disabled_breadcrumb_once(config: Any) -> None:
+    """Emit one-time stderr breadcrumb when cross-check is opted-out (G4 impl note).
+
+    Per spec sec.2.1 Feature G impl note: when ``config.magi_cross_check``
+    is False, emit a single stderr breadcrumb at Loop 2 entry so operators
+    see cross-check is OFF rather than silently inactive. Once per Loop 2
+    invocation, not per iter (dedup).
+
+    Args:
+        config: PluginConfig (or duck-typed) with ``magi_cross_check`` field.
+            Pre-v1.0.0 duck-typed shadow configs (e.g. ``SimpleNamespace``)
+            without the field are treated as opted-out (default False).
+    """
+    global _cross_check_disabled_breadcrumb_emitted
+    if getattr(config, "magi_cross_check", False):
+        return
+    if _cross_check_disabled_breadcrumb_emitted:
+        return
+    _cross_check_disabled_breadcrumb_emitted = True
+    sys.stderr.write(
+        "[sbtdd magi-cross-check] cross-check is OFF (magi_cross_check: "
+        "false in plugin.local.md). To enable meta-reviewer for this "
+        "gate, set magi_cross_check: true and re-run.\n"
+    )
+    sys.stderr.flush()
+
+
+def _invoke_magi_loop2(**kwargs: Any) -> tuple[str, list[dict[str, Any]]]:
+    """Adapter shim around ``magi_dispatch.invoke_magi`` returning (verdict, findings).
+
+    Exists primarily so :func:`_loop2_with_cross_check` can be unit-tested
+    in isolation (tests monkeypatch this function). Production callers
+    that already use :func:`_loop2` continue to drive
+    ``magi_dispatch.invoke_magi`` directly with the full :class:`MAGIVerdict`
+    return type.
+
+    Args:
+        **kwargs: Forwarded verbatim to :func:`magi_dispatch.invoke_magi`.
+
+    Returns:
+        Tuple ``(verdict_string, findings_list)`` extracted from the
+        :class:`MAGIVerdict`.
+    """
+    verdict_obj = magi_dispatch.invoke_magi(**kwargs)
+    findings_list = [dict(f) for f in getattr(verdict_obj, "findings", ())]
+    return (verdict_obj.verdict, findings_list)
+
+
+def _loop2_with_cross_check(
+    *,
+    diff: str,
+    iter_n: int,
+    config: Any,
+    audit_dir: Path,
+    **magi_kwargs: Any,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Wrapper around MAGI Loop 2 dispatch + cross-check sub-phase.
+
+    Per spec sec.2.1 + INV-35: cross-check ANNOTATES findings BEFORE
+    INV-29 routes them to ``/receiving-code-review``. Verdict itself is
+    unchanged (cross-check only modifies the findings set, never the
+    verdict string).
+
+    Per CRITICAL #1+#4 redesign: annotation-only — the returned findings
+    list has the same length as MAGI's emitted findings; INV-29 is the
+    only stage that may filter.
+
+    Args:
+        diff: Cumulative diff under review.
+        iter_n: Current MAGI Loop 2 iteration number.
+        config: PluginConfig (or duck-typed) with ``magi_cross_check`` field.
+        audit_dir: Directory for cross-check audit artifacts.
+        **magi_kwargs: Forwarded to :func:`_invoke_magi_loop2`.
+
+    Returns:
+        Tuple ``(verdict_string, annotated_findings_list)``.
+    """
+    _emit_cross_check_disabled_breadcrumb_once(config)
+    verdict, findings = _invoke_magi_loop2(**magi_kwargs)
+    annotated = _loop2_cross_check(
+        diff=diff,
+        verdict=verdict,
+        findings=findings,
+        iter_n=iter_n,
+        config=config,
+        audit_dir=audit_dir,
+    )
+    return verdict, annotated
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd pre-merge (Loop 1 + Loop 2, sec.S.5.6)."""
     parser = _build_parser()
@@ -804,6 +1646,16 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = ns.project_root
     _preflight(root)
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
+    # v1.0.0 C2 wiring (O-2 Loop 1 review CRITICAL #2): spec-snapshot drift
+    # gate at pre-merge entry per spec sec.3.2 H2-3 + H2-5. Raises
+    # MAGIGateError BEFORE Loop 1 / Loop 2 if scenarios drifted since plan
+    # approval, or if the snapshot file was deleted while the watermark in
+    # session-state.json says it WAS emitted (bypass-by-deletion guard).
+    _check_spec_snapshot_drift(
+        spec_path=root / "sbtdd" / "spec-behavior.md",
+        snapshot_path=root / "planning" / "spec-snapshot.json",
+        state_file_path=root / ".claude" / "session-state.json",
+    )
     _loop1(root)
     verdict = _loop2(root, cfg, ns.magi_threshold, ns)
     magi_dispatch.write_verdict_artifact(verdict, root / ".claude" / "magi-verdict.json")

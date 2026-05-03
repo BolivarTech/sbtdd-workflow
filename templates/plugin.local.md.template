@@ -29,6 +29,15 @@ worktree_policy: "optional"
 # spec_reviewer_model: claude-haiku-4-5
 # code_review_model: claude-sonnet-4-6
 # magi_dispatch_model: null   # outer dispatcher; sub-agents pick own
+# v1.0.0 Feature G -- opt-in MAGI cross-check meta-reviewer (annotation-only).
+# Default false. Set true to enable /requesting-code-review meta-review of
+# MAGI Loop 2 findings BEFORE INV-29 routing. The reviewer annotates each
+# finding with KEEP|DOWNGRADE|REJECT decisions; INV-29 is the only stage
+# that may filter findings (annotation-only contract).
+# magi_cross_check: false
+# v1.0.0 Feature I -- plugin.local.md schema version (default 1 = v0.5.0
+# backward compat). Future schema bumps via scripts/migrate_plugin_local.py.
+# schema_version: 1
 ---
 
 # Local configuration for the sbtdd-workflow plugin

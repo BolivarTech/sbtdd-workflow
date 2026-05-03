@@ -94,8 +94,12 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     def fake_brainstorming(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
+        # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\nContent goes here\n", encoding="utf-8"
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
         )
         return None
 
@@ -107,8 +111,17 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         )
         return None
 
+    def fake_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        # v1.0.0 Loop 2 iter 2->3 R11: production routes through
+        # invoke_writing_plans wrapper.
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+        )
+        return None
+
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", fake_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", fake_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", fake_invoke_writing_plans)
 
 
 def _make_verdict(label: str = "HOLD", degraded: bool = False) -> object:
