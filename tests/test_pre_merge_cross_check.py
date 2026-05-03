@@ -691,3 +691,128 @@ def test_c1_loop2_emits_off_breadcrumb_once_per_invocation(tmp_path, monkeypatch
     captured = capsys.readouterr()
     # Single occurrence (count of "cross-check is OFF" lines == 1).
     assert captured.err.count("cross-check is OFF") == 1
+
+
+# ---------------------------------------------------------------------------
+# C1 (melchior CRITICAL) — exhaustive verification that
+# `_apply_cross_check_decisions` honors the annotation-only invariant
+# (length-preserved + original `severity` unchanged on DOWNGRADE).
+# Single test per spec sec.2.1 redesign: the surfaced finding's `severity`
+# field is NEVER mutated; DOWNGRADE recommendations live solely in
+# `cross_check_recommended_severity`. INV-29 (operator + receiving-code-review)
+# is the only stage that may filter findings.
+# ---------------------------------------------------------------------------
+
+
+def test_g1_apply_cross_check_decisions_length_preserved():
+    """C1 verification: REJECT/DOWNGRADE/KEEP all length-preserved + original severity unchanged.
+
+    Annotation-only redesign (spec sec.2.1 CRITICAL #1+#4):
+
+    - REJECT must NOT remove the finding.
+    - DOWNGRADE must NOT mutate the original ``severity`` field; the
+      review's recommended severity lives in
+      ``cross_check_recommended_severity`` for INV-29 consideration.
+    - KEEP/REJECT must surface ``cross_check_recommended_severity == None``.
+    - The annotated list length always equals the input list length.
+    - Pre-existing finding fields (severity, title, detail, agent) are
+      preserved verbatim.
+    """
+    from pre_merge_cmd import _apply_cross_check_decisions
+
+    findings = [
+        {
+            "severity": "CRITICAL",
+            "title": "fp",
+            "detail": "false positive at line N",
+            "agent": "caspar",
+        },
+        {
+            "severity": "WARNING",
+            "title": "naming polish",
+            "detail": "rename for clarity",
+            "agent": "balthasar",
+        },
+        {
+            "severity": "CRITICAL",
+            "title": "valid",
+            "detail": "missing assertion",
+            "agent": "melchior",
+        },
+    ]
+    decisions = [
+        {
+            "original_index": 0,
+            "decision": "REJECT",
+            "rationale": "no underlying issue",
+        },
+        {
+            "original_index": 1,
+            "decision": "DOWNGRADE",
+            "rationale": "polish only",
+            "recommended_severity": "INFO",
+        },
+        {
+            "original_index": 2,
+            "decision": "KEEP",
+            "rationale": "valid concern",
+        },
+    ]
+    annotated = _apply_cross_check_decisions(findings, decisions)
+
+    # Length-preserved invariant (spec sec.2.1 CRITICAL #1+#4).
+    assert len(annotated) == len(findings)
+
+    # Original severity NEVER mutated (annotation-only redesign).
+    assert annotated[0]["severity"] == "CRITICAL"  # REJECT keeps severity
+    assert annotated[1]["severity"] == "WARNING"  # DOWNGRADE keeps severity
+    assert annotated[2]["severity"] == "CRITICAL"  # KEEP keeps severity
+
+    # cross_check_decision matches the input decision.
+    assert annotated[0]["cross_check_decision"] == "REJECT"
+    assert annotated[1]["cross_check_decision"] == "DOWNGRADE"
+    assert annotated[2]["cross_check_decision"] == "KEEP"
+
+    # cross_check_recommended_severity surfaced ONLY for DOWNGRADE; KEEP
+    # and REJECT carry None so audit JSON serializes them as null.
+    assert annotated[0]["cross_check_recommended_severity"] is None
+    assert annotated[1]["cross_check_recommended_severity"] == "INFO"
+    assert annotated[2]["cross_check_recommended_severity"] is None
+
+    # Pre-existing fields preserved verbatim across the annotation pass.
+    for idx, original in enumerate(findings):
+        for k in ("severity", "title", "detail", "agent"):
+            assert annotated[idx][k] == original[k]
+
+
+def test_g1_apply_cross_check_decisions_default_keep_for_missing_decision():
+    """C1 verification: missing per-finding decision defaults to KEEP, length still preserved.
+
+    When the meta-reviewer returns fewer decisions than findings (e.g. the
+    review timed out partway), `_apply_cross_check_decisions` must still
+    return a length-preserved list with the missing entries defaulting to
+    KEEP. INV-29 then evaluates the original severity unchanged.
+    """
+    from pre_merge_cmd import _apply_cross_check_decisions
+
+    findings = [
+        {"severity": "CRITICAL", "title": "a", "detail": "x", "agent": "caspar"},
+        {"severity": "WARNING", "title": "b", "detail": "y", "agent": "balthasar"},
+    ]
+    # Only one decision returned — second finding has no per-index decision.
+    decisions = [
+        {
+            "original_index": 0,
+            "decision": "REJECT",
+            "rationale": "false positive",
+        },
+    ]
+    annotated = _apply_cross_check_decisions(findings, decisions)
+
+    assert len(annotated) == len(findings)
+    assert annotated[0]["cross_check_decision"] == "REJECT"
+    # Default KEEP applied for finding without an explicit decision.
+    assert annotated[1]["cross_check_decision"] == "KEEP"
+    # Severities still untouched.
+    assert annotated[0]["severity"] == "CRITICAL"
+    assert annotated[1]["severity"] == "WARNING"
