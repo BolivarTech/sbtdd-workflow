@@ -738,8 +738,17 @@ def _loop2(
             findings_for_cross_check = _normalize_findings_for_carry_forward(
                 [dict(f) for f in (verdict.findings or ())]
             )
+            # v1.0.0 C2 (caspar Loop 2 iter 1 CRITICAL): compute the real
+            # cumulative diff so the meta-reviewer can ground its
+            # KEEP/DOWNGRADE/REJECT decisions in production code rather
+            # than evaluating findings text in isolation. Failure modes
+            # (no origin/main, shallow clone, detached HEAD) gracefully
+            # degrade to empty string with a stderr breadcrumb -- the
+            # cross-check still runs, just with reduced fidelity (spec
+            # sec.2.1 W-NEW1).
+            cross_check_diff = _compute_loop2_diff(root)
             annotated_findings = _loop2_cross_check(
-                diff="",  # diff context wired in by reviewer's runtime
+                diff=cross_check_diff,
                 verdict=verdict.verdict,
                 findings=findings_for_cross_check,
                 iter_n=iteration,
@@ -1027,6 +1036,101 @@ def _normalize_findings_for_carry_forward(
     ]
 
 
+#: Maximum diff size threaded into the cross-check prompt before truncation
+#: (spec sec.2.1 W-NEW1: 200KB cap). MAGI agents and the meta-reviewer
+#: have finite context budgets; oversized diffs degrade quality.
+_CROSS_CHECK_DIFF_MAX_BYTES: int = 200 * 1024
+
+#: Marker appended to truncated diffs so the meta-reviewer knows the diff
+#: is partial and adjusts its evaluation accordingly.
+_CROSS_CHECK_DIFF_TRUNCATION_MARKER: str = "\n[... truncated for prompt budget ...]\n"
+
+
+def _compute_loop2_diff(root: Path, base_ref: str = "origin/main") -> str:
+    """Compute the cumulative diff threaded into the cross-check meta-review.
+
+    Per spec sec.2.1 W-NEW1 (Loop 2 iter 1 caspar CRITICAL fix): the
+    meta-reviewer evaluates MAGI findings against the cumulative diff
+    under review, NOT the empty placeholder used during initial Feature G
+    plumbing. Without a real diff, the recursive payoff of the cross-check
+    is invalidated -- the reviewer has no production code to ground its
+    KEEP/DOWNGRADE/REJECT decisions in.
+
+    Resolution chain (defensive against detached HEAD / shallow clone):
+
+    1. ``git diff <base_ref>..HEAD`` (default ``origin/main``).
+    2. ``git diff main..HEAD`` (when ``origin/main`` is missing).
+    3. ``git diff $(git merge-base HEAD~50 HEAD)..HEAD`` (last-resort
+       walking history; bounded by 50 commits to stay fast).
+
+    On any subprocess failure the helper returns the empty string and
+    emits a stderr breadcrumb so the operator sees that the cross-check
+    meta-reviewer is falling back to findings-text-only evaluation.
+
+    Output is capped at :data:`_CROSS_CHECK_DIFF_MAX_BYTES` (200KB) and
+    truncated with :data:`_CROSS_CHECK_DIFF_TRUNCATION_MARKER` when the
+    raw diff exceeds the budget.
+
+    Args:
+        root: Project root directory (used as ``cwd`` for git invocations).
+        base_ref: Initial git ref to diff against. Defaults to
+            ``origin/main`` per the SBTDD plan-branch convention.
+
+    Returns:
+        Cumulative diff text, or ``""`` on any subprocess / fallback
+        failure (graceful degradation -- never raises).
+    """
+
+    def _try(cmd: list[str]) -> str | None:
+        try:
+            r = subprocess_utils.run_with_timeout(cmd, timeout=30, cwd=str(root))
+        except Exception as exc:  # noqa: BLE001 - graceful fallback per W-NEW1
+            sys.stderr.write(
+                f"[sbtdd magi-cross-check] failed to compute diff "
+                f"({' '.join(cmd)}): {exc}; meta-reviewer falls back to "
+                f"findings text only\n"
+            )
+            sys.stderr.flush()
+            return ""
+        if r.returncode != 0:
+            return None
+        return str(r.stdout)
+
+    # Primary: <base_ref>..HEAD (e.g. origin/main..HEAD).
+    diff = _try(["git", "diff", f"{base_ref}..HEAD"])
+    if diff is None:
+        diff = _try(["git", "diff", "main..HEAD"])
+    if diff is None:
+        # Last-resort: walk back up to 50 commits and diff from the
+        # merge-base. Bounded so shallow clones / detached HEAD scenarios
+        # don't hang the cross-check.
+        try:
+            r = subprocess_utils.run_with_timeout(
+                ["git", "merge-base", "HEAD~50", "HEAD"], timeout=10, cwd=str(root)
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                diff = _try(["git", "diff", f"{r.stdout.strip()}..HEAD"]) or ""
+            else:
+                diff = ""
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(
+                f"[sbtdd magi-cross-check] failed to compute diff "
+                f"(merge-base fallback): {exc}; meta-reviewer falls back to "
+                f"findings text only\n"
+            )
+            sys.stderr.flush()
+            diff = ""
+    if diff is None:
+        diff = ""
+
+    # Truncate to prompt budget (spec sec.2.1 W-NEW1: 200KB cap).
+    if len(diff) > _CROSS_CHECK_DIFF_MAX_BYTES:
+        diff = (
+            diff[:_CROSS_CHECK_DIFF_MAX_BYTES] + _CROSS_CHECK_DIFF_TRUNCATION_MARKER
+        )
+    return diff
+
+
 def _build_cross_check_prompt(
     diff: str,
     verdict: str,
@@ -1037,6 +1141,14 @@ def _build_cross_check_prompt(
     The prompt asks the reviewer to evaluate each MAGI finding for
     technical soundness given the spec + plan + diff context. Output
     format: structured JSON with one decision per finding.
+
+    Per spec sec.2.1 W-NEW1 (caspar Loop 2 iter 1 CRITICAL fix): when
+    ``diff`` is non-empty, the prompt embeds it under a
+    ``## Cumulative diff under review (truncated to 200KB)`` section so
+    the reviewer can ground decisions in the actual production code,
+    not just finding-text-only heuristics. Empty diff (subprocess
+    fallback) omits the section so the reviewer doesn't waste budget
+    on a stub.
 
     Args:
         diff: Cumulative diff under MAGI Loop 2 review.
@@ -1051,6 +1163,12 @@ def _build_cross_check_prompt(
         f"{f.get('title', '')}: {f.get('detail', '')}"
         for f in findings
     )
+    diff_section = ""
+    if diff:
+        diff_section = (
+            "\n\n## Cumulative diff under review (truncated to 200KB)\n\n"
+            f"```diff\n{diff}\n```\n"
+        )
     return (
         f"Evaluate if the following MAGI Loop 2 findings are technically "
         f"sound or false positives given the spec + plan + diff context.\n\n"
@@ -1061,6 +1179,7 @@ def _build_cross_check_prompt(
         f'"decision": "KEEP"|"DOWNGRADE"|"REJECT", '
         f'"rationale": "...", '
         f'"recommended_severity": "WARNING"|"INFO"|null}}, ...]}}'
+        f"{diff_section}"
     )
 
 
