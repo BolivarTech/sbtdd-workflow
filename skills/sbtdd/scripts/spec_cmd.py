@@ -128,7 +128,13 @@ def _run_spec_flow(root: Path) -> None:
     if not spec_behavior.exists():
         raise PreconditionError(f"/brainstorming completed but {spec_behavior} was not generated")
     plan_org = root / "planning" / "claude-plan-tdd-org.md"
-    superpowers_dispatch.writing_plans(args=[f"@{spec_behavior}"])
+    # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through
+    # ``invoke_writing_plans`` so the H5-1 scenario-stub directive
+    # extends the prompt at plan-generation time. Pre-fix the bare
+    # ``writing_plans`` wrapper was called, leaving the H5-1 prompt
+    # extension actually-dead. The wrapper internally delegates to
+    # ``invoke_skill`` and therefore preserves the v0.5.x argv shape.
+    superpowers_dispatch.invoke_writing_plans(spec_path=f"@{spec_behavior}")
     if not plan_org.exists():
         raise PreconditionError(f"/writing-plans completed but {plan_org} was not generated")
 

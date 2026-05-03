@@ -54,6 +54,9 @@ def test_spec_accepts_lowercase_todos_spanish_prose(
     # flow; INV-27 validation is what we exercise here, not the dispatcher.
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", lambda *a, **kw: None)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", lambda *a, **kw: None)
+    # v1.0.0 Loop 2 iter 2->3 R11: production routes through
+    # ``invoke_writing_plans``; stub it too so test stays subprocess-free.
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", lambda **kw: None)
     # Lowercase must not trigger INV-27; downstream precondition failures
     # (e.g. missing plugin.local.md, unseeded planning/ dir) are the
     # expected escape hatch.
@@ -118,8 +121,19 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
         )
         return None
 
+    def spy_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        # v1.0.0 Loop 2 iter 2->3 R11: production now routes through
+        # invoke_writing_plans wrapper; record under the same skill tag
+        # so existing call-order assertions continue to match.
+        calls.append({"skill": "writing-plans", "args": [spec_path]})
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+        )
+        return None
+
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", spy_invoke_writing_plans)
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
@@ -170,8 +184,19 @@ def test_spec_invokes_writing_plans_after_spec_generated(
         assert args is not None and any("spec-behavior.md" in tok for tok in args)
         return None
 
+    def spy_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        # v1.0.0 Loop 2 iter 2->3 R11: production now routes through
+        # invoke_writing_plans; mirror the spy contract on the wrapper.
+        calls.append("writing-plans")
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+        )
+        assert "spec-behavior.md" in spec_path
+        return None
+
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", spy_invoke_writing_plans)
     monkeypatch.setattr(
         magi_dispatch,
         "invoke_magi",
@@ -276,8 +301,17 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         )
         return None
 
+    def fake_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        # v1.0.0 Loop 2 iter 2->3 R11: mirror fake_writing_plans on the
+        # invoke_writing_plans wrapper that production uses.
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+        )
+        return None
+
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", fake_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", fake_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", fake_invoke_writing_plans)
 
 
 def _make_verdict(

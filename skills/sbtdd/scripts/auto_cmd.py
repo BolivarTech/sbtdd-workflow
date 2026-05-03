@@ -2463,6 +2463,18 @@ def _read_auto_run_audit(auto_run_path: Path) -> dict[str, Any]:
     an empty dict when the file is missing or contains invalid JSON so
     callers don't need to defensively wrap each access.
 
+    .. note:: **v1.0.0 skeleton -- deferred to v1.0.1+ status renderer
+       wiring.** As of v1.0.0 this helper is consumed only by the
+       post-mortem test suite + the F44.3-2 backward-compat schema
+       contract. Production status rendering (e.g. ``/sbtdd status
+       --watch`` summary view, ``/sbtdd resume`` checkpoint reader) is
+       expected to consume this helper when it lands; the implementation
+       is intentionally minimal so the schema-tolerance contract is
+       fixed before consumers depend on it. Tracked in CHANGELOG
+       ``[1.0.0]`` Deferred section. Removing it before then would
+       force the future status-renderer feature to re-derive the
+       absent-tolerant read pattern from scratch.
+
     Args:
         auto_run_path: Path to ``.claude/auto-run.json``.
 

@@ -100,6 +100,15 @@ def bootstrapped_project(tmp_path, monkeypatch):
         sp.calls.append(("writing_plans", list(args or []), cwd or ""))
         return None
 
+    def fake_invoke_writing_plans(*, spec_path, **kwargs):
+        # v1.0.0 Loop 2 iter 2->3 R11: production routes through
+        # invoke_writing_plans wrapper. Mirror fake_writing_plans on it.
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            _PLAN_ORG_BODY, encoding="utf-8"
+        )
+        sp.calls.append(("writing_plans", [spec_path], kwargs.get("cwd", "") or ""))
+        return None
+
     def fake_noop(args=None, timeout=600, cwd=None, **kwargs):
         # Accept arbitrary v0.3.0+ kwargs (model, skill_field_name,
         # stream_prefix) so the integration stub stays compatible with
@@ -108,6 +117,7 @@ def bootstrapped_project(tmp_path, monkeypatch):
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", fake_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", fake_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", fake_invoke_writing_plans)
     monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", fake_noop)
     monkeypatch.setattr(superpowers_dispatch, "requesting_code_review", fake_noop)
     monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_noop)
