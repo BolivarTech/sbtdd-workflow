@@ -42,6 +42,20 @@ every post-v0.1 release.
 - **`_SUBPROCESS_INCOMPATIBLE_SKILLS` audit + criteria for set membership**
   (W2 balthasar iter 2): re-evaluate the whitelist after first production
   exposure; document criteria for adding/removing skills from the set.
+  Bundled with v1.0.3 LOCKED real headless detection (see [1.0.0]
+  Deferred section).
+- **600s subprocess hang for `/brainstorming` and `/writing-plans`**
+  (user directive 2026-05-03): empirically observed manifestation of
+  Finding A — when `_run_spec_flow` calls the wrapper functions, A2's
+  `allow_interactive_skill=True` is passed internally so the subprocess
+  spawns; if the subprocess HANGS (waiting for stdin), operator waits
+  full `run_with_timeout` budget (600s default) before getting a
+  `ValidationError`. v1.0.1 mitigations: hang is bounded (not infinite);
+  `--resume-from-magi` recovery flag (Item A3) provides operator escape;
+  spec sec.6.5 + this CHANGELOG document the manual `python run_magi.py`
+  fallback verbatim. **Full LOUD-FAST fix**: rolled to v1.0.3 LOCKED
+  (real headless detection). v1.0.1 ships only the conservative whitelist
+  baseline.
 - **Meta-test enforcing `allow_interactive_skill=True` on direct
   `invoke_skill` callsites** (W4 caspar iter 2): point-in-time pre-A2
   audit catches current callsites; v1.0.2 adds AST-based or grep-based
@@ -284,6 +298,27 @@ every post-v0.1 release.
   reword: "sequential-within-task, parallel-across-tasks-when-allowed".
   Estimated 2-3 day single-pillar v1.0.3 cycle. Depends on v1.0.1
   (plugin self-hosting fix) + v1.0.2 (cross-check completion).
+- **Real headless detection for `_SUBPROCESS_INCOMPATIBLE_SKILLS`
+  (v1.0.3 LOCKED, user directive 2026-05-03)**: v1.0.1 ships A2
+  whitelist + `allow_interactive_skill: bool = False` override hatch as
+  conservative-by-default baseline. The override is bypassed by the
+  wrapper functions internally so the wrappers can dispatch
+  `/brainstorming` and `/writing-plans` via `claude -p` subprocess —
+  but if those subprocesses then HANG (waiting for stdin that never
+  arrives, observed empirically 2026-05-03 on `/writing-plans`) the
+  operator waits the full `subprocess_utils.run_with_timeout` budget
+  (default 600s) before getting a `ValidationError`. v1.0.3 replaces
+  the override hatch with **actual environment detection** — env var
+  `SBTDD_HEADLESS=1` set by `run_sbtdd.py` entrypoint, OR
+  `os.isatty(0)` stdin-TTY check — that raises EVEN when wrappers pass
+  `allow_interactive_skill=True` if the calling context is genuinely
+  headless. This collapses both Finding A manifestations (silent-no-op
+  AND 600s hang) to a single LOUD-FAST `PreconditionError` before any
+  subprocess spawns. Companion v1.0.3 work: audit + criteria for set
+  membership of `_SUBPROCESS_INCOMPATIBLE_SKILLS` post first
+  production exposure (W2 balthasar v1.0.1 iter 2). Depends on v1.0.1
+  (whitelist + override hatch shipped as baseline) + v1.0.2 (so
+  v1.0.3 can iterate on top of own-cycle dogfood evidence from v1.0.2).
 - INV-31 default flip dedicated cycle (separate field-data doc).
 - Group B options 1, 3, 4, 6, 7 (opt-in flags only; not core deliverable).
 - GitHub Actions CI workflow.
