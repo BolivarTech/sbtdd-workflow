@@ -212,6 +212,19 @@ every post-v0.1 release.
 
 ### Deferred (rolled to v1.x)
 
+- **Parallel task dispatcher with deferred MAGI gate (v1.0.3 LOCKED)**:
+  user directive 2026-05-03. Replace current sequential `auto` Phase 2
+  task loop (strict INV-22 single-thread) with DAG-aware parallel
+  dispatcher that runs parallelizable tasks concurrently (respecting
+  `addBlockedBy` dependencies) and triggers full MAGI Loop 1+2 ONCE at
+  the end on the cumulative diff. Codifies the v0.4.0/v0.5.0/v1.0.0
+  manual subagent-parallel pattern (~40% wall-time reduction empirically)
+  as plugin feature. Touches `auto_cmd._phase2_task_loop` rewrite + new
+  `task_graph.py` + `parallel_dispatch.py` modules + worktree-per-
+  subagent integration with `superpowers:using-git-worktrees`. INV-22
+  reword: "sequential-within-task, parallel-across-tasks-when-allowed".
+  Estimated 2-3 day single-pillar v1.0.3 cycle. Depends on v1.0.1
+  (plugin self-hosting fix) + v1.0.2 (cross-check completion).
 - INV-31 default flip dedicated cycle (separate field-data doc).
 - Group B options 1, 3, 4, 6, 7 (opt-in flags only; not core deliverable).
 - GitHub Actions CI workflow.
