@@ -1,0 +1,23 @@
+{
+  "A0-1: brainstorming subprocess silently no-op detected": "473aa7cdda3ef88dae42bea87a140296c61c908e1608847cc016f49513fdb5bd",
+  "A0-2: writing_plans subprocess silently no-op detected": "7b8290188c596c76a36c29a0d9c3f522fe385be679647e788f7f3e9ecf3053b7",
+  "A0-3: first-run with no prior artifacts works": "0f8800f0c5cd1c3770963748d685f847b4c8d132e7db500363139d3313d0ef22",
+  "A0-4: both subprocesses write correctly \u2014 happy path": "c97321349a7ee89cfeb0a29c5e69110ffcec7ffff07e454ebaf3299c80e07467",
+  "A0-5: file rewritten with same content fast clock detected as no-op via signature equality": "28c86f51a11eccb19905ee367272b8383c8a4ddf2900fe32ce9f3fe8b413596d",
+  "A1-1: legacy fixture with \u00a74 header still works": "fe85446e1bcf1fcbca5ee31596164a4f07ce023fcdbdfff56880cbe73427e055",
+  "A1-2: distributed escenarios across pillar sections": "b23081aa7267d1401097cd3b77aff90da0ed267a5851de88c8364b190ae6a04c",
+  "A1-3: zero escenarios anywhere raises ValueError": "fe60454a8b606507281f8dd5c4b2ea4e42d71a27a87d41a5be3c2c169a8afb70",
+  "A1-4: legacy header present but empty falls through to Tier 2": "69ab40f01bf09628f77d79121f7334591ef04d4acddef19079ea9d1aeea8b844",
+  "A1-5: prose mention of word 'escenario' in commentary doesn't match scenario regex": "007db5fda3414750716e14d40f6b6589b5515f3ab0b3f9876cae777c4dcdb235",
+  "A2-1: brainstorming raises in headless mode": "ce38d7a11a2e60f07fc8ed1c7b1e96c952ba0f7248ff4d17845f604b81411985",
+  "A2-2: writing-plans raises in headless mode": "14d1011f58097cccd1ded754e0013e36770ad9047e5296052b706f476880cd4e",
+  "A2-3: magi:magi works in headless mode unchanged (regression)": "c09ede909ef171b70165bbf8ca3beaef222da635e40176fdc0d5f4aec9f477e4",
+  "A2-4: unknown skill name passes through (whitelist semantic)": "254c413b8af2bd0563b45f690f919a35a25e7b6fe076b60a96f0a3c20be4cb3d",
+  "A2-5: wrapper functions pass allow_interactive_skill=True internally so direct wrapper call still works": "b40ed666504ade269b33b40a28c89d1b5685c06f09e88a38d8155742b30e940e",
+  "A3-1: flag skips brainstorming and writing_plans": "d7bbdb4c7a071d7ffd23b82f9efe4a51dcbeab05fb438a7c7c7f37aa4dd5d8cf",
+  "A3-2: flag still validates spec-base placeholder": "b3909ac4ee4c4024baa4402b9723f7fb2420007ca738d605c50a85320f881830",
+  "A3-3: flag aborts when artifacts missing": "2c25f0be4f6178e6f74e785aaba54e7c11be9ea39e9c7cd19db13ebcf557a4e0",
+  "A3-4: flag combined with --override-checkpoint works": "d876e68fb56bbae34a34784b8951b25cf50acb47eb7469aec7c015aa0e5fe0cf",
+  "A3-5: malformed spec rejected by structural validation": "481ae1c9621663f768262b4a30a74776e718dd9a3af81a4fbfcec522400224d7",
+  "A3-6: malformed plan rejected by structural validation": "ec33b42d3b4023206d1008dd3dd58ba73c5b3827eb85d824e2852839a6884c17"
+}

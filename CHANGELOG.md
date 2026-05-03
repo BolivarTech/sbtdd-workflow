@@ -8,6 +8,119 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [1.0.1] - 2026-05-03
+
+> **Status**: Shipped. Plugin self-hosting fix per 3 dogfood findings of
+> v1.0.0 (Finding A `claude -p` Skill subprocess broken for interactive
+> skills; Finding B spec_snapshot regex too strict; Finding C output
+> validation missing). Bundle accepted via Checkpoint 2 2-iter
+> convergence (G1 cap=3 HARD, no INV-0 override) + Loop 2 1-iter
+> convergence (3-0 GO_WITH_CAVEATS, 2 APPROVE + 1 CONDITIONAL).
+
+### Planned (4 items LOCKED + 1 pre-migration task)
+
+- **A1** Permissive escenario regex (`spec_snapshot.emit_snapshot` two-tier
+  fallback for distributed escenarios across pillar sections).
+- **Pre-A2** Audit + migration of direct `invoke_skill` callers (3 prod +
+  4 test sites opt into `allow_interactive_skill=True` BEFORE A2 lands).
+- **A0** Output validation tripwire with composite signature
+  (mtime_ns + size + sha256) for cross-platform correctness; INV-37
+  proposed (mtime check fragile under FAT32/network mounts).
+- **A2** Headless-mode detection: `_SUBPROCESS_INCOMPATIBLE_SKILLS`
+  set + `allow_interactive_skill: bool = False` kwarg in `invoke_skill`
+  (safe-by-default; wrappers opt in internally).
+- **A3** `--resume-from-magi` recovery flag + structural validation
+  (`spec_snapshot.emit_snapshot` parse + plan task/checkbox regex).
+
+### Deferred to v1.0.2 (rolled forward from v1.0.0 + new from iter 2 triage)
+
+- Cross-check telemetry aggregation script (originally v1.0.1 LOCKED;
+  pivot deferred).
+- Cross-check prompt diff threading (W-NEW1, originally v1.0.1).
+- H5-2 spec_lint enforcement at Checkpoint 2 (originally v1.0.1).
+- Own-cycle cross-check dogfood (originally v1.0.1; depends on v1.0.1
+  fixes shipping first to enable `/sbtdd pre-merge` end-to-end).
+- **`_SUBPROCESS_INCOMPATIBLE_SKILLS` audit + criteria for set membership**
+  (W2 balthasar iter 2): re-evaluate the whitelist after first production
+  exposure; document criteria for adding/removing skills from the set.
+  Bundled with v1.0.3 LOCKED real headless detection (see [1.0.0]
+  Deferred section).
+- **600s subprocess hang for `/brainstorming` and `/writing-plans`**
+  (user directive 2026-05-03): empirically observed manifestation of
+  Finding A — when `_run_spec_flow` calls the wrapper functions, A2's
+  `allow_interactive_skill=True` is passed internally so the subprocess
+  spawns; if the subprocess HANGS (waiting for stdin), operator waits
+  full `run_with_timeout` budget (600s default) before getting a
+  `ValidationError`. v1.0.1 mitigations: hang is bounded (not infinite);
+  `--resume-from-magi` recovery flag (Item A3) provides operator escape;
+  spec sec.6.5 + this CHANGELOG document the manual `python run_magi.py`
+  fallback verbatim. **Full LOUD-FAST fix**: rolled to v1.0.3 LOCKED
+  (real headless detection). v1.0.1 ships only the conservative whitelist
+  baseline.
+- **Meta-test enforcing `allow_interactive_skill=True` on direct
+  `invoke_skill` callsites** (W4 caspar iter 2): point-in-time pre-A2
+  audit catches current callsites; v1.0.2 adds AST-based or grep-based
+  meta-test to enforce against future regressions where new code adds
+  direct calls without the override.
+- **Per-module coverage threshold via `coverage.py` + `--fail-under=85`**
+  (I2 iter 1): out of scope for defensive-fix v1.0.1 release.
+
+### Process notes
+
+- **v1.0.1 own-cycle methodology**: spec + plan hand-crafted in
+  interactive Claude Code session (NOT via `claude -p /brainstorming`
+  subprocess) per consistency with Finding A discovery — the broken
+  subprocess pattern IS the bug v1.0.1 ships fixes for. Recovery flag
+  A3 will codify this pattern post-ship.
+- **Manual MAGI Checkpoint 2 dispatch**: `python skills/magi/scripts/run_magi.py`
+  invoked directly because v1.0.0 plugin's `/sbtdd spec` flow is broken
+  via Finding A (the same bug v1.0.1 fixes). Iter 1 GO_WITH_CAVEATS (3-0)
+  with 3 CRITICAL/10 WARNING; iter 2 GO_WITH_CAVEATS (3-0) with 0 CRITICAL
+  (resolved) + 7 WARNING (low-risk doc/test). All 3 agents recommended
+  iter 2 terminal under G1 cap=3 HARD; INV-29 satisfied via
+  /receiving-code-review triage.
+- **G1 binding cap=3 HARD respected**: Checkpoint 2 converged in 2 iters
+  (iter 2 terminal). NO INV-0 override invoked.
+- **P7 empirical proof-of-recovery NOT executed in v1.0.1** (W5 caspar
+  Loop 2 iter 1 disclosure): unit tests A3-1..A3-7 cover the structural
+  validation surface; the end-to-end `--resume-from-magi` recovery test
+  in a fresh Claude Code session was NOT run during v1.0.1 implementation.
+  First true empirical exercise will be the v1.0.2 cycle (which uses the
+  v1.0.1 recovery flag in anger if `/sbtdd spec` dispatchers regress).
+  Acceptance criterion P7 is satisfied at the unit-test level for v1.0.1
+  ship; full empirical validation is v1.0.2 first-cycle deliverable.
+- **Diff stat -9332 line accounting** (W6 caspar Loop 2 iter 1):
+  net deletion is dominated by spec/plan-org regeneration. v1.0.0
+  `spec-behavior.md` was ~12K lines (large bundle); v1.0.1
+  `spec-behavior.md` is ~880 lines (single-pillar focused). Same shape
+  for `claude-plan-tdd-org.md` (4K → 500 lines). Production code delta
+  is small additive: A0 tripwire ~40 lines, A1 fallback ~30 lines, A2
+  set + kwarg ~50 lines, A3 flag + structural validation ~80 lines.
+  Net additions across `skills/sbtdd/scripts/` are ~200 lines; the
+  rest is doc/spec/plan refresh inherent to single-pillar release
+  scope discipline.
+- **A0 known asymmetry modes** (W4 caspar Loop 2 iter 1): documented
+  in `_file_signature` docstring at `spec_cmd.py:124-185`. Two
+  intentional semantics: (a) deterministic regen producing identical
+  bytes within a tick → false-positive "no-op detected" (acceptable —
+  A0 detects "the FILE did not change", not "the subprocess did not
+  run"); (b) touch-without-content (utime advance on identical bytes)
+  → mtime field differs so signature differs → A0 treats as change
+  (correct from "did the file change" perspective). Operators relying
+  on touch-without-content semantics use `--resume-from-magi` to
+  bypass A0 entirely.
+
+### Bug fixes
+
+- **W7 spec_snapshot.persist_snapshot BaseException narrowed**: changed
+  `except BaseException:` to `except Exception:` so `KeyboardInterrupt`
+  and `SystemExit` propagate to the operator without delay. Tmp cleanup
+  still runs for the bounded subset of errors callers handle (OSError,
+  PermissionError, JSONEncodeError). New regression test
+  `test_w7_persist_snapshot_propagates_keyboard_interrupt` asserts
+  Ctrl-C bubbles up. Same housekeeping pattern as v1.0.0 W7 fix in
+  `auto_cmd._write_auto_run_audit`. caspar Loop 2 iter 1 W7.
+
 ## [1.0.0] - 2026-05-02
 
 > **Status**: Shipped. Bundle accepted at-threshold per spec sec.6 Gate
@@ -212,6 +325,58 @@ every post-v0.1 release.
 
 ### Deferred (rolled to v1.x)
 
+- **Parallel task dispatcher with deferred MAGI gate (v1.0.3 LOCKED)**:
+  user directive 2026-05-03. Replace current sequential `auto` Phase 2
+  task loop (strict INV-22 single-thread) with DAG-aware parallel
+  dispatcher that runs parallelizable tasks concurrently (respecting
+  `addBlockedBy` dependencies) and triggers full MAGI Loop 1+2 ONCE at
+  the end on the cumulative diff. Codifies the v0.4.0/v0.5.0/v1.0.0
+  manual subagent-parallel pattern (~40% wall-time reduction empirically)
+  as plugin feature. Touches `auto_cmd._phase2_task_loop` rewrite + new
+  `task_graph.py` + `parallel_dispatch.py` modules + worktree-per-
+  subagent integration with `superpowers:using-git-worktrees`. INV-22
+  reword: "sequential-within-task, parallel-across-tasks-when-allowed".
+  Estimated 2-3 day single-pillar v1.0.3 cycle. Depends on v1.0.1
+  (plugin self-hosting fix) + v1.0.2 (cross-check completion).
+- **Real headless detection for `_SUBPROCESS_INCOMPATIBLE_SKILLS`
+  (v1.0.3 LOCKED, user directive 2026-05-03)**: v1.0.1 ships A2
+  whitelist + `allow_interactive_skill: bool = False` override hatch as
+  conservative-by-default baseline. The override is bypassed by the
+  wrapper functions internally so the wrappers can dispatch
+  `/brainstorming` and `/writing-plans` via `claude -p` subprocess —
+  but if those subprocesses then HANG (waiting for stdin that never
+  arrives, observed empirically 2026-05-03 on `/writing-plans`) the
+  operator waits the full `subprocess_utils.run_with_timeout` budget
+  (default 600s) before getting a `ValidationError`. v1.0.3 replaces
+  the override hatch with **actual environment detection** — env var
+  `SBTDD_HEADLESS=1` set by `run_sbtdd.py` entrypoint, OR
+  `os.isatty(0)` stdin-TTY check — that raises EVEN when wrappers pass
+  `allow_interactive_skill=True` if the calling context is genuinely
+  headless. This collapses both Finding A manifestations (silent-no-op
+  AND 600s hang) to a single LOUD-FAST `PreconditionError` before any
+  subprocess spawns. Companion v1.0.3 work: audit + criteria for set
+  membership of `_SUBPROCESS_INCOMPATIBLE_SKILLS` post first
+  production exposure (W2 balthasar v1.0.1 iter 2). Depends on v1.0.1
+  (whitelist + override hatch shipped as baseline) + v1.0.2 (so
+  v1.0.3 can iterate on top of own-cycle dogfood evidence from v1.0.2).
+- **MAGI gate template alignment audit (v1.0.3 LOCKED, user directive
+  2026-05-03)**: verify the plugin's MAGI cycle implementation
+  (`pre_merge_cmd._loop2` + `magi_dispatch` + cross-check sub-phase
+  + carry-forward block format + review summary artifact + cost
+  awareness via `auto_skill_models`) matches the canonical procedure
+  documented in `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md`
+  (411 lines synthesized 2026-05-01 from SBTDD-workflow + MAGI plugin
+  empirical learnings). Deliverable: section-by-section GAP audit
+  document `docs/audits/v1.0.3-magi-gate-template-alignment.md` +
+  cross-artifact alignment test (similar to v0.4.x HF1 canonical
+  wording test) + remediation commits per GAP. Sections to verify:
+  trigger criteria, pass threshold + verdict actions table,
+  carry-forward format for iter N+1 payload, review summary artifact
+  per-feature emission, cost awareness + per-skill model selection,
+  per-project setup checklist `{placeholder}` markers in
+  `templates/CLAUDE.local.md.template`. Estimated 1-2 days. Depends on
+  v1.0.2 (cross-check completion) so the audit runs against a
+  fully-functional plugin pipeline.
 - INV-31 default flip dedicated cycle (separate field-data doc).
 - Group B options 1, 3, 4, 6, 7 (opt-in flags only; not core deliverable).
 - GitHub Actions CI workflow.

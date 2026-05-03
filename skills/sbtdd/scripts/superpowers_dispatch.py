@@ -29,8 +29,28 @@ from typing import Any, Callable
 
 import quota_detector
 import subprocess_utils
-from errors import QuotaExhaustedError, ValidationError
+from errors import PreconditionError, QuotaExhaustedError, ValidationError
 from models import INV_0_PINNED_MODEL_RE
+
+
+#: v1.0.1 Item A2 (sec.2.3) -- skills demonstrably broken under
+#: ``claude -p`` headless subprocess transport. Empirically (v1.0.0
+#: dogfood Finding A) ``/brainstorming`` and ``/writing-plans`` exit 0
+#: but produce silently-empty output when invoked outside an interactive
+#: Claude Code session. Whitelist semantic: only known-broken skills are
+#: gated; unknown / future skills pass through unchanged.
+#:
+#: ``invoke_skill`` raises :class:`PreconditionError` BEFORE subprocess
+#: spawn when the called skill is in this set unless the caller passes
+#: ``allow_interactive_skill=True`` (which the Pre-A2 wrappers do
+#: automatically). The error guides operators toward
+#: ``/sbtdd spec --resume-from-magi`` (v1.0.1 Item A3) for recovery.
+_SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(
+    {
+        "brainstorming",
+        "writing-plans",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -141,6 +161,7 @@ def invoke_skill(
     model: str | None = None,
     skill_field_name: str = "implementer_model",
     stream_prefix: str | None = None,
+    allow_interactive_skill: bool = False,
 ) -> SkillResult:
     """Invoke a superpowers skill via ``claude -p`` subprocess.
 
@@ -168,6 +189,15 @@ def invoke_skill(
             streaming integration -- iter 2 finding #1 + #7 fix). When
             ``None`` (default) the v0.2.x ``capture_output=True``
             behavior is preserved.
+        allow_interactive_skill: v1.0.1 Item A2 (sec.2.3) opt-in
+            override. ``False`` (default) is safe-by-default for headless
+            CLI / external callers: when v1.0.1 Item A2 lands, skills in
+            ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` raise ``PreconditionError``
+            before subprocess spawn. ``True`` is the wrapper-aware path:
+            high-level wrappers (``brainstorming``, ``writing_plans``,
+            ``_invoke_skill``) pass ``True`` because they ARE the
+            coordinated dispatch path. Pre-A2 lands the kwarg as no-op;
+            A2 Step 4 adds the gate logic that consumes it.
 
     Returns:
         :class:`SkillResult` with returncode, stdout, stderr.
@@ -177,6 +207,22 @@ def invoke_skill(
         ValidationError: If the subprocess timed out OR exited non-zero without
             matching a quota pattern. Mapped to exit 1 by run_sbtdd.py.
     """
+    # v1.0.1 Item A2 (sec.2.3): safe-by-default gate -- skills in
+    # ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g. ``/brainstorming``,
+    # ``/writing-plans``) raise BEFORE subprocess spawn unless the caller
+    # opts into the override. Wrappers built via ``_make_wrapper`` and
+    # the H5-1 ``_invoke_skill`` helper pass ``True`` automatically (per
+    # Pre-A2 migration); external callers must opt in explicitly.
+    if skill in _SUBPROCESS_INCOMPATIBLE_SKILLS and not allow_interactive_skill:
+        raise PreconditionError(
+            f"Skill /{skill} es interactivo y NO puede ser invocado via "
+            f"`claude -p` subprocess (output silently empty observed in v1.0.0 "
+            f"dogfood). Run /{skill} manualmente en sesion interactiva de "
+            f"Claude Code, o usa la wrapper function "
+            f"`superpowers_dispatch.{skill.replace('-', '_')}(...)` que pasa "
+            f"el override automaticamente. Para recovery despues de dispatch "
+            f"manual, usa `sbtdd spec --resume-from-magi`."
+        )
     effective_model = _apply_inv0_model_check(model, skill_field_name)
     cmd = _build_skill_cmd(skill, args, model=effective_model)
     # iter 2 finding #1 + #7: only pass stream_prefix when supplied so
@@ -288,6 +334,33 @@ def _make_wrapper(
             kwargs["skill_field_name"] = skill_field_name
         if stream_prefix is not None:
             kwargs["stream_prefix"] = stream_prefix
+        # v1.0.1 Pre-A2: wrappers ARE the safe coordinated dispatch path
+        # for any skill (including those in _SUBPROCESS_INCOMPATIBLE_SKILLS),
+        # so the wrapper opts into the override automatically. A2 Step 4
+        # adds the gate logic that consumes this kwarg; here Pre-A2
+        # ensures the wrapper continues to work once the gate is wired.
+        #
+        # Forwarding pattern matches v0.3.0 ``model`` + v0.5.0
+        # ``stream_prefix``: only inject the kwarg when the late-bound
+        # ``fn`` accepts it. Pre-existing test fakes that monkeypatch
+        # ``invoke_skill`` with the v0.2/v0.3/v0.5 signatures (no
+        # ``allow_interactive_skill`` parameter) keep working
+        # byte-identically. Production ``invoke_skill`` (which DID gain
+        # the kwarg in Pre-A2) gets the override; stubs without it do
+        # not.
+        try:
+            import inspect
+
+            sig = inspect.signature(fn)
+            if "allow_interactive_skill" in sig.parameters or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                kwargs["allow_interactive_skill"] = True
+        except (TypeError, ValueError):
+            # Builtin / C-extension callables may not be inspectable;
+            # skip the override gracefully (same defensive pattern as
+            # other v0.5.0 introspection paths).
+            pass
         result: SkillResult = fn(skill_name, **kwargs)
         return result
 
@@ -367,6 +440,22 @@ def _invoke_skill(*, prompt: str, skill: str, **kwargs: Any) -> Any:
     """
     module = _sys.modules[__name__]
     fn = module.invoke_skill  # late-bound so tests can replace via monkeypatch.
+    # v1.0.1 Pre-A2: same rationale as _make_wrapper -- _invoke_skill is the
+    # H5-1 prompt-extension path and ARE the coordinated dispatch entry.
+    # Inject ``allow_interactive_skill=True`` only when ``fn`` accepts it;
+    # this preserves byte-identical behavior for pre-existing test fakes
+    # that monkeypatch ``invoke_skill`` with the v0.5/v1.0 signature.
+    if "allow_interactive_skill" not in kwargs:
+        try:
+            import inspect
+
+            sig = inspect.signature(fn)
+            if "allow_interactive_skill" in sig.parameters or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                kwargs["allow_interactive_skill"] = True
+        except (TypeError, ValueError):
+            pass
     return fn(skill, args=[prompt], **kwargs)
 
 

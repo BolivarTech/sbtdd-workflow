@@ -97,7 +97,24 @@ def _extract_scenarios(section_text: str) -> dict[str, str]:
 
 
 def emit_snapshot(spec_path: Path) -> dict[str, str]:
-    """Parse spec sec.4 Escenarios; return ``{scenario_title: hash}``.
+    """Parse spec scenarios; return ``{scenario_title: hash}``.
+
+    Two-tier discovery strategy (v1.0.1 Item A1, sec.2.2):
+
+    1. **Tier 1 (legacy)** -- locate ``## §4 Escenarios`` header and parse
+       its body. Backward-compatible with v1.0.0 fixtures and any spec
+       that uses the umbrella section header.
+    2. **Tier 2 (distributed fallback)** -- when Tier 1 misses (no header)
+       OR matches but the section body has zero scenarios, scan the WHOLE
+       document for ``**Escenario X: ...**`` / ``## Escenario X: ...`` /
+       ``### Escenario X: ...`` blocks. Production specs (e.g. v1.0.0 +
+       v1.0.1's own ``spec-behavior.md``) place each Escenario inside the
+       relevant pillar section with no umbrella header.
+
+    The strict ``_SCENARIO_HEADER_RE`` is reused unchanged in both tiers,
+    so plain-prose mentions of the word "escenario" outside the bold-
+    asterisks / heading-prefix syntax do NOT match (Escenario A1-5
+    regression guard).
 
     Args:
         spec_path: Path to ``sbtdd/spec-behavior.md``.
@@ -109,27 +126,37 @@ def emit_snapshot(spec_path: Path) -> dict[str, str]:
         header line up to the next scenario header).
 
     Raises:
-        ValueError: When no §4 Escenarios section is found OR the section
-            contains zero scenario blocks. Per WARNING melchior zero-match
-            guard: silently returning ``{}`` would later compare equal to
-            another empty snapshot from a similarly broken spec, masking
-            real drift.
+        ValueError: When neither Tier 1 nor Tier 2 yields any scenario
+            block. Per WARNING melchior zero-match guard: silently
+            returning ``{}`` would later compare equal to another empty
+            snapshot from a similarly broken spec, masking real drift.
+            The error message references both legacy and distributed
+            patterns so operators know what shapes are accepted.
     """
     text = spec_path.read_text(encoding="utf-8")
+
+    # Tier 1: legacy ``## §4 Escenarios`` umbrella section. Backward compat
+    # preserved for fixtures + any spec that uses the explicit section.
     section_match = _SECTION_RE.search(text)
-    if not section_match:
+    if section_match:
+        scenarios = _extract_scenarios(section_match.group(1))
+        if scenarios:
+            return scenarios
+        # Legacy header present but body is empty -> fall through to Tier 2
+        # (forgiving fallback per Escenario A1-4) rather than raising here.
+
+    # Tier 2: distributed format. Scan the whole document for scenario
+    # blocks; reuses ``_SCENARIO_HEADER_RE`` so plain-prose mentions of
+    # the word "escenario" do NOT match (A1-5 regression guard).
+    scenarios = _extract_scenarios(text)
+    if not scenarios:
         raise ValueError(
-            f"No §4 Escenarios section found in {spec_path}; "
-            f"spec-snapshot drift detection requires the section header."
+            f"No escenarios found in {spec_path} (neither legacy "
+            f"`## §4 Escenarios` section nor distributed `**Escenario X: ...**` "
+            f"blocks). spec-snapshot drift detection requires at least one "
+            f"scenario block; refusing to emit empty snapshot (would mask drift)."
         )
-    section_text = section_match.group(1)
-    snapshot = _extract_scenarios(section_text)
-    if not snapshot:
-        raise ValueError(
-            f"§4 Escenarios section in {spec_path} contains zero scenarios; "
-            f"refusing to emit empty snapshot (would mask drift)."
-        )
-    return snapshot
+    return scenarios
 
 
 def compare(prev: dict[str, str], curr: dict[str, str]) -> dict[str, list[str]]:
@@ -183,9 +210,13 @@ def persist_snapshot(path: Path, snapshot: dict[str, str]) -> None:
     try:
         tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp, path)
-    except BaseException:
-        # If anything goes wrong before the atomic rename completes, drop
-        # the temp file so we do not leak it into the destination dir.
+    except Exception:
+        # W7 caspar Loop 2 iter 1 fix: narrowed from BaseException to
+        # Exception so KeyboardInterrupt and SystemExit propagate to
+        # the operator without delay. Tmp cleanup still runs for the
+        # bounded subset of errors callers expect to handle (OSError,
+        # PermissionError, JSONEncodeError). Same housekeeping pattern
+        # as v1.0.0 W7 fix in auto_cmd._write_auto_run_audit.
         if tmp.exists():
             try:
                 tmp.unlink()

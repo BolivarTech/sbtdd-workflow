@@ -64,6 +64,10 @@ subcommand routes through `run_sbtdd.py` (see `## Execution pipeline` below).
 - `--non-interactive` (on `spec`, `pre-merge`) -- force headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
 - `--skip-spec-review` (on `close-task`) -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
 
+### v1.0.1 flags
+
+- `--resume-from-magi` (on `spec`, new in v1.0.1) -- skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against operator-produced `sbtdd/spec-behavior.md` + `planning/claude-plan-tdd-org.md`. Recovery path for v1.0.1 Finding A (`claude -p /<skill>` subprocess transport is broken for interactive skills -- output is silently empty). Workflow: run `/brainstorming` and `/writing-plans` manually in an interactive Claude Code session to produce both artifacts, then invoke `/sbtdd spec --resume-from-magi` to drive Checkpoint 2 against them. The flag still enforces INV-27 placeholder check on `spec-behavior-base.md` AND structural validation (spec must yield `>=1` escenario via `spec_snapshot.emit_snapshot`; plan-org must contain `>=1` `### Task` heading + `>=1` `- [ ]` checkbox).
+
 > **BREAKING -- INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts. Operators must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The reviewer-feedback mini-cycle (`/receiving-code-review` + mini-cycle TDD fix + re-dispatch up to 3 iter) promised in spec-base §2.2 shipped in v0.2.1 (B6 auto-feedback loop), so a single reviewer issue mid-`auto` no longer aborts the whole run -- but the per-task cost overhead remains.
 
 ### v0.3 flags

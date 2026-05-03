@@ -184,20 +184,27 @@ def test_h2_1_scenario_header_form_tolerance(
 
 
 def test_emit_snapshot_raises_when_no_escenarios_section(tmp_path: Path) -> None:
-    """WARNING melchior zero-match guard: missing §4 section raises ValueError."""
+    """WARNING melchior zero-match guard: missing §4 section raises ValueError.
+
+    v1.0.1 Item A1: Tier 2 fallback also runs against the whole document;
+    when neither tier finds scenarios the unified ``No escenarios found``
+    error fires (still preserves the zero-match guard).
+    """
     from spec_snapshot import emit_snapshot
 
     spec = tmp_path / "spec.md"
     spec.write_text("# spec without scenarios section", encoding="utf-8")
-    with pytest.raises(ValueError, match=r"No.*Escenarios section"):
+    with pytest.raises(ValueError, match=r"No escenarios"):
         emit_snapshot(spec)
 
 
 def test_emit_snapshot_raises_when_section_empty(tmp_path: Path) -> None:
-    """WARNING melchior zero-match guard: empty §4 section raises ValueError.
+    """WARNING melchior zero-match guard: empty §4 section + empty doc raises.
 
     Silent {} would compare equal to another empty {} from a similarly
-    broken spec, masking real drift.
+    broken spec, masking real drift. v1.0.1 Item A1: when Tier 1 finds the
+    section but its body is empty, Tier 2 fallback also runs; when Tier 2
+    yields zero scenarios the unified error fires.
     """
     from spec_snapshot import emit_snapshot
 
@@ -213,7 +220,7 @@ def test_emit_snapshot_raises_when_section_empty(tmp_path: Path) -> None:
 """,
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="zero scenarios"):
+    with pytest.raises(ValueError, match=r"No escenarios"):
         emit_snapshot(spec)
 
 
@@ -297,6 +304,38 @@ def test_h2_4_persist_snapshot_uses_atomic_rename(tmp_path: Path) -> None:
     assert leftover == [], f"atomic rename did not consume tmp files: {leftover}"
 
 
+def test_w7_persist_snapshot_propagates_keyboard_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W7 caspar Loop 2 iter 1: BaseException narrowed to Exception so
+    KeyboardInterrupt and SystemExit propagate to the operator.
+
+    Pre-fix: ``except BaseException:`` swallowed Ctrl-C during the brief
+    tmp-cleanup window between tmp.write_text and os.replace.
+    Post-fix: ``except Exception:`` lets KeyboardInterrupt bubble up.
+    """
+    import os
+
+    from spec_snapshot import persist_snapshot
+
+    target = tmp_path / "snap.json"
+    snapshot = {"S1": "h1"}
+
+    # Simulate Ctrl-C during os.replace by monkeypatching the function.
+    def raise_keyboard_interrupt(*args, **kwargs):
+        raise KeyboardInterrupt("simulated Ctrl-C during atomic rename")
+
+    monkeypatch.setattr(os, "replace", raise_keyboard_interrupt)
+
+    with pytest.raises(KeyboardInterrupt, match="simulated Ctrl-C"):
+        persist_snapshot(target, snapshot)
+
+    # Tmp file cleanup is best-effort and may not run when KeyboardInterrupt
+    # propagates through the narrow Exception catch — that is intentional;
+    # operator gets fast Ctrl-C response, leftover cleanup is operator
+    # concern. We assert the propagation happened, not the cleanup state.
+
+
 def test_load_snapshot_round_trip(tmp_path: Path) -> None:
     """Sanity: persist then load round-trip."""
     from spec_snapshot import load_snapshot, persist_snapshot
@@ -316,3 +355,166 @@ def test_load_snapshot_rejects_non_object_json(tmp_path: Path) -> None:
     target.write_text('["not", "an", "object"]', encoding="utf-8")
     with pytest.raises(ValueError, match="not a JSON object"):
         load_snapshot(target)
+
+
+# ---------------------------------------------------------------------------
+# v1.0.1 Item A1 -- permissive escenario regex (sec.2.2 / sec.4 escenarios
+# A1-1 .. A1-5). The two-tier path supports both the legacy ``## §4
+# Escenarios`` header AND distributed ``**Escenario X: ...**`` blocks
+# scattered across pillar sections (Finding B from v1.0.0 dogfood).
+# ---------------------------------------------------------------------------
+
+
+def test_emit_snapshot_distributed_escenarios_across_sections(tmp_path: Path) -> None:
+    """A1-2: distributed ``**Escenario X: ...**`` blocks across pillar sections.
+
+    Real production specs (e.g. v1.0.0 + v1.0.1's own ``spec-behavior.md``)
+    omit the legacy ``## §4 Escenarios`` umbrella header and place each
+    Escenario inside the relevant pillar section. Tier 2 fallback must
+    scan the whole document and recover both blocks.
+    """
+    from spec_snapshot import emit_snapshot
+
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text(
+        """# BDD overlay v1.0.1
+
+## 1. Resumen ejecutivo
+
+Some prose without scenarios.
+
+## 2. Pillar 1 -- feature A
+
+**Escenario X-1: feature A handles empty input**
+
+> **Given** empty input
+> **When** invoke_a() is called
+> **Then** returns []
+
+## 3. Pillar 2 -- feature B
+
+**Escenario Y-1: feature B handles whitespace**
+
+> **Given** whitespace input
+> **When** invoke_b() is called
+> **Then** returns []
+""",
+        encoding="utf-8",
+    )
+
+    snapshot = emit_snapshot(spec)
+    assert isinstance(snapshot, dict)
+    assert len(snapshot) == 2, f"expected 2 distributed escenarios, got {snapshot!r}"
+    titles = list(snapshot.keys())
+    assert any("X-1" in t for t in titles), titles
+    assert any("Y-1" in t for t in titles), titles
+
+
+def test_emit_snapshot_legacy_section_still_works(tmp_path: Path) -> None:
+    """A1-1: legacy fixture with ``## §4 Escenarios`` header still parses (Tier 1)."""
+    from spec_snapshot import emit_snapshot
+
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text(
+        """# BDD overlay legacy form
+
+## §4 Escenarios BDD
+
+**Escenario 1: ejemplo**
+
+> **Given** g
+> **When** w
+> **Then** t
+""",
+        encoding="utf-8",
+    )
+
+    snapshot = emit_snapshot(spec)
+    assert len(snapshot) == 1
+    assert any("ejemplo" in t for t in snapshot.keys())
+
+
+def test_emit_snapshot_zero_escenarios_anywhere_raises(tmp_path: Path) -> None:
+    """A1-3: zero escenarios anywhere raises ValueError (zero-match guard preserved)."""
+    from spec_snapshot import emit_snapshot
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        """# spec without any Escenario blocks
+
+## 1. Resumen
+
+Just prose. No structured Escenario X: header anywhere.
+
+## 2. Otra seccion
+
+More prose, again no scenarios.
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"No escenarios"):
+        emit_snapshot(spec)
+
+
+def test_emit_snapshot_legacy_header_empty_falls_through_to_tier2(tmp_path: Path) -> None:
+    """A1-4: legacy ``## §4 Escenarios`` header present but empty falls through.
+
+    Forgiving fallback: when Tier 1 finds the header but the section body
+    has no scenarios, run Tier 2 on the whole document instead of raising.
+    """
+    from spec_snapshot import emit_snapshot
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        """# spec
+
+## §4 Escenarios BDD
+
+(scenarios live in pillar sections instead)
+
+## 5. Pillar with scenarios
+
+**Escenario S1: real escenario**
+
+> **Given** g
+> **When** w
+> **Then** t
+""",
+        encoding="utf-8",
+    )
+
+    snapshot = emit_snapshot(spec)
+    assert len(snapshot) == 1
+    assert any("S1" in t for t in snapshot.keys())
+
+
+def test_emit_snapshot_prose_mention_does_not_match_scenario_regex(tmp_path: Path) -> None:
+    """A1-5: plain-prose mention of word "escenario" does NOT match Tier 2.
+
+    Regression-guards against Tier 2 over-matching: the permissive widening
+    is for distributed-but-still-structured scenarios (bold-asterisks
+    delimiters or heading prefix), NOT for plain prose mentions of the word.
+    """
+    from spec_snapshot import emit_snapshot
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        """# spec discussing scenario design
+
+## 1. Diseno
+
+En el escenario donde el operador usa el flag, ...
+
+Este escenario fue evaluado por MAGI Loop 2.
+
+## 2. Otra seccion
+
+La palabra escenario aparece varias veces en prosa pero NO en el formato
+estructurado **Escenario X: ...**.
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"No escenarios"):
+        emit_snapshot(spec)

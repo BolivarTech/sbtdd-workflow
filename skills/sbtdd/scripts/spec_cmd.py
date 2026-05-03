@@ -14,6 +14,7 @@ Subcommand flow (populated across Tasks 16-18):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ import _plan_ops
 import commits
 import escalation_prompt
 import magi_dispatch
+import spec_snapshot
 import state_file
 import subprocess_utils
 import superpowers_dispatch
@@ -96,6 +98,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force headless path on safety-valve exhaustion (apply .claude/magi-auto-policy.json)",
     )
+    p.add_argument(
+        "--resume-from-magi",
+        action="store_true",
+        help=(
+            "Skip /brainstorming + /writing-plans dispatch (assume artifacts "
+            "already produced by the operator manually); go directly to MAGI "
+            "Checkpoint 2. Recovery path for v1.0.1 Finding A (subprocess "
+            "transport broken for interactive skills)."
+        ),
+    )
     return p
 
 
@@ -109,25 +121,109 @@ def _plan_id_from_path(name: str) -> str:
     return m.group(1) if m else "X"
 
 
+def _file_signature(path: Path) -> tuple[int, int, str]:
+    """Composite signature for v1.0.1 Item A0 output-validation tripwire.
+
+    Returns ``(mtime_ns, size, sha256-of-content)``. Equal-tuple post-
+    subprocess vs pre-subprocess means no genuine content change occurred,
+    so :func:`_run_spec_flow` raises :class:`PreconditionError`.
+
+    Composite design (sec.2.1) is invariant under three failure modes
+    that bare ``mtime_ns`` misses:
+
+    1. **FS-precision floors** (FAT32, network mounts, container overlay):
+       a fast subprocess can rewrite within the same tick, leaving
+       ``mtime_after == mtime_before`` despite content change.
+    2. **Same-content rewrite under fast clock**: a subprocess that
+       rewrites the file with identical bytes still produces a stable
+       ``size`` and ``sha256`` (and indeed unchanged ``mtime_ns`` under
+       coarse-clock conditions).
+    3. **Touched-but-empty**: a subprocess that touches the file but
+       writes the same content (silent no-op rewrite) leaves all three
+       components identical.
+
+    Reads via 64KB chunks (``hashlib.sha256().update``) so files of
+    arbitrary size do not load fully into memory. v1.0.0 production
+    specs are <1MB but the v1.0.1 spec-behavior.md is ~30KB and the
+    helper must remain robust if specs grow.
+
+    **Known asymmetry modes** (W4 caspar Loop 2 iter 1):
+
+    - **False-positive (no-op detected when subprocess DID change content)**:
+      a deterministic regenerator that writes identical bytes (e.g.,
+      autoformat-then-rewrite a stable spec) within a tick will produce
+      an identical signature ``(mtime_ns, size, sha256)`` and trip
+      ``_run_spec_flow`` even though the subprocess "did its work" — the
+      work was simply a no-op at the byte level. This is the intentional
+      semantic: A0 detects "the FILE did not change", not "the subprocess
+      did not run".
+    - **False-negative (no-op missed when subprocess touched file but
+      content matches)**: a subprocess that calls ``utime`` to advance
+      mtime without writing AND the new content matches the old
+      content will produce different mtime + same size + same sha256 —
+      composite signature TUPLE differs (mtime field differs) so A0
+      treats this as a change. This is correct from a "did the file
+      change" perspective even though the operator may consider it a
+      semantic no-op. Operators relying on touch-without-content
+      semantics should use ``--resume-from-magi`` to bypass A0
+      altogether.
+
+    Args:
+        path: Path to the file to fingerprint. Must exist; the caller is
+            responsible for the existence check (``_run_spec_flow``
+            short-circuits when the file is absent pre-subprocess).
+
+    Returns:
+        Three-tuple ``(mtime_ns, size, sha256_hex)``.
+    """
+    st = path.stat()
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return (st.st_mtime_ns, st.st_size, h.hexdigest())
+
+
 def _run_spec_flow(root: Path) -> None:
     """Invoke ``/brainstorming`` then ``/writing-plans`` as sec.S.5.2 step 2-3.
 
-    Each skill must produce the expected downstream file; absent output is
-    treated as a precondition failure.
+    Each skill must produce a real content change in its expected
+    downstream file; absent output OR unchanged composite signature
+    (v1.0.1 Item A0, INV-37) is treated as a precondition failure.
 
     Args:
         root: Project root (destination of ``sbtdd/`` and ``planning/``).
 
     Raises:
         PreconditionError: When a skill completed but its output file is
-            missing.
+            missing OR its composite signature (mtime_ns + size + sha256)
+            did not change vs the pre-subprocess capture (subprocess
+            silently failed to write, e.g. ``claude -p /brainstorming``
+            output silently empty per v1.0.0 dogfood Finding C).
     """
     spec_base = root / "sbtdd" / "spec-behavior-base.md"
     spec_behavior = root / "sbtdd" / "spec-behavior.md"
+    plan_org = root / "planning" / "claude-plan-tdd-org.md"
+
+    # A0 (sec.2.1, INV-37): capture composite signature pre-subprocess.
+    # ``None`` short-circuits the post-check on the first-run path
+    # (file did not exist before the subprocess) per Escenario A0-3.
+    spec_sig_before = _file_signature(spec_behavior) if spec_behavior.exists() else None
+    plan_sig_before = _file_signature(plan_org) if plan_org.exists() else None
+
     superpowers_dispatch.brainstorming(args=[f"@{spec_base}"])
     if not spec_behavior.exists():
         raise PreconditionError(f"/brainstorming completed but {spec_behavior} was not generated")
-    plan_org = root / "planning" / "claude-plan-tdd-org.md"
+    spec_sig_after = _file_signature(spec_behavior)
+    if spec_sig_before is not None and spec_sig_after == spec_sig_before:
+        raise PreconditionError(
+            f"/brainstorming exit 0 pero {spec_behavior} no fue modificado "
+            f"(composite signature mtime+size+sha256 sin cambio). Verifica "
+            f"que la sesion sea interactiva (Claude Code activa, no `claude -p` "
+            f"subprocess), o usa --resume-from-magi si los artifacts fueron "
+            f"producidos manualmente."
+        )
+
     # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through
     # ``invoke_writing_plans`` so the H5-1 scenario-stub directive
     # extends the prompt at plan-generation time. Pre-fix the bare
@@ -137,6 +233,15 @@ def _run_spec_flow(root: Path) -> None:
     superpowers_dispatch.invoke_writing_plans(spec_path=f"@{spec_behavior}")
     if not plan_org.exists():
         raise PreconditionError(f"/writing-plans completed but {plan_org} was not generated")
+    plan_sig_after = _file_signature(plan_org)
+    if plan_sig_before is not None and plan_sig_after == plan_sig_before:
+        raise PreconditionError(
+            f"/writing-plans exit 0 pero {plan_org} no fue modificado "
+            f"(composite signature mtime+size+sha256 sin cambio). Verifica "
+            f"que la sesion sea interactiva (Claude Code activa, no `claude -p` "
+            f"subprocess), o usa --resume-from-magi si los artifacts fueron "
+            f"producidos manualmente."
+        )
 
 
 def _write_plan_tdd(
@@ -325,6 +430,75 @@ def _commit_approved_artifacts(root: Path) -> None:
     commits.create("chore", "add MAGI-approved spec and plan", cwd=str(root))
 
 
+def _validate_resume_from_magi_artifacts(root: Path) -> None:
+    """Validate operator-produced spec + plan artifacts before MAGI dispatch.
+
+    v1.0.1 Item A3 (sec.2.4) structural validation. Existence-only check
+    is insufficient (W2/W8): an empty / stub-only spec or plan would
+    waste a MAGI iter on uninspectable input. The structural check fires
+    BEFORE any MAGI dispatch:
+
+    1. ``spec-behavior.md`` must yield a parseable, non-empty snapshot
+       via :func:`spec_snapshot.emit_snapshot`. The except clause widens
+       to ``(FileNotFoundError, ValueError, OSError)`` (W3 caspar iter 2)
+       so FS-level read failures (permission denied, broken symlink,
+       etc.) surface as :class:`PreconditionError` rather than leaking
+       the raw exception to the operator.
+    2. ``planning/claude-plan-tdd-org.md`` must contain at least one
+       ``### Task`` heading AND at least one ``- [ ]`` checkbox. Empty
+       plans (all checkboxes already ``[x]``) are rejected as wrong
+       artifact stage.
+
+    Args:
+        root: Project root.
+
+    Raises:
+        PreconditionError: When any structural check fails. Error
+            message identifies which check fired and the affected path
+            so operators know what to fix.
+    """
+    spec_behavior_path = root / "sbtdd" / "spec-behavior.md"
+    plan_org_path = root / "planning" / "claude-plan-tdd-org.md"
+
+    # Spec validation: must yield >=1 escenario via emit_snapshot.
+    try:
+        snapshot = spec_snapshot.emit_snapshot(spec_behavior_path)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        raise PreconditionError(
+            f"--resume-from-magi requires a valid {spec_behavior_path} "
+            f"(spec_snapshot.emit_snapshot failed: {exc}). Run "
+            f"/brainstorming manualmente en sesion interactiva primero."
+        ) from exc
+    if not snapshot:
+        raise PreconditionError(
+            f"--resume-from-magi requires {spec_behavior_path} to contain "
+            f"at least one escenario; emit_snapshot returned empty dict."
+        )
+
+    # Plan validation: read once, apply both regex checks.
+    try:
+        plan_text = plan_org_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError) as exc:
+        raise PreconditionError(
+            f"--resume-from-magi requires {plan_org_path} to exist and be "
+            f"readable (got {exc}). Run /writing-plans manualmente en "
+            f"sesion interactiva primero."
+        ) from exc
+    if not re.search(r"^###\s+Task\b", plan_text, re.MULTILINE):
+        raise PreconditionError(
+            f"--resume-from-magi requires {plan_org_path} to contain at "
+            f"least one `### Task` heading; plan appears malformed. "
+            f"Regenerate via /writing-plans o hand-craft un plan-org "
+            f"valido antes de re-tentar."
+        )
+    if not re.search(r"^-\s+\[\s\]", plan_text, re.MULTILINE):
+        raise PreconditionError(
+            f"--resume-from-magi requires {plan_org_path} to contain at "
+            f"least one `- [ ]` checkbox; plan appears empty or all tasks "
+            f"already complete (wrong artifact stage)."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the spec subcommand.
 
@@ -335,17 +509,25 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code (0 on success).
 
     Raises:
-        PreconditionError: INV-27 violation, skeleton markers, or missing
-            downstream spec/plan artifact.
+        PreconditionError: INV-27 violation, skeleton markers, missing
+            downstream spec/plan artifact, or (under
+            ``--resume-from-magi``) operator-produced artifacts that
+            fail structural validation.
         MAGIGateError: Checkpoint 2 MAGI loop produced STRONG_NO_GO or
             exhausted the iteration budget without convergence.
     """
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root = Path(ns.project_root)
+    # INV-27 hard rule fires ALWAYS, even with ``--resume-from-magi`` set
+    # (W4 spec/plan alignment fix; Escenario A3-2). The flag bypasses
+    # subprocess dispatch but never the placeholder invariant.
     _validate_spec_base_no_placeholders(root / "sbtdd" / "spec-behavior-base.md")
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
-    _run_spec_flow(root)
+    if not ns.resume_from_magi:
+        _run_spec_flow(root)
+    else:
+        _validate_resume_from_magi_artifacts(root)
     _run_magi_checkpoint2(root, cfg, ns)
     # State file MUST be persisted BEFORE the artifacts commit so that
     # plan_approved_at is visible to any follow-on subcommand even if
