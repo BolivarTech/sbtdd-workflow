@@ -308,7 +308,7 @@ git commit -m "chore: mark task A2 complete"
 
 **Per-spec scenarios to satisfy**: A3-1, A3-2, A3-3, A3-4, A3-5, A3-6.
 
-- [ ] **Step 1: Write failing test for A3-1**
+- [x] **Step 1: Write failing test for A3-1**
 
 Add test where:
 - Pre-stage `sbtdd/spec-behavior.md` and `planning/claude-plan-tdd-org.md` (operator-produced).
@@ -317,18 +317,18 @@ Add test where:
 - Call `spec_cmd.main(["--project-root", str(tmp), "--resume-from-magi"])`.
 - Assert dispatch spies NOT called; state file exists post-call.
 
-- [ ] **Step 2: Run test — should FAIL**
+- [x] **Step 2: Run test — should FAIL**
 
 Expected: FAIL — `--resume-from-magi` flag doesn't exist (argparse error: unrecognized argument).
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_spec_cmd.py
 git commit -m "test: A3-1 --resume-from-magi flag skips dispatch (Red)"
 ```
 
-- [ ] **Step 4: Add flag to parser + skip logic in main + structural validation**
+- [x] **Step 4: Add flag to parser + skip logic in main + structural validation**
 
 Modify `_build_parser` to add `--resume-from-magi` flag (`action="store_true"`).
 
@@ -341,9 +341,9 @@ Modify `main`:
    - Read `plan_org` text. Assert `re.search(r"^###\s+Task\b", text, re.MULTILINE)` matches (>= 1 task heading) AND `re.search(r"^-\s+\[\s\]", text, re.MULTILINE)` matches (>= 1 unchecked checkbox). Else `PreconditionError` identifying which structural check failed.
 5. Continue with `_run_magi_checkpoint2` + `_create_state_file` + `_mark_plan_approved_with_snapshot` + `_commit_approved_artifacts` (unchanged).
 
-- [ ] **Step 5: Run test — should PASS**
+- [x] **Step 5: Run test — should PASS**
 
-- [ ] **Step 6: Add A3 combinatorial + structural tests (4 combinatorial cases + 2 structural-validation cases)**
+- [x] **Step 6: Add A3 combinatorial + structural tests (4 combinatorial cases + 2 structural-validation cases)**
 
 **Combinatorial tests for the flag matrix** (W10 expansion — all four combinations of `--resume-from-magi` × `--override-checkpoint`):
 - (a) `--resume-from-magi` only (skip dispatch, normal MAGI cap=3 path).
@@ -358,30 +358,30 @@ Modify `main`:
 - A3-6 (malformed plan rejected — missing `### Task` heading OR missing `- [ ]` checkbox; structural check fires before MAGI dispatch).
 - **A3-7 exception leakage regression** (W3 caspar iter 2): monkeypatch `spec_snapshot.emit_snapshot` to raise `OSError("simulated FS read failure")`; assert `--resume-from-magi` path catches it (per widened `except (FileNotFoundError, ValueError, OSError)` in spec sec.2.4) and re-raises as `PreconditionError`, NOT a leaked OSError to the operator. Regression-guards the W3 widening.
 
-- [ ] **Step 7: Run full test suite**
+- [x] **Step 7: Run full test suite**
 
 Run: `make verify`
 Expected: ALL pass.
 
-- [ ] **Step 8: Commit Green**
+- [x] **Step 8: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/spec_cmd.py tests/test_spec_cmd.py
 git commit -m "feat: A3 --resume-from-magi recovery flag with INV-27 preserved"
 ```
 
-- [ ] **Step 9: Update README + SKILL.md**
+- [x] **Step 9: Update README + SKILL.md**
 
 Document the new flag with example use case (recovery after manual brainstorming).
 
-- [ ] **Step 10: Commit docs**
+- [x] **Step 10: Commit docs**
 
 ```bash
 git add README.md skills/sbtdd/SKILL.md
 git commit -m "docs: A3 --resume-from-magi user docs"
 ```
 
-- [ ] **Step 11: Mark task complete**
+- [x] **Step 11: Mark task complete**
 
 ```bash
 git commit -m "chore: mark task A3 complete"
