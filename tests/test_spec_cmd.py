@@ -894,9 +894,7 @@ def _seed_a3_artifacts(tmp_path: Path) -> tuple[Path, Path]:
         "> **Given** g\n> **When** w\n> **Then** t\n",
         encoding="utf-8",
     )
-    plan_org.write_text(
-        "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
-    )
+    plan_org.write_text("# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8")
     return spec_behavior, plan_org
 
 
@@ -942,9 +940,7 @@ def test_a3_1_resume_from_magi_skips_dispatch(
     assert (tmp_path / ".claude" / "session-state.json").exists()
 
 
-def test_a3_2_resume_still_validates_inv27(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a3_2_resume_still_validates_inv27(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A3-2: INV-27 hard rule fires even with ``--resume-from-magi``.
 
     spec-behavior-base.md with uppercase placeholder is rejected before

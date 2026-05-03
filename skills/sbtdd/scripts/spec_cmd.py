@@ -23,6 +23,7 @@ import _plan_ops
 import commits
 import escalation_prompt
 import magi_dispatch
+import spec_snapshot
 import state_file
 import subprocess_utils
 import superpowers_dispatch
@@ -96,6 +97,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--non-interactive",
         action="store_true",
         help="Force headless path on safety-valve exhaustion (apply .claude/magi-auto-policy.json)",
+    )
+    p.add_argument(
+        "--resume-from-magi",
+        action="store_true",
+        help=(
+            "Skip /brainstorming + /writing-plans dispatch (assume artifacts "
+            "already produced by the operator manually); go directly to MAGI "
+            "Checkpoint 2. Recovery path for v1.0.1 Finding A (subprocess "
+            "transport broken for interactive skills)."
+        ),
     )
     return p
 
@@ -398,6 +409,75 @@ def _commit_approved_artifacts(root: Path) -> None:
     commits.create("chore", "add MAGI-approved spec and plan", cwd=str(root))
 
 
+def _validate_resume_from_magi_artifacts(root: Path) -> None:
+    """Validate operator-produced spec + plan artifacts before MAGI dispatch.
+
+    v1.0.1 Item A3 (sec.2.4) structural validation. Existence-only check
+    is insufficient (W2/W8): an empty / stub-only spec or plan would
+    waste a MAGI iter on uninspectable input. The structural check fires
+    BEFORE any MAGI dispatch:
+
+    1. ``spec-behavior.md`` must yield a parseable, non-empty snapshot
+       via :func:`spec_snapshot.emit_snapshot`. The except clause widens
+       to ``(FileNotFoundError, ValueError, OSError)`` (W3 caspar iter 2)
+       so FS-level read failures (permission denied, broken symlink,
+       etc.) surface as :class:`PreconditionError` rather than leaking
+       the raw exception to the operator.
+    2. ``planning/claude-plan-tdd-org.md`` must contain at least one
+       ``### Task`` heading AND at least one ``- [ ]`` checkbox. Empty
+       plans (all checkboxes already ``[x]``) are rejected as wrong
+       artifact stage.
+
+    Args:
+        root: Project root.
+
+    Raises:
+        PreconditionError: When any structural check fails. Error
+            message identifies which check fired and the affected path
+            so operators know what to fix.
+    """
+    spec_behavior_path = root / "sbtdd" / "spec-behavior.md"
+    plan_org_path = root / "planning" / "claude-plan-tdd-org.md"
+
+    # Spec validation: must yield >=1 escenario via emit_snapshot.
+    try:
+        snapshot = spec_snapshot.emit_snapshot(spec_behavior_path)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        raise PreconditionError(
+            f"--resume-from-magi requires a valid {spec_behavior_path} "
+            f"(spec_snapshot.emit_snapshot failed: {exc}). Run "
+            f"/brainstorming manualmente en sesion interactiva primero."
+        ) from exc
+    if not snapshot:
+        raise PreconditionError(
+            f"--resume-from-magi requires {spec_behavior_path} to contain "
+            f"at least one escenario; emit_snapshot returned empty dict."
+        )
+
+    # Plan validation: read once, apply both regex checks.
+    try:
+        plan_text = plan_org_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError) as exc:
+        raise PreconditionError(
+            f"--resume-from-magi requires {plan_org_path} to exist and be "
+            f"readable (got {exc}). Run /writing-plans manualmente en "
+            f"sesion interactiva primero."
+        ) from exc
+    if not re.search(r"^###\s+Task\b", plan_text, re.MULTILINE):
+        raise PreconditionError(
+            f"--resume-from-magi requires {plan_org_path} to contain at "
+            f"least one `### Task` heading; plan appears malformed. "
+            f"Regenerate via /writing-plans o hand-craft un plan-org "
+            f"valido antes de re-tentar."
+        )
+    if not re.search(r"^-\s+\[\s\]", plan_text, re.MULTILINE):
+        raise PreconditionError(
+            f"--resume-from-magi requires {plan_org_path} to contain at "
+            f"least one `- [ ]` checkbox; plan appears empty or all tasks "
+            f"already complete (wrong artifact stage)."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the spec subcommand.
 
@@ -408,17 +488,25 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code (0 on success).
 
     Raises:
-        PreconditionError: INV-27 violation, skeleton markers, or missing
-            downstream spec/plan artifact.
+        PreconditionError: INV-27 violation, skeleton markers, missing
+            downstream spec/plan artifact, or (under
+            ``--resume-from-magi``) operator-produced artifacts that
+            fail structural validation.
         MAGIGateError: Checkpoint 2 MAGI loop produced STRONG_NO_GO or
             exhausted the iteration budget without convergence.
     """
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root = Path(ns.project_root)
+    # INV-27 hard rule fires ALWAYS, even with ``--resume-from-magi`` set
+    # (W4 spec/plan alignment fix; Escenario A3-2). The flag bypasses
+    # subprocess dispatch but never the placeholder invariant.
     _validate_spec_base_no_placeholders(root / "sbtdd" / "spec-behavior-base.md")
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
-    _run_spec_flow(root)
+    if not ns.resume_from_magi:
+        _run_spec_flow(root)
+    else:
+        _validate_resume_from_magi_artifacts(root)
     _run_magi_checkpoint2(root, cfg, ns)
     # State file MUST be persisted BEFORE the artifacts commit so that
     # plan_approved_at is visible to any follow-on subcommand even if
