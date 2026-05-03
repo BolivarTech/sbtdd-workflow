@@ -510,3 +510,73 @@ def test_spec_does_not_commit_artifacts_when_magi_rejects(
         check=True,
     )
     assert "MAGI-approved" not in result.stdout
+
+
+def test_spec_routes_writing_plans_through_invoke_writing_plans_wrapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 3 (Loop 2 iter 2->3 R11): spec flow must use invoke_writing_plans.
+
+    Pre-fix ``spec_cmd._run_spec_flow`` called the bare
+    ``superpowers_dispatch.writing_plans`` wrapper, leaving the H5-1
+    scenario-stub directive in ``invoke_writing_plans`` actually-dead.
+    The fix routes the call through ``invoke_writing_plans(spec_path=...)``
+    so the H5-1 prompt extension is exercised at plan-generation time.
+    """
+    import magi_dispatch
+    import spec_cmd
+    import superpowers_dispatch
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _setup_git_repo(tmp_path)
+
+    def spy_brainstorming(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: stub**\n\n"
+            "> **Given** g.\n> **When** w.\n> **Then** t.\n",
+            encoding="utf-8",
+        )
+        return None
+
+    invoke_calls: list[dict] = []
+
+    def spy_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
+        invoke_calls.append({"spec_path": spec_path, "kwargs": kwargs})
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+        )
+        return None
+
+    # Bare wrapper must NOT be called -- spec_cmd should route through
+    # the prompt-extending wrapper instead.
+    bare_calls: list[dict] = []
+
+    def spy_bare_writing_plans(*args, **kwargs) -> object:
+        bare_calls.append({"args": args, "kwargs": kwargs})
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", spy_invoke_writing_plans)
+    monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_bare_writing_plans)
+    monkeypatch.setattr(
+        magi_dispatch,
+        "invoke_magi",
+        lambda context_paths, timeout=1800, cwd=None: _make_verdict("GO"),
+    )
+
+    spec_cmd.main(["--project-root", str(tmp_path)])
+
+    assert len(invoke_calls) == 1, (
+        "spec flow must invoke superpowers_dispatch.invoke_writing_plans exactly once"
+    )
+    assert "spec-behavior.md" in invoke_calls[0]["spec_path"], (
+        "spec_path must point at sbtdd/spec-behavior.md"
+    )
+    assert bare_calls == [], (
+        "bare superpowers_dispatch.writing_plans MUST NOT be called -- the "
+        "H5-1 scenario-stub directive lives in invoke_writing_plans"
+    )
