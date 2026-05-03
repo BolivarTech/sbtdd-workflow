@@ -38,7 +38,11 @@ def test_invoke_skill_returns_skill_result_on_success(monkeypatch):
         return FakeProc()
 
     monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
-    result = invoke_skill("brainstorming", args=["arg1"], timeout=42)
+    # v1.0.1 Pre-A2 migration: brainstorming is in the
+    # _SUBPROCESS_INCOMPATIBLE_SKILLS set; this direct invoke_skill test
+    # exercises the underlying subprocess flow, not the gate, so it opts
+    # into the wrapper-aware override.
+    result = invoke_skill("brainstorming", args=["arg1"], timeout=42, allow_interactive_skill=True)
     assert isinstance(result, SkillResult)
     assert result.skill == "brainstorming"
     assert result.returncode == 0
@@ -64,7 +68,10 @@ def test_invoke_skill_raises_quota_on_quota_pattern(monkeypatch):
         lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
     )
     with pytest.raises(QuotaExhaustedError) as exc_info:
-        invoke_skill("brainstorming")
+        # v1.0.1 Pre-A2 migration: opt into wrapper-aware override so the
+        # quota-detection branch (post-subprocess) is exercised rather than
+        # the new A2 gate (pre-subprocess).
+        invoke_skill("brainstorming", allow_interactive_skill=True)
     assert "429" in str(exc_info.value) or "rate_limit" in str(exc_info.value)
 
 
@@ -82,7 +89,10 @@ def test_invoke_skill_non_quota_nonzero_raises_validation_error(monkeypatch):
         lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
     )
     with pytest.raises(ValidationError) as exc_info:
-        invoke_skill("brainstorming")
+        # v1.0.1 Pre-A2 migration: opt into wrapper-aware override so the
+        # returncode validation branch (post-subprocess) is exercised
+        # rather than the A2 gate (pre-subprocess).
+        invoke_skill("brainstorming", allow_interactive_skill=True)
     assert "returncode=2" in str(exc_info.value) or "returncode" in str(exc_info.value)
 
 
@@ -95,7 +105,10 @@ def test_invoke_skill_wraps_timeout_as_validation_error(monkeypatch):
 
     monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
     with pytest.raises(ValidationError, match="timed out"):
-        invoke_skill("writing-plans")
+        # v1.0.1 Pre-A2 migration: writing-plans is in the
+        # _SUBPROCESS_INCOMPATIBLE_SKILLS set; opt into wrapper-aware
+        # override so the timeout-handling branch is exercised.
+        invoke_skill("writing-plans", allow_interactive_skill=True)
 
 
 def test_typed_wrappers_cover_all_twelve_skills(monkeypatch):
