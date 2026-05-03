@@ -29,8 +29,28 @@ from typing import Any, Callable
 
 import quota_detector
 import subprocess_utils
-from errors import QuotaExhaustedError, ValidationError
+from errors import PreconditionError, QuotaExhaustedError, ValidationError
 from models import INV_0_PINNED_MODEL_RE
+
+
+#: v1.0.1 Item A2 (sec.2.3) -- skills demonstrably broken under
+#: ``claude -p`` headless subprocess transport. Empirically (v1.0.0
+#: dogfood Finding A) ``/brainstorming`` and ``/writing-plans`` exit 0
+#: but produce silently-empty output when invoked outside an interactive
+#: Claude Code session. Whitelist semantic: only known-broken skills are
+#: gated; unknown / future skills pass through unchanged.
+#:
+#: ``invoke_skill`` raises :class:`PreconditionError` BEFORE subprocess
+#: spawn when the called skill is in this set unless the caller passes
+#: ``allow_interactive_skill=True`` (which the Pre-A2 wrappers do
+#: automatically). The error guides operators toward
+#: ``/sbtdd spec --resume-from-magi`` (v1.0.1 Item A3) for recovery.
+_SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(
+    {
+        "brainstorming",
+        "writing-plans",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -187,8 +207,22 @@ def invoke_skill(
         ValidationError: If the subprocess timed out OR exited non-zero without
             matching a quota pattern. Mapped to exit 1 by run_sbtdd.py.
     """
-    # v1.0.1 Pre-A2: kwarg accepted but unused; A2 Step 4 wires the gate.
-    del allow_interactive_skill  # noqa: F841 -- intentional placeholder
+    # v1.0.1 Item A2 (sec.2.3): safe-by-default gate -- skills in
+    # ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g. ``/brainstorming``,
+    # ``/writing-plans``) raise BEFORE subprocess spawn unless the caller
+    # opts into the override. Wrappers built via ``_make_wrapper`` and
+    # the H5-1 ``_invoke_skill`` helper pass ``True`` automatically (per
+    # Pre-A2 migration); external callers must opt in explicitly.
+    if skill in _SUBPROCESS_INCOMPATIBLE_SKILLS and not allow_interactive_skill:
+        raise PreconditionError(
+            f"Skill /{skill} es interactivo y NO puede ser invocado via "
+            f"`claude -p` subprocess (output silently empty observed in v1.0.0 "
+            f"dogfood). Run /{skill} manualmente en sesion interactiva de "
+            f"Claude Code, o usa la wrapper function "
+            f"`superpowers_dispatch.{skill.replace('-', '_')}(...)` que pasa "
+            f"el override automaticamente. Para recovery despues de dispatch "
+            f"manual, usa `sbtdd spec --resume-from-magi`."
+        )
     effective_model = _apply_inv0_model_check(model, skill_field_name)
     cmd = _build_skill_cmd(skill, args, model=effective_model)
     # iter 2 finding #1 + #7: only pass stream_prefix when supplied so
