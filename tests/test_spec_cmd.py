@@ -658,9 +658,7 @@ def test_a0_1_brainstorming_silent_no_op_detected(
         return None
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", silent_brainstorming)
-    monkeypatch.setattr(
-        superpowers_dispatch, "invoke_writing_plans", lambda **kw: None
-    )
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", lambda **kw: None)
 
     with pytest.raises(PreconditionError) as ei:
         spec_cmd._run_spec_flow(tmp_path)
@@ -685,9 +683,7 @@ def test_a0_2_writing_plans_silent_no_op_detected(
         "**Escenario 1: stub**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
         encoding="utf-8",
     )
-    plan_org.write_text(
-        "# pre-existing plan\n\n### Task 1: x\n- [ ] do\n", encoding="utf-8"
-    )
+    plan_org.write_text("# pre-existing plan\n\n### Task 1: x\n- [ ] do\n", encoding="utf-8")
 
     def updating_brainstorming(*a: object, **kw: object) -> object:
         # Brainstorming WRITES new content (passes A0 check).
@@ -702,12 +698,8 @@ def test_a0_2_writing_plans_silent_no_op_detected(
         # writing_plans does NOT modify plan_org -> A0 must detect.
         return None
 
-    monkeypatch.setattr(
-        superpowers_dispatch, "brainstorming", updating_brainstorming
-    )
-    monkeypatch.setattr(
-        superpowers_dispatch, "invoke_writing_plans", silent_writing_plans
-    )
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", updating_brainstorming)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", silent_writing_plans)
 
     with pytest.raises(PreconditionError) as ei:
         spec_cmd._run_spec_flow(tmp_path)
@@ -743,15 +735,11 @@ def test_a0_3_first_run_with_no_prior_artifacts_succeeds(
         return None
 
     def writing_plans_writer(**kw: object) -> object:
-        plan_org.write_text(
-            "### Task 1: x\n- [ ] do\n", encoding="utf-8"
-        )
+        plan_org.write_text("### Task 1: x\n- [ ] do\n", encoding="utf-8")
         return None
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", writing_brainstorming)
-    monkeypatch.setattr(
-        superpowers_dispatch, "invoke_writing_plans", writing_plans_writer
-    )
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", writing_plans_writer)
 
     # Should NOT raise -- first-run path tolerated.
     spec_cmd._run_spec_flow(tmp_path)
@@ -781,15 +769,11 @@ def test_a0_4_happy_path_both_subprocesses_write_correctly(
         return None
 
     def writing_plans_writer(**kw: object) -> object:
-        plan_org.write_text(
-            "# NEW plan\n\n### Task 1: x\n- [ ] do\n", encoding="utf-8"
-        )
+        plan_org.write_text("# NEW plan\n\n### Task 1: x\n- [ ] do\n", encoding="utf-8")
         return None
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", writing_brainstorming)
-    monkeypatch.setattr(
-        superpowers_dispatch, "invoke_writing_plans", writing_plans_writer
-    )
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", writing_plans_writer)
 
     # Should NOT raise -- both signatures change -> happy path.
     spec_cmd._run_spec_flow(tmp_path)
@@ -826,9 +810,7 @@ def test_a0_5_same_content_rewrite_under_fast_clock_detected(
         spec_behavior.write_text(same_content, encoding="utf-8")
         return None
 
-    monkeypatch.setattr(
-        superpowers_dispatch, "brainstorming", same_content_brainstorming
-    )
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", same_content_brainstorming)
     # Force composite signature equality regardless of FS clock precision
     # by pinning ``_file_signature`` to return ``original_sig`` for both
     # pre and post calls. This makes the test deterministic across

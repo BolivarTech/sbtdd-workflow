@@ -14,6 +14,7 @@ Subcommand flow (populated across Tasks 16-18):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,25 +110,88 @@ def _plan_id_from_path(name: str) -> str:
     return m.group(1) if m else "X"
 
 
+def _file_signature(path: Path) -> tuple[int, int, str]:
+    """Composite signature for v1.0.1 Item A0 output-validation tripwire.
+
+    Returns ``(mtime_ns, size, sha256-of-content)``. Equal-tuple post-
+    subprocess vs pre-subprocess means no genuine content change occurred,
+    so :func:`_run_spec_flow` raises :class:`PreconditionError`.
+
+    Composite design (sec.2.1) is invariant under three failure modes
+    that bare ``mtime_ns`` misses:
+
+    1. **FS-precision floors** (FAT32, network mounts, container overlay):
+       a fast subprocess can rewrite within the same tick, leaving
+       ``mtime_after == mtime_before`` despite content change.
+    2. **Same-content rewrite under fast clock**: a subprocess that
+       rewrites the file with identical bytes still produces a stable
+       ``size`` and ``sha256`` (and indeed unchanged ``mtime_ns`` under
+       coarse-clock conditions).
+    3. **Touched-but-empty**: a subprocess that touches the file but
+       writes the same content (silent no-op rewrite) leaves all three
+       components identical.
+
+    Reads via 64KB chunks (``hashlib.sha256().update``) so files of
+    arbitrary size do not load fully into memory. v1.0.0 production
+    specs are <1MB but the v1.0.1 spec-behavior.md is ~30KB and the
+    helper must remain robust if specs grow.
+
+    Args:
+        path: Path to the file to fingerprint. Must exist; the caller is
+            responsible for the existence check (``_run_spec_flow``
+            short-circuits when the file is absent pre-subprocess).
+
+    Returns:
+        Three-tuple ``(mtime_ns, size, sha256_hex)``.
+    """
+    st = path.stat()
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return (st.st_mtime_ns, st.st_size, h.hexdigest())
+
+
 def _run_spec_flow(root: Path) -> None:
     """Invoke ``/brainstorming`` then ``/writing-plans`` as sec.S.5.2 step 2-3.
 
-    Each skill must produce the expected downstream file; absent output is
-    treated as a precondition failure.
+    Each skill must produce a real content change in its expected
+    downstream file; absent output OR unchanged composite signature
+    (v1.0.1 Item A0, INV-37) is treated as a precondition failure.
 
     Args:
         root: Project root (destination of ``sbtdd/`` and ``planning/``).
 
     Raises:
         PreconditionError: When a skill completed but its output file is
-            missing.
+            missing OR its composite signature (mtime_ns + size + sha256)
+            did not change vs the pre-subprocess capture (subprocess
+            silently failed to write, e.g. ``claude -p /brainstorming``
+            output silently empty per v1.0.0 dogfood Finding C).
     """
     spec_base = root / "sbtdd" / "spec-behavior-base.md"
     spec_behavior = root / "sbtdd" / "spec-behavior.md"
+    plan_org = root / "planning" / "claude-plan-tdd-org.md"
+
+    # A0 (sec.2.1, INV-37): capture composite signature pre-subprocess.
+    # ``None`` short-circuits the post-check on the first-run path
+    # (file did not exist before the subprocess) per Escenario A0-3.
+    spec_sig_before = _file_signature(spec_behavior) if spec_behavior.exists() else None
+    plan_sig_before = _file_signature(plan_org) if plan_org.exists() else None
+
     superpowers_dispatch.brainstorming(args=[f"@{spec_base}"])
     if not spec_behavior.exists():
         raise PreconditionError(f"/brainstorming completed but {spec_behavior} was not generated")
-    plan_org = root / "planning" / "claude-plan-tdd-org.md"
+    spec_sig_after = _file_signature(spec_behavior)
+    if spec_sig_before is not None and spec_sig_after == spec_sig_before:
+        raise PreconditionError(
+            f"/brainstorming exit 0 pero {spec_behavior} no fue modificado "
+            f"(composite signature mtime+size+sha256 sin cambio). Verifica "
+            f"que la sesion sea interactiva (Claude Code activa, no `claude -p` "
+            f"subprocess), o usa --resume-from-magi si los artifacts fueron "
+            f"producidos manualmente."
+        )
+
     # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through
     # ``invoke_writing_plans`` so the H5-1 scenario-stub directive
     # extends the prompt at plan-generation time. Pre-fix the bare
@@ -137,6 +201,15 @@ def _run_spec_flow(root: Path) -> None:
     superpowers_dispatch.invoke_writing_plans(spec_path=f"@{spec_behavior}")
     if not plan_org.exists():
         raise PreconditionError(f"/writing-plans completed but {plan_org} was not generated")
+    plan_sig_after = _file_signature(plan_org)
+    if plan_sig_before is not None and plan_sig_after == plan_sig_before:
+        raise PreconditionError(
+            f"/writing-plans exit 0 pero {plan_org} no fue modificado "
+            f"(composite signature mtime+size+sha256 sin cambio). Verifica "
+            f"que la sesion sea interactiva (Claude Code activa, no `claude -p` "
+            f"subprocess), o usa --resume-from-magi si los artifacts fueron "
+            f"producidos manualmente."
+        )
 
 
 def _write_plan_tdd(
