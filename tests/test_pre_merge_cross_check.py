@@ -594,7 +594,7 @@ def test_c1_loop2_invokes_cross_check_when_magi_cross_check_true(tmp_path, monke
 
     spy = {"calls": 0, "kwargs": None}
 
-    def fake_cross_check(*, diff, verdict, findings, iter_n, config, audit_dir):
+    def fake_cross_check(*, diff, verdict, findings, iter_n, config, audit_dir, **_kw):
         spy["calls"] += 1
         spy["kwargs"] = {
             "diff": diff,
@@ -1205,7 +1205,7 @@ def test_phase4_pre_merge_audit_dir_invoked_from_loop2(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def fake_cross_check(*, diff, verdict, findings, iter_n, config, audit_dir):
+    def fake_cross_check(*, diff, verdict, findings, iter_n, config, audit_dir, **_kw):
         captured["audit_dir"] = audit_dir
         return [{**f, "cross_check_decision": "KEEP"} for f in findings]
 

@@ -754,7 +754,15 @@ def _loop2(
             # degrade to empty string with a stderr breadcrumb -- the
             # cross-check still runs, just with reduced fidelity (spec
             # sec.2.1 W-NEW1).
-            cross_check_diff = _compute_loop2_diff(root)
+            #
+            # v1.0.0 Loop 2 iter 2->3 W3: thread the (possibly truncated)
+            # diff plus its metadata so the audit JSON records whether
+            # the cap fired and what the original raw size was. Pre-fix
+            # post-mortem readers had no signal that 78% of the patch had
+            # been silently dropped.
+            cross_check_diff, diff_original_bytes, diff_truncated = (
+                _compute_loop2_diff_with_meta(root)
+            )
             annotated_findings = _loop2_cross_check(
                 diff=cross_check_diff,
                 verdict=verdict.verdict,
@@ -762,6 +770,8 @@ def _loop2(
                 iter_n=iteration,
                 config=cfg,
                 audit_dir=audit_dir,
+                diff_original_bytes=diff_original_bytes,
+                diff_truncated=diff_truncated,
             )
             verdict = dataclasses.replace(verdict, findings=tuple(annotated_findings))
         verdict_history.append(verdict)
@@ -1044,10 +1054,14 @@ def _normalize_findings_for_carry_forward(
     ]
 
 
-#: Maximum diff size threaded into the cross-check prompt before truncation
-#: (spec sec.2.1 W-NEW1: 200KB cap). MAGI agents and the meta-reviewer
-#: have finite context budgets; oversized diffs degrade quality.
-_CROSS_CHECK_DIFF_MAX_BYTES: int = 200 * 1024
+#: Maximum diff size threaded into the cross-check prompt before truncation.
+#: v0.5.0 W-NEW1 introduced a 200KB cap; v1.0.0 Loop 2 iter 2->3 R11/W3
+#: empirical sweep observed cumulative v1.0.0 diffs at ~918KB, so the cap
+#: was raised to 1MB to keep realistic plan-bundle diffs untruncated. MAGI
+#: agents + the meta-reviewer still have finite context budgets, so the
+#: hard ceiling stays in place; truncation metadata is now surfaced in
+#: the cross-check audit JSON for post-mortem visibility (spec sec.2.1 W3).
+_CROSS_CHECK_DIFF_MAX_BYTES: int = 1024 * 1024
 
 #: Marker appended to truncated diffs so the meta-reviewer knows the diff
 #: is partial and adjusts its evaluation accordingly.
@@ -1075,9 +1089,11 @@ def _compute_loop2_diff(root: Path, base_ref: str = "origin/main") -> str:
     emits a stderr breadcrumb so the operator sees that the cross-check
     meta-reviewer is falling back to findings-text-only evaluation.
 
-    Output is capped at :data:`_CROSS_CHECK_DIFF_MAX_BYTES` (200KB) and
+    Output is capped at :data:`_CROSS_CHECK_DIFF_MAX_BYTES` (1MB as of
+    v1.0.0; raised from the v0.5.0 200KB ceiling per the W3 sweep) and
     truncated with :data:`_CROSS_CHECK_DIFF_TRUNCATION_MARKER` when the
-    raw diff exceeds the budget.
+    raw diff exceeds the budget. Truncation metadata is exposed via
+    :func:`_compute_loop2_diff_with_meta` for audit-trail consumers.
 
     Args:
         root: Project root directory (used as ``cwd`` for git invocations).
@@ -1087,6 +1103,50 @@ def _compute_loop2_diff(root: Path, base_ref: str = "origin/main") -> str:
     Returns:
         Cumulative diff text, or ``""`` on any subprocess / fallback
         failure (graceful degradation -- never raises).
+    """
+    diff, _, _ = _compute_loop2_diff_with_meta(root, base_ref=base_ref)
+    return diff
+
+
+def _compute_loop2_diff_with_meta(
+    root: Path, base_ref: str = "origin/main"
+) -> tuple[str, int, bool]:
+    """Compute the cumulative cross-check diff plus truncation metadata.
+
+    Companion to :func:`_compute_loop2_diff` that surfaces the
+    pre-truncation byte count + a truncation flag so callers (the
+    cross-check audit writer) can record the metadata in the audit JSON.
+    The truncated diff itself is identical to what :func:`_compute_loop2_diff`
+    returns -- single source of truth for the truncation decision.
+
+    Args:
+        root: Project root directory.
+        base_ref: Initial git ref to diff against (default ``origin/main``).
+
+    Returns:
+        Tuple ``(diff, original_bytes, truncated)`` where ``diff`` is the
+        possibly-truncated text, ``original_bytes`` is the pre-truncation
+        size (``len(diff)`` when no truncation occurred), and
+        ``truncated`` indicates whether the cap was applied.
+    """
+    raw = _compute_loop2_diff_raw(root, base_ref=base_ref)
+    original_bytes = len(raw)
+    if original_bytes > _CROSS_CHECK_DIFF_MAX_BYTES:
+        truncated = True
+        diff = raw[:_CROSS_CHECK_DIFF_MAX_BYTES] + _CROSS_CHECK_DIFF_TRUNCATION_MARKER
+    else:
+        truncated = False
+        diff = raw
+    return diff, original_bytes, truncated
+
+
+def _compute_loop2_diff_raw(root: Path, base_ref: str = "origin/main") -> str:
+    """Internal helper that returns the *un-truncated* cumulative diff.
+
+    Shared by :func:`_compute_loop2_diff` and
+    :func:`_compute_loop2_diff_with_meta` so the resolution chain
+    (``origin/main`` -> ``main`` -> merge-base fallback) is owned in one
+    place. The public truncation logic lives in the two callers.
     """
 
     def _try(cmd: list[str]) -> str | None:
@@ -1104,14 +1164,10 @@ def _compute_loop2_diff(root: Path, base_ref: str = "origin/main") -> str:
             return None
         return str(r.stdout)
 
-    # Primary: <base_ref>..HEAD (e.g. origin/main..HEAD).
     diff = _try(["git", "diff", f"{base_ref}..HEAD"])
     if diff is None:
         diff = _try(["git", "diff", "main..HEAD"])
     if diff is None:
-        # Last-resort: walk back up to 50 commits and diff from the
-        # merge-base. Bounded so shallow clones / detached HEAD scenarios
-        # don't hang the cross-check.
         try:
             r = subprocess_utils.run_with_timeout(
                 ["git", "merge-base", "HEAD~50", "HEAD"], timeout=10, cwd=str(root)
@@ -1130,10 +1186,6 @@ def _compute_loop2_diff(root: Path, base_ref: str = "origin/main") -> str:
             diff = ""
     if diff is None:
         diff = ""
-
-    # Truncate to prompt budget (spec sec.2.1 W-NEW1: 200KB cap).
-    if len(diff) > _CROSS_CHECK_DIFF_MAX_BYTES:
-        diff = diff[:_CROSS_CHECK_DIFF_MAX_BYTES] + _CROSS_CHECK_DIFF_TRUNCATION_MARKER
     return diff
 
 
@@ -1316,6 +1368,9 @@ def _write_cross_check_audit(
     cross_check_failed: bool = False,
     failure_reason: str | None = None,
     json_parse_failure: str | None = None,
+    diff_truncated: bool = False,
+    diff_original_bytes: int | None = None,
+    diff_cap_bytes: int | None = None,
 ) -> Path:
     """Write cross-check audit artifact JSON atomically (spec sec.2.1 G6 schema).
 
@@ -1367,6 +1422,16 @@ def _write_cross_check_audit(
             "kind": "json_parse_error",
             "reason": json_parse_failure,
         }
+    # v1.0.0 Loop 2 iter 2->3 W3: surface diff-truncation metadata so
+    # post-mortem readers can tell whether the meta-reviewer evaluated
+    # the full patch or a truncated subset. Pre-fix the audit JSON had
+    # no signal for the W3 sweep finding (78% silent loss).
+    if diff_truncated:
+        audit_data["diff_truncated"] = True
+        if diff_original_bytes is not None:
+            audit_data["diff_original_bytes"] = diff_original_bytes
+        if diff_cap_bytes is not None:
+            audit_data["diff_cap_bytes"] = diff_cap_bytes
     tmp_path = audit_path.parent / (audit_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}")
     tmp_path.write_text(json.dumps(audit_data, indent=2, default=str), encoding="utf-8")
     tmp_path.replace(audit_path)  # atomic rename
@@ -1381,6 +1446,8 @@ def _loop2_cross_check(
     iter_n: int,
     config: Any,
     audit_dir: Path,
+    diff_original_bytes: int | None = None,
+    diff_truncated: bool = False,
 ) -> list[dict[str, Any]]:
     """Cross-check MAGI Loop 2 findings via /requesting-code-review meta-review.
 
@@ -1415,6 +1482,14 @@ def _loop2_cross_check(
     if not config.magi_cross_check:
         return findings
     prompt = _build_cross_check_prompt(diff, verdict, findings)
+    # v1.0.0 W3: forward the diff-truncation metadata to every audit-
+    # write call site below so post-mortem readers can distinguish
+    # full-diff evaluations from truncated-diff evaluations.
+    audit_diff_meta: dict[str, Any] = {
+        "diff_truncated": diff_truncated,
+        "diff_original_bytes": diff_original_bytes,
+        "diff_cap_bytes": _CROSS_CHECK_DIFF_MAX_BYTES if diff_truncated else None,
+    }
     try:
         review_output = _dispatch_requesting_code_review(diff=diff, prompt=prompt)
     except Exception as exc:  # noqa: BLE001 - graceful fallback per G5
@@ -1429,6 +1504,7 @@ def _loop2_cross_check(
             original_findings=findings,
             cross_check_failed=True,
             failure_reason=str(exc),
+            **audit_diff_meta,
         )
         return findings
 
@@ -1443,6 +1519,7 @@ def _loop2_cross_check(
             decisions=[],
             annotated_findings=findings,
             json_parse_failure=str(review_output.get("_failure_reason", "")),
+            **audit_diff_meta,
         )
         return findings  # original findings unchanged
 
@@ -1455,6 +1532,7 @@ def _loop2_cross_check(
         original_findings=findings,
         decisions=decisions,
         annotated_findings=annotated,
+        **audit_diff_meta,
     )
     return annotated
 
