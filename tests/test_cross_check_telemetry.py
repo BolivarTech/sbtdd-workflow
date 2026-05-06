@@ -222,7 +222,7 @@ def test_a5_json_output_parseable(tmp_path):
     root = tmp_path / "magi-cross-check"
     root.mkdir()
     _make_iter_artifact(
-        root / "iter1.json",
+        root / "iter1-x.json",
         1,
         [
             {

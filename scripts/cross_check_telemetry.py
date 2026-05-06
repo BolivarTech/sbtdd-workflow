@@ -169,3 +169,26 @@ def format_markdown(report: TelemetryReport) -> str:
     for s in sorted(agg_sev):
         lines.append(f"| {s} | {agg_sev[s]} |")
     return "\n".join(lines) + "\n"
+
+
+def format_json(report: TelemetryReport) -> str:
+    """Format a TelemetryReport as JSON (machine-readable)."""
+    payload = {
+        "total_iters": report.total_iters,
+        "decision_distribution": dict(report.decision_distribution),
+        "per_iter": [
+            {
+                "iter": ir.iter,
+                "verdict": ir.verdict,
+                "decisions": dict(ir.decisions),
+                "agents": dict(ir.agents),
+                "severity": dict(ir.severity),
+                "diff_truncated": ir.diff_truncated,
+                "diff_original_bytes": ir.diff_original_bytes,
+            }
+            for ir in report.per_iter
+        ],
+        "agreement_rate": report.agreement_rate,
+        "truncation_rate": report.truncation_rate,
+    }
+    return json.dumps(payload, indent=2)
