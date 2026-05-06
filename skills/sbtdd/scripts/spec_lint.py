@@ -13,6 +13,7 @@ Per spec sec.2.3 v1.0.2 Item C. 5 rules R1-R5; Q3 dictamen R3=warning.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,42 @@ class LintFinding:
     rule: str
     severity: str
     message: str
+
+
+_ESCENARIO_RE = re.compile(
+    r"^(?:\*\*Escenario\s+([A-Za-z0-9-]+)[^\*]*\*\*|"
+    r"#{2,3}\s+Escenario\s+([A-Za-z0-9-]+)[^\n]*)\s*$",
+    re.MULTILINE,
+)
+_GIVEN_RE = re.compile(r"^>\s*\*\*Given\*\*", re.MULTILINE)
+_WHEN_RE = re.compile(r"^>\s*\*\*When\*\*", re.MULTILINE)
+_THEN_RE = re.compile(r"^>\s*\*\*Then\*\*", re.MULTILINE)
+
+
+def _check_r1(path: Path, text: str) -> list[LintFinding]:
+    """R1: each escenario block has Given + When + Then bullets."""
+    findings: list[LintFinding] = []
+    matches = list(_ESCENARIO_RE.finditer(text))
+    for i, m in enumerate(matches):
+        line_start = text.count("\n", 0, m.start()) + 1
+        block_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        block = text[m.end() : block_end]
+        for label, rx in (
+            ("Given", _GIVEN_RE),
+            ("When", _WHEN_RE),
+            ("Then", _THEN_RE),
+        ):
+            if not rx.search(block):
+                findings.append(
+                    LintFinding(
+                        file=path,
+                        line=line_start,
+                        rule="R1",
+                        severity="error",
+                        message=f"escenario at line {line_start} missing {label} block",
+                    )
+                )
+    return findings
 
 
 def lint_spec(path: Path) -> list[LintFinding]:
@@ -44,7 +81,8 @@ def lint_spec(path: Path) -> list[LintFinding]:
                 message=f"spec file not found: {path}",
             )
         ]
-    path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     findings: list[LintFinding] = []
-    # Subsequent tasks 8-12 fill in R1-R5 checks.
+    findings.extend(_check_r1(path, text))
+    # Subsequent tasks 9-12 fill in R2-R5 checks.
     return findings
