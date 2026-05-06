@@ -37,6 +37,32 @@ _WHEN_RE = re.compile(r"^>\s*\*\*When\*\*", re.MULTILINE)
 _THEN_RE = re.compile(r"^>\s*\*\*Then\*\*", re.MULTILINE)
 
 
+def _check_r2(path: Path, text: str) -> list[LintFinding]:
+    """R2: escenario IDs unique across spec."""
+    findings: list[LintFinding] = []
+    seen: dict[str, list[int]] = {}
+    for m in _ESCENARIO_RE.finditer(text):
+        ident = m.group(1) or m.group(2)
+        if ident is None:
+            continue
+        line = text.count("\n", 0, m.start()) + 1
+        seen.setdefault(ident, []).append(line)
+    for ident, lines in seen.items():
+        if len(lines) > 1:
+            for ln in lines:
+                others = [other for other in lines if other != ln]
+                findings.append(
+                    LintFinding(
+                        file=path,
+                        line=ln,
+                        rule="R2",
+                        severity="error",
+                        message=(f"duplicate escenario ID '{ident}' (other occurrences: {others})"),
+                    )
+                )
+    return findings
+
+
 def _check_r1(path: Path, text: str) -> list[LintFinding]:
     """R1: each escenario block has Given + When + Then bullets."""
     findings: list[LintFinding] = []
@@ -84,5 +110,6 @@ def lint_spec(path: Path) -> list[LintFinding]:
     text = path.read_text(encoding="utf-8")
     findings: list[LintFinding] = []
     findings.extend(_check_r1(path, text))
-    # Subsequent tasks 9-12 fill in R2-R5 checks.
+    findings.extend(_check_r2(path, text))
+    # Subsequent tasks 10-12 fill in R3-R5 checks.
     return findings
