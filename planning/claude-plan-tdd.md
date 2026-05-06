@@ -1241,7 +1241,7 @@ Append `findings.extend(_check_r3(path, text))` to `lint_spec`.
 
 ---
 
-### Task 11: Item C — R4 INV-27 mechanical extension (escenario C-R4-1)
+### Task 11: Item C — R4 INV-27 mechanical extension (escenario C-R4-1) [x]
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/spec_lint.py`
