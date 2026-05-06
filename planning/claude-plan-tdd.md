@@ -841,7 +841,7 @@ git commit -m "test: B-1/B-2 regression guards for diff threading in cross-check
 **Surfaces**: `skills/sbtdd/scripts/spec_lint.py` (new); `skills/sbtdd/scripts/spec_cmd.py` (extend `_run_magi_checkpoint2`); `tests/test_spec_lint.py` (new); `tests/test_spec_cmd.py` (extend); `tests/test_invoke_skill_callsites_audit.py` (new); `pyproject.toml` (modify); `Makefile` (modify).
 **Wall-time estimated**: 16-25h.
 
-### Task 7: Item C — `LintFinding` dataclass + `lint_spec()` skeleton
+### Task 7: Item C — `LintFinding` dataclass + `lint_spec()` skeleton [x]
 
 **Files:**
 - Create: `skills/sbtdd/scripts/spec_lint.py`
