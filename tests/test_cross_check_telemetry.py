@@ -166,3 +166,49 @@ def test_aggregate_missing_root_raises_filenotfounderror(tmp_path):
         aggregate(ghost)
     assert str(ghost) in str(exc.value)
     assert "Feature G" in str(exc.value)
+
+
+def test_a4_markdown_output_well_formed(tmp_path):
+    """A-4: markdown output contains required tables."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import aggregate, format_markdown  # type: ignore[import-not-found]
+
+    root = tmp_path / "magi-cross-check"
+    root.mkdir()
+    _make_iter_artifact(
+        root / "iter1-x.json",
+        1,
+        [
+            {
+                "original_index": 0,
+                "decision": "KEEP",
+                "rationale": "ok",
+                "recommended_severity": None,
+                "agent": "melchior",
+                "title": "t",
+                "severity": "WARNING",
+            }
+        ],
+    )
+
+    report = aggregate(root)
+    md = format_markdown(report)
+
+    assert "Decision distribution" in md
+    assert "Per-iter breakdown" in md
+    assert "Per-agent" in md
+    assert "Per-severity" in md
+    assert "|---" in md
+    assert "KEEP" in md
+
+
+def test_a4_empty_markdown_no_iterations_message(tmp_path):
+    """A-4 empty: markdown shows 'No iterations found' for empty dir."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import aggregate, format_markdown  # type: ignore[import-not-found]
+
+    root = tmp_path / "empty"
+    root.mkdir()
+    md = format_markdown(aggregate(root))
+
+    assert "No iterations found" in md
