@@ -37,6 +37,30 @@ _WHEN_RE = re.compile(r"^>\s*\*\*When\*\*", re.MULTILINE)
 _THEN_RE = re.compile(r"^>\s*\*\*Then\*\*", re.MULTILINE)
 
 
+_HEADER_RE = re.compile(r"^##\s+(\d+)\.\s", re.MULTILINE)
+
+
+def _check_r3(path: Path, text: str) -> list[LintFinding]:
+    """R3: section headers ## N. monotonic (warning per Q3)."""
+    findings: list[LintFinding] = []
+    last = 0
+    for m in _HEADER_RE.finditer(text):
+        n = int(m.group(1))
+        line = text.count("\n", 0, m.start()) + 1
+        if n != last + 1 and last != 0:
+            findings.append(
+                LintFinding(
+                    file=path,
+                    line=line,
+                    rule="R3",
+                    severity="warning",
+                    message=f"section header skip: ## {n}. follows ## {last}.",
+                )
+            )
+        last = n
+    return findings
+
+
 def _check_r2(path: Path, text: str) -> list[LintFinding]:
     """R2: escenario IDs unique across spec."""
     findings: list[LintFinding] = []
@@ -111,5 +135,6 @@ def lint_spec(path: Path) -> list[LintFinding]:
     findings: list[LintFinding] = []
     findings.extend(_check_r1(path, text))
     findings.extend(_check_r2(path, text))
-    # Subsequent tasks 10-12 fill in R3-R5 checks.
+    findings.extend(_check_r3(path, text))
+    # Subsequent tasks 11-12 fill in R4-R5 checks.
     return findings
