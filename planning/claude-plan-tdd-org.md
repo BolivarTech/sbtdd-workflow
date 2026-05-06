@@ -1905,14 +1905,25 @@ exclude_lines = [
 ]
 ```
 
-4. **Verification**: after editing, run `python -c "import tomllib;
-   import sys; data = tomllib.loads(open('pyproject.toml').read()) if
-   sys.version_info >= (3,11) else __import__('tomli').loads(open('pyproject.toml').read())"`
-   to confirm the file parses as valid TOML. If python < 3.11 and
-   tomli is unavailable, run `python -c "import yaml" || pip install
-   tomli && python -c "import tomli; tomli.loads(open('pyproject.toml').read())"`.
-   The new `[tool.coverage.run]` and `[tool.coverage.report]` tables
-   should be top-level (not nested under any `[[tool.mypy.overrides]]`).
+4. **Verification**: after editing, run the appropriate one-liner
+   for your Python version to confirm the file parses as valid TOML
+   AND the new tables landed at top level:
+
+   - **Python 3.11+ (uses stdlib `tomllib`)**:
+     ```bash
+     python -c "import tomllib; data = tomllib.loads(open('pyproject.toml','rb').read()); assert 'coverage' in data['tool'], 'coverage tables not at top level'; print('OK')"
+     ```
+   - **Python 3.9/3.10 (no stdlib `tomllib`)**: install `tomli` if
+     unavailable, then check (W2 iter 2 fix — `import tomli`, NOT
+     `import yaml` which was the iter-1 typo):
+     ```bash
+     python -c "import tomli" || pip install tomli
+     python -c "import tomli; data = tomli.loads(open('pyproject.toml').read()); assert 'coverage' in data['tool'], 'coverage tables not at top level'; print('OK')"
+     ```
+   The assertion `'coverage' in data['tool']` confirms the new
+   `[tool.coverage.run]` and `[tool.coverage.report]` tables are
+   top-level (not silently nested inside `[[tool.mypy.overrides]]`).
+   Print `OK` on success; AssertionError on failed insertion.
 5. **mypy regression smoke**: run `python -m mypy --version && python -m
    mypy . | head -20` and confirm output mentions `Success: no issues
    found` (or the existing pre-Task-17 baseline). If mypy errors
@@ -1968,8 +1979,15 @@ typecheck:
 coverage:
 	python -m pytest --cov=skills/sbtdd/scripts --cov-report=term-missing tests/
 
-verify: test lint format typecheck coverage
+verify: lint format typecheck coverage
 ```
+
+Note (C1 iter 2 fix — caspar CRITICAL NF-A breach): `verify` does
+NOT depend on `test` because `coverage` already runs `pytest` (with
+`--cov` instrumentation). Including both would double-execute the
+test suite, breaking NF-A budget (`make verify` runtime <= 160s).
+The standalone `test:` target remains for dev workflow (`-v`
+verbose, no coverage instrumentation overhead).
 
 - [ ] **Step 2: Smoke test**
 

@@ -479,8 +479,15 @@ baseline is 84%) en separate atomic commit.
 coverage:
 	python -m pytest --cov=skills/sbtdd/scripts --cov-report=term-missing tests/
 
-verify: test lint format typecheck coverage
+verify: lint format typecheck coverage
 ```
+
+Note (C1 iter 2 fix — caspar CRITICAL NF-A breach): `verify`
+intentionally does NOT depend on `test` because `coverage` already
+runs `pytest` (with `--cov` instrumentation). Including `test` would
+double-execute the test suite, breaking NF-A budget (`make verify`
+runtime <= 160s). The standalone `test:` target remains for dev
+workflow (quick `-v` verbose runs without coverage instrumentation).
 
 Note (C2/W4 iter 1 fix): the threshold value is read from
 `pyproject.toml [tool.coverage.report] fail_under` automatically by
@@ -926,10 +933,20 @@ direct dispatch + manual mini-cycle commits. Document en CHANGELOG
 `[1.0.2]` Process notes. Precedentes v0.5.0 + v1.0.0 + v1.0.1
 todos demonstrate ship viability con manual fallback.
 
-**Verbatim fallback command** (warm + ready to copy-paste):
+**Verbatim fallback command** (warm + ready to copy-paste).
+**Operator preparation step** (W4 iter 2 fix — caspar): the
+`v102-loop2-iter1-header.md` file referenced below is
+operator-prepared per the iter-1 dispatch protocol (see
+`.claude/magi-runs/v102-checkpoint2-iter1-header.md` shipped this
+cycle as reference template; for Loop 2 own-cycle fallback, the
+operator copies that template + adapts the cycle-context section
+for Loop 2 mode). The header is NOT auto-generated.
 
 ```bash
 mkdir -p .claude/magi-runs/v102-loop2-iter1
+# Step 0: operator prepares v102-loop2-iter1-header.md (Loop 2 mode
+# context; see .claude/magi-runs/v102-checkpoint2-iter1-header.md
+# for the analogous Checkpoint 2 template).
 {
   cat .claude/magi-runs/v102-loop2-iter1-header.md
   echo "---"
