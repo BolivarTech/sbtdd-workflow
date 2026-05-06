@@ -975,7 +975,7 @@ def lint_spec(path: Path) -> list[LintFinding]:
 
 ---
 
-### Task 8: Item C — R1 escenario well-formed (escenarios C-R1-1, C-R1-2)
+### Task 8: Item C — R1 escenario well-formed (escenarios C-R1-1, C-R1-2) [x]
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/spec_lint.py`
