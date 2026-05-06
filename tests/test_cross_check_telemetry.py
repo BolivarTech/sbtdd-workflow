@@ -251,3 +251,76 @@ def test_a5_json_output_parseable(tmp_path):
     assert parsed["total_iters"] == 1
     assert isinstance(parsed["per_iter"], list)
     assert isinstance(parsed["agreement_rate"], (int, float))
+
+
+def test_cli_default_format_markdown(tmp_path, capsys):
+    """CLI invokes aggregate + format_markdown by default."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import main  # type: ignore[import-not-found]
+
+    root = tmp_path / "magi-cross-check"
+    root.mkdir()
+    _make_iter_artifact(
+        root / "iter1-x.json",
+        1,
+        [
+            {
+                "original_index": 0,
+                "decision": "KEEP",
+                "rationale": "ok",
+                "recommended_severity": None,
+                "agent": "melchior",
+                "title": "t",
+                "severity": "WARNING",
+            }
+        ],
+    )
+
+    rc = main(["--root", str(root)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Decision distribution" in captured.out
+
+
+def test_cli_format_json_flag(tmp_path, capsys):
+    """CLI --format json outputs JSON parseable text."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import main  # type: ignore[import-not-found]
+
+    root = tmp_path / "magi-cross-check"
+    root.mkdir()
+    _make_iter_artifact(
+        root / "iter1-x.json",
+        1,
+        [
+            {
+                "original_index": 0,
+                "decision": "KEEP",
+                "rationale": "ok",
+                "recommended_severity": None,
+                "agent": "melchior",
+                "title": "t",
+                "severity": "WARNING",
+            }
+        ],
+    )
+
+    rc = main(["--root", str(root), "--format", "json"])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    parsed = json.loads(captured.out)
+    assert parsed["total_iters"] == 1
+
+
+def test_cli_missing_root_exit_2(tmp_path, capsys):
+    """CLI raises FileNotFoundError ⇒ exit code 2."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import main  # type: ignore[import-not-found]
+
+    rc = main(["--root", str(tmp_path / "does-not-exist")])
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert "not found" in captured.err.lower()
