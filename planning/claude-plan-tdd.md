@@ -528,7 +528,7 @@ git commit -m "chore: mark task 2 complete (A markdown formatter)"
 
 ---
 
-### Task 3: Item A — JSON formatter (escenario A-5)
+### Task 3: Item A — JSON formatter (escenario A-5) [x]
 
 **Files:**
 - Modify: `scripts/cross_check_telemetry.py`
