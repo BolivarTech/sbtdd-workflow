@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from spec_cmd import _INV27_RE
+
 
 @dataclass(frozen=True)
 class LintFinding:
@@ -38,6 +40,23 @@ _THEN_RE = re.compile(r"^>\s*\*\*Then\*\*", re.MULTILINE)
 
 
 _HEADER_RE = re.compile(r"^##\s+(\d+)\.\s", re.MULTILINE)
+
+
+def _check_r4(path: Path, text: str) -> list[LintFinding]:
+    """R4: cero matches uppercase placeholder (INV-27 mechanical)."""
+    findings: list[LintFinding] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if _INV27_RE.search(line):
+            findings.append(
+                LintFinding(
+                    file=path,
+                    line=lineno,
+                    rule="R4",
+                    severity="error",
+                    message=(f"INV-27 mechanical: line {lineno} contains uppercase placeholder"),
+                )
+            )
+    return findings
 
 
 def _check_r3(path: Path, text: str) -> list[LintFinding]:
@@ -136,5 +155,6 @@ def lint_spec(path: Path) -> list[LintFinding]:
     findings.extend(_check_r1(path, text))
     findings.extend(_check_r2(path, text))
     findings.extend(_check_r3(path, text))
-    # Subsequent tasks 11-12 fill in R4-R5 checks.
+    findings.extend(_check_r4(path, text))
+    # Subsequent task 12 fills in R5 check.
     return findings
