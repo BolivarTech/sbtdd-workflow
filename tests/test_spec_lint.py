@@ -181,3 +181,34 @@ def test_c_r4_1_inv27_extends_to_spec_behavior(tmp_path):
     assert len(r4) >= 1
     assert all(f.severity == "error" for f in r4)
     assert any("INV-27" in f.message for f in r4)
+
+
+def test_c_r5_1_frontmatter_present_passes(tmp_path):
+    """C-R5-1: '> Generado YYYY-MM-DD ...' present in first 30 lines passes."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n\n> Generado 2026-05-06 a partir de sbtdd/spec-behavior-base.md\n\n## 1. Section\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    assert [f for f in findings if f.rule == "R5"] == []
+
+
+def test_c_r5_2_missing_frontmatter_fails(tmp_path):
+    """C-R5-2: missing frontmatter emits R5 error at line 1."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n\n## 1. Section\n\nNo frontmatter at all.\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    r5 = [f for f in findings if f.rule == "R5"]
+    assert len(r5) == 1
+    assert r5[0].severity == "error"
+    assert r5[0].line == 1
