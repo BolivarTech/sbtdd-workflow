@@ -212,3 +212,42 @@ def test_a4_empty_markdown_no_iterations_message(tmp_path):
     md = format_markdown(aggregate(root))
 
     assert "No iterations found" in md
+
+
+def test_a5_json_output_parseable(tmp_path):
+    """A-5: JSON output round-trips through json.loads."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import aggregate, format_json  # type: ignore[import-not-found]
+
+    root = tmp_path / "magi-cross-check"
+    root.mkdir()
+    _make_iter_artifact(
+        root / "iter1.json",
+        1,
+        [
+            {
+                "original_index": 0,
+                "decision": "KEEP",
+                "rationale": "ok",
+                "recommended_severity": None,
+                "agent": "melchior",
+                "title": "t",
+                "severity": "WARNING",
+            }
+        ],
+    )
+
+    report = aggregate(root)
+    text = format_json(report)
+    parsed = json.loads(text)
+
+    assert set(parsed.keys()) >= {
+        "total_iters",
+        "decision_distribution",
+        "per_iter",
+        "agreement_rate",
+        "truncation_rate",
+    }
+    assert parsed["total_iters"] == 1
+    assert isinstance(parsed["per_iter"], list)
+    assert isinstance(parsed["agreement_rate"], (int, float))
