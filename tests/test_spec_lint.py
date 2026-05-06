@@ -127,3 +127,33 @@ def test_c_r2_2_duplicate_id_fails(tmp_path):
     r2 = [f for f in findings if f.rule == "R2"]
     assert len(r2) == 2
     assert all(f.severity == "error" for f in r2)
+
+
+def test_c_r3_1_monotonic_headers_pass(tmp_path):
+    """C-R3-1: monotonic ## N headers return no R3 finding."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n## 1. one\n\n## 2. two\n\n## 3. three\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    assert [f for f in findings if f.rule == "R3"] == []
+
+
+def test_c_r3_2_skip_emits_warning_severity(tmp_path):
+    """C-R3-2: header skip emits R3 finding at warning severity (Q3)."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n## 1. one\n\n## 2. two\n\n## 5. five\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    r3 = [f for f in findings if f.rule == "R3"]
+    assert len(r3) >= 1
+    assert all(f.severity == "warning" for f in r3)
