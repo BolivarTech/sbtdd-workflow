@@ -157,3 +157,27 @@ def test_c_r3_2_skip_emits_warning_severity(tmp_path):
     r3 = [f for f in findings if f.rule == "R3"]
     assert len(r3) >= 1
     assert all(f.severity == "warning" for f in r3)
+
+
+def test_c_r4_1_inv27_extends_to_spec_behavior(tmp_path):
+    """C-R4-1: spec-behavior.md with uppercase placeholder emits R4 error.
+
+    Synthetic fixture must use one of the three INV-27 tokens; we look up
+    spec_cmd._INV27_TOKENS to avoid hardcoding.
+    """
+    from spec_cmd import _INV27_TOKENS
+    from spec_lint import lint_spec
+
+    token = _INV27_TOKENS[0]
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
+        f"## 1. Section\n\nThis line contains {token} marker.\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    r4 = [f for f in findings if f.rule == "R4"]
+    assert len(r4) >= 1
+    assert all(f.severity == "error" for f in r4)
+    assert any("INV-27" in f.message for f in r4)
