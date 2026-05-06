@@ -92,3 +92,38 @@ def test_c_r1_2_missing_given_fails(tmp_path):
     assert len(r1) == 1
     assert r1[0].severity == "error"
     assert "given" in r1[0].message.lower()
+
+
+def test_c_r2_1_unique_ids_pass(tmp_path):
+    """C-R2-1: distinct escenario IDs return no R2 finding."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
+        "**Escenario X-1: a**\n\n> **Given** g\n> **When** w\n> **Then** t\n\n"
+        "**Escenario X-2: b**\n\n> **Given** g\n> **When** w\n> **Then** t\n\n"
+        "**Escenario Y-1: c**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    assert [f for f in findings if f.rule == "R2"] == []
+
+
+def test_c_r2_2_duplicate_id_fails(tmp_path):
+    """C-R2-2: duplicate escenario ID emits R2 errors for both occurrences."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
+        "**Escenario X-1: first**\n\n> **Given** g\n> **When** w\n> **Then** t\n\n"
+        "**Escenario X-1: dup**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    r2 = [f for f in findings if f.rule == "R2"]
+    assert len(r2) == 2
+    assert all(f.severity == "error" for f in r2)
