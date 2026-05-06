@@ -33,7 +33,7 @@
 **Surfaces** (cero overlap with Track Beta): `scripts/cross_check_telemetry.py` (new); `tests/test_cross_check_telemetry.py` (new); `tests/test_pre_merge_cross_check.py` (extend).
 **Wall-time estimated**: 6-9h.
 
-### Task 1: Item A — `aggregate()` core: happy path + empty + malformed
+### Task 1: Item A — `aggregate()` core: happy path + empty + malformed [x]
 
 **Files:**
 - Create: `scripts/cross_check_telemetry.py`
