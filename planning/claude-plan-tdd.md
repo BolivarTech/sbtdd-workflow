@@ -384,7 +384,7 @@ git commit -m "chore: mark task 1 complete (A core aggregate)"
 
 ---
 
-### Task 2: Item A — Markdown formatter (escenario A-4)
+### Task 2: Item A — Markdown formatter (escenario A-4) [x]
 
 **Files:**
 - Modify: `scripts/cross_check_telemetry.py`
