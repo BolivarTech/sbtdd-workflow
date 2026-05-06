@@ -724,7 +724,7 @@ if __name__ == "__main__":
 
 ---
 
-### Task 5: Item A — Performance smoke (escenario A-6 NF32)
+### Task 5: Item A — Performance smoke (escenario A-6 NF32) [x]
 
 **Files:**
 - Modify: `tests/test_cross_check_telemetry.py`
