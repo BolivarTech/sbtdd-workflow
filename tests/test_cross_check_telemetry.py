@@ -34,7 +34,7 @@ def _make_iter_artifact(path: Path, iter_n: int, decisions: list[dict]) -> None:
 def test_a1_happy_path_aggregates_three_iters(tmp_path):
     """A-1: aggregate three valid iter artifacts."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    from cross_check_telemetry import aggregate
+    from cross_check_telemetry import aggregate  # type: ignore[import-not-found]
 
     root = tmp_path / "magi-cross-check"
     root.mkdir()
@@ -97,7 +97,7 @@ def test_a1_happy_path_aggregates_three_iters(tmp_path):
 def test_a2_empty_directory_tolerated(tmp_path):
     """A-2: empty dir returns total_iters=0 without error."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    from cross_check_telemetry import aggregate
+    from cross_check_telemetry import aggregate  # type: ignore[import-not-found]
 
     root = tmp_path / "magi-cross-check"
     root.mkdir()
@@ -112,7 +112,7 @@ def test_a2_empty_directory_tolerated(tmp_path):
 def test_a3_malformed_json_skipped_with_breadcrumb(tmp_path, capsys):
     """A-3: malformed JSON files skipped with stderr breadcrumb."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    from cross_check_telemetry import aggregate
+    from cross_check_telemetry import aggregate  # type: ignore[import-not-found]
 
     root = tmp_path / "magi-cross-check"
     root.mkdir()
@@ -159,7 +159,7 @@ def test_a3_malformed_json_skipped_with_breadcrumb(tmp_path, capsys):
 def test_aggregate_missing_root_raises_filenotfounderror(tmp_path):
     """W3 iter 1 fix: aggregate() raises FileNotFoundError when root absent."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    from cross_check_telemetry import aggregate
+    from cross_check_telemetry import aggregate  # type: ignore[import-not-found]
 
     ghost = tmp_path / "does-not-exist"
     with pytest.raises(FileNotFoundError) as exc:
