@@ -1308,7 +1308,7 @@ Append `findings.extend(_check_r4(path, text))` to `lint_spec`.
 
 ---
 
-### Task 12: Item C — R5 frontmatter docstring (escenarios C-R5-1, C-R5-2)
+### Task 12: Item C — R5 frontmatter docstring (escenarios C-R5-1, C-R5-2) [x]
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/spec_lint.py`
