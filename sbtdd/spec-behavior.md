@@ -162,15 +162,22 @@ Defaults: `--root .claude/magi-cross-check`,
 
 **Track**: Alpha (subagent #1, after Item A).
 
-**Estado actual** (verificado 2026-05-06):
+**Estado actual** (verificado 2026-05-06; clarificado iter 1 W8 fix):
 
-- `_compute_loop2_diff_with_meta` exists en `pre_merge_cmd.py:1111`.
-- `_build_cross_check_prompt(diff, verdict, findings)` accepts
-  diff parameter en `pre_merge_cmd.py:1192` y embeds en
+- **Wiring shipped en v1.0.0** (mid-cycle iter 2→3 fix):
+  `_compute_loop2_diff_with_meta` existe en `pre_merge_cmd.py:1111`;
+  `_build_cross_check_prompt(diff, verdict, findings)` accepts diff
+  parameter en `pre_merge_cmd.py:1192` y embeds en
   `## Cumulative diff under review (truncated to 200KB)` section
-  cuando `diff != ""`.
-- Threading via `_loop2_with_cross_check` en
+  cuando `diff != ""`; threading via `_loop2_with_cross_check` en
   `pre_merge_cmd.py:1484`.
+- **NOT shipped**: empirical observation of cumulative diff size,
+  truncation rate, meta-reviewer file:line referencing rate. v1.0.0
+  could not exercise this path because `/sbtdd pre-merge` was broken
+  by other defects.
+- **v1.0.2 closes the loop**: regression-guard tests (Task 6) verify
+  the wiring; empirical observation deferred to Activity D dogfood
+  (sec.2.4) and reported in CHANGELOG `[1.0.2]` Process notes.
 
 **Entrega v1.0.2**:
 
@@ -223,7 +230,7 @@ def lint_spec(path: Path) -> list[LintFinding]:
 |------|-------|-----------------|
 | R1 | Cada bloque `**Escenario X: ...**` / `### Escenario X: ...` / `## Escenario X: ...` tiene Given / When / Then bullets no-vacios | error |
 | R2 | Cada Escenario tiene identifier unico (X-N format alphanumeric+dash) | error |
-| R3 | Section headers monotonous (no skip de `## 2` a `## 5`) | **warning** (Q3) |
+| R3 | Section headers monotonous **top-level integer only** (matches `^##\s+\d+\.\s` strict; non-numeric `## Heading` y sub-numbered `## 9.5` correctamente skipean per W2/W7 iter 1 fix) | **warning** (Q3) |
 | R4 | Cero matches uppercase placeholder (los tres tokens word-boundary, reusa `spec_cmd._INV27_RE`) | error |
 | R5 | Frontmatter docstring con `Generado YYYY-MM-DD` line + reference a source artifact | error |
 
@@ -254,8 +261,17 @@ def _run_magi_checkpoint2(...):
                 f"Fix violations and re-run /sbtdd spec."
             )
 
-    # ... existing magi_dispatch.invoke_magi(...) call
+    # ... existing magi_dispatch.invoke_magi(...) iter loop
 ```
+
+**Lint timing contract (C1 iter 1 fix)**: `spec_lint.lint_spec` runs
+**ONCE at the top of `_run_magi_checkpoint2`, BEFORE the MAGI iter
+loop begins**. If lint raises `ValidationError`, the cycle aborts
+without entering the iter loop — no MAGI iter budget is consumed.
+The safety valve cap=3 G1 binding remains intact for the next
+attempt after the operator fixes the lint violations and re-runs
+`/sbtdd spec`. This places the lint gate upstream of the safety
+valve, not inside it.
 
 **CLI standalone**:
 
@@ -458,15 +474,20 @@ baseline is 84%) en separate atomic commit.
 **`Makefile`** (extension):
 
 ```makefile
-verify: test lint format typecheck coverage
+.PHONY: test lint format typecheck coverage verify
 
 coverage:
-	pytest --cov=skills/sbtdd/scripts \
-	    --cov-report=term-missing \
-	    --cov-fail-under=$(shell python -c "import tomllib; \
-	        print(tomllib.loads(open('pyproject.toml').read())\
-	        ['tool']['coverage']['report']['fail_under'])")
+	python -m pytest --cov=skills/sbtdd/scripts --cov-report=term-missing tests/
+
+verify: test lint format typecheck coverage
 ```
+
+Note (C2/W4 iter 1 fix): the threshold value is read from
+`pyproject.toml [tool.coverage.report] fail_under` automatically by
+`pytest-cov` when `--cov-fail-under` is omitted, so no `tomllib`
+runtime dep is needed. tomllib is Python 3.11+ stdlib and the project
+supports 3.9+; using pytest-cov's built-in TOML reader keeps the
+toolchain portable across the supported Python range.
 
 **CHANGELOG `[1.0.2]` documenta**:
 - Per-module coverage baseline (tabla de modulo / %coverage
@@ -847,6 +868,31 @@ conflicts.
   (no override): defer F + G a v1.0.3 (E es methodology, puede
   ejercerse en cualquier ciclo posterior; D dogfood es own-cycle
   evidence intrinsica).
+
+**Scope-trim ladder for Checkpoint 2 iter 3** (W6 iter 1 fix —
+balthasar pre-staged decision):
+
+If Checkpoint 2 iter 3 verdict < `GO_WITH_CAVEATS` full no-degraded,
+trim scope in this order (smallest impact first), re-emit spec+plan
+artifacts, and proceed directly to implementation phase without
+further MAGI iterations:
+
+1. **First trim**: defer Item G (coverage threshold) → v1.0.3.
+   Smallest scope — `pyproject.toml` + `Makefile` only, no production
+   code. Plan tasks 17-19 removed; ~2-3 nuevos tests removed.
+2. **Second trim** (if iter 3 verdict still blocks after Item G defer
+   in re-evaluation): defer Item F (meta-test) → v1.0.3. Plan tasks
+   15-16 removed; ~3-5 nuevos tests removed. Bundle reduces a
+   A + B + C + D + E (3 plan tasks + 2 methodology).
+3. **Third trim** (rarely needed): defer Item C (spec_lint) →
+   v1.0.3 standalone cycle. Plan tasks 7-14 removed; bundle reduces
+   to A + B + D + E (2 plan tasks + 2 methodology). At this point
+   v1.0.2 is essentially "telemetry script + own-cycle dogfood" —
+   ship-ready single-pillar.
+
+The orchestrator picks the trim level at iter 3 escalation; record
+the decision in CHANGELOG `[1.0.2]` Process notes alongside the
+deferred-to-v1.0.3 list.
 
 ### 6.2 Loop 1 (`/requesting-code-review`)
 

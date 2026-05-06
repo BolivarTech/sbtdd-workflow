@@ -162,6 +162,18 @@ def test_a3_malformed_json_skipped_with_breadcrumb(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "iter2-broken.json" in captured.err
     assert "skip" in captured.err.lower() or "malformed" in captured.err.lower()
+
+
+def test_aggregate_missing_root_raises_filenotfounderror(tmp_path):
+    """W3 iter 1 fix: aggregate() raises FileNotFoundError when root absent."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import aggregate
+
+    ghost = tmp_path / "does-not-exist"
+    with pytest.raises(FileNotFoundError) as exc:
+        aggregate(ghost)
+    assert str(ghost) in str(exc.value)
+    assert "Feature G" in str(exc.value)
 ```
 
 Save to `tests/test_cross_check_telemetry.py`.
@@ -1495,6 +1507,17 @@ In `skills/sbtdd/scripts/spec_cmd.py`, locate `_run_magi_checkpoint2` (~line 525
 
 Verify `import sys` is present at top of `spec_cmd.py`; add if missing.
 
+**Lint timing contract (C1 iter 1 fix)**: this insertion places the
+spec_lint gate at the TOP of `_run_magi_checkpoint2`, BEFORE the
+existing MAGI iter loop. Concretely: the lint runs ONCE per
+`/sbtdd spec` invocation, NOT once per MAGI iter. If lint raises
+`ValidationError`, the cycle aborts BEFORE entering the iter loop,
+so the safety valve cap=3 G1 binding budget is NOT consumed. The
+operator fixes the lint violations and re-runs `/sbtdd spec`, which
+starts a fresh iter budget. Verify the insertion point is upstream
+of any `for iter_n in range(cfg.magi_max_iterations):` loop in
+`_run_magi_checkpoint2`.
+
 - [ ] **Step 5: Run tests pass**
 - [ ] **Step 6: Green commit `feat: integrate spec_lint gate in _run_magi_checkpoint2`**
 - [ ] **Step 7-9: Refactor + Task close `chore: mark task 13 complete`**
@@ -1848,9 +1871,22 @@ dev = [
 ]
 ```
 
-Append (after `[tool.mypy.overrides]` blocks):
+**Add `[tool.coverage.*]` tables at the end of `pyproject.toml`** (C3
+iter 1 fix — explicit insertion guidance to avoid landing inside
+`[[tool.mypy.overrides]]` block which would silently corrupt mypy
+config):
+
+1. Open `pyproject.toml` and verify the file ends with the **last**
+   `[[tool.mypy.overrides]]` block (currently terminates with
+   `disable_error_code = ["type-arg", "misc", "unused-ignore"]`).
+2. **Append a blank line** after the last `disable_error_code = ...`
+   line. This blank line is structurally meaningful — without it, the
+   subsequent `[tool.coverage.run]` table header could be parsed as
+   continuing the `[[tool.mypy.overrides]]` table on some readers.
+3. Append the two new tables AFTER the blank line:
 
 ```toml
+
 [tool.coverage.run]
 source = ["skills/sbtdd/scripts"]
 omit = [
@@ -1868,6 +1904,21 @@ exclude_lines = [
     "def __repr__",
 ]
 ```
+
+4. **Verification**: after editing, run `python -c "import tomllib;
+   import sys; data = tomllib.loads(open('pyproject.toml').read()) if
+   sys.version_info >= (3,11) else __import__('tomli').loads(open('pyproject.toml').read())"`
+   to confirm the file parses as valid TOML. If python < 3.11 and
+   tomli is unavailable, run `python -c "import yaml" || pip install
+   tomli && python -c "import tomli; tomli.loads(open('pyproject.toml').read())"`.
+   The new `[tool.coverage.run]` and `[tool.coverage.report]` tables
+   should be top-level (not nested under any `[[tool.mypy.overrides]]`).
+5. **mypy regression smoke**: run `python -m mypy --version && python -m
+   mypy . | head -20` and confirm output mentions `Success: no issues
+   found` (or the existing pre-Task-17 baseline). If mypy errors
+   appear with messages like `Section [tool.mypy.overrides] does not
+   accept key 'source'`, the append landed inside the wrong table —
+   undo the edit and retry following step 2 carefully.
 
 - [ ] **Step 2: Install dev deps + smoke test**
 
@@ -2017,13 +2068,34 @@ These are NOT plan tasks (no Red-Green-Refactor commits). They are orchestrator-
 Triggered after both Track Alpha + Track Beta close (all `[x]` in plan, state file `current_phase: "done"`):
 
 1. Verify spec-behavior.md + plan-tdd-org.md exist in repo.
-2. Invoke `/sbtdd spec --resume-from-magi` from this Claude Code session:
+
+2. **Pre-flight spec_lint dry-run** (W5 iter 1 fix — balthasar
+   pre-Activity-E gate to catch self-inflicted R1/R2/R4/R5 blocks
+   before they cost wall-time on a doomed `/sbtdd spec` invocation).
+   With Item C shipped (Tasks 7-14), `_run_magi_checkpoint2` will
+   refuse to dispatch MAGI if THIS spec/plan fail lint. Pre-flight
+   runs the lint OUT-OF-BAND so the operator can fix before
+   triggering the gated path:
+
+```bash
+python -m skills.sbtdd.scripts.spec_lint sbtdd/spec-behavior.md
+python -m skills.sbtdd.scripts.spec_lint planning/claude-plan-tdd-org.md
+```
+
+   Exit code 0 (clean) on both files = proceed. Exit code 1 (errors
+   present) = STOP, fix the violations (most likely R1 escenario
+   well-formed if hand-craft missed Given/When/Then bullets, or R5
+   frontmatter docstring drift), commit the spec/plan fix, and
+   re-run the dry-run before continuing. Warnings (R3 monotonic
+   skip) are advisory — surface them but do not block.
+
+3. Invoke `/sbtdd spec --resume-from-magi` from this Claude Code session:
 
 ```bash
 python skills/sbtdd/scripts/run_sbtdd.py spec --resume-from-magi
 ```
 
-3. Verify post-conditions:
+4. Verify post-conditions:
    - No `/brainstorming` or `/writing-plans` subprocess spawn (observable via process tree or stderr breadcrumb).
    - MAGI Checkpoint 2 dispatched on existing artifacts.
    - State file `.claude/session-state.json` written with `plan_approved_at: <ts>` if verdict >= GO_WITH_CAVEATS.
@@ -2107,6 +2179,45 @@ After pre-merge passes:
 3. Append final CHANGELOG `[1.0.2]` sections (Added / Changed / Process notes / Deferred).
 4. Tag `v1.0.2` + push (with explicit user authorization).
 5. Memory write: `project_v102_shipped.md`.
+
+---
+
+## Process notes (iter 1 fix additions)
+
+**I2/I4 — Coverage gate permissive window (Tasks 17 → 19):** between
+Task 17 (which lands `[tool.coverage.report] fail_under = 0`
+placeholder) and Task 19 (which sets the real threshold = `floor(baseline)
+- 2%`), the `make verify` coverage check is structurally a no-op —
+any coverage value passes the `>= 0` gate. This window spans Tasks 17,
+18, and 19 (estimated 6-13h wall-time of Track Beta). It is
+intentional: Task 17 isolates pyproject config wiring, Task 18 isolates
+Makefile target wiring, Task 19 isolates baseline measurement +
+threshold commitment. Splitting these gives clear narrative + atomic
+commits per concern. The trade-off is the permissive window. Mitigation:
+Track Beta MUST proceed Tasks 17 → 18 → 19 sequentially without
+multi-day gap; if interrupted (e.g. quota exhaustion mid-Track-Beta),
+resume MUST land Task 19 before the next track-close. Document this
+constraint in `.claude/auto-run.json` audit trail when applicable.
+
+**I5 — Task close checkbox edit pattern:** Task 1 step 9 explicitly
+shows the checkbox edit pattern:
+
+```bash
+# Edit planning/claude-plan-tdd.md to mark Task N as [x]
+git add planning/claude-plan-tdd.md
+git commit -m "chore: mark task N complete"
+```
+
+Tasks 2-19 step 9 reference this pattern by writing `Task close
+chore: mark task N complete`. The implicit convention is: open
+`planning/claude-plan-tdd.md` (the post-Checkpoint-2 approved plan,
+copied from this org file), find the `### Task N:` header, change its
+top-level `- [ ]` checkbox to `- [x]`, then run the `git add ... &&
+git commit -m "chore: mark task N complete"` pair. Subagents executing
+the plan: this is non-negotiable — the chore commit MUST include the
+`planning/claude-plan-tdd.md` diff, never just an empty commit. The
+state file `.claude/session-state.json` advance happens automatically
+via `/sbtdd close-task` if invoked, or manually otherwise.
 
 ---
 
