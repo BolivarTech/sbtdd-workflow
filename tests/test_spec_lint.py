@@ -56,3 +56,39 @@ def test_lint_spec_clean_file_returns_empty_list(tmp_path):
     findings = lint_spec(spec)
 
     assert findings == []
+
+
+def test_c_r1_1_well_formed_escenario_passes(tmp_path):
+    """C-R1-1: escenario with all bullets returns no R1 finding."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
+        "**Escenario X-1: ejemplo**\n\n"
+        "> **Given** g\n> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    r1 = [f for f in findings if f.rule == "R1"]
+    assert r1 == []
+
+
+def test_c_r1_2_missing_given_fails(tmp_path):
+    """C-R1-2: escenario missing Given block emits R1 error."""
+    from spec_lint import lint_spec
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
+        "**Escenario X-1: bad**\n\n"
+        "> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+
+    findings = lint_spec(spec)
+    r1 = [f for f in findings if f.rule == "R1"]
+    assert len(r1) == 1
+    assert r1[0].severity == "error"
+    assert "given" in r1[0].message.lower()
