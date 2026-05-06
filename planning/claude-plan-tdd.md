@@ -1080,7 +1080,7 @@ def lint_spec(path: Path) -> list[LintFinding]:
 
 ---
 
-### Task 9: Item C — R2 unique IDs (escenarios C-R2-1, C-R2-2)
+### Task 9: Item C — R2 unique IDs (escenarios C-R2-1, C-R2-2) [x]
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/spec_lint.py`
