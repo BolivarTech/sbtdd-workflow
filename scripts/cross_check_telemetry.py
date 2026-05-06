@@ -192,3 +192,44 @@ def format_json(report: TelemetryReport) -> str:
         "truncation_rate": report.truncation_rate,
     }
     return json.dumps(payload, indent=2)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entrypoint for `python scripts/cross_check_telemetry.py [...]`."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="cross_check_telemetry")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(".claude/magi-cross-check"),
+        help="Directory containing iter{N}-{ts}.json artifacts",
+    )
+    parser.add_argument(
+        "--cycle",
+        default="iter*-*.json",
+        help="Glob pattern for iteration files",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("markdown", "json"),
+        default="markdown",
+    )
+    ns = parser.parse_args(argv)
+
+    try:
+        report = aggregate(ns.root, cycle_pattern=ns.cycle)
+    except FileNotFoundError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+
+    if ns.format == "json":
+        sys.stdout.write(format_json(report))
+    else:
+        sys.stdout.write(format_markdown(report))
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
