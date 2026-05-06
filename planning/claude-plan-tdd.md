@@ -603,7 +603,7 @@ def format_json(report: TelemetryReport) -> str:
 
 ---
 
-### Task 4: Item A — CLI wrapper + arg parsing
+### Task 4: Item A — CLI wrapper + arg parsing [x]
 
 **Files:**
 - Modify: `scripts/cross_check_telemetry.py`
