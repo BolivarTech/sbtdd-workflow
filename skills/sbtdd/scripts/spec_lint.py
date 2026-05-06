@@ -42,6 +42,30 @@ _THEN_RE = re.compile(r"^>\s*\*\*Then\*\*", re.MULTILINE)
 _HEADER_RE = re.compile(r"^##\s+(\d+)\.\s", re.MULTILINE)
 
 
+_FRONTMATTER_RE = re.compile(
+    r"^>\s*Generado\s+\d{4}-\d{2}-\d{2}\s+a\s+partir\s+de\s+\S+",
+    re.MULTILINE,
+)
+
+
+def _check_r5(path: Path, text: str) -> list[LintFinding]:
+    """R5: frontmatter docstring in first 30 lines."""
+    head = "\n".join(text.splitlines()[:30])
+    if not _FRONTMATTER_RE.search(head):
+        return [
+            LintFinding(
+                file=path,
+                line=1,
+                rule="R5",
+                severity="error",
+                message=(
+                    "missing frontmatter docstring '> Generado YYYY-MM-DD a partir de <source>'"
+                ),
+            )
+        ]
+    return []
+
+
 def _check_r4(path: Path, text: str) -> list[LintFinding]:
     """R4: cero matches uppercase placeholder (INV-27 mechanical)."""
     findings: list[LintFinding] = []
@@ -156,5 +180,5 @@ def lint_spec(path: Path) -> list[LintFinding]:
     findings.extend(_check_r2(path, text))
     findings.extend(_check_r3(path, text))
     findings.extend(_check_r4(path, text))
-    # Subsequent task 12 fills in R5 check.
+    findings.extend(_check_r5(path, text))
     return findings
