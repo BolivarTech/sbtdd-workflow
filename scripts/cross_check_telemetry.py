@@ -121,3 +121,51 @@ def aggregate(
         agreement_rate=agreement,
         truncation_rate=truncation,
     )
+
+
+def format_markdown(report: TelemetryReport) -> str:
+    """Format a TelemetryReport as human-readable markdown."""
+    if report.total_iters == 0:
+        return "# Cross-check telemetry\n\nNo iterations found.\n"
+    lines = ["# Cross-check telemetry", ""]
+    lines.append(f"Total iters: {report.total_iters}")
+    lines.append(f"Agreement rate: {report.agreement_rate:.2%}")
+    lines.append(f"Truncation rate: {report.truncation_rate:.2%}")
+    lines.append("")
+    lines.append("## Decision distribution")
+    lines.append("| Decision | Count |")
+    lines.append("|---|---|")
+    for k in sorted(report.decision_distribution):
+        lines.append(f"| {k} | {report.decision_distribution[k]} |")
+    lines.append("")
+    lines.append("## Per-iter breakdown")
+    lines.append("| Iter | Verdict | KEEP | DOWNGRADE | REJECT | Truncated |")
+    lines.append("|---|---|---|---|---|---|")
+    for ir in report.per_iter:
+        d = ir.decisions
+        lines.append(
+            f"| {ir.iter} | {ir.verdict} | "
+            f"{d.get('KEEP', 0)} | {d.get('DOWNGRADE', 0)} | "
+            f"{d.get('REJECT', 0)} | {ir.diff_truncated} |"
+        )
+    lines.append("")
+    lines.append("## Per-agent rate")
+    lines.append("| Agent | Findings |")
+    lines.append("|---|---|")
+    agg_agents: dict[str, int] = {}
+    for ir in report.per_iter:
+        for a, c in ir.agents.items():
+            agg_agents[a] = agg_agents.get(a, 0) + c
+    for a in sorted(agg_agents):
+        lines.append(f"| {a} | {agg_agents[a]} |")
+    lines.append("")
+    lines.append("## Per-severity")
+    lines.append("| Severity | Count |")
+    lines.append("|---|---|")
+    agg_sev: dict[str, int] = {}
+    for ir in report.per_iter:
+        for s, c in ir.severity.items():
+            agg_sev[s] = agg_sev.get(s, 0) + c
+    for s in sorted(agg_sev):
+        lines.append(f"| {s} | {agg_sev[s]} |")
+    return "\n".join(lines) + "\n"
