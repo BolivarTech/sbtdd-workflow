@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -324,3 +325,36 @@ def test_cli_missing_root_exit_2(tmp_path, capsys):
 
     assert rc == 2
     assert "not found" in captured.err.lower()
+
+
+@pytest.mark.slow
+def test_a6_linear_performance_100_files(tmp_path):
+    """A-6: 100 valid iter artifacts aggregate < 5s wall-clock (NF32)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from cross_check_telemetry import aggregate  # type: ignore[import-not-found]
+
+    root = tmp_path / "magi-cross-check"
+    root.mkdir()
+    for i in range(1, 101):
+        _make_iter_artifact(
+            root / f"iter{i}-x.json",
+            i,
+            [
+                {
+                    "original_index": 0,
+                    "decision": "KEEP",
+                    "rationale": "ok",
+                    "recommended_severity": None,
+                    "agent": "melchior",
+                    "title": "t",
+                    "severity": "WARNING",
+                }
+            ],
+        )
+
+    t0 = time.monotonic()
+    report = aggregate(root)
+    elapsed = time.monotonic() - t0
+
+    assert report.total_iters == 100
+    assert elapsed < 5.0, f"NF32 violation: {elapsed:.2f}s for 100 files"
