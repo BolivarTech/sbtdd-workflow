@@ -1164,7 +1164,7 @@ Append `findings.extend(_check_r2(path, text))` to `lint_spec`.
 
 ---
 
-### Task 10: Item C — R3 monotonic headers warning (escenarios C-R3-1, C-R3-2)
+### Task 10: Item C — R3 monotonic headers warning (escenarios C-R3-1, C-R3-2) [x]
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/spec_lint.py`
