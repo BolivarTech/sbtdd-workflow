@@ -383,89 +383,41 @@ Pattern hand-coded each cycle. v1.0.4 codifies as plugin feature.
 
 **Tests**: ~15-20 covering escenarios C-1 through C-9.
 
-### 2.4 Item D — Phase auto-advance methodology gap fix (Pillar C LOCKED defensive, Track Beta, doc-only)
+### 2.4 Item D — DEFERRED to v1.0.5 LOCKED (iter 2 scope-trim per spec sec.6.1 G2 ladder)
 
-**Track**: Beta (subagent #2, after Item C).
+**Status**: DEFERRED ENTIRELY. No v1.0.4 implementation work.
 
-**Archivos** (DOC-ONLY, NO production code):
-- Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules — add
-  close-phase per-commit mandate).
-- Modify: `templates/CLAUDE.local.md.template` (template guidance
-  to destination projects).
-- Modify: writing-plans skill prompt extension (plan template
-  generation includes close-phase commands per Red/Green/Refactor
-  step, NOT raw `git commit`).
-- Create: `tests/test_close_phase_subagent_pattern.py` (smoke test
-  for doc-coherence; pattern follows v1.0.2 Item E doc-only smoke).
+**Rationale (iter 2 scope-trim Option D selected by user 2026-05-07)**:
 
-**Empirical context**: v1.0.3 Track Alpha + Track Beta both had to
-manually edit `.claude/session-state.json` to advance
-`current_phase` from `red` → `refactor` before invoking close-task.
-Plan's literal `git commit` commands skip the close-phase wrapper
-that does phase advance. v1.0.2 Q2 Option B mandate
-(`/sbtdd close-task` automation) was insufficient because plans
-still emitted raw `git commit` instructions per Red/Green/Refactor
-phase commit.
+iter 2 surfaced 3 CRITICAL findings — caspar's CRITICAL #3 ("§3
+cross-module contract contradicts §2.4 + plan T9 — close_task_cmd IS
+modified") + persistent 3-agent WARNING (melchior + balthasar +
+caspar) about Item D 3-touchpoint doc-only enforcement INSUFFICIENCY
+(third consecutive cycle of doc-only convention attempts: v1.0.2 Q2
+Option B I5 process notes; v1.0.3 dogfood demonstrated divergence;
+v1.0.4 attempted 3-touchpoint multiplication + tripwire fold-in).
 
-**Implementation (Q3 Option B — mandate close-phase per phase commit)**:
+Per spec sec.6.1 iter-2 CRITICAL trigger pre-stage: "scope-trim
+ladder defers Item D doc-only first → defer Item C parallel
+dispatcher second → Items A+B hard-LOCKED". Trigger fired; ladder
+applied at first step (defer Item D).
 
-1. `skills/sbtdd/SKILL.md` orchestrator rules add explicit:
-   > Subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py
-   > close-phase` after each Red/Green/Refactor verify-clean. Manual
-   > `git commit` per phase BYPASSES the phase-advance + state-file
-   > update + verification gate; treated as NON-CONFORMING and
-   > triggers drift detection on next `close-task`.
+**v1.0.5 LOCKED commitment**: Item D ships as Q3 OPTION A — code-side
+enforcement via `close_task_cmd._preflight` modification. Architectural
+preference 3-agent unanimous. NOT doc-only multiplication. Specifics
+deferred to v1.0.5 brainstorming + plan.
 
-2. `templates/CLAUDE.local.md.template` updated to include the
-   per-phase close-phase rule + reference to close-phase command +
-   reference to v1.0.4 Item D rationale.
+**v1.0.4 surfaces NOT touched by Item D scope-trim**:
+- `skills/sbtdd/SKILL.md` — unchanged in v1.0.4.
+- `templates/CLAUDE.local.md.template` — unchanged in v1.0.4.
+- writing-plans skill prompt extension — unchanged in v1.0.4.
+- `skills/sbtdd/scripts/close_task_cmd.py` — unchanged in v1.0.4.
+- `tests/test_close_phase_subagent_pattern.py` — NOT created in v1.0.4.
+- `tests/test_close_task_cmd.py` — no D-4 tripwire test in v1.0.4.
 
-3. Writing-plans skill prompt extension: plan template generation
-   produces TDD steps as:
-   ```markdown
-   - [ ] **Step N (Red): Write failing test**
-
-   ```python
-   ...
-   ```
-
-   - [ ] **Step N+1: Run pytest -v, verify FAIL**
-   - [ ] **Step N+2: close-phase Red**
-
-   Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-   Expected: pytest verify-clean fails (Red phase legitimacy),
-   atomic `test:` commit landed, state file advances to `green`.
-   ```
-
-4. Smoke test in `tests/test_close_phase_subagent_pattern.py`:
-   - Asserts that `skills/sbtdd/SKILL.md` contains the per-phase
-     close-phase mandate string (case-sensitive substring match).
-   - Asserts that `templates/CLAUDE.local.md.template` contains
-     the same.
-   - Asserts that the writing-plans skill prompt extension (or
-     template fixture) contains the close-phase command in
-     per-phase steps (ASCII-anchored regex).
-
-5. **iter 1 triage WARNING #5 fold-in — soft-warning tripwire**:
-   `close_task_cmd._preflight` detects when the active task's
-   commit chain since `phase_started_at_commit` lacks at least one
-   `test:` + one `feat:|fix:` + one `refactor:` prefix (i.e.,
-   close-phase per phase was bypassed via raw `git commit`). When
-   detected, emits stderr WARNING:
-   > `[sbtdd close-task] WARNING: Phase advance gate appears bypassed
-   > (no test:/feat:|fix:/refactor: triplet in commit chain since
-   > {phase_started_at_commit}). Per v1.0.4 Item D mandate, subagents
-   > MUST invoke `close-phase` after each Red/Green/Refactor verify-
-   > clean. Continuing close-task; revisit close-phase per-phase
-   > convention.`
-   - Soft-warning ONLY (does NOT block close-task; SBTDD-friendly).
-   - ~5 LOC + 2 tests (escenario D-4 below).
-   - Converts unobservable doc drift into runtime signal per
-     melchior+balthasar+caspar 3-agent agreement on Item D 3-touchpoint
-     enforcement insufficiency.
-
-**Tests**: ~5-7 covering escenarios D-1 through D-4.
+The Q3 Option B 3-touchpoint mandate that v1.0.4 originally proposed
+is REVERTED in scope. The Q2 v1.0.2 Option B `/sbtdd close-task`
+automation mandate (single I5 touchpoint) remains in force unchanged.
 
 ### 2.5 Activity D' retry — Linux/POSIX dogfood completion (methodology, mid-cycle orchestrator)
 
@@ -622,21 +574,28 @@ Non-gating for ship.
 
 ## 3. Cross-module contracts
 
-v1.0.4 NO introduce nuevos cross-cuts mas alla de:
+v1.0.4 NO introduce nuevos cross-cuts mas alla de (post iter 2
+scope-trim Option D):
 
-- **Item A+B coupled**: extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set
-  + add `_is_headless_context` + add `_build_headless_recovery_message`
-  in `superpowers_dispatch.py`. Existing `invoke_skill` signature
+- **Item A+B coupled (post iter 1 triage SIMPLIFIED)**: extend
+  `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + add
+  `_build_recovery_message` + `_PER_SKILL_RECOVERY` mapping in
+  `superpowers_dispatch.py`. Existing `invoke_skill` signature
   preserved (positional + kwargs); `allow_interactive_skill=False`
-  default unchanged.
+  default unchanged. NO `_is_headless_context()` helper. NO env-var
+  detection. Gate is membership-based + override.
 - **Item C**: NEW modules `dag_parser.py` + `parallel_dispatcher.py`
   with explicit public API. No mutation of existing helpers.
   `auto_cmd.py` adds `--parallel` flag; sequential default
-  unchanged.
-- **Item D**: doc-only; NO Python module changes. Adds
-  `tests/test_close_phase_subagent_pattern.py` smoke.
+  unchanged. Cycle detection iterative (Kahn's). Antichain partition
+  deterministic (sorted task IDs).
+- **Item D**: DEFERRED ENTIRELY to v1.0.5 LOCKED per iter 2 G2
+  scope-trim Option D. NO v1.0.4 modifications to `close_task_cmd`,
+  `SKILL.md`, `templates/CLAUDE.local.md.template`, or writing-plans
+  extension. NO new tests `test_close_phase_subagent_pattern.py` or
+  D-4 tripwire tests in `test_close_task_cmd.py`.
 
-**Contratos preservados (no modificados)**:
+**Contratos preservados (no modificados) en v1.0.4**:
 
 - `PreconditionError` / `ValidationError` / `MAGIGateError` (existing
   en `errors.py`).
@@ -646,9 +605,9 @@ v1.0.4 NO introduce nuevos cross-cuts mas alla de:
 - `_run_magi_checkpoint2` (v1.0.0+v1.0.1+v1.0.2) unchanged.
 - INV-37 composite-signature output validation tripwire (v1.0.1)
   unchanged.
-- `close_phase_cmd` + `close_task_cmd` unchanged (Item D Q3 Option
-  B doc-only does NOT modify these per design — code path
-  preserved).
+- `close_phase_cmd` + `close_task_cmd` unchanged (Item D DEFERRED
+  per iter 2 scope-trim; v1.0.5 will modify `close_task_cmd._preflight`
+  per Option A code-side enforcement architecture).
 - `state_file.SessionState` schema unchanged.
 - `commits.validate_prefix` unchanged.
 
@@ -858,7 +817,19 @@ Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 > shared barrier to maximize race exposure; asserts final
 > JSON parses correctly + matches one of the expected states.
 
-### 4.4 Item D — Phase auto-advance methodology gap fix (doc-only + soft-warning tripwire)
+### 4.4 Item D — DEFERRED to v1.0.5 LOCKED (iter 2 scope-trim Option D)
+
+Escenarios D-1 through D-4 originally specified for v1.0.4 are
+DEFERRED ENTIRELY to v1.0.5. No D-* escenarios apply to v1.0.4 ship
+acceptance criteria.
+
+v1.0.5 brainstorming will redesign Item D per Q3 OPTION A
+(code-side enforcement via `close_task_cmd._preflight`) producing
+new escenarios. The v1.0.4 D-1..D-4 escenarios below are preserved
+as historical context only — DO NOT IMPLEMENT in v1.0.4.
+
+<details>
+<summary>v1.0.4-deferred D-* escenarios (historical reference only — DEFERRED)</summary>
 
 **Escenario D-1: SKILL.md mandates close-phase per-phase**
 
@@ -908,6 +879,8 @@ Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 > insufficiency. Two test cases: (a) bypass detected → WARNING
 > emitted; (b) close-phase used per phase (commit chain has triplet)
 > → no WARNING.
+
+</details>
 
 ---
 
@@ -1199,45 +1172,56 @@ python skills/magi/scripts/run_magi.py code-review \
 
 v1.0.4 ship-ready cuando:
 
-### 9.1 Functional Items A-D + Activities D'-E'
+### 9.1 Functional Items A-C + Activities D'-E' (post iter 2 scope-trim Option D — Item D DEFERRED)
 
-- **F1**. F145-F150 (Item A): real headless detection (env var +
-  isatty + override) + extended `_SUBPROCESS_INCOMPATIBLE_SKILLS`
-  set + module docstring criteria documented + backward compat
-  preserved.
-- **F2**. F151-F152 (Item B): PreconditionError messages + per-skill
-  recovery dictionary + 600s hang elimination by construction.
-- **F3**. F153-F157 (Item C): parallel dispatcher (DAG parser +
-  antichain identification + file surface collision detection +
-  cumulative-diff Loop 2 + sequential default preserved).
-- **F4**. F158-F161 (Item D): doc-only per-phase close-phase
-  mandate in SKILL.md + CLAUDE.local.md.template + writing-plans
-  skill prompt extension + smoke test.
+- **F1**. F145-F150 (Item A post iter 1+2 triage SIMPLIFIED):
+  membership-based gate (no env-var/isatty heuristic) + extended
+  `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + module docstring criteria
+  documented + backward compat preserved (v1.0.1 wrappers via
+  `allow_interactive_skill=True`).
+- **F2**. F151-F152 (Item B post iter 1 triage SIMPLIFIED):
+  `_build_recovery_message` + per-skill recovery dictionary + 600s
+  hang elimination by construction (gate fires PRE-spawn regardless
+  of caller TTY state).
+- **F3**. F153-F157 (Item C post iter 1+2 triage): parallel dispatcher
+  (DAG parser code-fence-aware + iterative cycle detection +
+  antichain identification + file-surface collision detection
+  deterministic via sorted IDs + cumulative-diff Loop 2 + sequential
+  default preserved + concurrent state-file write race test).
+- ~~**F4** (Item D)~~: **DEFERRED to v1.0.5 LOCKED** per iter 2
+  scope-trim Option D. v1.0.5 brainstorming will redesign Item D
+  per Q3 OPTION A code-side enforcement architecture. No v1.0.4
+  ship acceptance criterion for Item D.
 - **F5** (methodology): Activity D' retry empirical validation
-  (cross-check + Loop 1 triage step pass).
+  (gate fires PRE-spawn for `/receiving-code-review` invocation by
+  pre_merge_cmd; manual recovery path completes Loop 1 without
+  600s hang).
 - **F6** (methodology): Activity E'-pre empirical validation
   (`--resume-from-magi` happy path on plan-approval phase).
-- **F7** (methodology): Activity E'-post empirical validation
-  (R10 + R4 observability post-impl, non-gating).
-- **F8** (methodology): parallel dispatcher dogfood
-  (chicken-and-egg empirical signal post Track Beta close).
+- **F7** (methodology, BEST-EFFORT post iter 2 scope-trim): Activity
+  E'-post (`--resume-from-magi` post-impl smoke; non-gating).
+- **F8** (methodology, BEST-EFFORT post iter 2 scope-trim): parallel
+  dispatcher dogfood (chicken-and-egg signal; non-gating).
 
 ### 9.2 No-functional
 
 - **NF-A**. `make verify` clean: pytest + ruff check + ruff format +
   mypy --strict + coverage >= 88%, runtime <= 165s. Soft-target
   <= 155s.
-- **NF-B**. Tests baseline 1105 + 1 skipped + ~35-50 nuevos =
-  ~1140-1155 final.
-- **NF-C**. Cross-platform (Windows + POSIX) — Item A headless
-  detection validated on both via env var + isatty.
+- **NF-B**. Tests baseline 1105 + 1 skipped + ~25-35 nuevos (post
+  iter 2 scope-trim of Item D tripwire tests) = ~1130-1140 final.
+- **NF-C**. Cross-platform (Windows + POSIX) — Item C concurrent
+  state-file write test validated on both (multiprocessing.Process
+  with shared barrier).
 - **NF-D**. Author/Version/Date headers en archivos modificados/
   nuevos.
 - **NF-E**. Zero modificacion a modulos frozen excepto los
-  enumerados: `superpowers_dispatch.py` (Items A+B); nuevos
-  modulos (`dag_parser.py`, `parallel_dispatcher.py`); `auto_cmd.py`
-  (Item C `--parallel` flag wiring); `skills/sbtdd/SKILL.md` +
-  `templates/CLAUDE.local.md.template` (Item D doc).
+  enumerados: `superpowers_dispatch.py` (Items A+B simplified);
+  nuevos modulos (`dag_parser.py`, `parallel_dispatcher.py`);
+  `auto_cmd.py` (Item C `--parallel` flag wiring). NO modificacion
+  a `close_task_cmd.py`, `skills/sbtdd/SKILL.md`,
+  `templates/CLAUDE.local.md.template`, ni writing-plans extension
+  (Item D DEFERRED).
 
 ### 9.3 Process
 
@@ -1263,22 +1247,24 @@ v1.0.4 ship-ready cuando:
 - **P8**. `/sbtdd pre-merge` exercised end-to-end during pre-merge
   phase (Activity D' retry).
 - **P9**. v1.0.4 own-cycle uses Item C parallel dispatcher during
-  Track Beta own-cycle (parallel dispatcher dogfood).
+  Track Beta own-cycle (parallel dispatcher dogfood) — BEST-EFFORT,
+  non-gating per iter 2 scope-trim demote.
 
 ### 9.4 Distribution
 
 - **D1**. Plugin instalable desde `BolivarTech/sbtdd-workflow`
   marketplace (`bolivartech-sbtdd`).
 - **D2**. Cross-artifact coherence tests actualizados (CHANGELOG,
-  CLAUDE.md, README, SKILL.md mention v1.0.4 ship + 4 plan tasks
-  across 3 pillars + 4 methodology activities + dogfood
-  observations).
-- **D3**. Nuevos modulos + flags + env vars documentados:
+  CLAUDE.md, README, SKILL.md mention v1.0.4 ship — Items A+B+C
+  shipped (2 pillars: A real headless gate + B parallel dispatcher);
+  Item D DEFERRED to v1.0.5 LOCKED).
+- **D3**. Nuevos modulos + flags documentados:
   - `dag_parser.py` + `parallel_dispatcher.py` en README + SKILL.md.
   - `--parallel` flag en `auto_cmd` documented.
-  - `SBTDD_HEADLESS` + `SBTDD_INTERACTIVE` env vars documented.
-  - Per-phase close-phase mandate documented in plan template +
-    SKILL.md + CLAUDE.local.md.template.
+  - NO env vars introduced (post iter 1 triage simplification dropped
+    `SBTDD_HEADLESS`/`SBTDD_INTERACTIVE` env vars).
+  - Item D DEFERRED to v1.0.5 — no plan template / SKILL.md /
+    CLAUDE.local.md.template changes in v1.0.4.
 
 ---
 

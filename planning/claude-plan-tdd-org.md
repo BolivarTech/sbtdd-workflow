@@ -5,10 +5,11 @@
 > Q1+Q2+Q3+Q4+Q5 resolved). Frontmatter required by spec_lint R5
 > (Item C v1.0.2 enforcement).
 >
-> v1.0.4 ships 3 pillars: Pillar A (Items A+B coupled subprocess-
-> incompatible gate + 600s LOUD-FAST fix); Pillar B (Item C parallel
-> task dispatcher with --parallel flag); Pillar C (Item D doc-only
-> per-phase close-phase mandate + soft-warning tripwire).
+> v1.0.4 ships 2 pillars (post iter 2 scope-trim Option D 2026-05-07):
+> Pillar A (Items A+B coupled subprocess-incompatible gate + 600s
+> LOUD-FAST fix); Pillar B (Item C parallel task dispatcher with
+> --parallel flag). **Pillar C (Item D) DEFERRED ENTIRELY to v1.0.5
+> LOCKED** per spec sec.6.1 G2 ladder firing on iter 2 CRITICAL #3.
 >
 > **iter 1 triage applied 2026-05-07** (post Checkpoint 2 iter 1
 > verdict GO_WITH_CAVEATS 3-0; 2 CRITICAL + 14 WARNING + 5 INFO):
@@ -19,18 +20,28 @@
 > dag_parser + code-fence-aware regex + iterative cycle detection
 > (WARNING melchior + caspar). Task 7 deterministic sort + synthetic
 > concurrent state-file write test (WARNING melchior + balthasar).
-> Task 9 + soft-warning tripwire in close-task (~5 LOC + 2 tests).
 >
-> Effective task layout post-triage: 8 tasks (4 Alpha + 4 Beta).
-> Task numbering preserved 1-9 with T2 marked ABSORBED.
+> **iter 2 surgical fixes + scope-trim applied 2026-05-07** (post
+> Checkpoint 2 iter 2 verdict GO_WITH_CAVEATS 3-0; 3 CRITICAL + 11
+> WARNING + 6 INFO; iter-2 CRITICAL trigger fired): Task 6
+> _detect_cycle converted recursive DFS → iterative Kahn's (CRITICAL
+> #1 surgical fix). Task 7 partition_by_collision sorts task IDs
+> ascending before greedy packing (CRITICAL #2 surgical fix).
+> **Task 9 DEFERRED ENTIRELY** per Option D (CRITICAL #3 + 3-agent
+> WARNING about doc-only insufficiency). Activity D' retry drops
+> SBTDD_INTERACTIVE=1 step.
+>
+> Effective task layout post-iter-2-trim: 7 active tasks (4 Alpha +
+> 3 Beta). Task numbering preserved 1-9 with T2 ABSORBED + T9
+> DEFERRED.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax (open + closed bracket forms) for tracking.
 
-**Goal:** Ship v1.0.4 — eliminate `/receiving-code-review` interactive subprocess hang via subprocess-incompatible gate (membership + override semantics; pre-spawn block) coupled with 600s LOUD-FAST PreconditionError fix; codify multi-track parallel subagent pattern as plugin feature via `--parallel` flag on `/sbtdd auto`; mandate per-phase close-phase commands via 3-touchpoint doc-only enforcement (SKILL.md + CLAUDE.local.md.template + writing-plans skill prompt extension) PLUS soft-warning tripwire in `close_task_cmd._preflight` (iter 1 triage WARNING fold-in). 8 plan tasks (1 ABSORBED) across 2 parallel subagent tracks; 4 methodology activities (Activity E'-pre + Activity D' retry + Activity E'-post + parallel dispatcher dogfood) executed by orchestrator.
+**Goal:** Ship v1.0.4 — eliminate `/receiving-code-review` interactive subprocess hang via subprocess-incompatible gate (membership + override semantics; pre-spawn block) coupled with 600s LOUD-FAST PreconditionError fix; codify multi-track parallel subagent pattern as plugin feature via `--parallel` flag on `/sbtdd auto`. **Item D (per-phase close-phase mandate + tripwire) DEFERRED ENTIRELY to v1.0.5 LOCKED** per iter 2 scope-trim Option D — v1.0.5 will ship Q3 OPTION A code-side enforcement architecture instead. 7 active plan tasks (T2 ABSORBED, T9 DEFERRED) across 2 parallel subagent tracks; 4 methodology activities (Activity E'-pre + Activity D' retry + Activity E'-post + parallel dispatcher dogfood) executed by orchestrator (last 2 demoted to BEST-EFFORT non-gating per iter 2 scope-trim).
 
-**Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (Items A+B coupled, 4 sequential tasks post-triage; T2 ABSORBED into T1) modifies `skills/sbtdd/scripts/superpowers_dispatch.py` + extends `tests/test_superpowers_dispatch.py` + `tests/test_invoke_skill_callsites_audit.py`. Track Beta (Items C+D sequential, 4 tasks) creates `skills/sbtdd/scripts/dag_parser.py` + `skills/sbtdd/scripts/parallel_dispatcher.py` (NEW modules), modifies `skills/sbtdd/scripts/auto_cmd.py` + tests, applies Item D doc-only updates to `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template` + writing-plans skill prompt extension + smoke test, AND modifies `skills/sbtdd/scripts/close_task_cmd.py` (~5 LOC tripwire) + extends `tests/test_close_task_cmd.py` (2 tests). Cero file overlap. Activities mid-cycle (E'-pre before Track dispatch; D' retry + E'-post + parallel dogfood after Track close) run in orchestrator session before pre-merge gate.
+**Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (Items A+B coupled, 4 sequential tasks post-triage; T2 ABSORBED into T1) modifies `skills/sbtdd/scripts/superpowers_dispatch.py` + extends `tests/test_superpowers_dispatch.py` + `tests/test_invoke_skill_callsites_audit.py`. Track Beta (Item C only post iter 2 scope-trim, 3 tasks T6+T7+T8; T9 DEFERRED) creates `skills/sbtdd/scripts/dag_parser.py` + `skills/sbtdd/scripts/parallel_dispatcher.py` (NEW modules), modifies `skills/sbtdd/scripts/auto_cmd.py` + tests. **No Item D doc-only or tripwire modifications in v1.0.4** (deferred). Cero file overlap. Activities mid-cycle (E'-pre before Track dispatch; D' retry after Track close; E'-post + parallel dogfood best-effort) run in orchestrator session before pre-merge gate.
 
-**State file write serialization**: Track Alpha owns Tasks 1-5 (sequential close, T2 ABSORBED no-op). Track Beta owns Tasks 6-9 (sequential close). State file `current_task_id` advances 1 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → done (skipping 2 by ABSORBED-no-op). `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Concurrent close-task invocations against disjoint task IDs are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3 precedent + v1.0.4 Task 7 synthetic concurrent test (iter 1 triage W6 fold-in).
+**State file write serialization**: Track Alpha owns Tasks 1-5 (sequential close, T2 ABSORBED no-op). Track Beta owns Tasks 6-8 (sequential close, T9 DEFERRED no-op). State file `current_task_id` advances 1 → 3 → 4 → 5 → 6 → 7 → 8 → done (skipping 2 ABSORBED + 9 DEFERRED). `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Concurrent close-task invocations against disjoint task IDs are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3 precedent + v1.0.4 Task 7 synthetic concurrent test (iter 1 triage W6 fold-in).
 
 **Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active in same worktree (parallel-safe per spec sec.3 since Tracks have disjoint surfaces). Brainstorming refinements 2026-05-07: Q1 = 2-track parallel (Alpha A+B coupled, Beta C+D sequential); Q2 = Item C `--parallel` flag on `/sbtdd auto` (no new subcommand); Q3 = Item D Option B mandate close-phase per phase commit via 3-touchpoint doc-only; Q4 = Activity E' Option C both pre + post Track-close exercises; Q5 auto-resolved cap=3 HARD G1, iter-2 CRITICAL trigger pre-staged.
 
@@ -212,18 +223,14 @@ Expected: Task 1 checkboxes flipped, `chore:` commit, state file advances `curre
 
 ---
 
-### Task 2: ABSORBED INTO TASK 1 (iter 1 triage CRITICAL #1+#2 simplification)
+### Task 2: ABSORBED INTO TASK 1 (iter 1 triage CRITICAL #1+#2; iter 2 confirmed)
 
 **Status**: ABSORBED — no implementation work required.
 
-**Rationale**: iter 1 triage SIMPLIFIED Item A — dropped `_is_headless_context()` helper + env-var detection per caspar CRITICAL #1+#2 verifying the original heuristic does NOT fix the v1.0.3 bug. The set extension that was Task 2's scope is now part of Task 1 (Step 4 extends both set + module docstring atomically). Remaining Task 1 absorbs Task 2's escenario A-5 coverage.
-
-- [ ] **Single step: ABSORBED — no-op for subagents**
-
-This task header is preserved for plan numbering continuity. The
-subagent does NOT execute steps for Task 2; orchestrator will
-advance state file from `current_task_id: 1 → 3` upon Task 1 close
-(see Task 1 close-task Step 9). No commit produced for Task 2.
+iter 1 triage SIMPLIFIED Item A. Set extension that was Task 2's
+scope is part of Task 1 Step 4. Subagents skip this header entirely;
+orchestrator advances state file from `current_task_id: 1 → 3`
+upon Task 1 close. No commits, no tests, no execution work for T2.
 
 #### Red Phase
 
@@ -1333,53 +1340,93 @@ def _extract_dependencies(task_text: str) -> set[str]:
     return deps
 
 
+_CODE_FENCE_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
+
+
+def _strip_code_fences(plan_text: str) -> str:
+    """Replace markdown code-fenced regions with blank lines preserving line numbers.
+
+    Per iter 1 triage WARNING #3+#15 + iter 2 verification: ### Task N:
+    headers inside code fences are EXAMPLES (e.g., writing-plans extension
+    template) and MUST NOT pollute the graph as phantom tasks. Replace
+    fenced regions with same number of blank lines so byte offsets used
+    by downstream regexes remain stable.
+    """
+    def _replace(match: re.Match[str]) -> str:
+        return "\n" * match.group(0).count("\n")
+    return _CODE_FENCE_RE.sub(_replace, plan_text)
+
+
 def _split_task_blocks(plan_text: str) -> list[tuple[str, str, str]]:
     """Split plan text into (task_id, title, body) tuples.
 
     Returns one entry per ### Task N: block, with body containing
     everything from the header up to (but not including) the next
-    ### Task N: header or end-of-file.
+    ### Task N: header or end-of-file. Code-fenced regions are
+    stripped before regex application (iter 1 triage WARNING #3+#15).
     """
-    headers = list(_TASK_HEADER_RE.finditer(plan_text))
+    cleaned = _strip_code_fences(plan_text)
+    headers = list(_TASK_HEADER_RE.finditer(cleaned))
     if not headers:
         return []
     blocks: list[tuple[str, str, str]] = []
     for i, m in enumerate(headers):
         start = m.end()
-        end = headers[i + 1].start() if i + 1 < len(headers) else len(plan_text)
-        body = plan_text[start:end]
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(cleaned)
+        body = cleaned[start:end]
         blocks.append((m.group(1), m.group(2).strip(), body))
     return blocks
 
 
 def _detect_cycle(edges: dict[str, set[str]]) -> list[str] | None:
-    """Return cycle path if found, else None. Tarjan-style DFS."""
-    visited: set[str] = set()
-    stack: set[str] = set()
-    path: list[str] = []
+    """Return cycle path if found, else None.
 
-    def dfs(node: str) -> list[str] | None:
-        if node in stack:
-            cycle_start = path.index(node)
-            return path[cycle_start:] + [node]
-        if node in visited:
-            return None
-        visited.add(node)
-        stack.add(node)
-        path.append(node)
-        for dep in edges.get(node, set()):
-            cycle = dfs(dep)
-            if cycle is not None:
-                return cycle
-        stack.discard(node)
-        path.pop()
+    iter 1 triage WARNING #16 + iter 2 CRITICAL #1 fix: ITERATIVE
+    Kahn's algorithm. Nodes whose dependencies are all completed get
+    removed from the graph progressively; any node never removed
+    participates in a cycle. Eliminates Python recursion limit failure
+    mode for plans with > 1000 dependency depth.
+    """
+    in_degree: dict[str, int] = {node: 0 for node in edges}
+    for node, deps in edges.items():
+        for dep in deps:
+            in_degree.setdefault(dep, 0)
+    for node, deps in edges.items():
+        for _ in deps:
+            in_degree[node] = in_degree.get(node, 0) + 1
+
+    queue = [node for node, deg in in_degree.items() if deg == 0]
+    completed: set[str] = set()
+    while queue:
+        node = queue.pop(0)
+        completed.add(node)
+        # When `node` completes, every dependent of `node` (i.e., every
+        # X where `node` in edges[X]) loses one inbound edge.
+        for x, deps in edges.items():
+            if node in deps and x not in completed and x not in queue:
+                in_degree[x] -= 1
+                if in_degree[x] == 0:
+                    queue.append(x)
+
+    leftover = set(in_degree.keys()) - completed
+    if not leftover:
         return None
-
-    for node in edges:
-        cycle = dfs(node)
-        if cycle is not None:
-            return cycle
-    return None
+    # Reconstruct cycle path by following edges from any leftover node.
+    start = sorted(leftover)[0]
+    path: list[str] = [start]
+    seen: set[str] = {start}
+    current = start
+    while True:
+        next_nodes = [d for d in edges.get(current, set()) if d in leftover]
+        if not next_nodes:
+            return path
+        nxt = sorted(next_nodes)[0]
+        if nxt in seen:
+            cycle_start = path.index(nxt)
+            return path[cycle_start:] + [nxt]
+        path.append(nxt)
+        seen.add(nxt)
+        current = nxt
 
 
 def parse_plan(plan_path: Path) -> TaskGraph:
@@ -1680,6 +1727,10 @@ def partition_by_collision(
     into sub-batches so that every task in a sub-batch is
     pairwise-disjoint with every other task in the same sub-batch.
 
+    iter 1 triage WARNING #7 + iter 2 CRITICAL #2 fix: input task IDs
+    are SORTED ASCENDING before greedy first-fit packing -- output is
+    deterministic regardless of Python set iteration order.
+
     Args:
         antichain: Set of task IDs (output of TaskGraph.antichains()).
         graph: The TaskGraph (for Task lookup).
@@ -1691,7 +1742,7 @@ def partition_by_collision(
     """
     if not antichain:
         return []
-    remaining = list(antichain)
+    remaining = sorted(antichain)  # iter 2 CRITICAL #2 fix: deterministic order
     sub_batches: list[set[str]] = []
     while remaining:
         head = remaining.pop(0)
@@ -2035,432 +2086,26 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 ---
 
-### Task 9: Item D — Per-phase close-phase doc-only mandate + soft-warning tripwire + escenarios D-1 + D-2 + D-3 + D-4 (iter 1 triage WARNING #5 fold-in)
+### Task 9: Item D — DEFERRED ENTIRELY to v1.0.5 (iter 2 scope-trim Option D)
 
-**Files:**
-- Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules)
-- Modify: `templates/CLAUDE.local.md.template` (template guidance to destination projects)
-- Modify: writing-plans skill prompt extension (template for plan generation)
-- Create: `tests/test_close_phase_subagent_pattern.py` (smoke test, doc-coherence)
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (~5 LOC tripwire in `_preflight`)
-- Extend: `tests/test_close_task_cmd.py` (2 tests for D-4 tripwire detection)
+**Status**: DEFERRED — no v1.0.4 implementation work. Subagents skip this header entirely; orchestrator advances state file from `current_task_id: 8 → done` upon Task 8 close (no T9 work to perform).
 
-Covers escenarios D-1, D-2, D-3, D-4 from spec sec.4.4.
+**Rationale (iter 2 Checkpoint 2 scope-trim per spec sec.6.1 G2 ladder)**: iter 2 surfaced 3 CRITICAL findings; caspar CRITICAL #3 ("§3 cross-module contract contradicts §2.4 + plan T9") + persistent 3-agent WARNING (melchior + balthasar + caspar) about Item D 3-touchpoint doc-only enforcement INSUFFICIENCY (third consecutive cycle of doc-only convention attempts: v1.0.2 Q2 Option B I5 process notes; v1.0.3 dogfood demonstrated divergence; v1.0.4 attempted 3-touchpoint multiplication + tripwire fold-in). Per spec sec.6.1 iter-2 CRITICAL trigger pre-stage: scope-trim ladder defers Item D first. User selected Option D (hybrid: surgical fixes for #1+#2 + scope-trim Item D for #3) on 2026-05-07.
 
-**iter 1 triage WARNING #5 fold-in** (3-agent agreement: melchior + balthasar + caspar): tripwire in `close_task_cmd._preflight` detects when commit chain since `phase_started_at_commit` lacks the `test:`/`feat:|fix:`/`refactor:` triplet (i.e., subagent emitted raw `git commit` per phase instead of `close-phase`). Soft-warning to stderr; does NOT block close-task. Converts unobservable doc drift into runtime signal.
+**v1.0.5 LOCKED commitment**: Item D ships as **Q3 OPTION A** — code-side enforcement via `close_task_cmd._preflight` modification. Architectural preference confirmed by 3-agent unanimous flag in v1.0.4 iter 1 + iter 2. NOT doc-only multiplication. Specifics deferred to v1.0.5 brainstorming + plan.
 
-#### Red Phase
+**v1.0.4 surfaces NOT touched in this cycle**:
+- `skills/sbtdd/SKILL.md` — unchanged in v1.0.4.
+- `templates/CLAUDE.local.md.template` — unchanged in v1.0.4.
+- writing-plans skill prompt extension — unchanged / NOT created in v1.0.4.
+- `skills/sbtdd/scripts/close_task_cmd.py` — unchanged in v1.0.4.
+- `tests/test_close_phase_subagent_pattern.py` — NOT created in v1.0.4.
+- `tests/test_close_task_cmd.py` — no D-4 tripwire test in v1.0.4.
 
-- [ ] **Step 1: Write the failing tests**
-
-Create `tests/test_close_phase_subagent_pattern.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-07
-"""v1.0.4 Item D — close-phase per-phase mandate doc-coherence smoke test.
-
-Covers escenarios D-1, D-2, D-3 from spec sec.4.4. Pattern follows
-v1.0.2 Item E doc-only smoke (`tests/test_close_task_subagent_pattern.py`).
-
-The actual code path of `/sbtdd close-phase` is covered by
-`tests/test_close_phase_cmd.py`; this smoke asserts that documentation
-references it from the 3 mandated touchpoints (Q3 Option B 3-touchpoint
-enforcement vs v1.0.2 single I5 process notes).
-"""
-
-from __future__ import annotations
-
-import re
-from pathlib import Path
-
-import pytest
-
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_d1_skill_md_mandates_close_phase_per_phase():
-    """D-1: SKILL.md contains the per-phase close-phase mandate."""
-    skill_md = _REPO_ROOT / "skills" / "sbtdd" / "SKILL.md"
-    text = skill_md.read_text(encoding="utf-8")
-    # Mandate text must reference close-phase per Red/Green/Refactor
-    assert "close-phase" in text
-    assert "Red" in text and "Green" in text and "Refactor" in text
-    # Mandate explicitly states manual `git commit` per phase is non-conforming
-    assert re.search(
-        r"manual.+git\s+commit.+(BYPASS|NON-CONFORMING)",
-        text,
-        re.IGNORECASE | re.DOTALL,
-    ), (
-        "SKILL.md must explicitly state that manual `git commit` per phase "
-        "BYPASSES close-phase / is NON-CONFORMING (Q3 Option B mandate)."
-    )
-
-
-def test_d2_claude_local_template_references_close_phase():
-    """D-2: CLAUDE.local.md.template references close-phase per phase."""
-    template = _REPO_ROOT / "templates" / "CLAUDE.local.md.template"
-    text = template.read_text(encoding="utf-8")
-    assert "close-phase" in text, (
-        "CLAUDE.local.md.template must reference close-phase command per "
-        "Q3 Option B 3-touchpoint enforcement."
-    )
-    # Template must reference the per-phase Red/Green/Refactor pattern
-    assert re.search(r"Red.+Green.+Refactor", text, re.DOTALL), (
-        "Template must document close-phase per Red/Green/Refactor cycle."
-    )
-
-
-def test_d3_writing_plans_template_uses_close_phase_in_steps():
-    """D-3: writing-plans skill prompt extension generates close-phase steps."""
-    # The extension is documented either in SKILL.md OR a dedicated template
-    # under templates/. Prefer searching templates/ first.
-    extension_candidates = [
-        _REPO_ROOT / "templates" / "writing-plans-extension.md",
-        _REPO_ROOT / "templates" / "plan-tdd-template.md",
-        _REPO_ROOT / "skills" / "sbtdd" / "SKILL.md",
-    ]
-    found_in: list[Path] = []
-    for candidate in extension_candidates:
-        if not candidate.exists():
-            continue
-        text = candidate.read_text(encoding="utf-8")
-        # Look for close-phase in per-phase context
-        if "close-phase" in text and re.search(
-            r"close-phase\s+(Red|Green|Refactor)",
-            text,
-            re.IGNORECASE,
-        ):
-            found_in.append(candidate)
-    assert found_in, (
-        "writing-plans extension OR template must include 'close-phase Red/"
-        "Green/Refactor' in per-phase steps. Searched: "
-        + ", ".join(str(c.relative_to(_REPO_ROOT)) for c in extension_candidates)
-    )
-
-
-def test_d_three_touchpoint_consistency():
-    """D-1+D-2+D-3 cross-check: all 3 touchpoints reference the same command literal."""
-    skill_md = _REPO_ROOT / "skills" / "sbtdd" / "SKILL.md"
-    template = _REPO_ROOT / "templates" / "CLAUDE.local.md.template"
-    extension_candidates = [
-        _REPO_ROOT / "templates" / "writing-plans-extension.md",
-        _REPO_ROOT / "templates" / "plan-tdd-template.md",
-    ]
-    canonical_cmd = "python skills/sbtdd/scripts/run_sbtdd.py close-phase"
-    skill_md_text = skill_md.read_text(encoding="utf-8")
-    template_text = template.read_text(encoding="utf-8")
-    assert canonical_cmd in skill_md_text or "close-phase" in skill_md_text, (
-        "SKILL.md must reference the canonical close-phase command"
-    )
-    assert canonical_cmd in template_text or "close-phase" in template_text, (
-        "CLAUDE.local.md.template must reference the canonical close-phase command"
-    )
-    # At least ONE of the extension candidates exists and references command
-    extension_text_combined = ""
-    for c in extension_candidates:
-        if c.exists():
-            extension_text_combined += c.read_text(encoding="utf-8")
-    if extension_text_combined:
-        assert canonical_cmd in extension_text_combined or "close-phase" in extension_text_combined, (
-            "writing-plans extension must reference the canonical close-phase command"
-        )
-```
-
-- [ ] **Step 2: Run tests to verify FAIL**
-
-Run: `pytest tests/test_close_phase_subagent_pattern.py -v`
-Expected: All FAIL — current SKILL.md / template / extension don't contain the per-phase mandate text.
-
-- [ ] **Step 3: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Green Phase
-
-- [ ] **Step 4: Update SKILL.md with mandate**
-
-Append to `skills/sbtdd/SKILL.md` an `### v1.0.4 close-phase per-phase mandate` section:
-
-```markdown
-### v1.0.4 close-phase per-phase mandate (Q3 Option B)
-
-Subagents executing tasks under `subagent-driven-development` or
-`executing-plans` MUST invoke
-`python skills/sbtdd/scripts/run_sbtdd.py close-phase` after each
-Red/Green/Refactor verify-clean (i.e. once per TDD phase commit).
-
-Manual `git commit` per phase BYPASSES the phase-advance + state-file
-update + verification gate; treated as NON-CONFORMING and triggers
-drift detection on the next `close-task`. v1.0.4 own-cycle dogfood
-empirically demonstrated this gap (v1.0.3 subagents diverged from
-the v1.0.2 Q2 Option B mandate by emitting raw `git commit`
-instructions per phase).
-
-The per-phase invocation:
-1. Runs `/verification-before-completion` (sec.0.1: `pytest`,
-   `ruff check .`, `ruff format --check .`, `mypy .`).
-2. Creates atomic commit with the prefix from sec.5
-   (`test:` / `feat:` / `fix:` / `refactor:`).
-3. Updates `.claude/session-state.json` `current_phase` advance.
-
-Plans generated by `/writing-plans` should emit per-phase close-phase
-commands explicitly. Subagents reading raw `git commit` instructions
-in plans pre-dating v1.0.4 should treat them as legacy; invoke
-close-phase instead.
-```
-
-- [ ] **Step 5: Update `templates/CLAUDE.local.md.template` with mandate**
-
-Append to `templates/CLAUDE.local.md.template` a section in §3 (TDD cycle) noting the per-phase close-phase mandate:
-
-```markdown
-### Per-phase commit protocol (v1.0.4 mandate)
-
-Every Red/Green/Refactor phase commit MUST be created via
-`python skills/sbtdd/scripts/run_sbtdd.py close-phase`, NOT via raw
-`git commit`. Reasoning:
-
-- close-phase runs `/verification-before-completion` BEFORE creating
-  the commit, ensuring §0.1 is clean.
-- close-phase advances `.claude/session-state.json` `current_phase`
-  atomically with the commit.
-- Manual `git commit` per phase BYPASSES both gates; treated as
-  NON-CONFORMING and triggers drift detection on next `close-task`.
-
-Subagents executing tasks under multi-agent dispatch (`subagent-driven-
-development`, `executing-plans`, parallel `--parallel` flag) MUST
-follow this protocol unconditionally. Empirically v1.0.3 cycle
-surfaced this gap (subagents diverged from v1.0.2 Q2 Option B
-mandate by emitting raw `git commit` steps); v1.0.4 elevates the
-convention to plan template + writing-plans extension + this
-template (3-touchpoint enforcement).
-```
-
-- [ ] **Step 6: Create or update writing-plans extension template**
-
-If `templates/writing-plans-extension.md` does not exist, create it (small file documenting plan template format extension); otherwise append to existing template/SKILL.md.
-
-Create `templates/writing-plans-extension.md`:
-
-```markdown
-# writing-plans skill prompt extension (v1.0.4 close-phase per-phase mandate)
-
-When generating implementation plans for SBTDD projects, every TDD
-step MUST emit per-phase close-phase commands instead of raw
-`git commit`. Use this canonical step template:
-
-```markdown
-- [ ] **Step N (Red): Write failing test**
-
-\`\`\`python
-def test_specific_behavior():
-    ...
-\`\`\`
-
-- [ ] **Step N+1: Run pytest -v, verify FAIL**
-
-Run: \`pytest tests/path::test_name -v\`
-Expected: FAIL with [reason]
-
-- [ ] **Step N+2: close-phase Red**
-
-Run: \`python skills/sbtdd/scripts/run_sbtdd.py close-phase\`
-
-Expected: Red phase verify-clean confirms tests fail for the correct
-reason (missing implementation, not import error). Atomic \`test:\`
-commit landed. State file advances \`current_phase: red → green\`.
-```
-
-Repeat for Green (`close-phase Green` after impl + verify-clean) and
-Refactor (`close-phase Refactor` after refactor + verify-clean).
-After Refactor close-phase, invoke
-`close-task --skip-spec-review` to mark task complete.
-
-This pattern is mandatory for v1.0.4+ plans. Plans pre-dating v1.0.4
-may use raw `git commit` syntax; subagents executing such plans
-should still invoke close-phase instead per the v1.0.4 mandate
-documented in `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template`.
-```
-
-- [ ] **Step 7: Run tests to verify PASS**
-
-Run: `pytest tests/test_close_phase_subagent_pattern.py -v`
-Expected: 4/4 PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [ ] **Step 8: close-phase Green (3-touchpoint doc commit)**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-Expected: `docs:` commit landed (e.g. `docs: mandate close-phase per-phase via 3-touchpoint v1.0.4 Item D`).
-
-#### Red Phase (D-4 tripwire — iter 1 triage WARNING #5 fold-in)
-
-- [ ] **Step 9: Write failing test for D-4 tripwire**
-
-Append to `tests/test_close_task_cmd.py`:
-
-```python
-class TestCloseTaskTripwire:
-    """v1.0.4 Item D escenario D-4 (iter 1 triage WARNING #5 fold-in) —
-    soft-warning tripwire detects raw-git-commit per-phase bypass."""
-
-    def test_d4_tripwire_emits_warning_when_phase_advance_bypassed(
-        self, tmp_path, capsys, monkeypatch
-    ):
-        """D-4(a): commit chain since phase_started_at_commit lacks
-        test:/feat:|fix:/refactor: triplet → soft-warning emitted."""
-        from close_task_cmd import _preflight
-
-        # Synthesize git history: chain of raw `git commit` (no test:/feat:/refactor: prefixes)
-        # Set up state file with phase_started_at_commit pointing to known SHA
-        # (Real impl will fetch git log between SHA and HEAD; mock for unit test.)
-        state = {
-            "current_task_id": "5",
-            "current_phase": "refactor",
-            "phase_started_at_commit": "abc1234",
-        }
-        with patch("close_task_cmd._git_log_between") as mock_git_log:
-            mock_git_log.return_value = [
-                "raw commit 1",
-                "raw commit 2",
-                "raw commit 3",
-            ]
-            _preflight(state, project_root=tmp_path)
-        captured = capsys.readouterr()
-        assert "[sbtdd close-task] WARNING" in captured.err
-        assert "Phase advance gate appears bypassed" in captured.err
-        assert "v1.0.4 Item D mandate" in captured.err
-
-    def test_d4_tripwire_silent_when_close_phase_used(
-        self, tmp_path, capsys, monkeypatch
-    ):
-        """D-4(b): commit chain has test:/feat:/refactor: triplet (close-phase used)
-        → no warning emitted."""
-        from close_task_cmd import _preflight
-
-        state = {
-            "current_task_id": "5",
-            "current_phase": "refactor",
-            "phase_started_at_commit": "abc1234",
-        }
-        with patch("close_task_cmd._git_log_between") as mock_git_log:
-            mock_git_log.return_value = [
-                "test: write failing test for foo",
-                "feat: implement foo",
-                "refactor: extract helper",
-            ]
-            _preflight(state, project_root=tmp_path)
-        captured = capsys.readouterr()
-        assert "[sbtdd close-task] WARNING" not in captured.err
-
-    def test_d4_tripwire_does_not_block_close_task(
-        self, tmp_path, capsys, monkeypatch
-    ):
-        """D-4: tripwire is SOFT-WARNING ONLY — close-task proceeds even on bypass."""
-        from close_task_cmd import _preflight
-
-        state = {
-            "current_task_id": "5",
-            "current_phase": "refactor",
-            "phase_started_at_commit": "abc1234",
-        }
-        with patch("close_task_cmd._git_log_between") as mock_git_log:
-            mock_git_log.return_value = ["raw commit"]
-            # MUST NOT raise — soft-warning only
-            _preflight(state, project_root=tmp_path)
-```
-
-- [ ] **Step 10: Run tests to verify FAIL**
-
-Run: `pytest tests/test_close_task_cmd.py::TestCloseTaskTripwire -v`
-Expected: 3/3 FAIL — `_git_log_between` helper does not exist; `_preflight` does not yet emit the warning.
-
-- [ ] **Step 11: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Green Phase (D-4 tripwire impl)
-
-- [ ] **Step 12: Implement tripwire in `_preflight` (~5 LOC)**
-
-Modify `skills/sbtdd/scripts/close_task_cmd.py`. Add helper + check:
-
-```python
-import subprocess
-import sys
-
-
-def _git_log_between(start_sha: str, end_sha: str = "HEAD", project_root: Path | None = None) -> list[str]:
-    """Return commit subjects between start_sha (exclusive) and end_sha (inclusive)."""
-    cwd = str(project_root) if project_root else None
-    result = subprocess.run(
-        ["git", "log", f"{start_sha}..{end_sha}", "--format=%s"],
-        capture_output=True, text=True, check=False, cwd=cwd,
-    )
-    if result.returncode != 0:
-        return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-
-
-def _preflight(state: dict, project_root: Path | None = None) -> None:
-    """v1.0.4 Item D D-4 tripwire: detect bypass of close-phase per-phase mandate.
-
-    Soft-warning to stderr when commit chain since phase_started_at_commit
-    lacks at least one test: + one feat:|fix: + one refactor: prefix
-    (i.e., subagent emitted raw `git commit` instead of close-phase).
-    Does NOT block close-task — converts unobservable doc drift into
-    runtime signal per iter 1 triage WARNING #5 (3-agent agreement).
-    """
-    start_sha = state.get("phase_started_at_commit")
-    if not start_sha:
-        return
-    subjects = _git_log_between(start_sha, project_root=project_root)
-    has_test = any(s.startswith("test:") for s in subjects)
-    has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
-    has_refactor = any(s.startswith("refactor:") for s in subjects)
-    if not (has_test and has_green and has_refactor):
-        sys.stderr.write(
-            f"[sbtdd close-task] WARNING: Phase advance gate appears "
-            f"bypassed (no test:/feat:|fix:/refactor: triplet in commit "
-            f"chain since {start_sha}). Per v1.0.4 Item D mandate, "
-            f"subagents MUST invoke `close-phase` after each Red/Green/"
-            f"Refactor verify-clean. Continuing close-task; revisit "
-            f"close-phase per-phase convention.\n"
-        )
-```
-
-- [ ] **Step 13: Run tests to verify PASS**
-
-Run: `pytest tests/test_close_task_cmd.py::TestCloseTaskTripwire -v`
-Expected: 3/3 PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [ ] **Step 14: close-phase Green**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-Expected: `feat:` commit landed (e.g. `feat: add close-task tripwire for v1.0.4 Item D D-4 (iter 1 triage WARNING #5 fold-in)`).
-
-#### Refactor Phase
-
-- [ ] **Step 15: Refactor — verify cross-touchpoint consistency**
-
-Re-read SKILL.md + template + extension to confirm consistent wording. Verify tripwire helper integrates cleanly with existing `_preflight` chain (no duplicate work).
-
-- [ ] **Step 16: close-phase Refactor + Step 17: close-task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
+The Q2 v1.0.2 Option B `/sbtdd close-task` automation mandate (single I5 touchpoint) remains in force unchanged. v1.0.5 will replace this with code-side enforcement.
 
 ---
+
 
 ## Mid-cycle methodology activities (orchestrator)
 
@@ -2501,30 +2146,34 @@ artifacts (unexpected since artifacts pass spec_lint), fall back
 to manual `run_magi.py` Checkpoint 2 dispatch per v1.0.2+v1.0.3
 precedent. Document failure in CHANGELOG as v1.0.5 backlog.
 
-### Activity D' retry — `/sbtdd pre-merge` end-to-end with SBTDD_INTERACTIVE=1 (AFTER Track close)
+### Activity D' retry — `/sbtdd pre-merge` end-to-end (AFTER Track close, post iter 1+2 triage)
 
 **When**: AFTER Track Alpha + Track Beta close + Items A+B fix
 landed in working tree.
 
-**Steps**:
+**Steps (post iter 1 triage CRITICAL #2 fix — drop SBTDD_INTERACTIVE step)**:
 
 1. Verify Items A+B fix landed:
    ```bash
-   grep -n "_is_headless_context" skills/sbtdd/scripts/superpowers_dispatch.py
+   grep -n "_SUBPROCESS_INCOMPATIBLE_SKILLS" skills/sbtdd/scripts/superpowers_dispatch.py
    grep -n "receiving-code-review" skills/sbtdd/scripts/superpowers_dispatch.py
    ```
-2. Set `SBTDD_INTERACTIVE=1`:
-   ```bash
-   export SBTDD_INTERACTIVE=1  # POSIX
-   $env:SBTDD_INTERACTIVE = "1"  # PowerShell
-   ```
-3. Run `/sbtdd pre-merge` end-to-end:
+   Expected: set membership extended to include `receiving-code-review`.
+   NO `_is_headless_context` helper present (iter 1 simplification).
+2. Run `/sbtdd pre-merge` end-to-end (NO env var setup; gate fires
+   unconditionally for incompatible skills):
    ```bash
    python skills/sbtdd/scripts/run_sbtdd.py pre-merge
    ```
-4. Verify `/receiving-code-review` subprocess fires successfully.
+3. Verify `/receiving-code-review` subprocess invocation by
+   `pre_merge_cmd` raises `PreconditionError` PRE-spawn (Items A+B
+   fix validates here — gate fires by construction).
+4. Operator manually runs `/receiving-code-review` skill via
+   interactive Claude Code session per the recovery message
+   guidance, applies findings + mini-cycle TDD fixes, then resumes
+   `/sbtdd pre-merge` (re-invoke).
 5. Verify Loop 1 fix-finding triage step completes WITHOUT 600s
-   hang.
+   hang (PreconditionError raised in <1s + manual recovery).
 6. Capture cross-check artifacts:
    ```bash
    ls .claude/magi-cross-check/iter*-*.json
