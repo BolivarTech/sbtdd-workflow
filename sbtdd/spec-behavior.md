@@ -27,23 +27,49 @@
 
 ## 1. Resumen ejecutivo
 
-**Objetivo v1.0.3**: completa la auditoria LOCKED original (MAGI gate
-template alignment vs `magi-gate-template.md`) + arregla los gaps de
-infraestructura que el v1.0.2 own-cycle dogfood surfaced (Windows
-long-filename, drift detector false-positive, spec-snapshot manual
-regen friction, subagent close-task convention divergence),
-preparando baseline aligned para v1.0.4 (parallel dispatcher + real
-headless detection).
+**Objetivo v1.0.3 (revised iter 2 — scope-trimmed per pre-staged
+iter-2 CRITICAL trigger)**: completa la auditoria LOCKED original
+(MAGI gate template alignment vs `magi-gate-template.md`) + arregla
+el cross-check Windows infrastructure failure surfaced en v1.0.2
+own-cycle dogfood. Items C (drift line-anchored), D (spec-snapshot
+autoregen), E (close-task convention codification) **deferred to
+v1.0.4** per spec sec.6.1 iter-2 CRITICAL trigger pre-stage:
+Checkpoint 2 iter 2 still surfaced 1 CRITICAL (Task 2 test fidelity
++ refined Item B root-cause analysis), forcing immediate scope-trim
+rather than burning iter 3 on a multi-pillar bundle.
 
-Tres clases de work units:
+**Refined Item B root-cause (iter 2)**: WinError 206 fires because
+`superpowers_dispatch._build_skill_cmd` packs the cross-check prompt
+(including diff truncated to 200KB) into a single `-p <prompt>`
+argv argument. On Windows, total cmdline length triggers
+ERROR_FILENAME_EXCEEDS_RANGE (WinError 206). Fix: pass large prompts
+via `@<filepath>` reference in argv (small) with content written to
+project-relative temp file (`.claude/magi-cross-check/.tmp/prompt-<run-id>.md`).
+Combined with project-relative temp dir per R2 ladder step 3,
+addresses both possible failure modes (argv length AND MAX_PATH).
 
-- **Plan tasks bona-fide (5 items)**: A, B, C, D, E — TDD-cycle tasks
-  con archivos production + tests adicionales.
+Tres clases de work units (scope-trimmed iter 2):
+
+- **Plan tasks bona-fide (2 items)**: A, B — TDD-cycle tasks. Items
+  C+D+E **deferred to v1.0.4 per iter-2 CRITICAL trigger** (spec
+  sec.6.1 pre-stage; orig brainstorming Q1 partition collapses to
+  Track Alpha = A only / Track Beta = B only).
 - **Methodology activities (2 items)**: D' (Linux/POSIX dogfood
   completion post Item B fix), E' (true `--resume-from-magi`
   end-to-end smoke test post Track-close per hybrid methodology).
 - **Process notes (CHANGELOG)**: documentation de findings empiricos
-  de D' + E'.
+  de D' + E' + iter-2 trigger ship rationale.
+
+**Deferred to v1.0.4** (sections 2.3, 2.4, 2.5 below preserved for
+v1.0.4 cycle reference; Items C, D, E descriptions remain valid as
+backlog entries):
+- Item C: drift detector line-anchored regex (false-positive on
+  inline backtick prose mentions of `- [ ]`).
+- Item D: spec-snapshot auto-regeneration in
+  `_run_magi_checkpoint2` post-MAGI-pass branch.
+- Item E: close-task convention codification (Q2 Option B —
+  `/sbtdd close-task` automation enforcement via
+  `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template`).
 
 Decisiones de brainstorming 2026-05-06:
 
@@ -181,37 +207,50 @@ melchior+caspar+balthasar — Track Alpha truly audit-only):
 Fired during all 3 v1.0.2 Loop 2 iters. Cross-check meta-reviewer
 NEVER ran on Windows. Activity D' incomplete.
 
-**Mitigation strategy** (revised iter 1 fix W4+W6+W12 caspar+balthasar+melchior):
+**Mitigation strategy (revised iter 2 — actual root cause identified)**:
 
-**Default fix = project-relative temp dir** (R2 ladder step 3).
-Decision rule (deterministic per W4 melchior + W12 caspar): commit
-to step 3 unconditionally because:
-- Works identically on Windows + POSIX (side-steps MAX_PATH entirely
-  without platform-specific code paths).
-- Eliminates W6 balthasar concern that fix ships validated only on
-  POSIX (project-relative test paths reproduce on any OS).
-- Removes ambiguity of "if shorter prefix insufficient escalate to
-  `\\?\`" — that ambiguity is exactly the W4+W12 issue.
-- Project dir writability is already a runtime dependency for
-  `.claude/session-state.json` + `.claude/magi-cross-check/iter*-*.json`
-  artifacts.
+Static read of `superpowers_dispatch._build_skill_cmd` (line 99)
+revealed: cross-check prompt is packed into a single `-p <prompt>`
+argv argument. For cross-check, this prompt includes the verdict +
+findings text + diff truncated to 200KB. On Windows, ERROR_FILENAME_EXCEEDS_RANGE
+(WinError 206) fires when total cmdline exceeds platform limits.
 
-Implementation: cross-check temp dir construction moves from
-`tempfile.mkdtemp(prefix="sbtdd-magi-...")` (system-temp) to
-`Path(".claude/magi-cross-check/.tmp/<run-id>/")` (project-relative)
-where `<run-id>` is a short UUID4 hex (8 chars). Cleanup via
-`finally`-block `shutil.rmtree(temp_dir, ignore_errors=True)`.
+**Defense-in-depth fix** (combines two mitigations addressing both
+possible root causes):
 
-**Fallback ladder** (only if R2 step 3 surfaces unexpected blocker):
-- Step 2 fallback: `\\?\` long-path syntax wrapping (Windows-specific
-  conditional code path).
-- Step 1 fallback: shorter prefix in system-temp (last resort).
+1. **`@filepath` prompt reference** (primary fix, addresses argv
+   length): write the cross-check prompt content to a project-relative
+   temp file (`.claude/magi-cross-check/.tmp/prompt-<run-id>.md`) and
+   pass `@<filepath>` reference in argv. Argv stays short (<1KB);
+   prompt content unbounded. Per `_build_skill_cmd` docstring, claude
+   CLI supports `@file` references inside prompts — the sub-session
+   forwards them.
+2. **Project-relative temp dir** (secondary fix, addresses MAX_PATH):
+   the `<run-id>` is short UUID4 hex (8 chars), keeping path under
+   `.claude/magi-cross-check/.tmp/prompt-12345678.md` (<= 50 chars
+   from repo root) — well under MAX_PATH 260 limit. Side-steps
+   Windows MAX_PATH per R2 ladder step 3.
+
+Modification surfaces:
+- `pre_merge_cmd._dispatch_requesting_code_review` (line ~1243):
+  write prompt to temp file before invoking
+  `superpowers_dispatch.requesting_code_review`; pass file path as
+  argv `@<path>` reference instead of inline prompt content.
+- Cleanup: `finally`-block `Path(prompt_file).unlink(missing_ok=True)`
+  + `shutil.rmtree(temp_dir, ignore_errors=True)`.
 
 **Empirical validation**: Activity D' Linux/POSIX dogfood validates
-end-to-end. Project-relative path eliminates Windows-specific test
-runtime dependency: any OS reproduces the fix's behavior.
+end-to-end. Project-relative path + @file reference eliminate
+Windows-specific test runtime dependency: any OS reproduces the
+fix's behavior via tests that capture argv content.
 
-### 2.3 Item C — Drift detector line-anchored match (Pillar C defensive, Track Beta)
+### Items C, D, E — Deferred to v1.0.4 per iter-2 CRITICAL trigger
+
+The original v1.0.3 spec sec.2.3-2.5 (Items C drift detector, D spec-snapshot autoregen, E close-task convention codification) are **deferred to v1.0.4 per spec sec.6.1 iter-2 CRITICAL trigger pre-stage**. MAGI Checkpoint 2 iter 2 still surfaced 1 CRITICAL (Task 2 test fidelity + refined Item B root-cause); pre-staged decision (`Items C+D+E defer to v1.0.4 first`) executed.
+
+The Items C/D/E technical detail (problem statement, empirical context, implementation plan, escenarios) is preserved IN-PLACE below for v1.0.4 cycle reference. Track Alpha + Track Beta v1.0.3 implementation does NOT touch these items.
+
+### 2.3 Item C — Drift detector line-anchored match (DEFERRED to v1.0.4)
 
 **Track**: Beta (subagent #2, after Item B).
 
@@ -260,7 +299,7 @@ def _plan_all_tasks_complete(plan_text: str) -> str:
 (line-start) continue to detect drift correctly. Inline backtick
 mentions no longer false-positive.
 
-### 2.4 Item D — Spec-snapshot auto-regeneration (Pillar C defensive, Track Beta)
+### 2.4 Item D — Spec-snapshot auto-regeneration (DEFERRED to v1.0.4)
 
 **Track**: Beta (subagent #2, after Item C).
 
@@ -320,7 +359,7 @@ check still fires correctly when autoregen runs in the
 spec sec.9.5 "INV-37 unaffected" claim as test enforcement, not
 just documentation.
 
-### 2.5 Item E — Close-task convention codification (Pillar C defensive, Track Beta)
+### 2.5 Item E — Close-task convention codification (DEFERRED to v1.0.4)
 
 **Track**: Beta (subagent #2, after Item D).
 

@@ -1,17 +1,23 @@
-# v1.0.3 Template Alignment + v1.0.2 Dogfood Remediations Implementation Plan
+# v1.0.3 Template Alignment + Cross-check Windows Fix Implementation Plan (scope-trimmed iter 2)
 
 > Generado 2026-05-06 a partir de sbtdd/spec-behavior.md v1.0.3 via
 > superpowers:writing-plans skill (interactive session, post-MAGI
-> Checkpoint 2 STRONG GO unanimous expected). Frontmatter required by
-> spec_lint R5 (Item C v1.0.2 enforcement).
+> Checkpoint 2 iter 2 scope-trim per pre-staged trigger). Frontmatter
+> required by spec_lint R5 (Item C v1.0.2 enforcement).
+>
+> Iter 2 verdict GO_WITH_CAVEATS (3-0) with 1 CRITICAL persisting
+> (Task 2 test fidelity + Item B root-cause refinement) triggered
+> spec sec.6.1 iter-2 CRITICAL pre-stage: scope-trim Items C+D+E
+> deferred to v1.0.4 cycle. v1.0.3 ships Pillar A (audit) + Pillar B
+> (cross-check Windows fix via @file prompt reference) only.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax (open + closed bracket forms) for tracking.
 
-**Goal:** Ship v1.0.3 — completar la auditoria LOCKED original (MAGI gate template alignment vs canonical template) + arreglar gaps de infraestructura del v1.0.2 own-cycle dogfood (Windows long-filename, drift detector false-positive, spec-snapshot manual regen friction, subagent close-task convention divergence). 5 plan tasks (A audit + B Windows fix + C drift + D autoregen + E close-task codification) over 2 parallel subagent tracks; 2 methodology activities (D' Linux/POSIX dogfood + E' --resume-from-magi smoke test) executed by orchestrator.
+**Goal:** Ship v1.0.3 — completar la auditoria LOCKED original (MAGI gate template alignment vs canonical template) + arreglar el cross-check Windows infrastructure failure surfaced en v1.0.2 own-cycle dogfood. 2 plan tasks (Task 1 = Item A audit; Task 2 = Item B cross-check Windows fix via @file prompt reference + project-relative temp dir) over 2 parallel subagent tracks; 2 methodology activities (D' Linux/POSIX dogfood + E' --resume-from-magi smoke test) executed by orchestrator. Items C+D+E (drift line-anchored, spec-snapshot autoregen, close-task convention codification) **deferred to v1.0.4** per iter-2 CRITICAL trigger.
 
-**Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (audit-only) writes `docs/audits/v1.0.3-magi-gate-template-alignment.md` + `tests/test_magi_template_alignment.py` — NO production code. Track Beta (sequential B → C → D → E) modifies `pre_merge_cmd.py` + `drift.py` + `spec_cmd.py` + `state_file.py` + `subprocess_utils.py` (possibly) + doc files. Cero file overlap. Activity D' (Linux/POSIX dogfood post Item B fix) + Activity E' (--resume-from-magi smoke test post Track-close) run mid-cycle in orchestrator session before pre-merge gate.
+**Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (audit-only) writes `docs/audits/v1.0.3-magi-gate-template-alignment.md` + `tests/test_magi_template_alignment.py` — NO production code. Track Beta (Item B only) modifies `pre_merge_cmd.py` + extends `tests/test_pre_merge_cross_check.py`. Cero file overlap. Activity D' (Linux/POSIX dogfood post Item B fix) + Activity E' (--resume-from-magi smoke test post Track-close) run mid-cycle in orchestrator session before pre-merge gate.
 
-**State file write serialization** (iter 1 W8 caspar fix): both Track Alpha + Track Beta invoke `/sbtdd close-task` which writes `.claude/session-state.json`. Concurrent writes risk corruption. Mitigation: each track operates on a DISJOINT `current_task_id` range — Track Alpha owns Task 1; Track Beta owns Tasks 2-5. State file's `current_task_id` field advances sequentially within Track Beta (2 → 3 → 4 → 5 → done), and Track Alpha writes `current_task_id="1"` only during its single close. The two tracks never concurrently mutate the same state file fields with conflicting intent. Additional safety: `state_file.save()` already uses atomic `os.replace` (existing v0.5.0 pattern) on a temp file, so partial writes are impossible. Risk acknowledged but mitigated by sequential-within-track + atomic-write semantics.
+**State file write serialization**: Track Alpha owns Task 1 (single close). Track Beta owns Task 2 (single close). State file `current_task_id` advances 1 → 2 → done. `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Concurrent close-task invocations against disjoint task IDs are safe.
 
 **Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active. Brainstorming refinements 2026-05-06: Q1 = 2-track parallel (Alpha audit-only, Beta code+doc); Q2 = Item E close-task codify via `/sbtdd close-task` automation (Option B); hybrid methodology (Opcion A run_magi.py for Checkpoint 2; Opcion B --resume-from-magi as Activity E' smoke test).
 
@@ -327,743 +333,26 @@ Expected: all `- [ ]` step checkboxes in Task 1 section flipped to `- [x]`. Atom
 **Surfaces** (cero overlap with Track Alpha): `skills/sbtdd/scripts/pre_merge_cmd.py` + `skills/sbtdd/scripts/drift.py` + `skills/sbtdd/scripts/spec_cmd.py` + `skills/sbtdd/scripts/state_file.py` + `skills/sbtdd/scripts/subprocess_utils.py` (possibly) + `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template` + tests.
 **Wall-time estimated**: ~3 days.
 
-### Task 2: Item B — Cross-check Windows long-filename fix
+### Task 2: Item B — Cross-check Windows fix via @file prompt reference
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/pre_merge_cmd.py` (`_loop2_with_cross_check` o downstream subprocess invocation — exact location pending Beta investigation)
-- Possibly modify: `skills/sbtdd/scripts/subprocess_utils.py` (long-path helper if needed)
-- Modify: `tests/test_pre_merge_cross_check.py` (extend with B-1 to B-5 escenarios)
+- Modify: `skills/sbtdd/scripts/pre_merge_cmd.py` (`_dispatch_requesting_code_review` function ~line 1243 — write prompt to project-relative temp file before invoking `superpowers_dispatch.requesting_code_review`; pass `@<filepath>` reference in argv)
+- Modify: `tests/test_pre_merge_cross_check.py` (extend with B-1..B-5 escenarios; concrete monkeypatch on `subprocess_utils.run_with_timeout` to capture argv)
 
-Covers escenarios B-1, B-2, B-3, B-4, B-5 from spec sec.4.
+Covers escenarios B-1, B-2, B-3, B-4, B-5 from spec sec.4. Refined iter 2 root cause: WinError 206 fires because cross-check prompt (with diff embedded ~200KB) is packed into a single `-p <prompt>` argv argument that exceeds Windows cmdline limits. Fix: write prompt to project-relative temp file + pass `@<filepath>` reference in argv (small payload).
 
 #### Red Phase
 
-- [ ] **Step 1: Investigate cross-check temp dir construction**
-
-Subagent reads `skills/sbtdd/scripts/pre_merge_cmd.py` to identify exact location where cross-check temp paths are constructed. Look for `tempfile.mkdtemp(prefix=...)` calls or similar within `_loop2_with_cross_check` or downstream subprocess invocation helpers. Document the exact file:line in commit message of subsequent Red commit.
-
-- [ ] **Step 2: Write the failing reproduction test (iter 1 C1+W9 fix — exercise REAL production code path)**
-
-Per MAGI Checkpoint 2 iter 1 melchior CRITICAL: tests MUST exercise
-`_loop2_with_cross_check` production invocation chain, NOT bare file
-I/O on tmp_path. Otherwise Activity D' surfaces the bug Item B was
-supposed to fix (because tests passed against synthetic file ops
-that never crossed the production code path).
+- [ ] **Step 1: Append failing tests with concrete monkeypatch on subprocess capture**
 
 Append to `tests/test_pre_merge_cross_check.py`:
 
 ```python
 import os
-from pathlib import Path
-
-import pytest
-
-
-def test_b1_b2_cross_check_uses_project_relative_temp_dir(tmp_path, monkeypatch):
-    """B-1 + B-2: cross-check temp dir is project-relative (not system-temp).
-
-    Per spec sec.2.2 R2 ladder step 3 default: project-relative dir
-    side-steps Windows MAX_PATH entirely. This test exercises the
-    production code path in _loop2_with_cross_check / downstream
-    helpers, asserting the temp dir resolves to a path under
-    .claude/magi-cross-check/.tmp/ rather than system-temp.
-    """
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    import pre_merge_cmd
-
-    # Capture temp dir paths used by the production code path.
-    # Subagent identifies the exact helper during Step 1 investigation
-    # and adapts this monkeypatch target accordingly.
-    captured_paths: list[str] = []
-
-    # Example monkeypatch shape (subagent adapts to actual production code):
-    # If production uses tempfile.mkdtemp directly:
-    real_mkdtemp = pre_merge_cmd.tempfile.mkdtemp if hasattr(pre_merge_cmd, "tempfile") else None
-    if real_mkdtemp is None:
-        pytest.skip(
-            "tempfile usage location pending Step 1 investigation; "
-            "subagent updates monkeypatch target after locating real code path"
-        )
-
-    def fake_mkdtemp(*args, **kwargs):
-        path = real_mkdtemp(*args, **kwargs)
-        captured_paths.append(path)
-        return path
-
-    monkeypatch.setattr(pre_merge_cmd.tempfile, "mkdtemp", fake_mkdtemp)
-
-    # Invoke a function in the production cross-check path that creates
-    # the temp dir. Subagent identifies which entry point is appropriate
-    # (likely _loop2_with_cross_check via dispatch, OR a smaller helper
-    # like _make_cross_check_workspace if extracted).
-    # ... invocation here ...
-
-    # Assert post-fix: temp dir is project-relative
-    assert captured_paths, "No temp dir created during cross-check invocation"
-    for p in captured_paths:
-        path_obj = Path(p)
-        # Project-relative path will be under .claude/magi-cross-check/.tmp/
-        repo_root = Path(__file__).resolve().parents[1]
-        try:
-            rel = path_obj.relative_to(repo_root)
-            assert rel.parts[:3] == (".claude", "magi-cross-check", ".tmp"), (
-                f"Temp dir not under .claude/magi-cross-check/.tmp/: {p}"
-            )
-        except ValueError:
-            pytest.fail(
-                f"Temp dir is system-temp ({p}), not project-relative. "
-                "Item B fix incomplete."
-            )
-
-
-def test_b3_long_path_handling_via_production_path(tmp_path, monkeypatch):
-    """B-3: long path (>=300 chars total) handling via REAL production path.
-
-    Constructs a long base via project-relative temp dir + nested run-id.
-    Asserts the production cross-check invocation succeeds without
-    OSError (works on Windows + POSIX after Item B fix).
-    """
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    import pre_merge_cmd
-
-    # Subagent populates this test with the actual production invocation
-    # chain after Step 1 investigation. The test must exercise the
-    # subprocess call to /requesting-code-review (or the prompt+diff
-    # write) where the long-filename failure originally occurred.
-    pytest.skip(
-        "Subagent populates with actual production invocation after Step 1 "
-        "investigation identifies the call chain for cross-check temp file write"
-    )
-
-
-def test_b4_short_paths_backward_compat(tmp_path, monkeypatch):
-    """B-4: normal-length project-relative paths work (no regression).
-
-    With project-relative temp dir at .claude/magi-cross-check/.tmp/<8-char-uuid>/,
-    typical paths are well under 260 chars on Windows. This test validates
-    the post-fix happy path.
-    """
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    pytest.skip(
-        "Subagent populates with end-to-end happy path test exercising "
-        "real cross-check invocation post Item B fix"
-    )
-
-
-def test_b5_posix_unaffected(tmp_path):
-    """B-5: POSIX runtime cross-check works (project-relative path on POSIX).
-
-    POSIX has no MAX_PATH equivalent, so project-relative dir was never
-    needed for POSIX correctness — this test validates the fix doesn't
-    regress POSIX behavior. Effectively a smoke test that project-relative
-    dir resolves correctly on Linux/macOS.
-    """
-    if os.name == "nt":
-        pytest.skip("POSIX-only test")
-
-    project_temp = Path(".claude/magi-cross-check/.tmp")
-    project_temp.mkdir(parents=True, exist_ok=True)
-    test_subdir = project_temp / "smoke-test"
-    test_subdir.mkdir(exist_ok=True)
-    test_file = test_subdir / "f.json"
-    test_file.write_text("posix-smoke", encoding="utf-8")
-    assert test_file.read_text(encoding="utf-8") == "posix-smoke"
-    # Cleanup
-    test_file.unlink()
-    test_subdir.rmdir()
-```
-
-**Implementation note for subagent**: the monkeypatch targets above
-are scaffolding. During Step 1 investigation, identify the exact
-production code path (likely `_loop2_with_cross_check` or a helper
-it calls — possibly `_dispatch_requesting_code_review` or
-`subprocess_utils` writer). Adapt the monkeypatch to intercept
-where `tempfile.mkdtemp` (or equivalent) is called. The test must
-fail PRE-fix (system-temp path) and pass POST-fix (project-relative).
-
-If the production code uses `tempfile.TemporaryDirectory` instead of
-`mkdtemp`, monkeypatch the class instead. If the code uses a custom
-helper, monkeypatch that helper.
-
-- [ ] **Step 3: Run test to verify Red signal**
-
-```bash
-python -m pytest tests/test_pre_merge_cross_check.py::test_b1_b2_long_path_handling_post_fix tests/test_pre_merge_cross_check.py::test_b3_paths_300_plus_chars_work -v
-```
-
-Expected on Windows pre-fix: `test_b1_b2_long_path_handling_post_fix` may FAIL with WinError 206 (or similar long-path error) if the test fixture itself triggers it. On Linux/POSIX: PASS (no MAX_PATH).
-
-If tests pass on Windows pre-fix, the synthetic fixture isn't aggressive enough — increase target_length to 400 and/or use deeper nesting.
-
-- [ ] **Step 4: Verify + commit Red**
-
-```bash
-python -m ruff check tests/test_pre_merge_cross_check.py
-python -m ruff format --check tests/test_pre_merge_cross_check.py
-python -m mypy tests/test_pre_merge_cross_check.py
-git add tests/test_pre_merge_cross_check.py
-git commit -m "test: B-1..B-5 long-path handling tripwires (cross-platform)"
-```
-
-#### Green Phase
-
-- [ ] **Step 5: Apply mitigation (R2 ladder — start with shorter prefix)**
-
-Per spec sec.2.2 Mitigation ladder, attempt #1 = shorter temp dir prefix. Subagent locates the cross-check temp dir construction (identified in Step 1 investigation) and reduces prefix length.
-
-Example diff (exact location subagent-determined):
-
-```python
-# Before (hypothetical):
-temp_dir = tempfile.mkdtemp(prefix="sbtdd-magi-cross-check-")
-
-# After:
-temp_dir = tempfile.mkdtemp(prefix="sbm-")
-```
-
-If shorter prefix insufficient (test still fails on Windows with sufficiently long base path), escalate to attempt #2 (`\\?\` long-path syntax wrapping) or attempt #3 (project-relative `.claude/magi-cross-check/.tmp/<run-id>/`). Document choice in commit message.
-
-- [ ] **Step 6: Run tests to verify Green pass**
-
-```bash
-python -m pytest tests/test_pre_merge_cross_check.py -v
-```
-
-Expected: all B-1..B-5 tests PASS. Existing pre-merge cross-check tests continue passing (regression check).
-
-- [ ] **Step 7: Verify + commit Green phase**
-
-```bash
-make verify
-git add skills/sbtdd/scripts/pre_merge_cmd.py
-# Possibly also subprocess_utils.py if helper added
-git commit -m "fix: cross-check Windows long-path mitigation (Item B R2 step 1)"
-```
-
-#### Refactor Phase
-
-- [ ] **Step 8: Refactor (extract helper if pattern repeats)**
-
-If the path construction logic appears in multiple places, extract a helper function (e.g., `_make_short_temp_dir(suffix: str) -> Path`) in `subprocess_utils.py` and replace inline calls. Otherwise skip.
-
-- [ ] **Step 9: Verify + commit Refactor phase (skip if no changes)**
-
-```bash
-make verify
-# If helper extracted:
-# git add skills/sbtdd/scripts/subprocess_utils.py skills/sbtdd/scripts/pre_merge_cmd.py
-# git commit -m "refactor: extract _make_short_temp_dir helper"
-```
-
-#### Task close
-
-- [ ] **Step 10: Close task via automation**
-
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-```
-
-State file advances to `current_task_id="3"` (Item C), `current_phase="red"`.
-
----
-
-### Task 3: Item C — Drift detector line-anchored match
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/drift.py` (`_plan_all_tasks_complete` function)
-- Modify: `tests/test_drift.py` (append C-1 to C-4 escenarios)
-
-Covers escenarios C-1, C-2, C-3, C-4 from spec sec.4.
-
-#### Red Phase
-
-- [ ] **Step 1: Append failing tests**
-
-Append to `tests/test_drift.py`:
-
-```python
-def test_c1_inline_backtick_prose_not_false_positive(tmp_path):
-    """C-1: inline backtick prose mention NOT counted as open checkbox."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    from drift import _plan_all_tasks_complete
-
-    plan_text = (
-        "# Plan\n\n"
-        "### Task 1: example\n\n"
-        "- [x] Step 1: done\n"
-        "- [x] Step 2: done\n\n"
-        "Note: the syntax `- [ ]` represents an open checkbox.\n"
-        "Subagents must use `- [x]` form when closing tasks.\n"
-    )
-
-    result = _plan_all_tasks_complete(plan_text)
-    assert result == "[x]", (
-        "Inline backtick prose mentions of `- [ ]` should NOT be counted as open checkboxes"
-    )
-
-
-def test_c2_real_open_checkbox_detected(tmp_path):
-    """C-2: real line-anchored - [ ] checkbox correctly detected as drift."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    from drift import _plan_all_tasks_complete
-
-    plan_text = (
-        "# Plan\n\n"
-        "### Task 1: example\n\n"
-        "- [x] Step 1: done\n"
-        "- [ ] Step 2: not done\n"
-    )
-
-    result = _plan_all_tasks_complete(plan_text)
-    assert result == "[ ]", "Real line-anchored - [ ] checkbox should be detected"
-
-
-def test_c3_mixed_real_and_prose(tmp_path):
-    """C-3: mix of real checkboxes + prose backtick mentions in multi-task plan."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    from drift import _plan_all_tasks_complete
-
-    plan_text_all_done = (
-        "# Plan\n\n"
-        "Note: standard syntax is `- [ ]` for open and `- [x]` for closed.\n\n"
-        "### Task 1: alpha\n\n"
-        "- [x] Step 1: done\n\n"
-        "### Task 2: beta\n\n"
-        "- [x] Step 1: done\n"
-        "Reference to `- [ ]` form in prose, not actual checkbox.\n"
-    )
-    assert _plan_all_tasks_complete(plan_text_all_done) == "[x]"
-
-    plan_text_one_open = (
-        "# Plan\n\n"
-        "Note: `- [ ]` in prose.\n\n"
-        "### Task 1: alpha\n\n"
-        "- [x] Step 1: done\n\n"
-        "### Task 2: beta\n\n"
-        "- [ ] Step 1: open!\n"
-    )
-    assert _plan_all_tasks_complete(plan_text_one_open) == "[ ]"
-
-
-def test_c4_backward_compat_existing_fixtures(tmp_path):
-    """C-4: existing real-checkbox fixtures continue working post-refactor."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    from drift import _plan_all_tasks_complete
-
-    # Standard fixture pattern from existing test_drift.py
-    plan_text_complete = (
-        "### Task 1: ex\n\n"
-        "- [x] Step 1\n"
-        "- [x] Step 2\n"
-    )
-    assert _plan_all_tasks_complete(plan_text_complete) == "[x]"
-
-    plan_text_incomplete = (
-        "### Task 1: ex\n\n"
-        "- [x] Step 1\n"
-        "- [ ] Step 2\n"
-    )
-    assert _plan_all_tasks_complete(plan_text_incomplete) == "[ ]"
-```
-
-- [ ] **Step 2: Run tests to verify Red signal**
-
-```bash
-python -m pytest tests/test_drift.py::test_c1_inline_backtick_prose_not_false_positive -v
-```
-
-Expected pre-fix: FAIL because current substring-match detects backtick prose. Specifically, `"- [ ]" in plan_text[start:end]` returns True for the prose mention.
-
-- [ ] **Step 3: Verify + commit Red**
-
-```bash
-python -m ruff check tests/test_drift.py
-python -m ruff format --check tests/test_drift.py
-python -m mypy tests/test_drift.py
-git add tests/test_drift.py
-git commit -m "test: C-1..C-4 drift detector line-anchored regression"
-```
-
-#### Green Phase
-
-- [ ] **Step 4: Apply line-anchored regex fix**
-
-Modify `skills/sbtdd/scripts/drift.py`. Locate `_plan_all_tasks_complete` function (~line 242 per v1.0.2 inspection). Replace substring match with regex:
-
-```python
 import re
-
-# Add at module level near other regex constants:
-_OPEN_CHECKBOX_RE = re.compile(r"^- \[ \]", re.MULTILINE)
-
-
-def _plan_all_tasks_complete(plan_text: str) -> str:
-    """Return ``"[x]"`` iff every ``### Task <id>:`` section is fully flipped.
-
-    Uses line-anchored regex (re.MULTILINE) to match ``- [ ]`` checkboxes
-    only at line start, avoiding false-positives from inline backtick
-    prose mentions of the literal `- [ ]` string in documentation.
-
-    v1.0.3 Item C fix: previously used substring ``"- [ ]" in plan_text[start:end]``
-    which matched inline prose like ``Note: use `- [ ]` for open`` as
-    a real open checkbox, triggering DriftError when plan was actually
-    fully complete. v1.0.2 ship hit this with 2 such prose mentions.
-    """
-    headers = list(_ANY_TASK_HEADER.finditer(plan_text))
-    if not headers:
-        return "[x]"
-    for i, match in enumerate(headers):
-        start = match.end()
-        end = headers[i + 1].start() if i + 1 < len(headers) else len(plan_text)
-        section = plan_text[start:end]
-        if _OPEN_CHECKBOX_RE.search(section):
-            return "[ ]"
-    return "[x]"
-```
-
-- [ ] **Step 5: Run tests to verify pass**
-
-```bash
-python -m pytest tests/test_drift.py -v
-```
-
-Expected: ALL drift tests pass (existing + new C-1..C-4). Backward compat preserved.
-
-- [ ] **Step 6: Verify + commit Green phase**
-
-```bash
-make verify
-git add skills/sbtdd/scripts/drift.py
-git commit -m "fix: drift detector line-anchored - [ ] regex (Item C)"
-```
-
-#### Refactor + Task close
-
-- [ ] **Step 7-8: Refactor optional (skip if regex shape clean)**
-- [ ] **Step 9: Close task via automation**
-
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-```
-
-State file advances to `current_task_id="4"` (Item D), `current_phase="red"`.
-
----
-
-### Task 4: Item D — Spec-snapshot auto-regeneration
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/spec_cmd.py` (`_run_magi_checkpoint2` post-MAGI-pass branch)
-- Modify: `skills/sbtdd/scripts/state_file.py` (if `spec_snapshot_emitted_at` field needs handling — check existing schema)
-- Modify: `tests/test_spec_cmd.py` (append D-1 to D-4 escenarios)
-- Read-only: `skills/sbtdd/scripts/spec_snapshot.py` (existing `emit_snapshot` + `persist_snapshot`)
-
-Covers escenarios D-1, D-2, D-3, D-4 from spec sec.4.
-
-#### Red Phase
-
-- [ ] **Step 1: Investigate existing emit pattern + state_file schema (iter 1 W2 fix)**
-
-Read `skills/sbtdd/scripts/spec_cmd.py` to locate `_run_magi_checkpoint2` post-MAGI-pass branch + existing `_mark_plan_approved_with_snapshot` helper (R10 v1.0.0 fix). Determine if autoregen is partially shipped or fully missing. If partially shipped (e.g., `_mark_plan_approved_with_snapshot` exists and is called from `--resume-from-magi` path), this task tightens vs adds.
-
-**state_file schema decision (W2 melchior iter 1)**: read
-`skills/sbtdd/scripts/state_file.py` to verify `SessionState`
-dataclass has `spec_snapshot_emitted_at` field. Two cases:
-
-- **Field exists** (with default, likely from v1.0.0 R10 fix): no
-  schema change. Item D just populates the field on autoregen.
-- **Field missing**: add field as `Optional[str] = None` (default
-  None for backward compat with v1.0.2 state files). NO migration
-  required because `Optional` defaults handle pre-existing JSON
-  state files without the field. Document the decision in commit
-  message: `feat: add spec_snapshot_emitted_at optional field`.
-
-Backward compat contract: existing v1.0.2 state files (without the
-field) load as `spec_snapshot_emitted_at=None`. v1.0.3 cycles populate
-the field. Reading code MUST tolerate None (treat as "snapshot
-emitted at unknown time"). v1.0.4+ may make field required after
-2-cycle migration window per Feature I migration tool pattern.
-
-- [ ] **Step 2: Write failing tests**
-
-Append to `tests/test_spec_cmd.py`:
-
-```python
-def test_d1_d2_post_magi_pass_autoregen(tmp_path, monkeypatch):
-    """D-1 + D-2: after MAGI pass, snapshot regenerated + state file timestamp."""
-    import json
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    import spec_cmd
-    import spec_snapshot
-    from state_file import SessionState
-
-    root = tmp_path
-    (root / "sbtdd").mkdir()
-    (root / "planning").mkdir()
-    (root / ".claude").mkdir()
-
-    spec = root / "sbtdd" / "spec-behavior.md"
-    spec.write_text(
-        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
-        "## 1. Section\n\n"
-        "**Escenario X-1: example**\n\n"
-        "> **Given** g\n> **When** w\n> **Then** t\n",
-        encoding="utf-8",
-    )
-    plan = root / "planning" / "claude-plan-tdd-org.md"
-    plan.write_text(
-        "# Plan\n> Generado 2026-05-06 a partir de y.md\n\n## 1. T\n",
-        encoding="utf-8",
-    )
-    plan_final = root / "planning" / "claude-plan-tdd.md"
-    plan_final.write_text(plan.read_text(encoding="utf-8"), encoding="utf-8")
-
-    # Pre-existing snapshot from prior cycle (with stale escenarios)
-    snapshot_path = root / "planning" / "spec-snapshot.json"
-    snapshot_path.write_text(json.dumps({"OLD-1: stale": "deadbeef"}), encoding="utf-8")
-
-    invoke_called = []
-    def fake_invoke(*a, **kw):
-        invoke_called.append(True)
-        return {"verdict": "GO", "iterations": [], "degraded": False}
-    monkeypatch.setattr("magi_dispatch.invoke_magi", fake_invoke)
-    monkeypatch.setattr(spec_cmd, "_create_state_file", lambda *a, **kw: None)
-    monkeypatch.setattr(spec_cmd, "_commit_approved_artifacts", lambda *a, **kw: None)
-
-    cfg = type("Cfg", (), {"magi_max_iterations": 3, "magi_threshold": "GO_WITH_CAVEATS"})()
-    ns = type("NS", (), {"override_checkpoint": False, "reason": None,
-                          "resume_from_magi": False})()
-    spec_cmd._run_magi_checkpoint2(root, cfg, ns)
-
-    # D-1: snapshot regenerated with current escenarios (X-1, not OLD-1)
-    new_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    assert "OLD-1: stale" not in new_snapshot, "Stale escenario should be removed"
-    assert any("X-1" in title for title in new_snapshot.keys()), (
-        "Current spec X-1 escenario should be in regenerated snapshot"
-    )
-
-
-def test_d3_resume_from_magi_idempotent(tmp_path, monkeypatch):
-    """D-3: --resume-from-magi autoregen idempotent (same content -> same hashes)."""
-    import json
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    import spec_cmd
-
-    root = tmp_path
-    (root / "sbtdd").mkdir()
-    (root / "planning").mkdir()
-    (root / ".claude").mkdir()
-    spec = root / "sbtdd" / "spec-behavior.md"
-    spec.write_text(
-        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
-        "## 1. Section\n\n"
-        "**Escenario Y-1: stable**\n\n"
-        "> **Given** g\n> **When** w\n> **Then** t\n",
-        encoding="utf-8",
-    )
-    plan = root / "planning" / "claude-plan-tdd-org.md"
-    plan.write_text(
-        "# Plan\n> Generado 2026-05-06 a partir de y.md\n\n## 1. T\n",
-        encoding="utf-8",
-    )
-    plan_final = root / "planning" / "claude-plan-tdd.md"
-    plan_final.write_text(plan.read_text(encoding="utf-8"), encoding="utf-8")
-
-    monkeypatch.setattr("magi_dispatch.invoke_magi",
-                        lambda *a, **kw: {"verdict": "GO", "iterations": [], "degraded": False})
-    monkeypatch.setattr(spec_cmd, "_create_state_file", lambda *a, **kw: None)
-    monkeypatch.setattr(spec_cmd, "_commit_approved_artifacts", lambda *a, **kw: None)
-
-    cfg = type("Cfg", (), {"magi_max_iterations": 3, "magi_threshold": "GO_WITH_CAVEATS"})()
-    ns = type("NS", (), {"override_checkpoint": False, "reason": None,
-                          "resume_from_magi": True})()
-
-    # First invocation
-    spec_cmd._run_magi_checkpoint2(root, cfg, ns)
-    snapshot_after_first = (root / "planning" / "spec-snapshot.json").read_text(encoding="utf-8")
-
-    # Second invocation (idempotent)
-    spec_cmd._run_magi_checkpoint2(root, cfg, ns)
-    snapshot_after_second = (root / "planning" / "spec-snapshot.json").read_text(encoding="utf-8")
-
-    # Iter 1 W7+I7 balthasar+caspar fix: defensive idempotency guard,
-    # not just observable. Asserts byte-for-byte equality.
-    assert snapshot_after_first == snapshot_after_second, (
-        "Idempotent autoregen: same spec content MUST yield byte-identical "
-        "snapshot file across multiple --resume-from-magi invocations. "
-        "Iter 1 R4 risk mitigated via this assertion."
-    )
-
-
-def test_d_inv37_unaffected_by_autoregen(tmp_path, monkeypatch):
-    """W11 caspar iter 1 fix: INV-37 invocation-site tripwire.
-
-    Item D autoregen runs in _run_magi_checkpoint2 post-MAGI-pass branch,
-    NOT in _run_spec_flow lint timing path. Asserts that INV-37
-    composite-signature check (mtime + size + sha256) on
-    spec-behavior.md still fires correctly when autoregen has just
-    written spec-snapshot.json (which is a different file). The two
-    paths must not interfere.
-    """
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    import spec_cmd
-
-    # Setup: spec-behavior.md exists; record its INV-37 composite signature
-    # before autoregen, after autoregen, after _run_spec_flow.
-    # Assert signatures match where expected (spec-behavior unchanged
-    # across the autoregen call) and differ where expected (after
-    # _run_spec_flow rewrites it).
-    pytest.skip(
-        "Subagent populates with explicit INV-37 signature comparison "
-        "asserting autoregen does NOT alter spec-behavior.md mtime+size+sha256"
-    )
-
-
-def test_d4_backward_compat_normal_flow(tmp_path, monkeypatch):
-    """D-4: plain /sbtdd spec (NOT --resume-from-magi) gets same autoregen behavior."""
-    import json
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
-    import spec_cmd
-
-    root = tmp_path
-    (root / "sbtdd").mkdir()
-    (root / "planning").mkdir()
-    (root / ".claude").mkdir()
-    spec = root / "sbtdd" / "spec-behavior.md"
-    spec.write_text(
-        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
-        "## 1. Section\n\n"
-        "**Escenario Z-1: normal**\n\n"
-        "> **Given** g\n> **When** w\n> **Then** t\n",
-        encoding="utf-8",
-    )
-    plan = root / "planning" / "claude-plan-tdd-org.md"
-    plan.write_text(
-        "# Plan\n> Generado 2026-05-06 a partir de y.md\n\n## 1. T\n",
-        encoding="utf-8",
-    )
-    plan_final = root / "planning" / "claude-plan-tdd.md"
-    plan_final.write_text(plan.read_text(encoding="utf-8"), encoding="utf-8")
-
-    monkeypatch.setattr("magi_dispatch.invoke_magi",
-                        lambda *a, **kw: {"verdict": "GO", "iterations": [], "degraded": False})
-    monkeypatch.setattr(spec_cmd, "_create_state_file", lambda *a, **kw: None)
-    monkeypatch.setattr(spec_cmd, "_commit_approved_artifacts", lambda *a, **kw: None)
-
-    cfg = type("Cfg", (), {"magi_max_iterations": 3, "magi_threshold": "GO_WITH_CAVEATS"})()
-    # resume_from_magi=False (normal flow)
-    ns = type("NS", (), {"override_checkpoint": False, "reason": None,
-                          "resume_from_magi": False})()
-    spec_cmd._run_magi_checkpoint2(root, cfg, ns)
-
-    snapshot_path = root / "planning" / "spec-snapshot.json"
-    assert snapshot_path.exists(), "Normal flow should also emit snapshot"
-    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    assert any("Z-1" in title for title in snapshot.keys())
-```
-
-- [ ] **Step 3: Verify + commit Red**
-
-```bash
-python -m pytest tests/test_spec_cmd.py::test_d1_d2_post_magi_pass_autoregen tests/test_spec_cmd.py::test_d3_resume_from_magi_idempotent tests/test_spec_cmd.py::test_d4_backward_compat_normal_flow -v
-```
-
-Expected: Red signal varies. If autoregen partially shipped via `_mark_plan_approved_with_snapshot`, some tests may PASS already. Document which tests fail vs pass — those that fail represent the gap to fill.
-
-```bash
-python -m ruff check tests/test_spec_cmd.py
-python -m ruff format --check tests/test_spec_cmd.py
-python -m mypy tests/test_spec_cmd.py
-git add tests/test_spec_cmd.py
-git commit -m "test: D-1..D-4 spec-snapshot autoregen tripwires"
-```
-
-#### Green Phase
-
-- [ ] **Step 4: Implement autoregen in `_run_magi_checkpoint2`**
-
-In `skills/sbtdd/scripts/spec_cmd.py`, locate `_run_magi_checkpoint2`. After MAGI verdict converges to `>= GO_WITH_CAVEATS` full no-degraded (post-iter-loop branch, BEFORE `_create_state_file` and `_commit_approved_artifacts`), insert:
-
-```python
-    # v1.0.3 Item D: spec-snapshot auto-regeneration (post-MAGI-pass)
-    import spec_snapshot
-    snapshot = spec_snapshot.emit_snapshot(spec_path)
-    spec_snapshot.persist_snapshot(snapshot, root / "planning" / "spec-snapshot.json")
-    # state_file.spec_snapshot_emitted_at update happens via existing
-    # _mark_plan_approved_with_snapshot pattern OR via _create_state_file
-    # depending on flow. The autoregen here ensures the JSON file is
-    # current; state file timestamp is updated downstream.
-```
-
-Verify integration with existing `_mark_plan_approved_with_snapshot` helper (R10 v1.0.0 fix). If existing helper already covers this for one path (e.g., normal `/sbtdd spec`), ensure `--resume-from-magi` path ALSO triggers via consistent code.
-
-If `state_file.py` lacks `spec_snapshot_emitted_at` field, add it (defaulting to None for backward compat).
-
-- [ ] **Step 5: Run tests pass**
-
-```bash
-python -m pytest tests/test_spec_cmd.py -v -k "test_d1 or test_d2 or test_d3 or test_d4"
-```
-
-Expected: 4 PASS.
-
-- [ ] **Step 6: Verify + commit Green phase**
-
-```bash
-make verify
-git add skills/sbtdd/scripts/spec_cmd.py
-# Possibly state_file.py if field added:
-# git add skills/sbtdd/scripts/state_file.py
-git commit -m "feat: spec-snapshot autoregen in _run_magi_checkpoint2 (Item D)"
-```
-
-#### Refactor + Task close
-
-- [ ] **Step 7-8: Refactor optional (skip if cohesive)**
-- [ ] **Step 9: Close task via automation**
-
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-```
-
-State file advances to `current_task_id="5"` (Item E), `current_phase="red"`.
-
----
-
-### Task 5: Item E — Close-task convention codification (doc-only)
-
-**Files:**
-- Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules — add close-task automation requirement)
-- Modify: `templates/CLAUDE.local.md.template` (template guidance for destination projects)
-- Create: `tests/test_close_task_subagent_pattern.py` (smoke test asserting docs reference close-task)
-
-Covers escenarios E-1, E-2 from spec sec.4.
-
-#### Red Phase
-
-- [ ] **Step 1: Write failing smoke test**
-
-Create `tests/test_close_task_subagent_pattern.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-06
-"""Smoke tests for v1.0.3 Item E close-task convention codification.
-
-Asserts orchestrator skill + template files reference /sbtdd close-task
-automation per Q2 Option B brainstorming decision. Doc-only enforcement
-of the convention; underlying close-task command tested in
-tests/test_close_task_cmd.py.
-
-Covers escenarios E-1 (command behavior — re-asserts via existing
-close_task_cmd tests) + E-2 (docs reference).
-"""
-
-from __future__ import annotations
-
+import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -1071,154 +360,235 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_e2_skill_md_references_close_task():
-    """E-2: skills/sbtdd/SKILL.md mentions close-task automation requirement."""
-    skill_md = _REPO_ROOT / "skills" / "sbtdd" / "SKILL.md"
-    assert skill_md.exists()
-    text = skill_md.read_text(encoding="utf-8")
-    assert "close-task" in text, (
-        "SKILL.md must reference /sbtdd close-task convention (v1.0.3 Item E Q2 Option B)"
+def _capture_dispatch_argv(monkeypatch) -> list[list[str]]:
+    """Monkeypatch subprocess_utils.run_with_timeout to capture argv per call."""
+    sys.path.insert(0, str(_REPO_ROOT / "skills" / "sbtdd" / "scripts"))
+    import subprocess_utils
+
+    captured: list[list[str]] = []
+
+    def fake_run_with_timeout(cmd, **kwargs):
+        captured.append(list(cmd))
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = '{"decisions": []}'
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run_with_timeout)
+    return captured
+
+
+def test_b1_b2_cross_check_uses_atfile_reference(monkeypatch):
+    """B-1 + B-2: cross-check passes prompt via @<filepath>, not inline argv.
+
+    Captures the cmd argv passed to subprocess_utils.run_with_timeout
+    by superpowers_dispatch (invoked via
+    pre_merge_cmd._dispatch_requesting_code_review). Asserts the prompt
+    content is NOT packed into argv (which would trigger WinError 206
+    on Windows for ~200KB cross-check diffs); instead, an @<filepath>
+    reference appears.
+    """
+    sys.path.insert(0, str(_REPO_ROOT / "skills" / "sbtdd" / "scripts"))
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    captured_cmds = _capture_dispatch_argv(monkeypatch)
+
+    large_prompt = "## Cumulative diff under review\n\n" + ("x" * 50000)
+    diff = "--- a/foo.py\n+++ b/foo.py\n" + ("x" * 50000)
+
+    _dispatch_requesting_code_review(diff=diff, prompt=large_prompt)
+
+    assert captured_cmds, "No subprocess invocation captured"
+    cmd_text = " ".join(captured_cmds[0])
+
+    assert len(cmd_text) < 2048, (
+        f"Argv too long ({len(cmd_text)} chars). Prompt should be passed via "
+        f"@<filepath> reference, not inline."
     )
-    assert "NON-CONFORMING" in text or "non-conforming" in text.lower(), (
-        "SKILL.md must explicitly mark manual checkbox edits as non-conforming"
+    assert "@" in cmd_text, "Argv should contain @<filepath> reference"
+    assert ("x" * 50000) not in cmd_text, "Prompt content leaked into argv"
+
+
+def test_b3_temp_file_is_project_relative(monkeypatch):
+    """B-3: temp prompt file lives under .claude/magi-cross-check/.tmp/ (project-relative).
+
+    Side-steps Windows MAX_PATH 260 limit by keeping path short
+    relative to repo root.
+    """
+    sys.path.insert(0, str(_REPO_ROOT / "skills" / "sbtdd" / "scripts"))
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    captured_cmds = _capture_dispatch_argv(monkeypatch)
+    _dispatch_requesting_code_review(diff="x", prompt="## Test prompt")
+
+    assert captured_cmds
+    cmd_text = " ".join(captured_cmds[0])
+
+    match = re.search(r"@(\S+)", cmd_text)
+    assert match, "No @<filepath> reference in argv"
+    filepath_str = match.group(1)
+
+    posix_path = filepath_str.replace("\\", "/")
+    assert ".claude/magi-cross-check/.tmp" in posix_path, (
+        f"Temp file not project-relative: {filepath_str}"
     )
 
 
-def test_e2_template_claude_local_references_close_task():
-    """E-2: templates/CLAUDE.local.md.template mentions close-task command."""
-    template = _REPO_ROOT / "templates" / "CLAUDE.local.md.template"
-    assert template.exists()
-    text = template.read_text(encoding="utf-8")
-    assert "close-task" in text, (
-        "templates/CLAUDE.local.md.template must reference /sbtdd close-task convention"
-    )
+def test_b4_short_prompts_use_uniform_path(monkeypatch):
+    """B-4: small prompts also use @file reference (no regression for typical case)."""
+    sys.path.insert(0, str(_REPO_ROOT / "skills" / "sbtdd" / "scripts"))
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    captured_cmds = _capture_dispatch_argv(monkeypatch)
+    _dispatch_requesting_code_review(diff="", prompt="## Tiny prompt")
+
+    assert captured_cmds, "Even short prompts dispatch via subprocess"
+    cmd_text = " ".join(captured_cmds[0])
+    assert "@" in cmd_text, "Uniform @file reference path even for small prompts"
 
 
-def test_e1_close_task_command_is_runnable():
-    """E-1 prerequisite: close-task subcommand exists and accepts --skip-spec-review."""
-    import subprocess
-    result = subprocess.run(
-        ["python", "skills/sbtdd/scripts/run_sbtdd.py", "close-task", "--help"],
-        capture_output=True,
-        text=True,
-        cwd=str(_REPO_ROOT),
-        timeout=30,
-    )
-    assert result.returncode == 0, f"close-task --help failed: {result.stderr}"
-    assert "--skip-spec-review" in result.stdout, (
-        "close-task command must accept --skip-spec-review escape valve"
+def test_b5_temp_file_cleanup(monkeypatch):
+    """B-5: temp prompt file is cleaned up after dispatch (no leak)."""
+    sys.path.insert(0, str(_REPO_ROOT / "skills" / "sbtdd" / "scripts"))
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    tmp_dir = _REPO_ROOT / ".claude" / "magi-cross-check" / ".tmp"
+    initial_files = set(tmp_dir.glob("*")) if tmp_dir.exists() else set()
+
+    _capture_dispatch_argv(monkeypatch)
+    _dispatch_requesting_code_review(diff="x", prompt="## Cleanup test")
+
+    final_files = set(tmp_dir.glob("*")) if tmp_dir.exists() else set()
+    leaked = final_files - initial_files
+    # Filter out non-prompt files (only check prompt-*.md files we may have created)
+    leaked_prompts = {f for f in leaked if f.name.startswith("prompt-") and f.suffix == ".md"}
+    assert not leaked_prompts, (
+        f"Temp prompt files leaked (no cleanup): {leaked_prompts}"
     )
 ```
 
-- [ ] **Step 2: Run tests to verify Red**
+- [ ] **Step 2: Run tests to verify Red signal**
 
 ```bash
-python -m pytest tests/test_close_task_subagent_pattern.py -v
+python -m pytest tests/test_pre_merge_cross_check.py -k "test_b1_b2 or test_b3 or test_b4 or test_b5" -v
 ```
 
-Expected: `test_e2_skill_md_references_close_task` FAIL (SKILL.md doesn't yet mention close-task convention). `test_e2_template_claude_local_references_close_task` FAIL similarly. `test_e1_close_task_command_is_runnable` PASS (command exists v0.1+).
+Expected pre-fix: all 4 FAIL because current `_dispatch_requesting_code_review` passes prompt inline (no @file reference, no temp file).
 
-- [ ] **Step 3: Verify + commit Red**
+- [ ] **Step 3: Verify + commit Red phase**
 
 ```bash
-python -m ruff check tests/test_close_task_subagent_pattern.py
-python -m ruff format --check tests/test_close_task_subagent_pattern.py
-python -m mypy tests/test_close_task_subagent_pattern.py
-git add tests/test_close_task_subagent_pattern.py
-git commit -m "test: E-1/E-2 close-task convention codification tripwires"
+python -m ruff check tests/test_pre_merge_cross_check.py
+python -m ruff format --check tests/test_pre_merge_cross_check.py
+python -m mypy tests/test_pre_merge_cross_check.py
+git add tests/test_pre_merge_cross_check.py
+git commit -m "test: B-1..B-5 cross-check @file prompt reference tripwires"
 ```
 
 #### Green Phase
 
-- [ ] **Step 4: Update `skills/sbtdd/SKILL.md` orchestrator rules**
+- [ ] **Step 4: Implement @file prompt reference in `_dispatch_requesting_code_review`**
 
-Append a new section to `skills/sbtdd/SKILL.md`:
+Modify `skills/sbtdd/scripts/pre_merge_cmd.py` line ~1243 `_dispatch_requesting_code_review` function. Add the prompt-to-tempfile + @file reference logic:
 
-```markdown
+```python
+def _dispatch_requesting_code_review(
+    *,
+    diff: str,
+    prompt: str,
+    cwd: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Dispatch /requesting-code-review skill with cross-check meta-prompt.
 
-### v1.0.3 Item E: Close-task automation convention (Q2 Option B)
+    v1.0.3 Item B fix: write prompt content to project-relative temp file
+    + pass @<filepath> reference in argv (instead of packing the entire
+    prompt -- including diff up to 200KB -- into a single -p argv element
+    which exceeds Windows cmdline limits triggering WinError 206).
 
-**Mandate**: subagents MUST close each plan task via the
-`/sbtdd close-task` automation command after Refactor phase
-verify-clean. Manual plan-file edits to flip `- [ ]` → `- [x]`
-checkboxes are **NON-CONFORMING** and trigger drift detection.
+    [existing docstring continues...]
+    """
+    import uuid
 
-Invocation pattern (subagent appends as final task close step):
+    # v1.0.3 Item B: project-relative temp dir + @file reference
+    repo_root = Path(cwd) if cwd else Path.cwd()
+    tmp_dir = repo_root / ".claude" / "magi-cross-check" / ".tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    run_id = uuid.uuid4().hex[:8]
+    prompt_file = tmp_dir / f"prompt-{run_id}.md"
+
+    try:
+        prompt_file.write_text(prompt, encoding="utf-8")
+        atfile_arg = f"@{prompt_file.relative_to(repo_root).as_posix()}"
+        result = superpowers_dispatch.requesting_code_review(
+            args=[atfile_arg],
+            cwd=cwd,
+        )
+    finally:
+        prompt_file.unlink(missing_ok=True)
+
+    output_text = getattr(result, "stdout", "") or "{}"
+    try:
+        parsed: dict[str, Any] = json.loads(output_text)
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(
+            f"[sbtdd magi-cross-check] /requesting-code-review returned "
+            f"malformed JSON (meta-review skipped, findings unchanged): "
+            f"{exc}\n"
+        )
+        sys.stderr.flush()
+        return {
+            "decisions": [],
+            "_dispatch_failure": "json_parse_error",
+            "_failure_reason": str(exc),
+        }
+    parsed.setdefault("decisions", [])
+    return parsed
+```
+
+Verify the imports `import uuid` (and `import json` already present) at top of `pre_merge_cmd.py`.
+
+- [ ] **Step 5: Run tests to verify Green pass**
 
 ```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
+python -m pytest tests/test_pre_merge_cross_check.py -v
 ```
 
-The `--skip-spec-review` flag bypasses INV-31 spec-reviewer dispatch
-(~1-2 min/task overhead). Use it for defensive infrastructure work
-where INV-31 enforcement is not the cycle's primary concern.
+Expected: B-1..B-5 PASS + existing pre-merge cross-check tests continue passing.
 
-What `/sbtdd close-task` does atomically:
-1. Flip ALL `- [ ]` → `- [x]` in active task section.
-2. Atomic `chore: mark task {id} complete` commit (plan diff only).
-3. Advance `session-state.json` to next open task (fresh red phase)
-   OR mark plan `done` if last task.
-4. Honors INV-3 (plan checkboxes monotonic) + INV-12 (precondition
-   validation).
-
-Rationale: v1.0.2 ship empirically demonstrated that documentation
-alone (I5 Process notes in plan) doesn't enforce the per-step
-checkbox convention; subagents diverged to heading-mark pattern.
-Codifying via existing automation eliminates the divergence vector.
-```
-
-- [ ] **Step 5: Update `templates/CLAUDE.local.md.template`**
-
-Append to `templates/CLAUDE.local.md.template` (in the section about TDD discipline / per-task closing, or appropriate location):
-
-```markdown
-
-### Cierre de tarea (subagent convention v1.0.3)
-
-Subagents MUST close each plan task via the automation command after
-Refactor phase verify-clean:
-
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-```
-
-Manual plan-file edits to flip `[ ]` → `[x]` checkboxes are
-**NON-CONFORMING** and trigger drift detection per the v1.0.2 ship
-process notes. The close-task command flips ALL step checkboxes in
-the active task section atomically + creates the chore commit +
-advances state file.
-
-The `--skip-spec-review` flag is the recommended default for
-defensive infrastructure cycles; for feature work where INV-31
-spec-reviewer dispatch is desired, omit the flag.
-```
-
-- [ ] **Step 6: Run tests to verify pass**
-
-```bash
-python -m pytest tests/test_close_task_subagent_pattern.py -v
-```
-
-Expected: 3 PASS.
-
-- [ ] **Step 7: Verify + commit Green**
+- [ ] **Step 6: Verify + commit Green phase**
 
 ```bash
 make verify
-git add skills/sbtdd/SKILL.md templates/CLAUDE.local.md.template
-git commit -m "docs: codify close-task convention via automation (Item E Q2 Option B)"
+git add skills/sbtdd/scripts/pre_merge_cmd.py
+git commit -m "fix: cross-check prompt via @file reference (Item B Windows fix)"
 ```
 
-#### Refactor + Task close
+#### Refactor Phase
 
-- [ ] **Step 8-9: Refactor optional (doc-only; skip if clean)**
-- [ ] **Step 10: Close task via automation (this is the final Track Beta task!)**
+- [ ] **Step 7: Refactor (optional helper extraction)**
+
+Consider extracting `_write_prompt_atfile(prompt: str, repo_root: Path) -> tuple[Path, str]` helper if other dispatchers benefit from the same pattern. Otherwise skip.
+
+- [ ] **Step 8: Verify + commit Refactor phase (skip if no changes)**
+
+```bash
+make verify
+# If helper extracted:
+# git add skills/sbtdd/scripts/pre_merge_cmd.py
+# git commit -m "refactor: extract _write_prompt_atfile helper"
+```
+
+#### Task close
+
+- [ ] **Step 9: Close task via `/sbtdd close-task` automation**
 
 ```bash
 python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
 ```
 
-State file advances to `current_task_id=null, current_task_title=null, current_phase="done"` (plan complete; all 5 tasks closed). This unlocks finalization flow per spec sec.7.
+State file advances to `current_task_id=null, current_task_title=null, current_phase="done"` (plan complete; both tasks closed). This unlocks finalization flow per spec sec.7.
 
 ---
 
