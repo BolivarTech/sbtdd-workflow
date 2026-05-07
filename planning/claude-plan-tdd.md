@@ -749,21 +749,19 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 ---
 
-## Track Beta — Items C+D parallel dispatcher + close-phase mandate (Subagent #2, sequential T6 → T7 → T8 → T9)
+## Track Beta — Item C parallel dispatcher only (T9 DEFERRED) (Subagent #2, sequential T6 → T7 → T8)
 
 **Owner**: Subagent #2 dispatched from orchestrator.
-**Surfaces** (cero overlap with Track Alpha):
+**Surfaces** (cero overlap with Track Alpha; Item D surfaces removed
+per iter 2 scope-trim Option D, T9 DEFERRED to v1.0.5):
 - Create: `skills/sbtdd/scripts/dag_parser.py` (NEW)
 - Create: `skills/sbtdd/scripts/parallel_dispatcher.py` (NEW)
 - Modify: `skills/sbtdd/scripts/auto_cmd.py`
 - Create: `tests/test_dag_parser.py` (NEW)
 - Create: `tests/test_parallel_dispatcher.py` (NEW)
 - Modify: `tests/test_auto_cmd.py`
-- Modify: `skills/sbtdd/SKILL.md` (Item D doc)
-- Modify: `templates/CLAUDE.local.md.template` (Item D doc)
-- Create: `tests/test_close_phase_subagent_pattern.py` (NEW, Item D smoke)
 
-**Wall-time estimated**: ~2 days.
+**Wall-time estimated**: ~1.5 days.
 
 ### Task 6: Item C.1 — `dag_parser.py` module + escenarios C-1 + C-2 + C-3 + C-4 (iter 1 triage: code-fence-aware + iterative cycle detection)
 

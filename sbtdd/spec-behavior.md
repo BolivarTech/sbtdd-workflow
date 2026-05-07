@@ -903,23 +903,25 @@ Sequential ordering:
 
 Sin dependencias inter-track durante implementation phase.
 
-### 5.2 Track Beta (subagent #2, sequential C → D)
+### 5.2 Track Beta (subagent #2, Item C only — T9 DEFERRED)
 
 **Owner**: code-architect or general-purpose subagent.
-**Scope**: Item C parallel dispatcher (new modules) + Item D
-doc-only enforcement.
-**Wall-time estimado**: ~2 dias.
+**Scope**: Item C parallel dispatcher (new modules + `--parallel`
+flag wiring). Item D was deferred entirely to v1.0.5 per iter 2
+scope-trim Option D.
+**Wall-time estimado**: ~1.5 dias.
 
-Sequential ordering rationale:
+Sequential ordering (Item C tasks only):
 
-1. **C** (~1.5 dia): parallel dispatcher = `dag_parser.py` (new) +
-   `parallel_dispatcher.py` (new) + `auto_cmd.py` `--parallel`
-   flag + tests. Bulk of cycle scope.
-2. **D** (~0.5 dia): doc-only updates to SKILL.md +
-   CLAUDE.local.md.template + writing-plans skill prompt extension
-   + smoke test.
+1. **C.1** (~0.5 dia): `dag_parser.py` (new module).
+2. **C.2** (~0.5 dia): `parallel_dispatcher.py` (new module).
+3. **C.3** (~0.5 dia): `auto_cmd.py` `--parallel` flag wiring +
+   integration tests.
 
-Sin dependencias inter-track.
+Sin dependencias inter-track. Item D surfaces (SKILL.md,
+CLAUDE.local.md.template, writing-plans extension, close-phase
+subagent pattern test) deferred to v1.0.5 LOCKED Q3 Option A
+code-side enforcement.
 
 ### 5.3 Mid-cycle methodology (orchestrator)
 
