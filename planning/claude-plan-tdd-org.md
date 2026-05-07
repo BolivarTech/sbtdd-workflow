@@ -2221,7 +2221,7 @@ to sequential dispatch + document as v1.0.5 refinement.
 
 ## Pre-merge gate (Loop 1 + Loop 2)
 
-After all 9 plan tasks closed + 4 methodology activities executed:
+After all 7 active plan tasks (T2 ABSORBED, T9 DEFERRED post iter 2 scope-trim) closed + 4 methodology activities executed (last 2 best-effort non-gating):
 
 1. Verify all checkboxes flipped:
    ```bash
@@ -2262,12 +2262,19 @@ ladder (defer Item D first → Item C second → Items A+B hard-LOCKED).
 
 ## Plan invariants summary
 
-- **9 plan tasks** distributed across 2 parallel subagent tracks
-  (Track Alpha 5 tasks; Track Beta 4 tasks).
-- **4 methodology activities** executed by orchestrator
-  (E'-pre + D' retry + E'-post + parallel dogfood).
-- **Per-phase close-phase mandate** (Q3 Option B) applied to ALL
-  9 tasks via plan template (own-cycle dogfood ships the mandate).
+- **7 active plan tasks** (post iter 2 scope-trim Option D): T2
+  ABSORBED into T1 (iter 1 triage); T9 DEFERRED entirely to v1.0.5
+  (iter 2 scope-trim). Track Alpha 4 active tasks (T1, T3, T4, T5);
+  Track Beta 3 active tasks (T6, T7, T8).
+- **4 methodology activities** executed by orchestrator (E'-pre +
+  D' retry + E'-post + parallel dogfood); last 2 demoted to
+  BEST-EFFORT non-gating per iter 2 scope-trim.
+- **Per-phase close-phase mandate** (Q3 Option B) applied to all
+  7 active tasks via plan template (own-cycle dogfood). Note: Q3
+  Option B's broader doc-only enforcement scope (Item D in SKILL.md
+  + template + extension) is DEFERRED to v1.0.5; v1.0.4 cycle just
+  uses close-phase per-phase locally without shipping the convention
+  enforcement to destination projects.
 - **Cero file overlap** between Track Alpha and Track Beta surfaces
   (verified in spec sec.5.4).
 - **Tests baseline**: 1105 + 1 skipped → ~1140-1155 final.

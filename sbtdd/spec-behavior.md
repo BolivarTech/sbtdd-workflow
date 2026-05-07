@@ -50,7 +50,7 @@ Tres pillars:
   headless detection + 600s LOUD-FAST PreconditionError fix.
 - **Pillar B LOCKED HIGH VALUE** — Item C parallel task dispatcher
   with `--parallel` flag on existing `/sbtdd auto`.
-- **Pillar C LOCKED defensive** — Item D phase auto-advance
+- **Pillar C LOCKED defensive (DEFERRED to v1.0.5 per iter 2 scope-trim Option D)** — Item D phase auto-advance
   methodology gap fix via Q3 Option B doc-only mandate.
 
 Decisiones de brainstorming 2026-05-07 (Q1-Q5):
@@ -957,13 +957,15 @@ Surfaces Track Alpha vs Track Beta:
 | `tests/test_dag_parser.py` (new) | — | yes |
 | `tests/test_parallel_dispatcher.py` (new) | — | yes |
 | `tests/test_auto_cmd.py` | — | yes (extend) |
-| `skills/sbtdd/SKILL.md` | — | yes (Item D doc) |
-| `templates/CLAUDE.local.md.template` | — | yes (Item D doc) |
-| writing-plans extension | — | yes (Item D doc) |
-| `tests/test_close_phase_subagent_pattern.py` (new) | — | yes (Item D smoke) |
+| ~~`skills/sbtdd/SKILL.md`~~ | — | DEFERRED v1.0.5 (Item D scope-trim) |
+| ~~`templates/CLAUDE.local.md.template`~~ | — | DEFERRED v1.0.5 (Item D scope-trim) |
+| ~~writing-plans extension~~ | — | DEFERRED v1.0.5 (Item D scope-trim) |
+| ~~`tests/test_close_phase_subagent_pattern.py`~~ | — | DEFERRED v1.0.5 (Item D scope-trim) |
 
 **Cero overlap**. Tracks pueden run truly parallel sin merge
-conflicts.
+conflicts. Post iter 2 scope-trim Option D, Track Beta surfaces
+reduced to `dag_parser.py` + `parallel_dispatcher.py` + `auto_cmd.py`
++ tests only (Item D surfaces deferred to v1.0.5).
 
 ---
 
@@ -1099,12 +1101,12 @@ python skills/magi/scripts/run_magi.py code-review \
 
 ### 7.3 README + SKILL.md + CLAUDE.md
 
-- **README**: v1.0.4 docs section sobre real headless detection +
-  parallel dispatcher `--parallel` flag + per-phase close-phase
-  convention.
-- **SKILL.md**: `### v1.0.4 notes` section documentando 4 plan
-  tasks across 3 pillars + 4 methodology activities + close-phase
-  per-phase mandate.
+- **README**: v1.0.4 docs section sobre subprocess-incompatible gate
+  (membership + override semantics) + parallel dispatcher `--parallel`
+  flag. (Item D per-phase close-phase mandate DEFERRED to v1.0.5.)
+- **SKILL.md**: `### v1.0.4 notes` section documentando 7 active plan
+  tasks (T2 ABSORBED, T9 DEFERRED) across 2 pillars + 4 methodology
+  activities + Item D scope-trim rationale.
 - **CLAUDE.md**: v1.0.4 release notes pointer.
 
 ---
