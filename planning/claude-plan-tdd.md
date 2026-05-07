@@ -86,7 +86,7 @@ Covers escenarios A-2, A-5 from spec sec.4.1 (post triage: A-3 + A-4 env-var esc
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_superpowers_dispatch.py`:
 
@@ -135,12 +135,12 @@ class TestSubprocessIncompatibleSkillsExtended:
         assert "NO env-var/isatty heuristic" in docstring
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestSubprocessIncompatibleSkillsExtended -v`
 Expected: receiving-code-review check FAILs (set not extended), docstring checks FAIL (module docstring doesn't yet have v1.0.4 entry or gate semantics block).
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -148,7 +148,7 @@ Expected: Red phase verify-clean confirms tests fail for the correct reason. Ato
 
 #### Green Phase
 
-- [ ] **Step 4: Extend the set + update module docstring**
+- [x] **Step 4: Extend the set + update module docstring**
 
 Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
 
@@ -191,7 +191,7 @@ _SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset({
 })
 ```
 
-- [ ] **Step 5: Run tests to verify PASS**
+- [x] **Step 5: Run tests to verify PASS**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestSubprocessIncompatibleSkillsExtended -v`
 Expected: 5/5 PASS.
@@ -199,7 +199,7 @@ Expected: 5/5 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 6: close-phase Green**
+- [x] **Step 6: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -207,15 +207,15 @@ Expected: Atomic `feat:` commit (e.g. `feat: extend _SUBPROCESS_INCOMPATIBLE_SKI
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor — no changes expected**
+- [x] **Step 7: Refactor — no changes expected**
 
 Set extension is minimal. Docstring documents audit history. Skip refactor.
 
-- [ ] **Step 8: close-phase Refactor (no-op or empty diff)**
+- [x] **Step 8: close-phase Refactor (no-op or empty diff)**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-- [ ] **Step 9: close-task**
+- [x] **Step 9: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
