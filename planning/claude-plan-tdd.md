@@ -1845,7 +1845,7 @@ git commit -m "test: F-3/F-4 excludes + production audit"
 
 ---
 
-### Task 17: Item G — Add `pytest-cov` + initial coverage config (placeholder threshold=0)
+### Task 17: Item G — Add `pytest-cov` + initial coverage config (placeholder threshold=0) [x]
 
 **Files:**
 - Modify: `pyproject.toml`
