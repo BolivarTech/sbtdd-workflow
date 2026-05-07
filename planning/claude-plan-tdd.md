@@ -582,7 +582,7 @@ Covers escenarios B-1, B-2, B-3 from spec sec.4.2 (post triage: env-var formatti
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_superpowers_dispatch.py`:
 
@@ -652,18 +652,18 @@ class TestBuildRecoveryMessage:
         assert elapsed < 1.0, f"Expected <1s; took {elapsed:.2f}s"
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestBuildRecoveryMessage -v`
 Expected: 6/6 FAIL — placeholder from Task 3 returns minimal string; per-skill dictionary not implemented.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: Replace placeholder with full implementation (post iter 1 triage simplified, no env-var formatting)**
+- [x] **Step 4: Replace placeholder with full implementation (post iter 1 triage simplified, no env-var formatting)**
 
 Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
 
@@ -721,7 +721,7 @@ def _build_recovery_message(skill: str) -> str:
 
 Confirm `from types import MappingProxyType` and `from typing import Mapping` are imported.
 
-- [ ] **Step 5: Run tests to verify PASS**
+- [x] **Step 5: Run tests to verify PASS**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestBuildRecoveryMessage -v`
 Expected: 6/6 PASS.
@@ -729,7 +729,7 @@ Expected: 6/6 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 6: close-phase Green**
+- [x] **Step 6: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -737,11 +737,11 @@ Expected: `feat:` commit landed (e.g. `feat: build per-skill headless recovery m
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor — extract message format string if reusable**
+- [x] **Step 7: Refactor — extract message format string if reusable**
 
 If recovery message format becomes verbose, extract template. Likely YAGNI; skip.
 
-- [ ] **Step 8: close-phase Refactor + Step 9: close-task**
+- [x] **Step 8: close-phase Refactor + Step 9: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
