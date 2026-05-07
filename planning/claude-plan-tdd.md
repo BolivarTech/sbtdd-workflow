@@ -1524,7 +1524,7 @@ of any `for iter_n in range(cfg.magi_max_iterations):` loop in
 
 ---
 
-### Task 14: Item C — CLI standalone (escenario C-cli-1)
+### Task 14: Item C — CLI standalone (escenario C-cli-1) [x]
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/spec_lint.py`
