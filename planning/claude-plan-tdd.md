@@ -343,7 +343,7 @@ Covers escenarios B-1, B-2, B-3, B-4, B-5 from spec sec.4. Refined iter 2 root c
 
 #### Red Phase
 
-- [ ] **Step 1: Append failing tests with concrete monkeypatch on subprocess capture**
+- [x] **Step 1: Append failing tests with concrete monkeypatch on subprocess capture**
 
 Append to `tests/test_pre_merge_cross_check.py`:
 
@@ -468,7 +468,7 @@ def test_b5_temp_file_cleanup(monkeypatch):
     )
 ```
 
-- [ ] **Step 2: Run tests to verify Red signal**
+- [x] **Step 2: Run tests to verify Red signal**
 
 ```bash
 python -m pytest tests/test_pre_merge_cross_check.py -k "test_b1_b2 or test_b3 or test_b4 or test_b5" -v
@@ -476,7 +476,7 @@ python -m pytest tests/test_pre_merge_cross_check.py -k "test_b1_b2 or test_b3 o
 
 Expected pre-fix: all 4 FAIL because current `_dispatch_requesting_code_review` passes prompt inline (no @file reference, no temp file).
 
-- [ ] **Step 3: Verify + commit Red phase**
+- [x] **Step 3: Verify + commit Red phase**
 
 ```bash
 python -m ruff check tests/test_pre_merge_cross_check.py
@@ -488,7 +488,7 @@ git commit -m "test: B-1..B-5 cross-check @file prompt reference tripwires"
 
 #### Green Phase
 
-- [ ] **Step 4: Implement @file prompt reference in `_dispatch_requesting_code_review`**
+- [x] **Step 4: Implement @file prompt reference in `_dispatch_requesting_code_review`**
 
 Modify `skills/sbtdd/scripts/pre_merge_cmd.py` line ~1243 `_dispatch_requesting_code_review` function. Add the prompt-to-tempfile + @file reference logic:
 
@@ -549,7 +549,7 @@ def _dispatch_requesting_code_review(
 
 Verify the imports `import uuid` (and `import json` already present) at top of `pre_merge_cmd.py`.
 
-- [ ] **Step 5: Run tests to verify Green pass**
+- [x] **Step 5: Run tests to verify Green pass**
 
 ```bash
 python -m pytest tests/test_pre_merge_cross_check.py -v
@@ -557,7 +557,7 @@ python -m pytest tests/test_pre_merge_cross_check.py -v
 
 Expected: B-1..B-5 PASS + existing pre-merge cross-check tests continue passing.
 
-- [ ] **Step 6: Verify + commit Green phase**
+- [x] **Step 6: Verify + commit Green phase**
 
 ```bash
 make verify
@@ -567,11 +567,11 @@ git commit -m "fix: cross-check prompt via @file reference (Item B Windows fix)"
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor (optional helper extraction)**
+- [x] **Step 7: Refactor (optional helper extraction)**
 
 Consider extracting `_write_prompt_atfile(prompt: str, repo_root: Path) -> tuple[Path, str]` helper if other dispatchers benefit from the same pattern. Otherwise skip.
 
-- [ ] **Step 8: Verify + commit Refactor phase (skip if no changes)**
+- [x] **Step 8: Verify + commit Refactor phase (skip if no changes)**
 
 ```bash
 make verify
@@ -582,7 +582,7 @@ make verify
 
 #### Task close
 
-- [ ] **Step 9: Close task via `/sbtdd close-task` automation**
+- [x] **Step 9: Close task via `/sbtdd close-task` automation**
 
 ```bash
 python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
