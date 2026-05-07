@@ -125,3 +125,91 @@ def test_production_callsites_pass_audit():
         + "\n".join(all_violations)
         + "\n\nFix: add allow_interactive_skill=True or use wrapper."
     )
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Item A.5 (Task 5) -- audit no callsite bypasses headless gate
+# inappropriately via ``allow_interactive_skill=True`` outside known-safe
+# locations.
+#
+# Complementary to the "missing override" audit above (which catches
+# UNDER-application). This new audit catches OVER-application: callsites
+# that pass ``allow_interactive_skill=True`` without belonging to a
+# whitelisted location are a regression and must be removed or
+# whitelisted with rationale comment.
+# ---------------------------------------------------------------------------
+
+
+class TestHeadlessGateCallsiteConsistency:
+    """v1.0.4 Item A.5 -- audit no callsite bypasses headless gate inappropriately."""
+
+    def test_no_invoke_skill_call_with_allow_interactive_skill_true_outside_known_safe(self):
+        """Audit: ``allow_interactive_skill=True`` only at known-safe callsites.
+
+        Known-safe callsites (v1.0.4 baseline):
+        - ``skills/sbtdd/scripts/superpowers_dispatch.py``: ``brainstorming``,
+          ``writing_plans``, ``receiving_code_review``, and other wrappers
+          built via ``_make_wrapper`` pass the override internally per the
+          v1.0.1 Pre-A2 migration baseline.
+        - ``tests/*``: every test file is allowed (pytest fixture context;
+          monkeypatched stubs may need to drive the subprocess code path).
+
+        Any new ``invoke_skill(..., allow_interactive_skill=True)`` callsite
+        in ``skills/sbtdd/scripts/`` outside these locations is a regression
+        and must be removed or whitelisted with explicit rationale comment.
+        """
+        skills_dir = _REPO_ROOT / "skills" / "sbtdd" / "scripts"
+
+        # Whitelist: callsite location -> rationale.
+        # New entries require code review + matching rationale here.
+        WHITELIST = {
+            "superpowers_dispatch.py": (
+                "wrapper functions brainstorming/writing_plans/"
+                "receiving_code_review/etc. pass override internally per "
+                "v1.0.1 Pre-A2 migration baseline + v1.0.4 Item A.2 gate"
+            ),
+        }
+
+        offenders: list[tuple[str, int, str]] = []
+        for py_file in skills_dir.rglob("*.py"):
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                # Match invoke_skill(...) or *_dispatch.invoke_skill(...).
+                func = node.func
+                func_name: str | None = None
+                if isinstance(func, ast.Name):
+                    func_name = func.id
+                elif isinstance(func, ast.Attribute):
+                    func_name = func.attr
+                if func_name != "invoke_skill":
+                    continue
+                # Look for ``allow_interactive_skill=True`` keyword.
+                for kw in node.keywords:
+                    if kw.arg == "allow_interactive_skill":
+                        if isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                            file_basename = py_file.name
+                            if file_basename not in WHITELIST:
+                                offenders.append(
+                                    (
+                                        py_file.relative_to(_REPO_ROOT).as_posix(),
+                                        node.lineno,
+                                        "allow_interactive_skill=True",
+                                    )
+                                )
+
+        assert not offenders, (
+            "Found unwhitelisted callsites passing allow_interactive_skill=True:\n"
+            + "\n".join(f"  {path}:{lineno} ({reason})" for path, lineno, reason in offenders)
+            + "\nAdd to WHITELIST with rationale or remove the override."
+        )
+
+    def test_subprocess_dispatch_module_imports_ast_safe(self):
+        """Defensive: AST audit can parse superpowers_dispatch.py without error."""
+        path = _REPO_ROOT / "skills" / "sbtdd" / "scripts" / "superpowers_dispatch.py"
+        # Must parse without SyntaxError.
+        ast.parse(path.read_text(encoding="utf-8"))
