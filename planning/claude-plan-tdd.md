@@ -1383,7 +1383,7 @@ Append `findings.extend(_check_r5(path, text))` to `lint_spec`.
 
 ---
 
-### Task 13: Item C — Integration en `_run_magi_checkpoint2` (escenarios C-int-1, C-int-2)
+### Task 13: Item C — Integration en `_run_magi_checkpoint2` (escenarios C-int-1, C-int-2) [x]
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/spec_cmd.py`
