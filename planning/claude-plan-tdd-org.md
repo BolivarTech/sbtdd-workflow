@@ -5,18 +5,32 @@
 > Q1+Q2+Q3+Q4+Q5 resolved). Frontmatter required by spec_lint R5
 > (Item C v1.0.2 enforcement).
 >
-> v1.0.4 ships 3 pillars: Pillar A (Items A+B coupled real headless
-> detection + 600s LOUD-FAST fix); Pillar B (Item C parallel task
-> dispatcher with --parallel flag); Pillar C (Item D doc-only
-> per-phase close-phase mandate).
+> v1.0.4 ships 3 pillars: Pillar A (Items A+B coupled subprocess-
+> incompatible gate + 600s LOUD-FAST fix); Pillar B (Item C parallel
+> task dispatcher with --parallel flag); Pillar C (Item D doc-only
+> per-phase close-phase mandate + soft-warning tripwire).
+>
+> **iter 1 triage applied 2026-05-07** (post Checkpoint 2 iter 1
+> verdict GO_WITH_CAVEATS 3-0; 2 CRITICAL + 14 WARNING + 5 INFO):
+> Task 2 ABSORBED into Task 1 (single set extension + tests after
+> CRITICAL #1 simplification dropped helper). Task 3 simplified
+> (membership + override gate; no env-var detection). Task 4
+> recovery message simplified (no env-var formatting). Task 6
+> dag_parser + code-fence-aware regex + iterative cycle detection
+> (WARNING melchior + caspar). Task 7 deterministic sort + synthetic
+> concurrent state-file write test (WARNING melchior + balthasar).
+> Task 9 + soft-warning tripwire in close-task (~5 LOC + 2 tests).
+>
+> Effective task layout post-triage: 8 tasks (4 Alpha + 4 Beta).
+> Task numbering preserved 1-9 with T2 marked ABSORBED.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax (open + closed bracket forms) for tracking.
 
-**Goal:** Ship v1.0.4 — eliminate `/receiving-code-review` interactive subprocess hang via real headless detection (env var + isatty + override) coupled with 600s LOUD-FAST PreconditionError fix; codify multi-track parallel subagent pattern as plugin feature via `--parallel` flag on `/sbtdd auto`; mandate per-phase close-phase commands via 3-touchpoint doc-only enforcement (SKILL.md + CLAUDE.local.md.template + writing-plans skill prompt extension). 9 plan tasks across 2 parallel subagent tracks; 4 methodology activities (Activity E'-pre + Activity D' retry + Activity E'-post + parallel dispatcher dogfood) executed by orchestrator.
+**Goal:** Ship v1.0.4 — eliminate `/receiving-code-review` interactive subprocess hang via subprocess-incompatible gate (membership + override semantics; pre-spawn block) coupled with 600s LOUD-FAST PreconditionError fix; codify multi-track parallel subagent pattern as plugin feature via `--parallel` flag on `/sbtdd auto`; mandate per-phase close-phase commands via 3-touchpoint doc-only enforcement (SKILL.md + CLAUDE.local.md.template + writing-plans skill prompt extension) PLUS soft-warning tripwire in `close_task_cmd._preflight` (iter 1 triage WARNING fold-in). 8 plan tasks (1 ABSORBED) across 2 parallel subagent tracks; 4 methodology activities (Activity E'-pre + Activity D' retry + Activity E'-post + parallel dispatcher dogfood) executed by orchestrator.
 
-**Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (Items A+B coupled, 5 sequential tasks) modifies `skills/sbtdd/scripts/superpowers_dispatch.py` + extends `tests/test_superpowers_dispatch.py` + `tests/test_invoke_skill_callsites_audit.py`. Track Beta (Items C+D sequential, 4 tasks) creates `skills/sbtdd/scripts/dag_parser.py` + `skills/sbtdd/scripts/parallel_dispatcher.py` (NEW modules), modifies `skills/sbtdd/scripts/auto_cmd.py` + tests, applies Item D doc-only updates to `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template` + writing-plans skill prompt extension + smoke test. Cero file overlap. Activities mid-cycle (E'-pre before Track dispatch; D' retry + E'-post + parallel dogfood after Track close) run in orchestrator session before pre-merge gate.
+**Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (Items A+B coupled, 4 sequential tasks post-triage; T2 ABSORBED into T1) modifies `skills/sbtdd/scripts/superpowers_dispatch.py` + extends `tests/test_superpowers_dispatch.py` + `tests/test_invoke_skill_callsites_audit.py`. Track Beta (Items C+D sequential, 4 tasks) creates `skills/sbtdd/scripts/dag_parser.py` + `skills/sbtdd/scripts/parallel_dispatcher.py` (NEW modules), modifies `skills/sbtdd/scripts/auto_cmd.py` + tests, applies Item D doc-only updates to `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template` + writing-plans skill prompt extension + smoke test, AND modifies `skills/sbtdd/scripts/close_task_cmd.py` (~5 LOC tripwire) + extends `tests/test_close_task_cmd.py` (2 tests). Cero file overlap. Activities mid-cycle (E'-pre before Track dispatch; D' retry + E'-post + parallel dogfood after Track close) run in orchestrator session before pre-merge gate.
 
-**State file write serialization**: Track Alpha owns Tasks 1-5 (sequential close). Track Beta owns Tasks 6-9 (sequential close). State file `current_task_id` advances 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → done. `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Concurrent close-task invocations against disjoint task IDs are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3 precedent.
+**State file write serialization**: Track Alpha owns Tasks 1-5 (sequential close, T2 ABSORBED no-op). Track Beta owns Tasks 6-9 (sequential close). State file `current_task_id` advances 1 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → done (skipping 2 by ABSORBED-no-op). `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Concurrent close-task invocations against disjoint task IDs are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3 precedent + v1.0.4 Task 7 synthetic concurrent test (iter 1 triage W6 fold-in).
 
 **Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active in same worktree (parallel-safe per spec sec.3 since Tracks have disjoint surfaces). Brainstorming refinements 2026-05-07: Q1 = 2-track parallel (Alpha A+B coupled, Beta C+D sequential); Q2 = Item C `--parallel` flag on `/sbtdd auto` (no new subcommand); Q3 = Item D Option B mandate close-phase per phase commit via 3-touchpoint doc-only; Q4 = Activity E' Option C both pre + post Track-close exercises; Q5 auto-resolved cap=3 HARD G1, iter-2 CRITICAL trigger pre-staged.
 
@@ -51,13 +65,13 @@
 
 **Wall-time estimated**: ~1 day.
 
-### Task 1: Item A.1 — `_is_headless_context` helper + escenarios A-2 + A-3 + A-4
+### Task 1: Item A.1 — Extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + module docstring (iter 1 triage: ABSORBS T2)
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (add helper after `_SUBPROCESS_INCOMPATIBLE_SKILLS` set)
-- Test: `tests/test_superpowers_dispatch.py` (extend with `class TestIsHeadlessContext`)
+- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (extend frozenset + update module docstring with v1.0.4 audit history entry)
+- Test: `tests/test_superpowers_dispatch.py` (extend with `class TestSubprocessIncompatibleSkillsExtended`)
 
-Covers escenarios A-2, A-3, A-4 from spec sec.4.1.
+Covers escenarios A-2, A-5 from spec sec.4.1 (post triage: A-3 + A-4 env-var escenarios DROPPED per CRITICAL #1+#2 simplification).
 
 #### Red Phase
 
@@ -66,184 +80,150 @@ Covers escenarios A-2, A-3, A-4 from spec sec.4.1.
 Append to `tests/test_superpowers_dispatch.py`:
 
 ```python
-class TestIsHeadlessContext:
-    """v1.0.4 Item A escenarios A-2, A-3, A-4 — _is_headless_context detection."""
+class TestSubprocessIncompatibleSkillsExtended:
+    """v1.0.4 Item A.1 escenarios A-2 + A-5 — set extension + docstring audit history (post iter 1 triage)."""
 
-    def test_sbtdd_headless_env_var_forces_headless(self, monkeypatch):
-        """A-2: SBTDD_HEADLESS=1 forces headless regardless of isatty()."""
-        from superpowers_dispatch import _is_headless_context
+    def test_a5_receiving_code_review_in_incompatible_set(self):
+        """A-5: receiving-code-review extended in v1.0.4."""
+        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
-        # Even if isatty would return True, env var wins
-        assert _is_headless_context() is True
+        assert "receiving-code-review" in _SUBPROCESS_INCOMPATIBLE_SKILLS
 
-    def test_sbtdd_headless_case_insensitive(self, monkeypatch):
-        """A-2: SBTDD_HEADLESS accepts 1/true/yes case-insensitive."""
-        from superpowers_dispatch import _is_headless_context
+    def test_a5_brainstorming_writing_plans_preserved_v101(self):
+        """A-5: v1.0.1 baseline (brainstorming, writing-plans) preserved."""
+        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
 
-        for value in ("1", "true", "True", "TRUE", "yes", "Yes", "YES"):
-            monkeypatch.setenv("SBTDD_HEADLESS", value)
-            assert _is_headless_context() is True, f"value={value!r} should be headless"
+        assert "brainstorming" in _SUBPROCESS_INCOMPATIBLE_SKILLS
+        assert "writing-plans" in _SUBPROCESS_INCOMPATIBLE_SKILLS
 
-    def test_sbtdd_headless_other_values_not_headless(self, monkeypatch):
-        """A-2: SBTDD_HEADLESS=0/empty/garbage does NOT force headless."""
-        from superpowers_dispatch import _is_headless_context
+    def test_a2_set_is_frozenset_immutable(self):
+        """A-2: set is frozenset to prevent runtime mutation."""
+        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
 
-        for value in ("0", "false", "no", "", "garbage"):
-            monkeypatch.setenv("SBTDD_HEADLESS", value)
-            # Falls through to isatty check; default depends on stdin state
-            # We patch isatty to True so the result is unambiguously False
-            with patch("sys.stdin") as mock_stdin:
-                mock_stdin.isatty.return_value = True
-                assert _is_headless_context() is False, f"value={value!r} should not force headless"
+        assert isinstance(_SUBPROCESS_INCOMPATIBLE_SKILLS, frozenset)
 
-    def test_stdin_not_tty_triggers_headless(self, monkeypatch):
-        """A-3: stdin.isatty() False AND no env override triggers headless."""
-        from superpowers_dispatch import _is_headless_context
+    def test_a5_module_docstring_documents_audit_history(self):
+        """A-5 doc-coherence: module docstring records v1.0.1 + v1.0.4 additions."""
+        import superpowers_dispatch
 
-        monkeypatch.delenv("SBTDD_HEADLESS", raising=False)
-        monkeypatch.delenv("SBTDD_INTERACTIVE", raising=False)
-        with patch("sys.stdin") as mock_stdin:
-            mock_stdin.isatty.return_value = False
-            assert _is_headless_context() is True
+        docstring = superpowers_dispatch.__doc__ or ""
+        assert "v1.0.1" in docstring
+        assert "brainstorming" in docstring
+        assert "writing-plans" in docstring
+        assert "v1.0.4" in docstring
+        assert "receiving-code-review" in docstring
 
-    def test_sbtdd_interactive_overrides_isatty(self, monkeypatch):
-        """A-4: SBTDD_INTERACTIVE=1 overrides stdin.isatty() False."""
-        from superpowers_dispatch import _is_headless_context
+    def test_a5_module_docstring_documents_gate_semantics(self):
+        """A-5 doc-coherence (post iter 1 triage): module docstring documents
+        membership-based gate semantics (NOT env-var/isatty heuristic)."""
+        import superpowers_dispatch
 
-        monkeypatch.delenv("SBTDD_HEADLESS", raising=False)
-        monkeypatch.setenv("SBTDD_INTERACTIVE", "1")
-        with patch("sys.stdin") as mock_stdin:
-            mock_stdin.isatty.return_value = False
-            assert _is_headless_context() is False
-
-    def test_isatty_oserror_safe_default_headless(self, monkeypatch):
-        """Defensive: isatty() raises OSError → safe default is headless."""
-        from superpowers_dispatch import _is_headless_context
-
-        monkeypatch.delenv("SBTDD_HEADLESS", raising=False)
-        monkeypatch.delenv("SBTDD_INTERACTIVE", raising=False)
-        with patch("sys.stdin") as mock_stdin:
-            mock_stdin.isatty.side_effect = OSError("not a tty")
-            assert _is_headless_context() is True
+        docstring = superpowers_dispatch.__doc__ or ""
+        assert "BLOCKED UNCONDITIONALLY" in docstring
+        assert "allow_interactive_skill=True" in docstring
+        assert "NO env-var/isatty heuristic" in docstring
 ```
 
 - [ ] **Step 2: Run tests to verify FAIL**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestIsHeadlessContext -v`
-Expected: FAIL with `AttributeError: module 'superpowers_dispatch' has no attribute '_is_headless_context'`.
+Run: `pytest tests/test_superpowers_dispatch.py::TestSubprocessIncompatibleSkillsExtended -v`
+Expected: receiving-code-review check FAILs (set not extended), docstring checks FAIL (module docstring doesn't yet have v1.0.4 entry or gate semantics block).
 
 - [ ] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-Expected: Red phase verify-clean confirms tests fail for the correct reason (missing implementation, not import error). Atomic `test:` commit landed. State file advances `current_phase: red → green`.
+Expected: Red phase verify-clean confirms tests fail for the correct reason. Atomic `test:` commit landed. State file advances `current_phase: red → green`.
 
 #### Green Phase
 
-- [ ] **Step 4: Implement `_is_headless_context` helper**
+- [ ] **Step 4: Extend the set + update module docstring**
 
-Modify `skills/sbtdd/scripts/superpowers_dispatch.py`. Add after `_SUBPROCESS_INCOMPATIBLE_SKILLS` definition:
+Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
 
 ```python
-def _is_headless_context() -> bool:
-    """Return True if SBTDD is running in a headless context.
+"""Dispatcher for invoking superpowers skills via claude -p subprocess.
 
-    v1.0.4 Item A real headless detection. Replaces v1.0.1 conservative
-    whitelist + override-only baseline.
+...
 
-    Detection signals (any one is sufficient):
-    - ``SBTDD_HEADLESS`` env var is "1" / "true" / "yes" (case-insensitive)
-    - ``sys.stdin.isatty()`` returns False AND ``SBTDD_INTERACTIVE`` env
-      var is NOT set to "1" / "true" / "yes"
+Subprocess-incompatible skill audit history:
+- v1.0.1 (Finding A discovery): brainstorming, writing-plans.
+  Manifestation: silent no-op (subprocess returns without producing
+  skill output). Caught post-spawn via INV-37 composite-signature
+  check (v1.0.1 Item A0).
+- v1.0.4 (v1.0.3 Activity D' empirical hang during Loop 1 fix-finding
+  triage step): receiving-code-review. Manifestation: 600s subprocess
+  hang waiting interactive input. Cannot be caught post-spawn
+  (operator-blocking); requires pre-spawn gate.
 
-    Defensive default: if isatty() raises (e.g., closed stdin in CI), return
-    True so subprocess-incompatible skills are blocked rather than allowed
-    to spawn and hang.
+A skill is subprocess-incompatible iff it requires multi-turn
+interactive dialogue with the operator. Adding a new entry to the
+set without empirical evidence (subprocess hang or silent-no-op
+observed) is forbidden -- operators must run the skill manually in
+interactive session and document the failure mode in CHANGELOG
+before promoting.
 
-    Returns:
-        True if headless context detected, False otherwise.
-    """
-    headless = os.environ.get("SBTDD_HEADLESS", "").lower()
-    if headless in {"1", "true", "yes"}:
-        return True
-    interactive = os.environ.get("SBTDD_INTERACTIVE", "").lower()
-    if interactive in {"1", "true", "yes"}:
-        return False
-    try:
-        return not sys.stdin.isatty()
-    except (AttributeError, OSError):
-        return True
+Gate semantics (v1.0.4 post iter 1 triage): subprocess spawn for
+incompatible skills is BLOCKED UNCONDITIONALLY unless caller passes
+allow_interactive_skill=True. The override is the explicit opt-in
+for known-safe wrappers that have arranged for subprocess success
+(silent-no-op tolerated by v1.0.1 wrappers via INV-37 post-detection;
+or operator-controlled interactive callsites). NO env-var/isatty
+heuristic -- caspar Checkpoint 2 iter 1 CRITICAL verified the
+heuristic does not fix the v1.0.3 bug in operator main sessions.
+"""
+
+_SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset({
+    "brainstorming",
+    "writing-plans",
+    "receiving-code-review",  # v1.0.4 added per v1.0.3 Activity D' dogfood
+})
 ```
-
-Confirm `import os` and `import sys` present at top of file (likely already imported).
 
 - [ ] **Step 5: Run tests to verify PASS**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestIsHeadlessContext -v`
-Expected: 6/6 tests PASS.
+Run: `pytest tests/test_superpowers_dispatch.py::TestSubprocessIncompatibleSkillsExtended -v`
+Expected: 5/5 PASS.
 
 Run: `make verify`
-Expected: All checks green (pytest, ruff check, ruff format, mypy).
+Expected: Clean.
 
 - [ ] **Step 6: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-Expected: Green phase verify-clean passes. Atomic `feat:` commit landed (subject: `feat: add _is_headless_context helper for v1.0.4 Item A`). State file advances `current_phase: green → refactor`.
+Expected: Atomic `feat:` commit (e.g. `feat: extend _SUBPROCESS_INCOMPATIBLE_SKILLS for receiving-code-review (v1.0.4 Item A.1, T2 absorbed)`).
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor — extract HEADLESS_TRUTHY constant if duplicated**
+- [ ] **Step 7: Refactor — no changes expected**
 
-If `{"1", "true", "yes"}` literal appears in another module or seems likely to (e.g., new wrappers in Task 4), extract to module-level:
+Set extension is minimal. Docstring documents audit history. Skip refactor.
 
-```python
-_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes"})
-
-
-def _is_headless_context() -> bool:
-    ...
-    headless = os.environ.get("SBTDD_HEADLESS", "").lower()
-    if headless in _TRUTHY_ENV_VALUES:
-        return True
-    interactive = os.environ.get("SBTDD_INTERACTIVE", "").lower()
-    if interactive in _TRUTHY_ENV_VALUES:
-        return False
-    ...
-```
-
-If only used once, skip refactor (YAGNI). Document decision in commit message.
-
-- [ ] **Step 8: Run tests to verify still PASS**
-
-Run: `pytest tests/test_superpowers_dispatch.py::TestIsHeadlessContext -v`
-Expected: 6/6 tests PASS (no regression).
-
-Run: `make verify`
-Expected: Clean.
-
-- [ ] **Step 9: close-phase Refactor**
+- [ ] **Step 8: close-phase Refactor (no-op or empty diff)**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-Expected: Refactor phase verify-clean passes. Atomic `refactor:` commit landed (e.g. `refactor: extract _TRUTHY_ENV_VALUES constant`) OR no-op if YAGNI applied. State file advances `current_phase: refactor → done` for this task.
-
-- [ ] **Step 10: close-task**
+- [ ] **Step 9: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
-Expected: All `[ ]` checkboxes in Task 1 section flipped to `[x]`. Atomic `chore: mark task 1 complete` commit landed (plan diff only). State file advances `current_task_id: 1 → 2`.
+Expected: Task 1 checkboxes flipped, `chore:` commit, state file advances `current_task_id: 1 → 3` (skipping ABSORBED Task 2).
 
 ---
 
-### Task 2: Item A.2 — Extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + escenarios A-5
+### Task 2: ABSORBED INTO TASK 1 (iter 1 triage CRITICAL #1+#2 simplification)
 
-**Files:**
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (extend frozenset + update module docstring)
-- Test: `tests/test_superpowers_dispatch.py` (add A-5 test)
+**Status**: ABSORBED — no implementation work required.
 
-Covers escenario A-5 from spec sec.4.1.
+**Rationale**: iter 1 triage SIMPLIFIED Item A — dropped `_is_headless_context()` helper + env-var detection per caspar CRITICAL #1+#2 verifying the original heuristic does NOT fix the v1.0.3 bug. The set extension that was Task 2's scope is now part of Task 1 (Step 4 extends both set + module docstring atomically). Remaining Task 1 absorbs Task 2's escenario A-5 coverage.
+
+- [ ] **Single step: ABSORBED — no-op for subagents**
+
+This task header is preserved for plan numbering continuity. The
+subagent does NOT execute steps for Task 2; orchestrator will
+advance state file from `current_task_id: 1 → 3` upon Task 1 close
+(see Task 1 close-task Step 9). No commit produced for Task 2.
 
 #### Red Phase
 
@@ -364,13 +344,13 @@ Expected: Task 2 checkboxes flipped, `chore:` commit, state file advances.
 
 ---
 
-### Task 3: Item A.3 — Wire `_is_headless_context` into `invoke_skill` + escenarios A-1 + A-6 + A-7
+### Task 3: Item A.2 — Wire membership-based gate into `invoke_skill` + escenarios A-1 + A-3 + A-4 + A-5 (post iter 1 triage SIMPLIFIED)
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (`invoke_skill` function)
-- Test: `tests/test_superpowers_dispatch.py` (add A-1, A-6, A-7 tests)
+- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (`invoke_skill` function — add membership + override gate, NO env-var detection)
+- Test: `tests/test_superpowers_dispatch.py` (add A-1, A-3, A-4, A-5 tests)
 
-Covers escenarios A-1, A-6, A-7 from spec sec.4.1.
+Covers escenarios A-1, A-3, A-4, A-5 from spec sec.4.1 (post triage: NO `_is_headless_context()` helper; gate is membership-based with `allow_interactive_skill` override).
 
 #### Red Phase
 
@@ -379,40 +359,35 @@ Covers escenarios A-1, A-6, A-7 from spec sec.4.1.
 Append to `tests/test_superpowers_dispatch.py`:
 
 ```python
-class TestInvokeSkillHeadlessGate:
-    """v1.0.4 Item A.3 escenarios A-1, A-6, A-7 — invoke_skill headless gate."""
+class TestInvokeSkillMembershipGate:
+    """v1.0.4 Item A.2 escenarios A-1, A-3, A-4, A-5 — invoke_skill gate (post iter 1 triage)."""
 
-    def test_a1_receiving_code_review_raises_in_headless(self, monkeypatch):
-        """A-1: invoke_skill('receiving-code-review', ...) raises in headless."""
+    def test_a1_receiving_code_review_raises_unconditionally(self):
+        """A-1: invoke_skill('receiving-code-review', ...) raises without override (any context)."""
         from superpowers_dispatch import invoke_skill
         from errors import PreconditionError
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
         with pytest.raises(PreconditionError) as exc_info:
             invoke_skill("receiving-code-review", "any prompt")
-        assert "Skill `/receiving-code-review` cannot run via `claude -p`" in str(exc_info.value)
-        assert "headless context" in str(exc_info.value)
+        assert "Skill `/receiving-code-review` cannot run via `claude -p` subprocess" in str(exc_info.value)
+        assert "empirically incompatible" in str(exc_info.value)
 
-    def test_a1_no_subprocess_spawned_when_blocked(self, monkeypatch):
+    def test_a1_no_subprocess_spawned_when_blocked(self):
         """A-1: PreconditionError raised BEFORE subprocess spawn (no Popen call)."""
         from superpowers_dispatch import invoke_skill
         from errors import PreconditionError
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
         with patch("subprocess.run") as mock_run:
             with pytest.raises(PreconditionError):
                 invoke_skill("receiving-code-review", "any prompt")
             mock_run.assert_not_called()
 
-    def test_a6_allow_interactive_skill_bypasses_gate(self, monkeypatch):
-        """A-6: allow_interactive_skill=True bypasses headless gate."""
+    def test_a3_allow_interactive_skill_bypasses_gate(self):
+        """A-3: allow_interactive_skill=True bypasses gate (override active)."""
         from superpowers_dispatch import invoke_skill
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
-        # Mock subprocess to avoid actually spawning claude -p
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-            # Should NOT raise — override active
             result = invoke_skill(
                 "receiving-code-review",
                 "any prompt",
@@ -420,43 +395,50 @@ class TestInvokeSkillHeadlessGate:
             )
             mock_run.assert_called_once()
 
-    def test_a7_brainstorming_wrapper_backward_compat(self, monkeypatch):
-        """A-7: existing brainstorming wrapper preserves v1.0.1 behavior."""
+    def test_a4_brainstorming_wrapper_backward_compat(self):
+        """A-4: existing brainstorming wrapper preserves v1.0.1 behavior."""
         from superpowers_dispatch import brainstorming
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
-        # Wrapper should pass allow_interactive_skill=True internally
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
             result = brainstorming("any prompt")
             mock_run.assert_called_once()
 
-    def test_a7_writing_plans_wrapper_backward_compat(self, monkeypatch):
-        """A-7: existing writing_plans wrapper preserves v1.0.1 behavior."""
+    def test_a4_writing_plans_wrapper_backward_compat(self):
+        """A-4: existing writing_plans wrapper preserves v1.0.1 behavior."""
         from superpowers_dispatch import writing_plans
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
             result = writing_plans("any prompt")
             mock_run.assert_called_once()
 
-    def test_skills_not_in_set_pass_through(self, monkeypatch):
-        """Defensive: skills NOT in _SUBPROCESS_INCOMPATIBLE_SKILLS pass through."""
+    def test_a5_skills_not_in_set_pass_through(self):
+        """A-5: skills NOT in _SUBPROCESS_INCOMPATIBLE_SKILLS pass through."""
         from superpowers_dispatch import invoke_skill
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-            # systematic-debugging is NOT in the incompatible set
             result = invoke_skill("systematic-debugging", "any prompt")
             mock_run.assert_called_once()
+
+    def test_a1_gate_fires_in_tty_session(self):
+        """A-1 (post iter 1 triage CRITICAL #1+#2): gate fires regardless of TTY state.
+        This is the key fix vs caspar's CRITICAL — operator main session has TTY=True
+        but gate must STILL fire to prevent v1.0.3 hang."""
+        from superpowers_dispatch import invoke_skill
+        from errors import PreconditionError
+
+        with patch("sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = True  # operator main session
+            with pytest.raises(PreconditionError):
+                invoke_skill("receiving-code-review", "any prompt")
 ```
 
 - [ ] **Step 2: Run tests to verify FAIL**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillHeadlessGate -v`
-Expected: 6/6 FAIL — invoke_skill currently does not check `_is_headless_context()` for incompatible-set membership; PreconditionError not raised.
+Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillMembershipGate -v`
+Expected: 7/7 FAIL — invoke_skill currently does not check `_SUBPROCESS_INCOMPATIBLE_SKILLS` membership; PreconditionError not raised.
 
 - [ ] **Step 3: close-phase Red**
 
@@ -466,7 +448,7 @@ Expected: `test:` commit landed.
 
 #### Green Phase
 
-- [ ] **Step 4: Wire helper into `invoke_skill`**
+- [ ] **Step 4: Wire membership gate into `invoke_skill`**
 
 Modify `skills/sbtdd/scripts/superpowers_dispatch.py` `invoke_skill` function:
 
@@ -482,20 +464,29 @@ def invoke_skill(
 ) -> str:
     """Invoke a superpowers skill via `claude -p` subprocess.
 
-    v1.0.4 Item A.3: pre-spawn headless gate checks
-    `_is_headless_context()` for skills in
-    `_SUBPROCESS_INCOMPATIBLE_SKILLS`. When triggered, raises
-    `PreconditionError` BEFORE subprocess.run is called, eliminating
-    the v1.0.3 600s subprocess hang manifestation.
+    v1.0.4 Item A (post iter 1 triage SIMPLIFIED): pre-spawn
+    membership gate. Subprocess-incompatible skills (in
+    `_SUBPROCESS_INCOMPATIBLE_SKILLS`) are BLOCKED UNCONDITIONALLY
+    unless caller passes `allow_interactive_skill=True`. When
+    blocked, raises `PreconditionError` BEFORE subprocess.run is
+    called, eliminating the v1.0.3 600s subprocess hang
+    manifestation by construction.
 
-    Override hatch: `allow_interactive_skill=True` bypasses the gate
-    for known-safe interactive callsites (e.g., wrappers controlled
-    by interactive Loop 1 triage).
+    NO env-var/isatty heuristic per caspar Checkpoint 2 iter 1
+    CRITICAL verification: TTY-based detection does NOT fix the
+    v1.0.3 bug because operator main sessions have TTY=True (gate
+    would not fire, subprocess would spawn, hang persists).
+
+    Override hatch: `allow_interactive_skill=True` is the explicit
+    opt-in for known-safe wrappers that have arranged for
+    subprocess success (silent-no-op tolerated by v1.0.1 wrappers
+    via INV-37 post-detection; or operator-controlled interactive
+    callsites with inline rationale comment).
 
     Args:
         skill: Slash-command name (e.g., "receiving-code-review").
         prompt: Skill input.
-        allow_interactive_skill: Bypass headless gate (default False).
+        allow_interactive_skill: Bypass membership gate (default False).
         timeout: Subprocess timeout in seconds (default 600).
         output_dir: Optional directory for skill output artifacts.
         model: Optional model override (opus/sonnet/haiku).
@@ -504,28 +495,27 @@ def invoke_skill(
         Subprocess stdout.
 
     Raises:
-        PreconditionError: If skill is incompatible AND headless
-            context detected AND allow_interactive_skill is False.
+        PreconditionError: If skill is in incompatible set AND
+            `allow_interactive_skill` is False.
         ...
     """
     if (
         skill in _SUBPROCESS_INCOMPATIBLE_SKILLS
-        and _is_headless_context()
         and not allow_interactive_skill
     ):
-        raise PreconditionError(_build_headless_recovery_message(skill))
+        raise PreconditionError(_build_recovery_message(skill))
 
     # ... existing subprocess.run path unchanged ...
 ```
 
-For Task 3 implementation, `_build_headless_recovery_message` will be a placeholder helper that returns a minimal string. Task 4 builds out the full per-skill recovery dictionary. Add the placeholder:
+For Task 3 implementation, `_build_recovery_message` will be a placeholder helper that returns a minimal string. Task 4 builds out the full per-skill recovery dictionary. Add the placeholder:
 
 ```python
-def _build_headless_recovery_message(skill: str) -> str:
+def _build_recovery_message(skill: str) -> str:
     """Placeholder; full implementation in Task 4."""
     return (
-        f"Skill `/{skill}` cannot run via `claude -p` subprocess in "
-        f"headless context (interactive dialogue required)."
+        f"Skill `/{skill}` cannot run via `claude -p` subprocess "
+        f"(empirically incompatible)."
     )
 ```
 
@@ -542,8 +532,8 @@ def writing_plans(prompt: str, ...) -> str:
 
 - [ ] **Step 5: Run tests to verify PASS**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillHeadlessGate -v`
-Expected: 6/6 PASS.
+Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillMembershipGate -v`
+Expected: 7/7 PASS.
 
 Run: `make verify`
 Expected: Clean.
@@ -552,7 +542,7 @@ Expected: Clean.
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-Expected: `feat:` commit landed (e.g. `feat: wire _is_headless_context gate into invoke_skill`).
+Expected: `feat:` commit landed (e.g. `feat: wire membership gate into invoke_skill (v1.0.4 Item A.2 post iter 1 triage)`).
 
 #### Refactor Phase
 
@@ -575,13 +565,13 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 ---
 
-### Task 4: Item B — Build full `_build_headless_recovery_message` + `_PER_SKILL_RECOVERY` + escenarios B-1 + B-2 + B-3
+### Task 4: Item B — Build `_build_recovery_message` + `_PER_SKILL_RECOVERY` + escenarios B-1 + B-2 + B-3 (post iter 1 triage SIMPLIFIED)
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (replace placeholder + add `_PER_SKILL_RECOVERY` dict + `_GENERIC_RECOVERY` constant)
+- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (replace placeholder + add `_PER_SKILL_RECOVERY` dict + `_GENERIC_RECOVERY` constant; helper renamed `_build_headless_recovery_message` → `_build_recovery_message` per iter 1 triage simplification)
 - Test: `tests/test_superpowers_dispatch.py` (add B-1, B-2, B-3 tests)
 
-Covers escenarios B-1, B-2, B-3 from spec sec.4.2.
+Covers escenarios B-1, B-2, B-3 from spec sec.4.2 (post triage: env-var formatting tests B-1-env-var + B-1-isatty DROPPED per CRITICAL #1+#2 simplification).
 
 #### Red Phase
 
@@ -590,67 +580,62 @@ Covers escenarios B-1, B-2, B-3 from spec sec.4.2.
 Append to `tests/test_superpowers_dispatch.py`:
 
 ```python
-class TestBuildHeadlessRecoveryMessage:
-    """v1.0.4 Item B escenarios B-1, B-2, B-3 — recovery message detail + per-skill."""
+class TestBuildRecoveryMessage:
+    """v1.0.4 Item B escenarios B-1, B-2, B-3 — recovery message (post iter 1 triage simplified)."""
 
-    def test_b1_message_includes_recovery_options(self, monkeypatch):
-        """B-1: PreconditionError message includes all recovery options."""
-        from superpowers_dispatch import _build_headless_recovery_message
+    def test_b1_message_includes_recovery_options(self):
+        """B-1: PreconditionError message includes recovery options."""
+        from superpowers_dispatch import _build_recovery_message
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
-        with patch("sys.stdin") as mock_stdin:
-            mock_stdin.isatty.return_value = False
-            msg = _build_headless_recovery_message("receiving-code-review")
-        assert "Skill `/receiving-code-review` cannot run via `claude -p`" in msg
-        assert "SBTDD_HEADLESS=1" in msg
-        assert "stdin.isatty()=False" in msg
+        msg = _build_recovery_message("receiving-code-review")
+        assert "Skill `/receiving-code-review` cannot run via `claude -p` subprocess" in msg
+        assert "empirically incompatible" in msg
         assert "Run `/receiving-code-review` manually" in msg
         assert "python skills/magi/scripts/run_magi.py" in msg
-        assert "SBTDD_INTERACTIVE=1" in msg
+        assert "spec sec.6.4" in msg
+        assert "allow_interactive_skill=True" in msg
 
     def test_b2_per_skill_recovery_brainstorming(self):
         """B-2: brainstorming recovery references --resume-from-magi."""
-        from superpowers_dispatch import _build_headless_recovery_message
+        from superpowers_dispatch import _build_recovery_message
 
-        msg = _build_headless_recovery_message("brainstorming")
+        msg = _build_recovery_message("brainstorming")
         assert "Run `/brainstorming` manually in interactive Claude Code session" in msg
         assert "/sbtdd spec --resume-from-magi" in msg
 
     def test_b2_per_skill_recovery_writing_plans(self):
         """B-2: writing-plans recovery references --resume-from-magi."""
-        from superpowers_dispatch import _build_headless_recovery_message
+        from superpowers_dispatch import _build_recovery_message
 
-        msg = _build_headless_recovery_message("writing-plans")
+        msg = _build_recovery_message("writing-plans")
         assert "Run `/writing-plans` manually in interactive Claude Code session" in msg
         assert "/sbtdd spec --resume-from-magi" in msg
 
     def test_b2_per_skill_recovery_receiving_code_review(self):
         """B-2: receiving-code-review recovery references run_magi.py + sec.6.4."""
-        from superpowers_dispatch import _build_headless_recovery_message
+        from superpowers_dispatch import _build_recovery_message
 
-        msg = _build_headless_recovery_message("receiving-code-review")
+        msg = _build_recovery_message("receiving-code-review")
         assert "Run `/receiving-code-review` manually in interactive session" in msg
         assert "skills/magi/scripts/run_magi.py code-review" in msg
         assert "spec sec.6.4" in msg
 
     def test_b2_unknown_skill_uses_generic_recovery(self):
         """B-2: unknown skill name falls back to generic recovery message."""
-        from superpowers_dispatch import _build_headless_recovery_message, _GENERIC_RECOVERY
+        from superpowers_dispatch import _build_recovery_message, _GENERIC_RECOVERY
 
-        msg = _build_headless_recovery_message("never-shipped-skill")
-        # Generic recovery substring should appear in the message
+        msg = _build_recovery_message("never-shipped-skill")
         for line in _GENERIC_RECOVERY.splitlines():
             line = line.strip()
             if line:
                 assert line in msg, f"Generic recovery line missing: {line!r}"
 
-    def test_b3_no_subprocess_when_blocked_under_one_second(self, monkeypatch):
+    def test_b3_no_subprocess_when_blocked_under_one_second(self):
         """B-3: PreconditionError raised within 1 second (NOT 600s hang)."""
         import time
         from superpowers_dispatch import invoke_skill
         from errors import PreconditionError
 
-        monkeypatch.setenv("SBTDD_HEADLESS", "1")
         start = time.monotonic()
         with patch("subprocess.run") as mock_run:
             with pytest.raises(PreconditionError):
@@ -658,28 +643,12 @@ class TestBuildHeadlessRecoveryMessage:
             mock_run.assert_not_called()
         elapsed = time.monotonic() - start
         assert elapsed < 1.0, f"Expected <1s; took {elapsed:.2f}s"
-
-    def test_b1_message_reports_actual_env_var_value(self, monkeypatch):
-        """B-1: SBTDD_HEADLESS reported value is actual env var content (not hardcoded)."""
-        from superpowers_dispatch import _build_headless_recovery_message
-
-        monkeypatch.setenv("SBTDD_HEADLESS", "true")
-        msg = _build_headless_recovery_message("receiving-code-review")
-        assert "SBTDD_HEADLESS=true" in msg
-
-    def test_b1_message_reports_unset_when_env_absent(self, monkeypatch):
-        """B-1: SBTDD_HEADLESS=<unset> when env var not present."""
-        from superpowers_dispatch import _build_headless_recovery_message
-
-        monkeypatch.delenv("SBTDD_HEADLESS", raising=False)
-        msg = _build_headless_recovery_message("receiving-code-review")
-        assert "SBTDD_HEADLESS=<unset>" in msg
 ```
 
 - [ ] **Step 2: Run tests to verify FAIL**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestBuildHeadlessRecoveryMessage -v`
-Expected: 8/8 FAIL — placeholder from Task 3 returns minimal string; per-skill dictionary not implemented.
+Run: `pytest tests/test_superpowers_dispatch.py::TestBuildRecoveryMessage -v`
+Expected: 6/6 FAIL — placeholder from Task 3 returns minimal string; per-skill dictionary not implemented.
 
 - [ ] **Step 3: close-phase Red**
 
@@ -687,7 +656,7 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: Replace placeholder with full implementation**
+- [ ] **Step 4: Replace placeholder with full implementation (post iter 1 triage simplified, no env-var formatting)**
 
 Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
 
@@ -714,33 +683,32 @@ _GENERIC_RECOVERY = (
 )
 
 
-def _build_headless_recovery_message(skill: str) -> str:
+def _build_recovery_message(skill: str) -> str:
     """Construct the operator-facing recovery message for a blocked skill.
+
+    v1.0.4 post iter 1 triage SIMPLIFIED: no env-var formatting
+    (gate is membership-based, not heuristic-based — no env state
+    to report).
 
     Args:
         skill: Slash-command name (e.g., "receiving-code-review").
 
     Returns:
         Multi-line operator-facing message including:
-        - Reason (skill incompatible + headless context detected)
-        - Detected env state (SBTDD_HEADLESS value + stdin.isatty())
+        - Reason (skill empirically incompatible)
         - Per-skill recovery options (or generic if skill unknown)
-        - Generic SBTDD_INTERACTIVE escape-hatch hint
+        - Override hint (allow_interactive_skill=True for known-safe
+          callers).
     """
-    sbtdd_headless = os.environ.get("SBTDD_HEADLESS", "<unset>")
-    try:
-        isatty = sys.stdin.isatty()
-    except (AttributeError, OSError):
-        isatty = False
     per_skill = _PER_SKILL_RECOVERY.get(skill, _GENERIC_RECOVERY)
     return (
-        f"Skill `/{skill}` cannot run via `claude -p` subprocess in "
-        f"headless context (interactive dialogue required). Detected:\n"
-        f"  SBTDD_HEADLESS={sbtdd_headless} | stdin.isatty()={isatty}\n"
-        f"Recovery options:\n"
+        f"Skill `/{skill}` cannot run via `claude -p` subprocess "
+        f"(empirically incompatible: requires multi-turn interactive "
+        f"dialogue or hangs > 600s). Recovery options:\n"
         f"{per_skill}\n"
-        f"  Set SBTDD_INTERACTIVE=1 if you ARE in interactive context\n"
-        f"  but isatty() returns false (rare; e.g., piped script)."
+        f"To override (only when caller has arranged interactive "
+        f"completion path), pass `allow_interactive_skill=True` to "
+        f"`invoke_skill(...)`."
     )
 ```
 
@@ -748,8 +716,8 @@ Confirm `from types import MappingProxyType` and `from typing import Mapping` ar
 
 - [ ] **Step 5: Run tests to verify PASS**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestBuildHeadlessRecoveryMessage -v`
-Expected: 8/8 PASS.
+Run: `pytest tests/test_superpowers_dispatch.py::TestBuildRecoveryMessage -v`
+Expected: 6/6 PASS.
 
 Run: `make verify`
 Expected: Clean.
@@ -907,13 +875,18 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 **Wall-time estimated**: ~2 days.
 
-### Task 6: Item C.1 — `dag_parser.py` module + escenarios C-1 + C-2 + C-3 + C-4
+### Task 6: Item C.1 — `dag_parser.py` module + escenarios C-1 + C-2 + C-3 + C-4 (iter 1 triage: code-fence-aware + iterative cycle detection)
 
 **Files:**
 - Create: `skills/sbtdd/scripts/dag_parser.py`
 - Create: `tests/test_dag_parser.py`
 
 Covers escenarios C-1, C-2, C-3, C-4 from spec sec.4.3.
+
+**iter 1 triage fold-ins** (WARNING melchior #3 + caspar #5 + caspar #6):
+- C-1: `_split_task_blocks` strips markdown code-fenced regions (delimited by triple backtick) BEFORE applying `_TASK_HEADER_RE`. Phantom task headers inside code fences (e.g., writing-plans extension template's literal `### Task N:` examples) MUST NOT be added to graph.
+- C-3: cycle detection uses ITERATIVE Kahn's algorithm (or Tarjan with explicit stack) instead of recursive DFS. Eliminates Python recursion limit failure mode for plans with > 1000 dependency depth.
+- New regression test: `parse_plan(planning/claude-plan-tdd.md)` returns exactly 8 tasks (T1..T9 minus ABSORBED T2), NOT 8 + phantoms-from-fences.
 
 #### Red Phase
 
@@ -1155,6 +1128,75 @@ def test_c2_unknown_dependency_target_raises(tmp_path: Path):
         parse_plan(plan)
     msg = str(exc_info.value).lower()
     assert "999" in msg or "unknown" in msg
+
+
+def test_c1_code_fence_aware_skips_phantom_headers(tmp_path: Path):
+    """C-1 iter 1 triage WARNING (melchior + caspar): code-fenced ### Task N:
+    examples MUST NOT pollute graph as phantom tasks."""
+    plan = tmp_path / "plan.md"
+    plan.write_text(textwrap.dedent("""\
+        ### Task 1: Real
+
+        **Files:**
+        - Modify: `real.py`
+
+        Example template embedded in plan:
+
+        ```markdown
+        ### Task 99: Phantom
+
+        **Files:**
+        - Modify: `phantom.py`
+        ```
+
+        ### Task 2: AlsoReal
+
+        **Files:**
+        - Modify: `also_real.py`
+        """))
+    graph = parse_plan(plan)
+    # Only T1 + T2 — phantom T99 inside fence MUST be skipped
+    assert set(graph.tasks.keys()) == {"1", "2"}
+    assert "99" not in graph.tasks
+
+
+def test_c3_iterative_cycle_detection_no_recursion_limit(tmp_path: Path):
+    """C-3 iter 1 triage WARNING (caspar): cycle detection iterative — no
+    recursion limit failure for deep dependency chains."""
+    plan_lines = ["# Deep chain plan"]
+    # 1500 sequential tasks: each depends on the previous
+    for i in range(1, 1501):
+        plan_lines.append(f"\n### Task {i}: T{i}")
+        plan_lines.append("\n**Files:**")
+        plan_lines.append(f"- Modify: `t{i}.py`")
+        if i > 1:
+            plan_lines.append(f"\n**Depends on**: Task {i - 1}")
+    plan = tmp_path / "deep.md"
+    plan.write_text("\n".join(plan_lines))
+    # Recursive DFS would hit Python recursion limit (default 1000).
+    # Iterative algorithm must succeed without RecursionError.
+    graph = parse_plan(plan)
+    assert len(graph.tasks) == 1500
+    chains = graph.antichains()
+    # Linear chain: 1500 antichains, one task each
+    assert len(chains) == 1500
+
+
+def test_c3_iterative_cycle_detection_self_loop(tmp_path: Path):
+    """C-3 iter 1 triage: self-loop is a cycle — iterative algorithm detects."""
+    plan = tmp_path / "self.md"
+    plan.write_text(textwrap.dedent("""\
+        ### Task 1: SelfLoop
+
+        **Files:**
+        - Modify: `self.py`
+
+        **Depends on**: Task 1
+        """))
+    with pytest.raises(ValidationError) as exc_info:
+        parse_plan(plan)
+    msg = str(exc_info.value).lower()
+    assert "cycle" in msg or "cyclic" in msg
 ```
 
 - [ ] **Step 2: Run tests to verify FAIL**
@@ -1407,13 +1449,17 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 ---
 
-### Task 7: Item C.2 — `parallel_dispatcher.py` module + escenarios C-5 + C-6
+### Task 7: Item C.2 — `parallel_dispatcher.py` module + escenarios C-5 + C-6 + C-10 + C-11 (iter 1 triage: deterministic sort + concurrent test)
 
 **Files:**
 - Create: `skills/sbtdd/scripts/parallel_dispatcher.py`
 - Create: `tests/test_parallel_dispatcher.py`
 
-Covers escenarios C-5, C-6 from spec sec.4.3.
+Covers escenarios C-5, C-6, C-10, C-11 from spec sec.4.3.
+
+**iter 1 triage fold-ins** (WARNING melchior #4 + melchior #7 + balthasar #4):
+- C-10: `partition_by_collision` SORTS task IDs ascending before greedy first-fit packing — deterministic output regardless of Python set iteration order.
+- C-11: synthetic concurrent state-file write race test using `multiprocessing.Process` with shared barrier; asserts final state file is consistent (one of expected states, never partial-merge nor corrupt JSON). State-file serialization via `parallel_dispatcher` queueing OR `fcntl.flock` (POSIX) / `msvcrt.locking` (Windows) wrapper.
 
 #### Red Phase
 
@@ -1492,20 +1538,72 @@ def test_c5_three_way_collision():
     assert all(len(b) == 1 for b in batches)
 
 
-def test_c6_partial_collision_groups():
-    """C-6: 1+2 collide on a.py; 3 disjoint → batches [{1,3}, {2}] OR [{2,3}, {1}]."""
+def test_c6_partial_collision_groups_deterministic():
+    """C-6 + C-10 (iter 1 triage): 1+2 collide on a.py; 3 disjoint.
+    Ascending-id sort + greedy first-fit → exact batches [{1, 3}, {2}]."""
     graph = _make_graph({
         "1": {"a.py"},
         "2": {"a.py"},
         "3": {"b.py"},
     })
     batches = partition_by_collision({"1", "2", "3"}, graph)
-    # Total 3 tasks distributed; one batch must be size 2 (with 3 + non-colliding task)
-    # and one batch must contain the leftover colliding task
-    flat = {tid for batch in batches for tid in batch}
-    assert flat == {"1", "2", "3"}
-    sizes = sorted(len(b) for b in batches)
-    assert sizes == [1, 2]
+    # Deterministic: sorted ids → "1" packed first with disjoint "3";
+    # "2" left over (collides with "1" on a.py).
+    assert batches == [{"1", "3"}, {"2"}]
+
+
+def test_c10_partition_deterministic_across_invocations():
+    """C-10 iter 1 triage: same input MUST produce same output across calls
+    (eliminates Python set iteration order dependency)."""
+    graph = _make_graph({
+        "1": {"x.py"},
+        "2": {"y.py"},
+        "3": {"x.py"},
+        "4": {"z.py"},
+    })
+    # Run twice; results must be byte-identical
+    batches_1 = partition_by_collision({"1", "2", "3", "4"}, graph)
+    batches_2 = partition_by_collision({"1", "2", "3", "4"}, graph)
+    assert batches_1 == batches_2
+    # Pin canonical ordering: ascending-id greedy fit
+    assert batches_1 == [{"1", "2", "4"}, {"3"}]
+
+
+def test_c11_synthetic_concurrent_state_file_write(tmp_path):
+    """C-11 iter 1 triage: synthetic concurrent state-file write race.
+
+    Two processes call state_file.save() simultaneously against
+    disjoint task IDs. Final file must parse as valid JSON and
+    match one of the expected states (never partial-merge).
+    """
+    import json
+    import multiprocessing
+    from state_file import save, SessionState  # adjust import path as needed
+
+    state_path = tmp_path / "session-state.json"
+    state_path.write_text(json.dumps({"current_task_id": "0", "current_phase": "red"}))
+
+    def writer(task_id: str, barrier: multiprocessing.Barrier) -> None:
+        barrier.wait()  # synchronize start
+        new_state = SessionState(current_task_id=task_id, current_phase="green")
+        save(state_path, new_state)
+
+    barrier = multiprocessing.Barrier(2)
+    procs = [
+        multiprocessing.Process(target=writer, args=(tid, barrier))
+        for tid in ("5", "6")
+    ]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join()
+
+    # File must exist and parse cleanly
+    text = state_path.read_text()
+    parsed = json.loads(text)  # must NOT raise
+    # Final state must be one of the writers' states (never partial-merge)
+    assert parsed.get("current_task_id") in {"5", "6"}
+    assert parsed.get("current_phase") == "green"
 
 
 def test_c5_singleton_passthrough():
@@ -1937,15 +2035,19 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 ---
 
-### Task 9: Item D — Per-phase close-phase doc-only mandate + escenarios D-1 + D-2 + D-3
+### Task 9: Item D — Per-phase close-phase doc-only mandate + soft-warning tripwire + escenarios D-1 + D-2 + D-3 + D-4 (iter 1 triage WARNING #5 fold-in)
 
 **Files:**
 - Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules)
 - Modify: `templates/CLAUDE.local.md.template` (template guidance to destination projects)
 - Modify: writing-plans skill prompt extension (template for plan generation)
 - Create: `tests/test_close_phase_subagent_pattern.py` (smoke test, doc-coherence)
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (~5 LOC tripwire in `_preflight`)
+- Extend: `tests/test_close_task_cmd.py` (2 tests for D-4 tripwire detection)
 
-Covers escenarios D-1, D-2, D-3 from spec sec.4.4.
+Covers escenarios D-1, D-2, D-3, D-4 from spec sec.4.4.
+
+**iter 1 triage WARNING #5 fold-in** (3-agent agreement: melchior + balthasar + caspar): tripwire in `close_task_cmd._preflight` detects when commit chain since `phase_started_at_commit` lacks the `test:`/`feat:|fix:`/`refactor:` triplet (i.e., subagent emitted raw `git commit` per phase instead of `close-phase`). Soft-warning to stderr; does NOT block close-task. Converts unobservable doc drift into runtime signal.
 
 #### Red Phase
 
@@ -2191,19 +2293,169 @@ Expected: 4/4 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 8: close-phase Green**
+- [ ] **Step 8: close-phase Green (3-touchpoint doc commit)**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 Expected: `docs:` commit landed (e.g. `docs: mandate close-phase per-phase via 3-touchpoint v1.0.4 Item D`).
 
+#### Red Phase (D-4 tripwire — iter 1 triage WARNING #5 fold-in)
+
+- [ ] **Step 9: Write failing test for D-4 tripwire**
+
+Append to `tests/test_close_task_cmd.py`:
+
+```python
+class TestCloseTaskTripwire:
+    """v1.0.4 Item D escenario D-4 (iter 1 triage WARNING #5 fold-in) —
+    soft-warning tripwire detects raw-git-commit per-phase bypass."""
+
+    def test_d4_tripwire_emits_warning_when_phase_advance_bypassed(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """D-4(a): commit chain since phase_started_at_commit lacks
+        test:/feat:|fix:/refactor: triplet → soft-warning emitted."""
+        from close_task_cmd import _preflight
+
+        # Synthesize git history: chain of raw `git commit` (no test:/feat:/refactor: prefixes)
+        # Set up state file with phase_started_at_commit pointing to known SHA
+        # (Real impl will fetch git log between SHA and HEAD; mock for unit test.)
+        state = {
+            "current_task_id": "5",
+            "current_phase": "refactor",
+            "phase_started_at_commit": "abc1234",
+        }
+        with patch("close_task_cmd._git_log_between") as mock_git_log:
+            mock_git_log.return_value = [
+                "raw commit 1",
+                "raw commit 2",
+                "raw commit 3",
+            ]
+            _preflight(state, project_root=tmp_path)
+        captured = capsys.readouterr()
+        assert "[sbtdd close-task] WARNING" in captured.err
+        assert "Phase advance gate appears bypassed" in captured.err
+        assert "v1.0.4 Item D mandate" in captured.err
+
+    def test_d4_tripwire_silent_when_close_phase_used(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """D-4(b): commit chain has test:/feat:/refactor: triplet (close-phase used)
+        → no warning emitted."""
+        from close_task_cmd import _preflight
+
+        state = {
+            "current_task_id": "5",
+            "current_phase": "refactor",
+            "phase_started_at_commit": "abc1234",
+        }
+        with patch("close_task_cmd._git_log_between") as mock_git_log:
+            mock_git_log.return_value = [
+                "test: write failing test for foo",
+                "feat: implement foo",
+                "refactor: extract helper",
+            ]
+            _preflight(state, project_root=tmp_path)
+        captured = capsys.readouterr()
+        assert "[sbtdd close-task] WARNING" not in captured.err
+
+    def test_d4_tripwire_does_not_block_close_task(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """D-4: tripwire is SOFT-WARNING ONLY — close-task proceeds even on bypass."""
+        from close_task_cmd import _preflight
+
+        state = {
+            "current_task_id": "5",
+            "current_phase": "refactor",
+            "phase_started_at_commit": "abc1234",
+        }
+        with patch("close_task_cmd._git_log_between") as mock_git_log:
+            mock_git_log.return_value = ["raw commit"]
+            # MUST NOT raise — soft-warning only
+            _preflight(state, project_root=tmp_path)
+```
+
+- [ ] **Step 10: Run tests to verify FAIL**
+
+Run: `pytest tests/test_close_task_cmd.py::TestCloseTaskTripwire -v`
+Expected: 3/3 FAIL — `_git_log_between` helper does not exist; `_preflight` does not yet emit the warning.
+
+- [ ] **Step 11: close-phase Red**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+
+#### Green Phase (D-4 tripwire impl)
+
+- [ ] **Step 12: Implement tripwire in `_preflight` (~5 LOC)**
+
+Modify `skills/sbtdd/scripts/close_task_cmd.py`. Add helper + check:
+
+```python
+import subprocess
+import sys
+
+
+def _git_log_between(start_sha: str, end_sha: str = "HEAD", project_root: Path | None = None) -> list[str]:
+    """Return commit subjects between start_sha (exclusive) and end_sha (inclusive)."""
+    cwd = str(project_root) if project_root else None
+    result = subprocess.run(
+        ["git", "log", f"{start_sha}..{end_sha}", "--format=%s"],
+        capture_output=True, text=True, check=False, cwd=cwd,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _preflight(state: dict, project_root: Path | None = None) -> None:
+    """v1.0.4 Item D D-4 tripwire: detect bypass of close-phase per-phase mandate.
+
+    Soft-warning to stderr when commit chain since phase_started_at_commit
+    lacks at least one test: + one feat:|fix: + one refactor: prefix
+    (i.e., subagent emitted raw `git commit` instead of close-phase).
+    Does NOT block close-task — converts unobservable doc drift into
+    runtime signal per iter 1 triage WARNING #5 (3-agent agreement).
+    """
+    start_sha = state.get("phase_started_at_commit")
+    if not start_sha:
+        return
+    subjects = _git_log_between(start_sha, project_root=project_root)
+    has_test = any(s.startswith("test:") for s in subjects)
+    has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
+    has_refactor = any(s.startswith("refactor:") for s in subjects)
+    if not (has_test and has_green and has_refactor):
+        sys.stderr.write(
+            f"[sbtdd close-task] WARNING: Phase advance gate appears "
+            f"bypassed (no test:/feat:|fix:/refactor: triplet in commit "
+            f"chain since {start_sha}). Per v1.0.4 Item D mandate, "
+            f"subagents MUST invoke `close-phase` after each Red/Green/"
+            f"Refactor verify-clean. Continuing close-task; revisit "
+            f"close-phase per-phase convention.\n"
+        )
+```
+
+- [ ] **Step 13: Run tests to verify PASS**
+
+Run: `pytest tests/test_close_task_cmd.py::TestCloseTaskTripwire -v`
+Expected: 3/3 PASS.
+
+Run: `make verify`
+Expected: Clean.
+
+- [ ] **Step 14: close-phase Green**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+
+Expected: `feat:` commit landed (e.g. `feat: add close-task tripwire for v1.0.4 Item D D-4 (iter 1 triage WARNING #5 fold-in)`).
+
 #### Refactor Phase
 
-- [ ] **Step 9: Refactor — verify cross-touchpoint consistency**
+- [ ] **Step 15: Refactor — verify cross-touchpoint consistency**
 
-Re-read SKILL.md + template + extension to confirm consistent wording. Adjust for clarity if needed.
+Re-read SKILL.md + template + extension to confirm consistent wording. Verify tripwire helper integrates cleanly with existing `_preflight` chain (no duplicate work).
 
-- [ ] **Step 10: close-phase Refactor + Step 11: close-task**
+- [ ] **Step 16: close-phase Refactor + Step 17: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`

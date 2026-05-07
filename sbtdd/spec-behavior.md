@@ -18,6 +18,17 @@
 >
 > INV-27 compliant: cero matches uppercase placeholder word-boundary
 > verificable con `spec_cmd._INV27_RE` regex.
+>
+> **iter 1 triage applied 2026-05-07** (post Checkpoint 2 iter 1
+> verdict GO_WITH_CAVEATS 3-0 con 2 CRITICAL + 14 WARNING + 5 INFO):
+> Item A SIMPLIFICADO — drop `_is_headless_context()` helper +
+> `SBTDD_HEADLESS`/`SBTDD_INTERACTIVE` env vars. Gate by
+> `_SUBPROCESS_INCOMPATIBLE_SKILLS` membership + `allow_interactive_skill`
+> override only. Activity D' retry methodology updated (drop env var
+> step, validate gate-fires + manual recovery). Item D extended con
+> soft-warning tripwire en `close_task_cmd._preflight`. dag_parser
+> code-fence-aware regex + iterative cycle detection. Deterministic
+> antichain partition + synthetic concurrent state-file write test.
 
 ---
 
@@ -124,19 +135,21 @@ E'-post exercises post-impl as smoke test.
 
 ## 2. Items LOCKED
 
-### 2.1 Item A — Real headless detection (Pillar A PRIMARY CRITICAL, Track Alpha)
+### 2.1 Item A — Subprocess-incompatible gate (Pillar A PRIMARY CRITICAL, Track Alpha) — iter 1 triage SIMPLIFIED
 
 **Track**: Alpha (subagent #1, sequential A → B coupled).
 
 **Archivos**:
 - Modify: `skills/sbtdd/scripts/superpowers_dispatch.py`
-  (`invoke_skill` + helper `_is_headless_context()` + extend
-  `_SUBPROCESS_INCOMPATIBLE_SKILLS` set).
+  (extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + module docstring
+  + integrate gate into `invoke_skill`; iter 1 triage dropped
+  `_is_headless_context()` helper + `SBTDD_HEADLESS`/
+  `SBTDD_INTERACTIVE` env vars per caspar CRITICAL #1+#2).
 - Extend: `tests/test_superpowers_dispatch.py` (escenarios A-1
-  through A-7 + B-1 through B-3).
+  through A-5 + B-1 through B-3).
 - Extend: `tests/test_invoke_skill_callsites_audit.py`
-  (allow_interactive_skill audit unchanged; add audit for
-  `_is_headless_context` callsites consistency).
+  (allow_interactive_skill whitelist audit; no env-var coverage
+  needed post-simplification).
 
 **Empirical context (v1.0.3 ship)**:
 
@@ -150,74 +163,86 @@ Conservative baseline + override hatch
 (`allow_interactive_skill: bool = False`) caught silent-no-op
 manifestation post-spawn but not the 600s hang manifestation.
 
-**Implementation**:
+**iter 1 triage CRITICAL #1+#2 root-cause**:
 
-1. New helper `_is_headless_context() -> bool`:
+caspar Checkpoint 2 iter 1 verified that the original env-var/
+isatty heuristic does NOT fix the v1.0.3 bug: in operator's main
+session (TTY=True), gate does NOT fire, subprocess spawns, 600s
+hang persists. Additionally, Activity D' retry's proposed
+`SBTDD_INTERACTIVE=1` step is paradoxical (bypasses the very gate
+it claims to validate). Both CRITICALs share root cause = the
+heuristic is the wrong abstraction for the v1.0.3 bug surface.
+
+**Implementation (post iter 1 triage)**:
+
+1. Extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + module docstring:
    ```python
-   def _is_headless_context() -> bool:
-       """Return True if SBTDD is running in a headless context.
+   """Dispatcher for invoking superpowers skills via claude -p subprocess.
 
-       Detection signals (any one is sufficient):
-       - SBTDD_HEADLESS env var is "1" / "true" / "yes" (case-insensitive)
-       - sys.stdin.isatty() returns False AND SBTDD_INTERACTIVE env var
-         is NOT set to "1" / "true" / "yes"
-       """
-       headless = os.environ.get("SBTDD_HEADLESS", "").lower()
-       if headless in {"1", "true", "yes"}:
-           return True
-       interactive = os.environ.get("SBTDD_INTERACTIVE", "").lower()
-       if interactive in {"1", "true", "yes"}:
-           return False
-       try:
-           return not sys.stdin.isatty()
-       except (AttributeError, OSError):
-           return True  # safe default
-   ```
+   ...
 
-2. Extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set:
-   ```python
-   _SUBPROCESS_INCOMPATIBLE_SKILLS = frozenset({
+   Subprocess-incompatible skill audit history:
+   - v1.0.1 (Finding A discovery): brainstorming, writing-plans.
+     Manifestation: silent no-op (subprocess returns without
+     producing skill output). Caught post-spawn via INV-37
+     composite-signature check (v1.0.1 Item A0).
+   - v1.0.4 (v1.0.3 Activity D' empirical hang during Loop 1
+     fix-finding triage step): receiving-code-review.
+     Manifestation: 600s subprocess hang waiting interactive input.
+     Cannot be caught post-spawn (operator-blocking); requires
+     pre-spawn gate.
+
+   A skill is subprocess-incompatible iff it requires multi-turn
+   interactive dialogue with the operator. Adding a new entry to
+   the set without empirical evidence (subprocess hang or silent-
+   no-op observed) is forbidden -- operators must run the skill
+   manually in interactive session and document the failure mode
+   in CHANGELOG before promoting.
+
+   Gate semantics (v1.0.4 post iter 1 triage): subprocess spawn
+   for incompatible skills is BLOCKED UNCONDITIONALLY unless caller
+   passes `allow_interactive_skill=True`. The override is the
+   explicit opt-in for known-safe wrappers that have arranged for
+   subprocess success (silent-no-op tolerated by v1.0.1 wrappers
+   via INV-37 post-detection; or operator-controlled interactive
+   callsites). NO env-var/isatty heuristic -- caspar iter 1
+   CRITICAL verified the heuristic does not fix the v1.0.3 bug
+   in operator main sessions.
+   """
+
+   _SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset({
        "brainstorming",
        "writing-plans",
        "receiving-code-review",  # v1.0.4 added per v1.0.3 dogfood
    })
    ```
 
-3. Document membership criteria in module docstring:
-   ```
-   A skill is subprocess-incompatible iff it requires multi-turn
-   interactive dialogue with the operator (cannot complete via
-   single non-interactive subprocess invocation).
-
-   Audit history:
-   - v1.0.1: brainstorming + writing-plans (Finding A discovery).
-   - v1.0.4: + receiving-code-review (v1.0.3 Activity D' empirical
-     hang during Loop 1 fix-finding triage).
-   ```
-
-4. Modify `invoke_skill(skill, prompt, ..., allow_interactive_skill=False)`:
+2. Modify `invoke_skill(skill, prompt, ..., allow_interactive_skill=False)`:
    ```python
    def invoke_skill(skill, prompt, ..., allow_interactive_skill=False):
        if (
            skill in _SUBPROCESS_INCOMPATIBLE_SKILLS
-           and _is_headless_context()
            and not allow_interactive_skill
        ):
            raise PreconditionError(
-               _build_headless_recovery_message(skill)
+               _build_recovery_message(skill)
            )
        # existing subprocess.run path unchanged
        ...
    ```
 
-5. `allow_interactive_skill=True` kwarg preserved as override
+3. `allow_interactive_skill=True` kwarg preserved as override
    (backward compat for v1.0.1 wrappers `brainstorming(...)`,
-   `writing_plans(...)`). New wrapper `receiving_code_review(...)`
-   passes `allow_interactive_skill=True` ONLY when caller is a
-   known-safe interactive callsite (e.g., interactive Loop 1
-   triage in operator-controlled session). Default-off elsewhere.
+   `writing_plans(...)` which rely on subprocess silent-no-op
+   pattern + INV-37 post-detection). New wrapper
+   `receiving_code_review(...)` does NOT pass override by default
+   (no caller can legitimately allow 600s hang to spawn). Specific
+   known-safe interactive callsites pass override explicitly with
+   inline rationale comment + Task 4 (formerly Task 5) audit entry.
 
-**Tests**: ~12-18 covering escenarios A-1 through A-7.
+**Tests**: ~8-12 covering escenarios A-1 through A-5 (post triage:
+A-2/A-3/A-4 env-var escenarios dropped; A-1 simplified to
+membership + override semantics).
 
 ### 2.2 Item B — 600s subprocess hang LOUD-FAST fix (Pillar A PRIMARY CRITICAL, Track Alpha, coupled with A)
 
@@ -230,31 +255,26 @@ subprocess wait-then-fail. v1.0.1 only caught silent-no-op
 manifestation (skill ran but produced no output) via post-spawn
 heuristics; PRE-spawn hang (operator-blocking) was uncaught.
 
-**Implementation**:
+**Implementation (post iter 1 triage — simplified, no env-var formatting)**:
 
-1. New helper `_build_headless_recovery_message(skill: str) -> str`:
+1. New helper `_build_recovery_message(skill: str) -> str`:
    ```python
-   def _build_headless_recovery_message(skill: str) -> str:
-       sbtdd_headless = os.environ.get("SBTDD_HEADLESS", "<unset>")
-       try:
-           isatty = sys.stdin.isatty()
-       except (AttributeError, OSError):
-           isatty = False
+   def _build_recovery_message(skill: str) -> str:
        per_skill = _PER_SKILL_RECOVERY.get(skill, _GENERIC_RECOVERY)
        return (
-           f"Skill `/{skill}` cannot run via `claude -p` subprocess in "
-           f"headless context (interactive dialogue required). Detected:\n"
-           f"  SBTDD_HEADLESS={sbtdd_headless} | stdin.isatty()={isatty}\n"
-           f"Recovery options:\n"
+           f"Skill `/{skill}` cannot run via `claude -p` subprocess "
+           f"(empirically incompatible: requires multi-turn interactive "
+           f"dialogue or hangs > 600s). Recovery options:\n"
            f"{per_skill}\n"
-           f"  Set SBTDD_INTERACTIVE=1 if you ARE in interactive context\n"
-           f"  but isatty() returns false (rare; e.g., piped script)."
+           f"To override (only when caller has arranged interactive "
+           f"completion path), pass `allow_interactive_skill=True` to "
+           f"`invoke_skill(...)`."
        )
    ```
 
 2. Per-skill recovery dictionary `_PER_SKILL_RECOVERY`:
    ```python
-   _PER_SKILL_RECOVERY = {
+   _PER_SKILL_RECOVERY: Mapping[str, str] = MappingProxyType({
        "brainstorming": (
            "  1. Run `/brainstorming` manually in interactive Claude "
            "Code session,\n     then use `/sbtdd spec --resume-from-magi`."
@@ -269,7 +289,7 @@ heuristics; PRE-spawn hang (operator-blocking) was uncaught.
            "skills/magi/scripts/run_magi.py code-review <payload>`\n"
            "     per spec sec.6.4 + apply mini-cycle TDD fixes manually."
        ),
-   }
+   })
    _GENERIC_RECOVERY = (
        "  1. Run the skill manually in interactive session,\n"
        "     then resume the SBTDD workflow."
@@ -277,10 +297,13 @@ heuristics; PRE-spawn hang (operator-blocking) was uncaught.
    ```
 
 3. Coupled with Item A: `invoke_skill` raises `PreconditionError`
-   BEFORE subprocess spawn when headless detected. Eliminates 600s
-   hang by construction.
+   BEFORE subprocess spawn when skill is in incompatible set + no
+   override. Eliminates 600s hang by construction (gate fires
+   regardless of caller's TTY state).
 
-**Tests**: ~3-5 covering B-1 through B-3.
+**Tests**: ~3-5 covering B-1 through B-3 (env-var formatting tests
+B-1-env-var + B-1-isatty dropped; B-3 1-second timing test
+preserved as PreconditionError-by-construction guarantee).
 
 ### 2.3 Item C — Parallel task dispatcher (Pillar B LOCKED HIGH VALUE, Track Beta)
 
@@ -424,7 +447,25 @@ phase commit.
      template fixture) contains the close-phase command in
      per-phase steps (ASCII-anchored regex).
 
-**Tests**: ~3-5 covering escenarios D-1 through D-3.
+5. **iter 1 triage WARNING #5 fold-in — soft-warning tripwire**:
+   `close_task_cmd._preflight` detects when the active task's
+   commit chain since `phase_started_at_commit` lacks at least one
+   `test:` + one `feat:|fix:` + one `refactor:` prefix (i.e.,
+   close-phase per phase was bypassed via raw `git commit`). When
+   detected, emits stderr WARNING:
+   > `[sbtdd close-task] WARNING: Phase advance gate appears bypassed
+   > (no test:/feat:|fix:/refactor: triplet in commit chain since
+   > {phase_started_at_commit}). Per v1.0.4 Item D mandate, subagents
+   > MUST invoke `close-phase` after each Red/Green/Refactor verify-
+   > clean. Continuing close-task; revisit close-phase per-phase
+   > convention.`
+   - Soft-warning ONLY (does NOT block close-task; SBTDD-friendly).
+   - ~5 LOC + 2 tests (escenario D-4 below).
+   - Converts unobservable doc drift into runtime signal per
+     melchior+balthasar+caspar 3-agent agreement on Item D 3-touchpoint
+     enforcement insufficiency.
+
+**Tests**: ~5-7 covering escenarios D-1 through D-4.
 
 ### 2.5 Activity D' retry — Linux/POSIX dogfood completion (methodology, mid-cycle orchestrator)
 
@@ -432,20 +473,25 @@ phase commit.
 
 **Archivos**: ninguno (config + run de comandos).
 
-**Pasos del orchestrator post Track-Alpha + Track-Beta close**:
+**Pasos del orchestrator post Track-Alpha + Track-Beta close (post iter 1 triage CRITICAL #2 fix)**:
 
 1. Verify Items A+B fix landed in working tree
-   (`superpowers_dispatch.py` includes `_is_headless_context` +
-   extended `_SUBPROCESS_INCOMPATIBLE_SKILLS`).
-2. Set `SBTDD_INTERACTIVE=1` env var (operator IS in interactive
-   Claude Code session).
-3. Run `/sbtdd pre-merge` end-to-end:
+   (`superpowers_dispatch.py` includes extended
+   `_SUBPROCESS_INCOMPATIBLE_SKILLS` set with `receiving-code-review`
+   + simplified gate logic without env-var detection).
+2. Run `/sbtdd pre-merge` end-to-end (NO env var setup needed —
+   gate fires unconditionally for incompatible skills):
    ```bash
    python skills/sbtdd/scripts/run_sbtdd.py pre-merge
    ```
-4. Verify `/receiving-code-review` subprocess fires successfully
-   under interactive context (Item A `SBTDD_INTERACTIVE=1`
-   override permits).
+3. Verify `/receiving-code-review` subprocess invocation by
+   `pre_merge_cmd` raises `PreconditionError` PRE-spawn (Items
+   A+B fix validates here — gate fires by construction).
+4. Operator manually runs `/receiving-code-review` skill via
+   interactive Claude Code session per the recovery message
+   guidance, applies findings + mini-cycle TDD fixes, then
+   resumes `/sbtdd pre-merge` (ideally via `--resume` or
+   re-invocation).
 5. Verify Loop 1 fix-finding triage step completes WITHOUT 600s
    hang.
 6. Capture Loop 2 cross-check artifacts:
@@ -453,12 +499,12 @@ phase commit.
    ls .claude/magi-cross-check/iter*-*.json
    ```
 7. Document findings in CHANGELOG `[1.0.4]` Process notes:
-   - Cross-check meta-reviewer succeeded (FIRST empirical fire on
-     full /sbtdd pre-merge path post v1.0.3 Item B Windows fix).
+   - PreconditionError raised PRE-spawn for `/receiving-code-review`
+     (Items A+B fix validated by gate-fires + recovery path success).
    - Iter count Loop 2.
-   - Cross-check decision distribution.
-   - Per-skill recovery messages observed for any skill that hit
-     PreconditionError (none expected with `SBTDD_INTERACTIVE=1`).
+   - Cross-check decision distribution (post Item B Windows fix).
+   - Recovery message observed (per-skill recovery dictionary
+     produced operator-actionable guidance).
 
 **Failure mode** (R7 risk): if Items A+B fix incomplete, document
 + retry. Methodology activity is non-blocking for ship per hybrid
@@ -613,84 +659,77 @@ v1.0.4 NO introduce nuevos cross-cuts mas alla de:
 Distribuidos por item (Tier 2 permissive regex per v1.0.1 Item A1).
 Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 
-### 4.1 Item A — Real headless detection
+### 4.1 Item A — Subprocess-incompatible gate (post iter 1 triage SIMPLIFIED)
 
-**Escenario A-1: SBTDD_HEADLESS=1 forces headless**
+**Escenario A-1: invoke_skill blocks receiving-code-review unconditionally without override**
 
 > **Given** Caller of `invoke_skill("receiving-code-review", ...)`
-> con `os.environ["SBTDD_HEADLESS"] = "1"` y stdin TTY-attached.
+> WITHOUT `allow_interactive_skill=True` (regardless of TTY state,
+> env vars, or caller context).
 > **When** `invoke_skill` invoked.
 > **Then** `PreconditionError` raised BEFORE subprocess spawn.
 > Error message contains "Skill `/receiving-code-review` cannot
-> run via `claude -p` subprocess in headless context".
+> run via `claude -p` subprocess (empirically incompatible:
+> requires multi-turn interactive dialogue or hangs > 600s)".
 
-**Escenario A-2: SBTDD_HEADLESS=true case-insensitive**
-
-> **Given** `os.environ["SBTDD_HEADLESS"] = "True"`.
-> **When** `_is_headless_context()` invoked.
-> **Then** Returns True. Case-insensitive accepts "1", "true", "yes",
-> "TRUE", "Yes" (deterministic).
-
-**Escenario A-3: stdin not TTY triggers headless**
-
-> **Given** Caller con `os.environ["SBTDD_HEADLESS"]` unset y
-> `sys.stdin.isatty()` returns False (e.g., piped script).
-> **When** `_is_headless_context()` invoked.
-> **Then** Returns True.
-
-**Escenario A-4: SBTDD_INTERACTIVE=1 overrides isatty**
-
-> **Given** `sys.stdin.isatty()` returns False y
-> `os.environ["SBTDD_INTERACTIVE"] = "1"`.
-> **When** `_is_headless_context()` invoked.
-> **Then** Returns False. SBTDD_INTERACTIVE is the operator escape
-> hatch for piped-script-but-actually-interactive contexts.
-
-**Escenario A-5: receiving-code-review in incompatible set**
+**Escenario A-2: receiving-code-review in incompatible set**
 
 > **Given** Default `_SUBPROCESS_INCOMPATIBLE_SKILLS` frozenset.
 > **When** `"receiving-code-review" in _SUBPROCESS_INCOMPATIBLE_SKILLS`.
 > **Then** Returns True. Set membership extended from v1.0.1
 > {brainstorming, writing-plans} to v1.0.4 {brainstorming,
-> writing-plans, receiving-code-review}.
+> writing-plans, receiving-code-review}. Module docstring
+> documents the audit history with v1.0.1 + v1.0.4 entries.
 
-**Escenario A-6: allow_interactive_skill=True bypasses headless gate**
+**Escenario A-3: allow_interactive_skill=True bypasses gate**
 
 > **Given** Caller of `invoke_skill("receiving-code-review", ...,
-> allow_interactive_skill=True)` con headless context.
+> allow_interactive_skill=True)` (any caller context).
 > **When** `invoke_skill` invoked.
 > **Then** No PreconditionError raised. Subprocess attempt proceeds
-> as v1.0.1 baseline (operator-controlled override).
+> as v1.0.1 baseline (operator-controlled override). Override is
+> the explicit opt-in for known-safe wrappers that have arranged
+> for subprocess success.
 
-**Escenario A-7: brainstorming + writing-plans backward compat**
+**Escenario A-4: brainstorming + writing-plans backward compat**
 
 > **Given** Existing v1.0.1 wrappers `brainstorming(...)` +
 > `writing_plans(...)` que pasan `allow_interactive_skill=True`
 > internamente.
-> **When** Wrappers invoked under headless context.
+> **When** Wrappers invoked.
 > **Then** No PreconditionError. Subprocess attempt proceeds
-> (v1.0.1 behavior preserved).
+> (v1.0.1 behavior preserved; silent-no-op manifestation tolerated
+> via INV-37 post-detection).
 
-### 4.2 Item B — 600s subprocess hang LOUD-FAST fix (coupled with A)
+**Escenario A-5: skills not in incompatible set pass through**
+
+> **Given** Caller of `invoke_skill("systematic-debugging", ...)`
+> (skill NOT in `_SUBPROCESS_INCOMPATIBLE_SKILLS`) without override.
+> **When** `invoke_skill` invoked.
+> **Then** No PreconditionError. Subprocess spawn proceeds normally
+> (existing subprocess.run path unchanged for skills outside
+> incompatible set).
+
+### 4.2 Item B — 600s subprocess hang LOUD-FAST fix (coupled with A, post iter 1 triage SIMPLIFIED)
 
 **Escenario B-1: PreconditionError message includes recovery options**
 
-> **Given** Headless context + skill in incompatible set + no
-> override.
-> **When** `_build_headless_recovery_message("receiving-code-review")`
+> **Given** Skill in incompatible set + no override.
+> **When** `_build_recovery_message("receiving-code-review")`
 > invoked.
 > **Then** Returned string contains:
-> - "Skill `/receiving-code-review` cannot run via `claude -p`"
-> - "SBTDD_HEADLESS=" + actual value
-> - "stdin.isatty()=" + actual bool
+> - "Skill `/receiving-code-review` cannot run via `claude -p` subprocess"
+> - "empirically incompatible: requires multi-turn interactive dialogue or hangs > 600s"
 > - Per-skill recovery: "Run `/receiving-code-review` manually" +
->   "fall back to manual `python skills/magi/scripts/run_magi.py`"
-> - Generic recovery: "Set SBTDD_INTERACTIVE=1 if you ARE in
->   interactive context".
+>   "fall back to manual `python skills/magi/scripts/run_magi.py`" +
+>   "spec sec.6.4"
+> - Override hint: "pass `allow_interactive_skill=True` to
+>   `invoke_skill(...)`" (only when caller has arranged interactive
+>   completion path).
 
 **Escenario B-2: per-skill recovery for brainstorming**
 
-> **Given** `_build_headless_recovery_message("brainstorming")`.
+> **Given** `_build_recovery_message("brainstorming")`.
 > **When** Invoked.
 > **Then** Returned string contains "Run `/brainstorming` manually
 > in interactive Claude Code session, then use
@@ -698,22 +737,31 @@ Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 
 **Escenario B-3: 600s hang eliminated by construction**
 
-> **Given** Headless context + `/receiving-code-review` invocation
-> attempt.
+> **Given** Caller invokes `/receiving-code-review` via
+> `invoke_skill` without override.
 > **When** `invoke_skill` called.
 > **Then** `PreconditionError` raised WITHIN 1 second (NOT 600s).
 > No subprocess process spawned (verifiable via no Popen call in
-> test mock).
+> test mock). Holds regardless of caller's TTY state, env vars, or
+> Claude Code session context (gate is membership-based, not
+> heuristic-based).
 
 ### 4.3 Item C — Parallel task dispatcher
 
-**Escenario C-1: dag_parser parses Task blocks**
+**Escenario C-1: dag_parser parses Task blocks (post iter 1 triage code-fence-aware)**
 
-> **Given** Plan file con multiple `### Task N:` headers.
+> **Given** Plan file con multiple `### Task N:` headers AND
+> markdown code-fenced regions that contain example `### Task N:`
+> patterns inside backtick blocks (e.g., writing-plans extension
+> template).
 > **When** `dag_parser.parse_plan(plan_path)` invoked.
-> **Then** Returned `TaskGraph` contains one `Task` per `### Task
-> N:` block, indexed by task ID. Each Task has title + Files list
-> + dependency markers extracted.
+> **Then** Returned `TaskGraph` contains one `Task` per real
+> `### Task N:` block (column 0, outside code fences), indexed by
+> task ID. Code-fenced example headers are SKIPPED (not added as
+> phantom tasks). Each Task has title + Files list + dependency
+> markers extracted. Implementation: `_split_task_blocks` strips
+> fenced regions (delimited by triple backtick) before applying
+> `_TASK_HEADER_RE`.
 
 **Escenario C-2: dag_parser extracts addBlockedBy dependencies**
 
@@ -723,13 +771,16 @@ Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 > **Then** Resulting `TaskGraph.edges` mapping for that task
 > includes "1" and "3" task IDs.
 
-**Escenario C-3: dag_parser detects cycles**
+**Escenario C-3: dag_parser detects cycles (post iter 1 triage iterative)**
 
 > **Given** Plan file con cycle: Task 1 depends on Task 2, Task 2
 > depends on Task 1.
 > **When** parse_plan invoked.
 > **Then** `ValidationError` raised with message identifying the
-> cycle.
+> cycle. Implementation uses iterative Kahn's algorithm (or Tarjan
+> with explicit stack) instead of recursive DFS — eliminates
+> Python recursion limit failure mode for plans with > 1000
+> dependency depth.
 
 **Escenario C-4: antichain identification**
 
@@ -780,7 +831,34 @@ Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 > off with `tdd-guard off` per spec sec.3 multi-agent rules, OR
 > use `/using-git-worktrees` for per-subagent worktree."
 
-### 4.4 Item D — Phase auto-advance methodology gap fix (doc-only)
+**Escenario C-10: deterministic antichain partition (iter 1 triage W7 fold-in)**
+
+> **Given** Antichain {Task 2, Task 3, Task 4} con Task 2 modifies
+> `auto_cmd.py`, Task 3 modifies `dag_parser.py`, Task 4 modifies
+> `auto_cmd.py` (collides with Task 2).
+> **When** `partition_by_collision` invoked twice with same input.
+> **Then** Both invocations return IDENTICAL batch lists (not
+> just same sizes). Implementation sorts task IDs ascending before
+> greedy first-fit packing, eliminating Python set iteration order
+> dependency. Test asserts exact batches `[{2, 3}, {4}]` (or
+> deterministic equivalent).
+
+**Escenario C-11: synthetic concurrent state-file write race (iter 1 triage W6 fold-in)**
+
+> **Given** Two subagents simultaneously call `state_file.save()`
+> against disjoint task IDs (e.g., subagent A advancing Task 5
+> phase while subagent B advancing Task 6 phase).
+> **When** Concurrent saves race against `.claude/session-state.json`.
+> **Then** Final state file is consistent (one of {state-A,
+> state-B}, never partial-merge nor corrupt JSON). Implementation
+> uses explicit serialization: `parallel_dispatcher` SERIALIZES
+> close-task invocations OR uses `fcntl.flock` (POSIX) /
+> `msvcrt.locking` (Windows) wrapper around state-file
+> read-modify-write. Test uses `multiprocessing.Process` with
+> shared barrier to maximize race exposure; asserts final
+> JSON parses correctly + matches one of the expected states.
+
+### 4.4 Item D — Phase auto-advance methodology gap fix (doc-only + soft-warning tripwire)
 
 **Escenario D-1: SKILL.md mandates close-phase per-phase**
 
@@ -810,6 +888,26 @@ Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 > Refactor" using the literal command
 > `python skills/sbtdd/scripts/run_sbtdd.py close-phase` as
 > opposed to raw `git commit`.
+
+**Escenario D-4: close-task soft-warning tripwire detects phase-advance bypass (iter 1 triage WARNING #5 fold-in)**
+
+> **Given** Active task con `phase_started_at_commit=<sha>`. Commit
+> chain since `<sha>` lacks at least one `test:` + one `feat:|fix:`
+> + one `refactor:` prefix (i.e., subagent emitted raw `git commit`
+> per phase instead of `close-phase`).
+> **When** `close_task_cmd._preflight` invoked.
+> **Then** Soft-warning emitted to stderr (does NOT block close-task):
+> "[sbtdd close-task] WARNING: Phase advance gate appears bypassed
+> (no test:/feat:|fix:/refactor: triplet in commit chain since
+> {phase_started_at_commit}). Per v1.0.4 Item D mandate, subagents
+> MUST invoke `close-phase` after each Red/Green/Refactor verify-
+> clean. Continuing close-task; revisit close-phase per-phase
+> convention." Close-task proceeds. Soft-warning converts
+> unobservable doc drift into runtime signal per melchior+balthasar+
+> caspar 3-agent agreement on Item D 3-touchpoint enforcement
+> insufficiency. Two test cases: (a) bypass detected → WARNING
+> emitted; (b) close-phase used per phase (commit chain has triplet)
+> → no WARNING.
 
 ---
 
