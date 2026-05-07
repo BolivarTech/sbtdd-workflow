@@ -498,3 +498,56 @@ def test_a2_5_wrapper_call_passes_override_internally(monkeypatch):
     result = brainstorming(args=["@spec.md"])
     assert isinstance(result, SkillResult)
     assert result.stdout == "wrapper bypass works"
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Item A.1 (Task 1, ABSORBS Task 2) -- _SUBPROCESS_INCOMPATIBLE_SKILLS
+# extension + module docstring audit history.
+# Covers escenarios A-2 (set semantics) + A-5 (set membership + doc coherence)
+# from spec sec.4.1 (post iter 1 triage: A-3 + A-4 env-var escenarios DROPPED
+# per CRITICAL #1+#2 simplification).
+# ---------------------------------------------------------------------------
+
+
+class TestSubprocessIncompatibleSkillsExtended:
+    """v1.0.4 Item A.1 escenarios A-2 + A-5 -- set extension + docstring audit history."""
+
+    def test_a5_receiving_code_review_in_incompatible_set(self):
+        """A-5: receiving-code-review extended in v1.0.4."""
+        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
+
+        assert "receiving-code-review" in _SUBPROCESS_INCOMPATIBLE_SKILLS
+
+    def test_a5_brainstorming_writing_plans_preserved_v101(self):
+        """A-5: v1.0.1 baseline (brainstorming, writing-plans) preserved."""
+        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
+
+        assert "brainstorming" in _SUBPROCESS_INCOMPATIBLE_SKILLS
+        assert "writing-plans" in _SUBPROCESS_INCOMPATIBLE_SKILLS
+
+    def test_a2_set_is_frozenset_immutable(self):
+        """A-2: set is frozenset to prevent runtime mutation."""
+        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
+
+        assert isinstance(_SUBPROCESS_INCOMPATIBLE_SKILLS, frozenset)
+
+    def test_a5_module_docstring_documents_audit_history(self):
+        """A-5 doc-coherence: module docstring records v1.0.1 + v1.0.4 additions."""
+        import superpowers_dispatch
+
+        docstring = superpowers_dispatch.__doc__ or ""
+        assert "v1.0.1" in docstring
+        assert "brainstorming" in docstring
+        assert "writing-plans" in docstring
+        assert "v1.0.4" in docstring
+        assert "receiving-code-review" in docstring
+
+    def test_a5_module_docstring_documents_gate_semantics(self):
+        """A-5 doc-coherence (post iter 1 triage): module docstring documents
+        membership-based gate semantics (NOT env-var/isatty heuristic)."""
+        import superpowers_dispatch
+
+        docstring = superpowers_dispatch.__doc__ or ""
+        assert "BLOCKED UNCONDITIONALLY" in docstring
+        assert "allow_interactive_skill=True" in docstring
+        assert "NO env-var/isatty heuristic" in docstring
