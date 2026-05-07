@@ -16,8 +16,6 @@ import multiprocessing
 import sys
 from pathlib import Path
 
-import pytest
-
 from dag_parser import Task, TaskGraph
 from parallel_dispatcher import _files_collide, partition_by_collision
 
@@ -137,7 +135,7 @@ def _writer_for_concurrent_test(
         last_verification_result=None,
         plan_approved_at=None,
     )
-    save(Path(state_path_str), state)
+    save(state, Path(state_path_str))
 
 
 def test_c11_synthetic_concurrent_state_file_write(tmp_path: Path) -> None:
