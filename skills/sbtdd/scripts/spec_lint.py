@@ -182,3 +182,55 @@ def lint_spec(path: Path) -> list[LintFinding]:
     findings.extend(_check_r4(path, text))
     findings.extend(_check_r5(path, text))
     return findings
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entrypoint for ``python -m skills.sbtdd.scripts.spec_lint <path>``.
+
+    Args:
+        argv: argument list (excluding program name). When ``None``,
+            ``argparse`` reads ``sys.argv[1:]`` directly.
+
+    Returns:
+        0 = clean (no findings or warnings only).
+        1 = at least one error-severity finding.
+        2 = ``path`` does not exist.
+    """
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(prog="spec_lint")
+    parser.add_argument("path", type=Path)
+    parser.add_argument(
+        "--severity",
+        choices=("error", "warning", "info"),
+        default=None,
+    )
+    parser.add_argument(
+        "--rule",
+        choices=("R1", "R2", "R3", "R4", "R5"),
+        default=None,
+    )
+    ns = parser.parse_args(argv)
+
+    if not ns.path.exists():
+        sys.stderr.write(f"spec file not found: {ns.path}\n")
+        return 2
+
+    findings = lint_spec(ns.path)
+    if ns.rule:
+        findings = [f for f in findings if f.rule == ns.rule]
+    if ns.severity:
+        findings = [f for f in findings if f.severity == ns.severity]
+
+    for f in findings:
+        sys.stdout.write(f"{f.file}:{f.line} ({f.rule} {f.severity}) {f.message}\n")
+
+    has_error = any(f.severity == "error" for f in findings)
+    return 1 if has_error else 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
