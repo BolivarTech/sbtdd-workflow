@@ -99,19 +99,27 @@ def aggregate(
 
     decision_dist: dict[str, int] = {}
     truncated_count = 0
-    severity_match = 0
-    severity_total = 0
+    # Loop 2 iter 3 caspar CRITICAL fix: agreement_rate semantically =
+    # fraction of MAGI findings the cross-check meta-reviewer KEEPs (i.e.
+    # agrees with original severity unchanged). Per Feature G v1.0.0
+    # contract: KEEP decision means recommended_severity unchanged, which
+    # IS severity-match. DOWNGRADE/REJECT are non-agreement. Variable
+    # names renamed from severity_match/severity_total to
+    # keep_count/decision_count for clarity; output field name
+    # `agreement_rate` preserved to avoid breaking JSON/markdown shape.
+    keep_count = 0
+    decision_count = 0
     for ir in iters:
         for k, v in ir.decisions.items():
             decision_dist[k] = decision_dist.get(k, 0) + v
         if ir.diff_truncated:
             truncated_count += 1
         for k, v in ir.decisions.items():
-            severity_total += v
+            decision_count += v
             if k == "KEEP":
-                severity_match += v
+                keep_count += v
 
-    agreement = severity_match / severity_total if severity_total else 0.0
+    agreement = keep_count / decision_count if decision_count else 0.0
     truncation = truncated_count / len(iters) if iters else 0.0
 
     return TelemetryReport(
