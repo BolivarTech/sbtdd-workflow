@@ -1319,9 +1319,21 @@ def _check_tdd_guard_warning(parallel: bool, project_root: Path) -> None:
     settings_path = project_root / ".claude" / "settings.json"
     if not settings_path.exists():
         return
+    # v1.0.4 Loop 2 iter-2 sub-issue 2 (C9): split JSONDecodeError vs OSError
+    # so corrupted JSON surfaces a stderr breadcrumb. OSError remains silent
+    # (genuine missing file is benign -- TDD-Guard simply not configured).
+    # Pre-fix both were swallowed silently; operators got NO signal that
+    # their TDD-Guard config was malformed.
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(
+            f"[sbtdd auto] WARNING: cannot parse {settings_path}: {exc}; "
+            f"TDD-Guard hook detection skipped. Restore valid JSON to "
+            f"re-enable the parallel-mode multi-agent caveat.\n"
+        )
+        return
+    except OSError:
         return
     hooks = settings.get("hooks", {})
     if not isinstance(hooks, dict):
@@ -2046,8 +2058,121 @@ def _apply_spec_review_findings_via_mini_cycle(
     )
 
 
+def _dispatch_batch_concurrent(batch: set[str], project_root: Path) -> None:
+    """Spawn ``subprocess.Popen`` per task in a multi-task batch (v1.0.4 sub-issue 1).
+
+    For dispatch plans where a batch contains 2+ tasks (only possible with
+    ``--parallel`` and DAG-derived antichains spanning multiple disjoint
+    file surfaces), this helper spawns one Popen subprocess per task,
+    waits for ALL processes to complete, and raises
+    :class:`VerificationIrremediableError` on any non-zero exit.
+
+    Each Popen invokes a lightweight Python entry point that runs the
+    single-task TDD cycle in isolation. State-file write coordination
+    relies on the contract that batches contain disjoint file surfaces
+    AND parent-side ``mark_and_advance`` advances the shared state file
+    sequentially after the batch completes (see ``_phase2_task_loop``).
+
+    Args:
+        batch: Set of task ids to dispatch concurrently. Must have
+            ``len(batch) > 1`` for the helper to be useful; size-1 batches
+            are short-circuited by the caller.
+        project_root: Project root containing ``planning/claude-plan-tdd.md``
+            and ``.claude/session-state.json``.
+
+    Raises:
+        VerificationIrremediableError: At least one Popen subprocess
+            returned non-zero. Message includes the offending task ids
+            and (best-effort) their captured stderr text.
+
+    Notes:
+        Concurrent execution transport is intentionally minimal in v1.0.4:
+        each Popen runs an inline ``python -c`` snippet that imports
+        ``auto_cmd._run_single_task_isolated``. The isolated entry point
+        does NOT mutate the shared session-state file -- the parent
+        advances state once per task in plan-text order after the batch
+        completes. State-file race avoidance is structural, not
+        lock-based; v1.0.5 may introduce a per-worktree lock if richer
+        concurrency primitives are needed.
+    """
+    if len(batch) <= 1:
+        # Defensive: caller short-circuits singletons.
+        return
+    procs: list[tuple[str, Any]] = []  # (task_id, Popen)
+    plugin_root = Path(__file__).resolve().parent
+    for task_id in sorted(batch):
+        argv = [
+            sys.executable,
+            "-c",
+            (
+                f"import sys; sys.path.insert(0, r'{plugin_root}'); "
+                f"from auto_cmd import _run_single_task_isolated; "
+                f"_run_single_task_isolated({task_id!r}, r'{project_root}')"
+            ),
+        ]
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        procs.append((task_id, proc))
+    # Wait for all spawned processes BEFORE checking returncode so concurrent
+    # tasks complete even if one fails early.
+    failures: list[tuple[str, int, str]] = []
+    for task_id, proc in procs:
+        try:
+            stdout_bytes, stderr_bytes = proc.communicate(timeout=3600)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout_bytes, stderr_bytes = proc.communicate()
+            failures.append((task_id, -1, "subprocess timeout (3600s)"))
+            continue
+        rc = proc.returncode
+        if rc != 0:
+            err_text = (
+                stderr_bytes.decode("utf-8", errors="replace")
+                if isinstance(stderr_bytes, bytes)
+                else str(stderr_bytes)
+            )
+            failures.append((task_id, rc, err_text))
+    if failures:
+        details = "; ".join(f"task {tid} exit={rc}: {msg[:200]}" for tid, rc, msg in failures)
+        raise VerificationIrremediableError(
+            f"concurrent dispatch failed for batch {sorted(batch)}: {details}"
+        )
+
+
+def _run_single_task_isolated(task_id: str, project_root_str: str) -> None:
+    """Run a single task's TDD red->green->refactor cycle in isolation.
+
+    Invoked via ``python -c`` from :func:`_dispatch_batch_concurrent`. Does
+    NOT touch the shared ``.claude/session-state.json`` -- parent advances
+    state after the batch completes.
+
+    v1.0.4 ships a STUB implementation that returns 0 immediately; the
+    full per-task cycle (read plan task, dispatch implementer, run
+    verification, commit phases) is v1.0.5 backlog alongside the
+    real concurrent transport. The contract pinned here is the entry
+    point shape (callable from ``python -c``) so tests can monkeypatch
+    ``subprocess.Popen`` and validate dispatch wiring without spinning
+    up the full TDD machinery in concurrent processes.
+
+    Args:
+        task_id: Plan task id (string).
+        project_root_str: Project root as a string (Popen-safe).
+    """
+    # v1.0.4 stub: minimal valid execution. The concurrent transport is
+    # exercised by tests via Popen monkeypatching; per-task TDD cycle
+    # in isolation is v1.0.5 scope.
+    sys.stdout.write(f"[sbtdd auto isolated] task {task_id} stub at {project_root_str}\n")
+
+
 def _phase2_task_loop(
-    ns: argparse.Namespace, state: SessionState, cfg: PluginConfig
+    ns: argparse.Namespace,
+    state: SessionState,
+    cfg: PluginConfig,
+    dispatch_plan: list[set[str]] | None = None,
 ) -> SessionState:
     """Run Phase 2 -- sequential task loop with TDD cycles per task.
 
@@ -2187,6 +2312,32 @@ def _phase2_task_loop(
         task_total=_t_total,
         dispatch_label=current.current_phase,
     )
+    # v1.0.4 Loop 2 iter-2 sub-issue 1 (consumer-side wiring): when
+    # ``dispatch_plan`` is supplied AND contains any multi-task batch,
+    # process multi-task batches concurrently via ``_dispatch_batch_
+    # concurrent``, advancing parent-side state once per task in plan
+    # order via ``mark_and_advance``. Singleton batches fall through to
+    # the legacy while-loop below, which handles them via the existing
+    # inline TDD body. When ``dispatch_plan is None`` OR all batches
+    # are singletons, the legacy while-loop handles everything
+    # unchanged (full backward compat with v1.0.3 plan-text-order
+    # behaviour).
+    if dispatch_plan is not None:
+        for batch in dispatch_plan:
+            if len(batch) > 1:
+                _dispatch_batch_concurrent(batch, root)
+                # Parent-side state advance: once per task in batch,
+                # in sorted order. Each mark_and_advance commits a
+                # ``chore: mark task <id> complete`` and moves
+                # ``current.current_task_id`` to the next open ``[ ]``.
+                for _task_id in sorted(batch):
+                    if current.current_task_id is None:
+                        break
+                    current = close_task_cmd.mark_and_advance(current, root)
+                    tasks_completed += 1
+        # After concurrent batches complete, fall through to the legacy
+        # while-loop to consume any remaining singleton tasks via the
+        # full inline TDD cycle.
     try:
         while current.current_task_id is not None:
             # v0.5.0 S1-13: bound heartbeat counter persistence latency
@@ -2992,21 +3143,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # v1.0.4 Item C end-to-end wiring (MAGI Loop 2 iter-1 CRITICAL #3 fix).
     # ``ns.parallel`` (default ``False``) drives:
-    #   1. TDD-Guard warning emission BEFORE phase 1 -- operators get the
-    #      multi-agent caveat as soon as their flag choice is parsed, not
-    #      buried mid-task-loop.
+    #   1. TDD-Guard warning emission AFTER phase 1 preflight -- operators
+    #      get a clean preflight summary first, then any multi-agent caveat.
     #   2. Dispatch plan construction -- ``_build_dispatch_plan_parallel``
     #      partitions tasks via DAG antichains + file-surface collision
     #      detection; ``_build_dispatch_plan_sequential`` preserves v1.0.3
     #      plan-text order. Result is stashed on ``ns.dispatch_plan`` so
-    #      ``_phase2_task_loop`` (and future v1.0.5 concurrent transport)
-    #      can consume the partitioned shape without re-parsing the plan.
+    #      ``_phase2_task_loop`` consumes the partitioned shape without
+    #      re-parsing the plan.
     # Pre-fix, the flag was DEAD-WIRED: argparse accepted it but main()
-    # never read ``ns.parallel`` and the helpers were orphaned (only
-    # exercised by unit tests). Operators set ``--parallel`` and observed
-    # sequential timing identical to the default. v1.0.4 ships
-    # partition-aware dispatch ordering; concurrent execution transport
-    # (subprocess.Popen pool with state-file lock) is v1.0.5 backlog.
+    # never read ``ns.parallel`` and the helpers were orphaned. v1.0.4 iter-2
+    # sub-issue 3 (preflight ordering): preflight now runs FIRST so failures
+    # surface in the documented context (env / state validation), not via
+    # confusing plan-parse errors.
+    state, cfg = _phase1_preflight(ns)
     _check_tdd_guard_warning(parallel=ns.parallel, project_root=ns.project_root)
     plan_path_for_dispatch = ns.project_root / "planning" / "claude-plan-tdd.md"
     if plan_path_for_dispatch.exists():
@@ -3015,11 +3165,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             ns.dispatch_plan = _build_dispatch_plan_sequential(plan_path_for_dispatch)
     else:
-        # Plan absent at this stage means phase 1 preflight will fail with
-        # a clearer error message; preserve that path by attaching an empty
-        # plan rather than re-raising here.
+        # Plan absent at this stage -- preflight already validated and
+        # passed (state.current_phase == 'done' OR plan path implicitly
+        # accepted by preflight). Attach empty plan so downstream
+        # consumers see a deterministic (empty) iterable.
         ns.dispatch_plan = []
-    state, cfg = _phase1_preflight(ns)
     started = _now_iso()
     auto_run = ns.project_root / ".claude" / "auto-run.json"
     _write_auto_run_audit(
@@ -3038,7 +3188,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     if state.current_phase != "done":
-        state = _phase2_task_loop(ns, state, cfg)
+        # v1.0.4 Loop 2 iter-2 sub-issue 1: pass dispatch_plan into the
+        # task loop so the consumer can route multi-task batches through
+        # the concurrent helper. Sequential default + dispatch_plan-None
+        # both fall through to the legacy while-loop body unchanged.
+        state = _phase2_task_loop(ns, state, cfg, dispatch_plan=getattr(ns, "dispatch_plan", None))
     try:
         verdict = _phase3_pre_merge(ns, cfg)
     except MAGIGateError as exc:

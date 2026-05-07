@@ -1618,7 +1618,12 @@ class TestAutoCmdParallelFlag:
     def test_c9_check_function_handles_corrupt_settings_json(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Defensive: corrupt settings.json silently bypasses warning."""
+        """v1.0.4 Loop 2 iter-2 sub-issue 2: corrupt settings.json now
+        emits a stderr breadcrumb identifying the parse error rather
+        than silently swallowing JSONDecodeError. Pre-fix this test
+        asserted no warning; post-fix it asserts the breadcrumb is
+        present (the parallel-mode multi-agent caveat is suppressed
+        but with audit trail)."""
         from auto_cmd import _check_tdd_guard_warning
 
         settings_dir = tmp_path / ".claude"
@@ -1627,8 +1632,9 @@ class TestAutoCmdParallelFlag:
 
         _check_tdd_guard_warning(parallel=True, project_root=tmp_path)
         captured = capsys.readouterr()
-        # No crash; no warning emitted because hooks dict cannot be read
-        assert "TDD-Guard" not in captured.err
+        # Sub-issue 2 fix: breadcrumb must be emitted for malformed JSON.
+        assert "settings.json" in captured.err
+        assert "WARNING" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -1697,21 +1703,39 @@ class TestAutoCmdParallelEndToEnd:
 
         monkeypatch.setattr(auto_cmd, "_check_tdd_guard_warning", _spy)
 
-        # Short-circuit phases via dry-run-style monkeypatch: stop at end of
-        # main() before phase 1. We achieve this by raising a sentinel from
-        # _phase1_preflight; main propagates exceptions.
-        sentinel = RuntimeError("phase1-reached")
+        # v1.0.4 iter-2 sub-issue 3: preflight now runs FIRST. Stub
+        # preflight to succeed (so warning + dispatch plan execute), then
+        # raise from _phase2_task_loop to short-circuit before MAGI dispatch.
+        from state_file import SessionState
 
-        def _boom(_ns: object) -> tuple[object, object]:
+        def _ok_preflight(_ns: object) -> tuple[object, object]:
+            stub_state = SessionState(
+                plan_path="planning/claude-plan-tdd.md",
+                current_task_id="1",
+                current_task_title="stub",
+                current_phase="red",
+                phase_started_at_commit="abc",
+                last_verification_at=None,
+                last_verification_result=None,
+                plan_approved_at="2026-01-01T00:00:00Z",
+                spec_snapshot_emitted_at=None,
+            )
+            stub_cfg = object()
+            return (stub_state, stub_cfg)
+
+        sentinel = RuntimeError("phase2-reached")
+
+        def _boom(*a: object, **kw: object) -> object:
             raise sentinel
 
-        monkeypatch.setattr(auto_cmd, "_phase1_preflight", _boom)
+        monkeypatch.setattr(auto_cmd, "_phase1_preflight", _ok_preflight)
+        monkeypatch.setattr(auto_cmd, "_phase2_task_loop", _boom)
 
-        with pytest.raises(RuntimeError, match="phase1-reached"):
+        with pytest.raises(RuntimeError, match="phase2-reached"):
             auto_cmd.main(["--project-root", str(tmp_path), "--parallel"])
 
         # Contract: _check_tdd_guard_warning was called with parallel=True
-        # BEFORE _phase1_preflight raised.
+        # AFTER _phase1_preflight returned (sub-issue 3 ordering).
         assert len(captured_calls) == 1, (
             f"expected exactly one _check_tdd_guard_warning call, got {len(captured_calls)}"
         )
@@ -1761,12 +1785,31 @@ class TestAutoCmdParallelEndToEnd:
 
         monkeypatch.setattr(auto_cmd, "_check_tdd_guard_warning", _spy)
 
-        sentinel = RuntimeError("phase1-reached")
+        # v1.0.4 iter-2 sub-issue 3: preflight runs FIRST. Stub preflight
+        # to succeed, then raise from _phase2_task_loop to short-circuit.
+        from state_file import SessionState
+
+        def _ok_preflight(_ns: object) -> tuple[object, object]:
+            stub_state = SessionState(
+                plan_path="planning/claude-plan-tdd.md",
+                current_task_id="1",
+                current_task_title="stub",
+                current_phase="red",
+                phase_started_at_commit="abc",
+                last_verification_at=None,
+                last_verification_result=None,
+                plan_approved_at="2026-01-01T00:00:00Z",
+                spec_snapshot_emitted_at=None,
+            )
+            return (stub_state, object())
+
+        sentinel = RuntimeError("phase2-reached")
+        monkeypatch.setattr(auto_cmd, "_phase1_preflight", _ok_preflight)
         monkeypatch.setattr(
-            auto_cmd, "_phase1_preflight", lambda _ns: (_ for _ in ()).throw(sentinel)
+            auto_cmd, "_phase2_task_loop", lambda *a, **kw: (_ for _ in ()).throw(sentinel)
         )
 
-        with pytest.raises(RuntimeError, match="phase1-reached"):
+        with pytest.raises(RuntimeError, match="phase2-reached"):
             auto_cmd.main(["--project-root", str(tmp_path)])
 
         # Sequential mode still calls the helper (with parallel=False) so
@@ -1787,18 +1830,36 @@ class TestAutoCmdParallelEndToEnd:
         _parallel`` was an orphan. Fix wires the helper at the top of
         ``main()`` (or just before phase 2) and stashes the resulting
         ``list[set[str]]`` on the namespace as ``ns.dispatch_plan``.
+
+        v1.0.4 iter-2 sub-issue 3 update: dispatch plan build now happens
+        AFTER preflight (not before), so capture ``ns.dispatch_plan`` via
+        an intercept on ``_phase2_task_loop`` instead of preflight.
         """
         import auto_cmd
+        from state_file import SessionState
 
         captured_dispatch_plan: list[object] = []
 
-        # Capture ns at end of main's pre-phase setup by intercepting
-        # _phase1_preflight (called immediately after dispatch plan build).
-        def _capture(ns: object) -> tuple[object, object]:
-            captured_dispatch_plan.append(getattr(ns, "dispatch_plan", "MISSING"))
-            raise RuntimeError("phase1-stop")
+        def _ok_preflight(_ns: object) -> tuple[object, object]:
+            stub_state = SessionState(
+                plan_path="planning/claude-plan-tdd.md",
+                current_task_id="1",
+                current_task_title="stub",
+                current_phase="red",
+                phase_started_at_commit="abc",
+                last_verification_at=None,
+                last_verification_result=None,
+                plan_approved_at="2026-01-01T00:00:00Z",
+                spec_snapshot_emitted_at=None,
+            )
+            return (stub_state, object())
 
-        monkeypatch.setattr(auto_cmd, "_phase1_preflight", _capture)
+        def _capture_phase2(ns: object, *args: object, **kwargs: object) -> object:
+            captured_dispatch_plan.append(getattr(ns, "dispatch_plan", "MISSING"))
+            raise RuntimeError("phase2-stop")
+
+        monkeypatch.setattr(auto_cmd, "_phase1_preflight", _ok_preflight)
+        monkeypatch.setattr(auto_cmd, "_phase2_task_loop", _capture_phase2)
 
         # Synthesize a trivial plan so dispatch plan build does not crash.
         plan_dir = tmp_path / "planning"
@@ -1808,7 +1869,7 @@ class TestAutoCmdParallelEndToEnd:
             "### Task 2: B\n\n**Files:**\n- Modify: `b.py`\n"
         )
 
-        with pytest.raises(RuntimeError, match="phase1-stop"):
+        with pytest.raises(RuntimeError, match="phase2-stop"):
             auto_cmd.main(["--project-root", str(tmp_path), "--parallel"])
 
         assert len(captured_dispatch_plan) == 1
@@ -1828,16 +1889,35 @@ class TestAutoCmdParallelEndToEnd:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """``main([])`` (sequential default) must attach a sequential dispatch
-        plan to ``ns.dispatch_plan`` (one batch per task in plan order)."""
+        plan to ``ns.dispatch_plan`` (one batch per task in plan order).
+
+        v1.0.4 iter-2 sub-issue 3 update: capture via _phase2_task_loop
+        intercept instead of _phase1_preflight (preflight now runs FIRST)."""
         import auto_cmd
+        from state_file import SessionState
 
         captured: list[object] = []
 
-        def _capture(ns: object) -> tuple[object, object]:
+        def _ok_preflight(_ns: object) -> tuple[object, object]:
+            stub_state = SessionState(
+                plan_path="planning/claude-plan-tdd.md",
+                current_task_id="1",
+                current_task_title="stub",
+                current_phase="red",
+                phase_started_at_commit="abc",
+                last_verification_at=None,
+                last_verification_result=None,
+                plan_approved_at="2026-01-01T00:00:00Z",
+                spec_snapshot_emitted_at=None,
+            )
+            return (stub_state, object())
+
+        def _capture_phase2(ns: object, *args: object, **kwargs: object) -> object:
             captured.append(getattr(ns, "dispatch_plan", "MISSING"))
             raise RuntimeError("stop")
 
-        monkeypatch.setattr(auto_cmd, "_phase1_preflight", _capture)
+        monkeypatch.setattr(auto_cmd, "_phase1_preflight", _ok_preflight)
+        monkeypatch.setattr(auto_cmd, "_phase2_task_loop", _capture_phase2)
 
         plan_dir = tmp_path / "planning"
         plan_dir.mkdir()
@@ -2006,9 +2086,7 @@ class TestPhase2ConsumesDispatchPlan:
         def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
             counter["n"] += 1
             (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True
-            )
+            subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
             subprocess.run(
                 ["git", "commit", "-m", f"{prefix}: {message}"],
                 cwd=str(tmp_path),
@@ -2065,9 +2143,7 @@ class TestPhase2ConsumesDispatchPlan:
         def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
             counter["n"] += 1
             (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True
-            )
+            subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
             subprocess.run(
                 ["git", "commit", "-m", f"{prefix}: {message}"],
                 cwd=str(tmp_path),
@@ -2084,9 +2160,7 @@ class TestPhase2ConsumesDispatchPlan:
 
         # Singleton batches in plan-text order -- equivalent to sequential.
         # Loop must consume all three and finish with done.
-        final = auto_cmd._phase2_task_loop(
-            ns, state, cfg, dispatch_plan=[{"1"}, {"2"}, {"3"}]
-        )
+        final = auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1"}, {"2"}, {"3"}])
         assert final.current_phase == "done"
         assert final.current_task_id is None
 
@@ -2123,9 +2197,7 @@ class TestPhase2ConsumesDispatchPlan:
         def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
             counter["n"] += 1
             (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True
-            )
+            subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
             subprocess.run(
                 ["git", "commit", "-m", f"{prefix}: {message}"],
                 cwd=str(tmp_path),
@@ -2151,9 +2223,7 @@ class TestPhase2ConsumesDispatchPlan:
 
         # One batch of size 2 + one singleton -- concurrent helper invoked
         # exactly once (for the batch of size 2).
-        auto_cmd._phase2_task_loop(
-            ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
-        )
+        auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}])
         assert len(captured_batches) == 1, (
             f"_dispatch_batch_concurrent must be invoked once for the size-2 "
             f"batch; got {len(captured_batches)} invocations"
@@ -2192,9 +2262,7 @@ class TestPhase2ConsumesDispatchPlan:
         monkeypatch.setattr(close_task_cmd, "commit_create", lambda *a, **kw: "ok")
 
         def failing_concurrent(batch: set[str], project_root: Path) -> None:
-            raise VerificationIrremediableError(
-                f"concurrent dispatch failed for batch {batch}"
-            )
+            raise VerificationIrremediableError(f"concurrent dispatch failed for batch {batch}")
 
         monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", failing_concurrent)
 
@@ -2202,9 +2270,7 @@ class TestPhase2ConsumesDispatchPlan:
         state = load_state(tmp_path / ".claude" / "session-state.json")
 
         with pytest.raises(VerificationIrremediableError, match="concurrent dispatch failed"):
-            auto_cmd._phase2_task_loop(
-                ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
-            )
+            auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}])
 
 
 class TestDispatchBatchConcurrent:
@@ -2239,21 +2305,24 @@ class TestDispatchBatchConcurrent:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
                 popen_calls.append((cmd, kwargs))
                 self._cmd = cmd
-                self._waited = False
+                # Initialise returncode to None per real Popen contract;
+                # communicate() sets it to 0 (success).
+                self.returncode: int | None = None
 
             def wait(self, timeout: float | None = None) -> int:
-                self._waited = True
+                self.returncode = 0
                 return 0
 
             def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                # Real Popen.communicate() sets returncode after wait.
+                self.returncode = 0
                 return (b"", b"")
 
-            @property
-            def returncode(self) -> int:
-                return 0 if self._waited else -1
-
             def poll(self) -> int | None:
-                return 0 if self._waited else None
+                return self.returncode
+
+            def kill(self) -> None:
+                self.returncode = -9
 
         monkeypatch.setattr(subprocess, "Popen", FakePopen)
 
@@ -2323,12 +2392,8 @@ class TestC9CorruptSettingsBreadcrumb:
         auto_cmd._check_tdd_guard_warning(parallel=True, project_root=tmp_path)
 
         err = capsys.readouterr().err
-        assert "settings.json" in err, (
-            "breadcrumb must reference the file name to be actionable"
-        )
-        assert "WARNING" in err or "warning" in err.lower(), (
-            "breadcrumb must signal severity"
-        )
+        assert "settings.json" in err, "breadcrumb must reference the file name to be actionable"
+        assert "WARNING" in err or "warning" in err.lower(), "breadcrumb must signal severity"
         # OSError still silently returns (file genuinely absent is benign):
         # confirm separate class with a missing file.
 
