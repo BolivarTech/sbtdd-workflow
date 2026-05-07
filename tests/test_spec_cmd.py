@@ -1162,3 +1162,94 @@ def test_a3_7_oserror_during_emit_snapshot_caught_as_precondition(
     msg = str(ei.value)
     assert "spec-behavior.md" in msg or "emit_snapshot" in msg, msg
     assert "simulated FS read failure" in msg, msg
+
+
+def test_c_int_1_lint_error_aborts_checkpoint2(tmp_path, monkeypatch):
+    """C-int-1: spec_lint R1 error aborts before magi_dispatch.invoke_magi."""
+    import spec_cmd
+    from errors import ValidationError
+
+    root = tmp_path
+    (root / "sbtdd").mkdir()
+    (root / "planning").mkdir()
+    spec = root / "sbtdd" / "spec-behavior.md"
+    plan = root / "planning" / "claude-plan-tdd-org.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
+        "## 1. Section\n\n**Escenario X-1: bad**\n\n"
+        "> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+    plan.write_text(
+        "# Plan\n> Generado 2026-05-06 a partir de y.md\n\n## 1. Section\n",
+        encoding="utf-8",
+    )
+
+    invoke_called = []
+    monkeypatch.setattr(
+        "magi_dispatch.invoke_magi",
+        lambda *a, **kw: invoke_called.append(True),
+    )
+
+    cfg = type("Cfg", (), {"magi_max_iterations": 3, "magi_threshold": "GO_WITH_CAVEATS"})()
+    ns = type(
+        "NS",
+        (),
+        {"override_checkpoint": False, "reason": None, "resume_from_magi": False},
+    )()
+    with pytest.raises(ValidationError) as exc:
+        spec_cmd._run_magi_checkpoint2(root, cfg, ns)
+
+    assert "spec_lint" in str(exc.value).lower()
+    assert "R1" in str(exc.value)
+    assert invoke_called == []
+
+
+def test_c_int_2_lint_warning_emits_breadcrumb_proceeds(tmp_path, monkeypatch, capsys):
+    """C-int-2: R3 warning emits stderr breadcrumb but does not abort."""
+    import spec_cmd
+
+    root = tmp_path
+    (root / "sbtdd").mkdir()
+    (root / "planning").mkdir()
+    spec = root / "sbtdd" / "spec-behavior.md"
+    plan = root / "planning" / "claude-plan-tdd-org.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n## 1. one\n\n## 2. two\n\n## 5. five\n",
+        encoding="utf-8",
+    )
+    plan.write_text(
+        "# Plan\n> Generado 2026-05-06 a partir de y.md\n\n## 1. Section\n",
+        encoding="utf-8",
+    )
+
+    invoke_called = []
+
+    def fake_invoke(*a, **kw):
+        invoke_called.append(True)
+        return type(
+            "V",
+            (),
+            {
+                "verdict": "GO",
+                "iterations": [],
+                "degraded": False,
+            },
+        )()
+
+    monkeypatch.setattr("magi_dispatch.invoke_magi", fake_invoke)
+    monkeypatch.setattr("magi_dispatch.verdict_is_strong_no_go", lambda v: False)
+    monkeypatch.setattr("magi_dispatch.verdict_passes_gate", lambda v, t: True)
+    monkeypatch.setattr(spec_cmd, "_write_plan_tdd", lambda *a, **kw: None)
+
+    cfg = type("Cfg", (), {"magi_max_iterations": 3, "magi_threshold": "GO_WITH_CAVEATS"})()
+    ns = type(
+        "NS",
+        (),
+        {"override_checkpoint": False, "reason": None, "resume_from_magi": False},
+    )()
+    spec_cmd._run_magi_checkpoint2(root, cfg, ns)
+
+    captured = capsys.readouterr()
+    assert "spec-lint" in captured.err.lower() or "R3" in captured.err
+    assert invoke_called == [True]
