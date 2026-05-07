@@ -1497,9 +1497,7 @@ class TestAutoCmdParallelFlag:
         # Sequential: each batch is single-task in plan order
         assert dispatch_plan == [{"1"}, {"2"}]
 
-    def test_c8_collision_forces_sequential_in_parallel_mode(
-        self, tmp_path: Path
-    ) -> None:
+    def test_c8_collision_forces_sequential_in_parallel_mode(self, tmp_path: Path) -> None:
         """C-8: file-colliding tasks split into sub-batches even under parallel."""
         import textwrap
 
@@ -1547,9 +1545,7 @@ class TestAutoCmdParallelFlag:
                         "PreToolUse": [
                             {
                                 "matcher": "Write|Edit",
-                                "hooks": [
-                                    {"type": "command", "command": "tdd-guard"}
-                                ],
+                                "hooks": [{"type": "command", "command": "tdd-guard"}],
                             }
                         ]
                     }
@@ -1582,9 +1578,7 @@ class TestAutoCmdParallelFlag:
                         "PreToolUse": [
                             {
                                 "matcher": "Write",
-                                "hooks": [
-                                    {"type": "command", "command": "tdd-guard"}
-                                ],
+                                "hooks": [{"type": "command", "command": "tdd-guard"}],
                             }
                         ]
                     }

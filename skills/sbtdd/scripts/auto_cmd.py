@@ -63,8 +63,10 @@ import subprocess_utils
 import superpowers_dispatch
 from commits import create as commit_create
 from config import PluginConfig, load_plugin_local
+from dag_parser import parse_plan
 from dependency_check import check_environment
 from drift import detect_drift
+from parallel_dispatcher import partition_by_collision
 from errors import (
     ChecklistError,
     CommitError,
@@ -1250,6 +1252,100 @@ class AutoRunAudit:
         )
 
 
+# ---------------------------------------------------------------------------
+# v1.0.4 Item C -- parallel dispatch plan helpers (escenarios C-7, C-8, C-9).
+# ---------------------------------------------------------------------------
+
+
+def _build_dispatch_plan_sequential(plan_path: Path) -> list[set[str]]:
+    """Sequential dispatch plan -- each task in its own batch in plan order.
+
+    Preserves v1.0.3 behaviour exactly. Default when ``--parallel`` is
+    NOT specified.
+
+    Args:
+        plan_path: Path to ``planning/claude-plan-tdd.md``.
+
+    Returns:
+        List of single-element sets, one per task, in the order the
+        tasks appear in the plan. Each batch is dispatched serially.
+    """
+    graph = parse_plan(plan_path)
+    return [{tid} for tid in graph.tasks.keys()]
+
+
+def _build_dispatch_plan_parallel(plan_path: Path) -> list[set[str]]:
+    """Parallel dispatch plan -- antichains partitioned by file collisions.
+
+    v1.0.4 Item C: opt-in via ``--parallel`` flag. DAG analysis +
+    file-surface collision detection produce parallel-safe batches.
+    Within each antichain, tasks are further partitioned so that no
+    two tasks in the same returned sub-batch share file surfaces.
+
+    Args:
+        plan_path: Path to ``planning/claude-plan-tdd.md``.
+
+    Returns:
+        Flat list of sets in dispatch order. Each set is a batch of
+        task ids that may run concurrently in the same worktree
+        without write conflicts.
+    """
+    graph = parse_plan(plan_path)
+    chains = graph.antichains()
+    flat: list[set[str]] = []
+    for chain in chains:
+        flat.extend(partition_by_collision(chain, graph))
+    return flat
+
+
+def _check_tdd_guard_warning(parallel: bool, project_root: Path) -> None:
+    """Emit stderr warning when ``--parallel`` + TDD-Guard hooks detected.
+
+    Per spec sec.3 multi-agent rules: parallel mode in same worktree
+    with TDD-Guard ON produces falsos bloqueos because TDD-Guard's
+    per-process state file is shared across subagents. The warning
+    documents the two escape valves: toggle off via ``tdd-guard off``
+    OR run each subagent in its own worktree via ``/using-git-worktrees``.
+
+    Args:
+        parallel: ``True`` if the run is opting into parallel dispatch.
+        project_root: Project root containing ``.claude/settings.json``.
+
+    Returns:
+        ``None``. Warning (when applicable) is written to ``sys.stderr``.
+    """
+    if not parallel:
+        return
+    settings_path = project_root / ".claude" / "settings.json"
+    if not settings_path.exists():
+        return
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return
+    has_tdd_guard = False
+    for hook_list in hooks.values():
+        if not isinstance(hook_list, list):
+            continue
+        for entry in hook_list:
+            if not isinstance(entry, dict):
+                continue
+            for h in entry.get("hooks", []):
+                if isinstance(h, dict) and "tdd-guard" in str(h.get("command", "")).lower():
+                    has_tdd_guard = True
+                    break
+    if has_tdd_guard:
+        sys.stderr.write(
+            "[sbtdd auto] WARNING: Parallel mode in same worktree with "
+            "TDD-Guard ON may produce falsos bloqueos. Toggle off with "
+            "`tdd-guard off` per spec sec.3 multi-agent rules, OR use "
+            "`/using-git-worktrees` for per-subagent worktree.\n"
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Return the argparse parser for ``sbtdd auto``."""
     p = argparse.ArgumentParser(prog="sbtdd auto")
@@ -1278,6 +1374,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "Valid skill names: implementer, spec_reviewer, code_review, "
             "magi_dispatch. Cascade: CLAUDE.md > CLI override > "
             "plugin.local.md > None (inherit session)."
+        ),
+    )
+    # v1.0.4 Item C: opt-in parallel task dispatch via DAG analysis +
+    # file-surface collision detection. Default False preserves the v1.0.3
+    # sequential dispatch behaviour exactly. See spec sec.3 multi-agent
+    # rules for the TDD-Guard interaction caveats.
+    p.add_argument(
+        "--parallel",
+        action="store_true",
+        default=False,
+        help=(
+            "v1.0.4 Item C: dispatch parallelizable task batches "
+            "concurrently. Requires TDD-Guard OFF in same worktree, "
+            "OR per-subagent worktree (see spec sec.3)."
         ),
     )
     return p
