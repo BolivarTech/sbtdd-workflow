@@ -203,6 +203,15 @@ For one-off bumps without editing the plugin config, pass
 # 2. Write the spec base, then run the spec pipeline
 #    (drafts spec-behavior.md, claude-plan-tdd-org.md, iterates via MAGI)
 /sbtdd spec
+#    Caveat v1.0.1 Finding A (subsists until v1.0.4 real headless detection):
+#    /brainstorming and /writing-plans are interactive skills. /sbtdd spec
+#    dispatches them via `claude -p` subprocess which silently exits empty.
+#    Workaround: in an interactive Claude Code session, manually invoke
+#    /brainstorming + /writing-plans against sbtdd/spec-behavior-base.md and
+#    let them produce sbtdd/spec-behavior.md + planning/claude-plan-tdd-org.md.
+#    THEN dispatch MAGI Checkpoint 2 via:
+/sbtdd spec --resume-from-magi  # validates structurally + runs MAGI only
+#    (See "Recent release highlights" for the v1.0.1 --resume-from-magi flag.)
 
 # 3. Execute the plan
 #    Option A: manual (one phase at a time)
@@ -214,12 +223,56 @@ For one-off bumps without editing the plugin config, pass
 #    Option B: shoot-and-forget
 /sbtdd auto
 
+#    Subagent convention (v1.0.2 Q2 Option B mandate): subagents executing
+#    plan tasks MUST close via the close-task automation, NOT manual
+#    plan-file edits (which trigger drift detection):
+python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
+#    (--skip-spec-review bypasses the v0.2 INV-31 spec-reviewer for
+#    defensive infrastructure cycles; omit for feature work where INV-31
+#    enforcement is desired.)
+
 # 4. Pre-merge gates
 /sbtdd pre-merge              # Loop 1 (code review) + Loop 2 (MAGI)
+#    Caveat (v1.0.4 backlog): /requesting-code-review is invoked as a
+#    subprocess for fix-finding triage between Loop 1 iters; it currently
+#    hangs waiting for interactive input on the same subprocess pattern as
+#    Finding A. Manual fallback per spec sec.6.4: dispatch MAGI Loop 2
+#    directly via:
+python skills/magi/scripts/run_magi.py code-review <payload> \
+    --model opus --timeout 900 --output-dir <dir>
+#    Apply findings via mini-cycle TDD manually + re-dispatch as needed.
+#    v1.0.4 LOCKED ships real headless detection
+#    (SBTDD_HEADLESS=1 + os.isatty(0)) which collapses the hang to a
+#    single LOUD-FAST PreconditionError.
 
 # 5. Finalize (runs the checklist + /finishing-a-development-branch)
 /sbtdd finalize
+#    Then bump plugin.json + marketplace.json to the new version,
+#    append CHANGELOG `[X.Y.Z]` section, commit `chore: bump to X.Y.Z`,
+#    create local tag `git tag vX.Y.Z`, and request explicit user
+#    authorization before pushing (memory rule: commit and push each
+#    require separate explicit authorization).
 ```
+
+### Known operational caveats (v1.0.4 backlog)
+
+Until v1.0.4 ships real headless detection + parallel task dispatcher,
+the following caveats apply during cycle execution:
+
+- **Interactive skill subprocess hangs**: `/brainstorming`,
+  `/writing-plans`, and `/receiving-code-review` are interactive skills
+  that hang silently when invoked via `claude -p` subprocess (Finding A
+  v1.0.0 + v1.0.4 LOCKED scope). Use the recovery paths above
+  (`--resume-from-magi`, manual `run_magi.py` for Loop 2).
+- **State file phase advance**: subagents executing plan tasks via raw
+  `git commit` (instead of `/sbtdd close-phase` wrapper) need to manually
+  advance `current_phase` from `red` → `green` → `refactor` in
+  `.claude/session-state.json` before invoking `close-task`. Methodology
+  gap to be addressed by v1.0.4 Item E close-task convention codification.
+- **Cross-check Windows path issues**: resolved in v1.0.3 Item B (project-
+  relative `.claude/magi-cross-check/.tmp/prompt-<uuid16>.md` + `@<file>`
+  reference in argv). Earlier versions hit WinError 206 from argv length
+  exceeding Windows cmdline limits.
 
 ### Direct CLI (bypassing the skill)
 
