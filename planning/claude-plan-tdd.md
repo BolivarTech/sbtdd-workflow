@@ -361,7 +361,7 @@ Covers escenarios A-1, A-3, A-4, A-5 from spec sec.4.1 (post triage: NO `_is_hea
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_superpowers_dispatch.py`:
 
@@ -442,12 +442,12 @@ class TestInvokeSkillMembershipGate:
                 invoke_skill("receiving-code-review", "any prompt")
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillMembershipGate -v`
 Expected: 7/7 FAIL — invoke_skill currently does not check `_SUBPROCESS_INCOMPATIBLE_SKILLS` membership; PreconditionError not raised.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -455,7 +455,7 @@ Expected: `test:` commit landed.
 
 #### Green Phase
 
-- [ ] **Step 4: Wire membership gate into `invoke_skill`**
+- [x] **Step 4: Wire membership gate into `invoke_skill`**
 
 Modify `skills/sbtdd/scripts/superpowers_dispatch.py` `invoke_skill` function:
 
@@ -537,7 +537,7 @@ def writing_plans(prompt: str, ...) -> str:
     return invoke_skill("writing-plans", prompt, ..., allow_interactive_skill=True)
 ```
 
-- [ ] **Step 5: Run tests to verify PASS**
+- [x] **Step 5: Run tests to verify PASS**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillMembershipGate -v`
 Expected: 7/7 PASS.
@@ -545,7 +545,7 @@ Expected: 7/7 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 6: close-phase Green**
+- [x] **Step 6: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -553,20 +553,20 @@ Expected: `feat:` commit landed (e.g. `feat: wire membership gate into invoke_sk
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor — confirm wrappers + extract gate logic if duplicated**
+- [x] **Step 7: Refactor — confirm wrappers + extract gate logic if duplicated**
 
 If multiple wrappers will need `allow_interactive_skill=True`, no further refactor needed — kwarg already in place. If gate logic appears in 2+ places, extract to private helper. Likely YAGNI; skip.
 
-- [ ] **Step 8: Run tests to verify still PASS**
+- [x] **Step 8: Run tests to verify still PASS**
 
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 9: close-phase Refactor**
+- [x] **Step 9: close-phase Refactor**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-- [ ] **Step 10: close-task**
+- [x] **Step 10: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
