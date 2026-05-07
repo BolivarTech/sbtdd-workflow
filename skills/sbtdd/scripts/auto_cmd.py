@@ -2990,6 +2990,35 @@ def main(argv: list[str] | None = None) -> int:
     if ns.dry_run:
         _print_dry_run_preview(ns)
         return 0
+    # v1.0.4 Item C end-to-end wiring (MAGI Loop 2 iter-1 CRITICAL #3 fix).
+    # ``ns.parallel`` (default ``False``) drives:
+    #   1. TDD-Guard warning emission BEFORE phase 1 -- operators get the
+    #      multi-agent caveat as soon as their flag choice is parsed, not
+    #      buried mid-task-loop.
+    #   2. Dispatch plan construction -- ``_build_dispatch_plan_parallel``
+    #      partitions tasks via DAG antichains + file-surface collision
+    #      detection; ``_build_dispatch_plan_sequential`` preserves v1.0.3
+    #      plan-text order. Result is stashed on ``ns.dispatch_plan`` so
+    #      ``_phase2_task_loop`` (and future v1.0.5 concurrent transport)
+    #      can consume the partitioned shape without re-parsing the plan.
+    # Pre-fix, the flag was DEAD-WIRED: argparse accepted it but main()
+    # never read ``ns.parallel`` and the helpers were orphaned (only
+    # exercised by unit tests). Operators set ``--parallel`` and observed
+    # sequential timing identical to the default. v1.0.4 ships
+    # partition-aware dispatch ordering; concurrent execution transport
+    # (subprocess.Popen pool with state-file lock) is v1.0.5 backlog.
+    _check_tdd_guard_warning(parallel=ns.parallel, project_root=ns.project_root)
+    plan_path_for_dispatch = ns.project_root / "planning" / "claude-plan-tdd.md"
+    if plan_path_for_dispatch.exists():
+        if ns.parallel:
+            ns.dispatch_plan = _build_dispatch_plan_parallel(plan_path_for_dispatch)
+        else:
+            ns.dispatch_plan = _build_dispatch_plan_sequential(plan_path_for_dispatch)
+    else:
+        # Plan absent at this stage means phase 1 preflight will fail with
+        # a clearer error message; preserve that path by attaching an empty
+        # plan rather than re-raising here.
+        ns.dispatch_plan = []
     state, cfg = _phase1_preflight(ns)
     started = _now_iso()
     auto_run = ns.project_root / ".claude" / "auto-run.json"
