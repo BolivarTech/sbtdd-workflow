@@ -1,5 +1,10 @@
 # v1.0.2 Cross-check Completion + Own-cycle Dogfood Implementation Plan
 
+> Generado 2026-05-06 a partir de sbtdd/spec-behavior.md v1.0.2 via
+> superpowers:writing-plans skill (interactive session, post-MAGI
+> Checkpoint 2 STRONG GO unanimous). Frontmatter required by spec_lint
+> R5 (Item C R5 enforced from this v1.0.2 cycle onward).
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship v1.0.2 — close the 4 LOCKED items rolled forward from the v1.0.1 pivot (cross-check telemetry, diff threading regression test, spec_lint enforcement, own-cycle dogfood) plus 3 defensive items (recovery empirical, meta-test, coverage threshold). 5 plan tasks (A, B, C, F, G) over 2 parallel subagent tracks; 2 methodology activities (D, E) executed by the orchestrator.
