@@ -897,7 +897,7 @@ Covers escenarios C-1, C-2, C-3, C-4 from spec sec.4.3.
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `tests/test_dag_parser.py`:
 
@@ -1206,18 +1206,18 @@ def test_c3_iterative_cycle_detection_self_loop(tmp_path: Path):
     assert "cycle" in msg or "cyclic" in msg
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_dag_parser.py -v`
 Expected: All FAIL — `dag_parser` module does not exist.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: Implement `dag_parser.py`**
+- [x] **Step 4: Implement `dag_parser.py`**
 
 Create `skills/sbtdd/scripts/dag_parser.py`:
 
@@ -1469,7 +1469,7 @@ def parse_plan(plan_path: Path) -> TaskGraph:
     return TaskGraph(tasks=tasks, edges=edges)
 ```
 
-- [ ] **Step 5: Run tests to verify PASS**
+- [x] **Step 5: Run tests to verify PASS**
 
 Run: `pytest tests/test_dag_parser.py -v`
 Expected: 12/12 PASS.
@@ -1477,7 +1477,7 @@ Expected: 12/12 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 6: close-phase Green**
+- [x] **Step 6: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1485,11 +1485,11 @@ Expected: `feat:` commit landed (e.g. `feat: add dag_parser module for v1.0.4 It
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor — extract helper functions if needed**
+- [x] **Step 7: Refactor — extract helper functions if needed**
 
 Module already structured by responsibility (split, extract files, extract deps, cycle detect, parse). Skip refactor.
 
-- [ ] **Step 8: close-phase Refactor + Step 9: close-task**
+- [x] **Step 8: close-phase Refactor + Step 9: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
