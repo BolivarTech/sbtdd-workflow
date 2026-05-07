@@ -1629,7 +1629,7 @@ if __name__ == "__main__":
 
 ---
 
-### Task 15: Item F — Meta-test core (escenarios F-1, F-2)
+### Task 15: Item F — Meta-test core (escenarios F-1, F-2) [x]
 
 **Files:**
 - Create: `tests/fixtures/audit_callsites/__init__.py`
