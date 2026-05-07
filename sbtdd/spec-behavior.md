@@ -139,13 +139,21 @@ Pattern follows `tests/test_changelog.py` HF1 cross-artifact alignment:
 - Assert presence of required strings (or absence if template removed
   them).
 
-**GAP routing protocol**:
+**GAP routing protocol** (revised iter 1 fix W3+W10+I5
+melchior+caspar+balthasar — Track Alpha truly audit-only):
 - For each row marked `GAP`: assess severity (CRITICAL = template
   requires + plugin doesn't enforce; WARNING = plugin enforces stricter
   than template; INFO = doc-only difference).
-- CRITICAL GAPs → backlog entry for Track Beta to fix in this cycle.
-- WARNING/INFO GAPs → Process notes documentation + defer to v1.0.4
-  if not blocking.
+- **ALL GAPs (CRITICAL + WARNING + INFO) → defer to v1.0.4 backlog by
+  default**. Track Alpha is purely audit-only; it does NOT interrupt
+  Track Beta with mid-cycle backlog entries. The audit doc Action
+  column captures GAP findings + recommended v1.0.4 fix; orchestrator
+  evaluates at finalization whether any GAP is severe enough to
+  warrant cycle-abort + scope-spike (rare; documented escape valve).
+- This preserves Q1 disjoint-surface contract: Track Alpha output =
+  audit doc + alignment test only; Track Beta scope is fixed at
+  cycle-start (B+C+D+E) and does NOT grow mid-cycle from Alpha
+  findings.
 - Template defects (template wrong, plugin right) → propose template
   amendment in audit doc; physical update to template file
   (`D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md`)
@@ -173,25 +181,35 @@ Pattern follows `tests/test_changelog.py` HF1 cross-artifact alignment:
 Fired during all 3 v1.0.2 Loop 2 iters. Cross-check meta-reviewer
 NEVER ran on Windows. Activity D' incomplete.
 
-**Mitigation ladder (per spec-base R2)**:
+**Mitigation strategy** (revised iter 1 fix W4+W6+W12 caspar+balthasar+melchior):
 
-1. **First attempt — shorter temp dir prefix**: change
-   `tempfile.mkdtemp(prefix="sbtdd-magi-")` (or equivalent) to use
-   shorter prefix like `sbm-`. Reduces base path length by ~6 chars.
-   May be sufficient for typical paths.
-2. **Second attempt — `\\?\` long-path syntax**: wrap Windows file
-   operations with `\\?\` prefix to bypass MAX_PATH (260 char limit).
-   Bulletproof but Windows-specific code paths.
-3. **Third attempt — project-relative temp dir**: move cross-check
-   temp dir to `.claude/magi-cross-check/.tmp/<run-id>/`. Side-steps
-   Windows MAX_PATH entirely. Requires writable project dir runtime
-   dependency.
+**Default fix = project-relative temp dir** (R2 ladder step 3).
+Decision rule (deterministic per W4 melchior + W12 caspar): commit
+to step 3 unconditionally because:
+- Works identically on Windows + POSIX (side-steps MAX_PATH entirely
+  without platform-specific code paths).
+- Eliminates W6 balthasar concern that fix ships validated only on
+  POSIX (project-relative test paths reproduce on any OS).
+- Removes ambiguity of "if shorter prefix insufficient escalate to
+  `\\?\`" — that ambiguity is exactly the W4+W12 issue.
+- Project dir writability is already a runtime dependency for
+  `.claude/session-state.json` + `.claude/magi-cross-check/iter*-*.json`
+  artifacts.
 
-**Empirical validation**: Activity D' (Linux/POSIX dogfood completion)
-exercises the fix on Linux first; Windows validation requires Windows
-runtime which orchestrator may not have. If Windows untestable in
-this cycle, scope-reduce to "minimum viable" (shorter prefix only)
-and defer full mitigation to v1.0.4 per R2 ladder.
+Implementation: cross-check temp dir construction moves from
+`tempfile.mkdtemp(prefix="sbtdd-magi-...")` (system-temp) to
+`Path(".claude/magi-cross-check/.tmp/<run-id>/")` (project-relative)
+where `<run-id>` is a short UUID4 hex (8 chars). Cleanup via
+`finally`-block `shutil.rmtree(temp_dir, ignore_errors=True)`.
+
+**Fallback ladder** (only if R2 step 3 surfaces unexpected blocker):
+- Step 2 fallback: `\\?\` long-path syntax wrapping (Windows-specific
+  conditional code path).
+- Step 1 fallback: shorter prefix in system-temp (last resort).
+
+**Empirical validation**: Activity D' Linux/POSIX dogfood validates
+end-to-end. Project-relative path eliminates Windows-specific test
+runtime dependency: any OS reproduces the fix's behavior.
 
 ### 2.3 Item C — Drift detector line-anchored match (Pillar C defensive, Track Beta)
 
@@ -281,10 +299,26 @@ spec_snapshot.persist_snapshot(snapshot, root / "planning" / "spec-snapshot.json
 # _mark_plan_approved_with_snapshot pattern (R10 v1.0.0 fix).
 ```
 
-**R4 risk mitigation** (`--resume-from-magi` interaction): if flag
-detected, autoregen still runs (idempotent: same spec → same hashes).
-If MAGI re-runs over same artifacts and produces same verdict, snapshot
-overwrite is no-op. Activity E' methodology validates this empirically.
+**R4 risk mitigation** (revised iter 1 fix W7+I7 balthasar+caspar —
+defensive guard, not observable-only):
+- Idempotency assertion: autoregen test asserts that two consecutive
+  invocations over identical spec content produce byte-identical
+  snapshot file (escenario D-3 below codifies this).
+- Skip-on-resume guard option: if `--resume-from-magi` detected AND
+  spec-snapshot.json mtime is within 60s of spec-behavior.md mtime
+  (i.e., autoregen already happened recently), skip the autoregen
+  call to prevent redundant write. Defensive only — idempotency
+  means double-write is also safe, but skip avoids unnecessary I/O.
+- Activity E' validates the guard empirically (no surprise commit
+  conflicts).
+
+**INV-37 invocation-site tripwire** (iter 1 fix W11 caspar):
+new test `test_d_inv37_unaffected_by_autoregen` asserts that
+`spec_cmd._run_spec_flow` mtime + size + sha256 composite-signature
+check still fires correctly when autoregen runs in the
+`_run_magi_checkpoint2` post-MAGI-pass branch. This codifies the
+spec sec.9.5 "INV-37 unaffected" claim as test enforcement, not
+just documentation.
 
 ### 2.5 Item E — Close-task convention codification (Pillar C defensive, Track Beta)
 
@@ -748,8 +782,15 @@ conflicts.
   cerrado v1.0.1+v1.0.2 = 2-streak no-override). NO INV-0 path.
 - Bundle scope multi-pillar (5 plan tasks + 2 methodology) — esperamos
   converger en 2-3 iters.
-- Si llega a iter 3 sin convergencia, scope-trim ladder per
-  spec-base sec.6.1:
+- **Iter 2 CRITICAL trigger** (revised iter 1 fix W5+I1+I8
+  balthasar+melchior+caspar): if Loop 2 iter 2 still surfaces ANY
+  CRITICAL finding (post-iter-1-triage-fix), scope-trim immediately
+  rather than burning iter 3 on a multi-pillar bundle. Pre-staged
+  decision: Items C+D+E defer to v1.0.4 first; if needed, also
+  Item E only; only Pillar A + Pillar B are hard-LOCKED for v1.0.3
+  ship.
+- Si llega a iter 3 sin convergencia (despite iter-2 trigger), default
+  scope-trim ladder applies:
   1. Defer Pillar C Items C+D+E to v1.0.4 (smaller scope).
   2. Then Item E only deferred (codification can happen any cycle).
   3. Then Item D only deferred (autoregen is opt-in convenience).

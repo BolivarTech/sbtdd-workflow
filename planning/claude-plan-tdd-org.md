@@ -11,6 +11,8 @@
 
 **Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (audit-only) writes `docs/audits/v1.0.3-magi-gate-template-alignment.md` + `tests/test_magi_template_alignment.py` — NO production code. Track Beta (sequential B → C → D → E) modifies `pre_merge_cmd.py` + `drift.py` + `spec_cmd.py` + `state_file.py` + `subprocess_utils.py` (possibly) + doc files. Cero file overlap. Activity D' (Linux/POSIX dogfood post Item B fix) + Activity E' (--resume-from-magi smoke test post Track-close) run mid-cycle in orchestrator session before pre-merge gate.
 
+**State file write serialization** (iter 1 W8 caspar fix): both Track Alpha + Track Beta invoke `/sbtdd close-task` which writes `.claude/session-state.json`. Concurrent writes risk corruption. Mitigation: each track operates on a DISJOINT `current_task_id` range — Track Alpha owns Task 1; Track Beta owns Tasks 2-5. State file's `current_task_id` field advances sequentially within Track Beta (2 → 3 → 4 → 5 → done), and Track Alpha writes `current_task_id="1"` only during its single close. The two tracks never concurrently mutate the same state file fields with conflicting intent. Additional safety: `state_file.save()` already uses atomic `os.replace` (existing v0.5.0 pattern) on a temp file, so partial writes are impossible. Risk acknowledged but mitigated by sequential-within-track + atomic-write semantics.
+
 **Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active. Brainstorming refinements 2026-05-06: Q1 = 2-track parallel (Alpha audit-only, Beta code+doc); Q2 = Item E close-task codify via `/sbtdd close-task` automation (Option B); hybrid methodology (Opcion A run_magi.py for Checkpoint 2; Opcion B --resume-from-magi as Activity E' smoke test).
 
 **Plan invariants** (cross-task contracts):
@@ -340,75 +342,148 @@ Covers escenarios B-1, B-2, B-3, B-4, B-5 from spec sec.4.
 
 Subagent reads `skills/sbtdd/scripts/pre_merge_cmd.py` to identify exact location where cross-check temp paths are constructed. Look for `tempfile.mkdtemp(prefix=...)` calls or similar within `_loop2_with_cross_check` or downstream subprocess invocation helpers. Document the exact file:line in commit message of subsequent Red commit.
 
-- [ ] **Step 2: Write the failing reproduction test**
+- [ ] **Step 2: Write the failing reproduction test (iter 1 C1+W9 fix — exercise REAL production code path)**
+
+Per MAGI Checkpoint 2 iter 1 melchior CRITICAL: tests MUST exercise
+`_loop2_with_cross_check` production invocation chain, NOT bare file
+I/O on tmp_path. Otherwise Activity D' surfaces the bug Item B was
+supposed to fix (because tests passed against synthetic file ops
+that never crossed the production code path).
 
 Append to `tests/test_pre_merge_cross_check.py`:
 
 ```python
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
 
 
-def _make_long_synthetic_path(tmp_path: Path, target_length: int) -> Path:
-    """Create a path under tmp_path whose total length is at least target_length chars."""
-    base = tmp_path
-    # Pad with nested dirs of fixed name until total length >= target_length
-    pad_segment = "x" * 8  # short segment to control length precisely
-    while len(str(base / "f.json")) < target_length:
-        base = base / pad_segment
-        base.mkdir(exist_ok=True)
-    return base / "f.json"
+def test_b1_b2_cross_check_uses_project_relative_temp_dir(tmp_path, monkeypatch):
+    """B-1 + B-2: cross-check temp dir is project-relative (not system-temp).
 
-
-@pytest.mark.skipif(os.name != "nt", reason="WinError 206 is Windows-only")
-def test_b1_b2_long_path_handling_post_fix(tmp_path):
-    """B-1 + B-2: synthetic long path post-fix succeeds (Windows-only).
-
-    Pre-fix: synthetic path >= 260 chars triggers WinError 206.
-    Post-fix: shorter prefix OR \\?\\ syntax OR project-relative dir
-    bypasses MAX_PATH limit.
+    Per spec sec.2.2 R2 ladder step 3 default: project-relative dir
+    side-steps Windows MAX_PATH entirely. This test exercises the
+    production code path in _loop2_with_cross_check / downstream
+    helpers, asserting the temp dir resolves to a path under
+    .claude/magi-cross-check/.tmp/ rather than system-temp.
     """
-    long_path = _make_long_synthetic_path(tmp_path, target_length=270)
-    assert len(str(long_path)) >= 260, (
-        f"Test setup error: path only {len(str(long_path))} chars"
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
+    import pre_merge_cmd
+
+    # Capture temp dir paths used by the production code path.
+    # Subagent identifies the exact helper during Step 1 investigation
+    # and adapts this monkeypatch target accordingly.
+    captured_paths: list[str] = []
+
+    # Example monkeypatch shape (subagent adapts to actual production code):
+    # If production uses tempfile.mkdtemp directly:
+    real_mkdtemp = pre_merge_cmd.tempfile.mkdtemp if hasattr(pre_merge_cmd, "tempfile") else None
+    if real_mkdtemp is None:
+        pytest.skip(
+            "tempfile usage location pending Step 1 investigation; "
+            "subagent updates monkeypatch target after locating real code path"
+        )
+
+    def fake_mkdtemp(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        captured_paths.append(path)
+        return path
+
+    monkeypatch.setattr(pre_merge_cmd.tempfile, "mkdtemp", fake_mkdtemp)
+
+    # Invoke a function in the production cross-check path that creates
+    # the temp dir. Subagent identifies which entry point is appropriate
+    # (likely _loop2_with_cross_check via dispatch, OR a smaller helper
+    # like _make_cross_check_workspace if extracted).
+    # ... invocation here ...
+
+    # Assert post-fix: temp dir is project-relative
+    assert captured_paths, "No temp dir created during cross-check invocation"
+    for p in captured_paths:
+        path_obj = Path(p)
+        # Project-relative path will be under .claude/magi-cross-check/.tmp/
+        repo_root = Path(__file__).resolve().parents[1]
+        try:
+            rel = path_obj.relative_to(repo_root)
+            assert rel.parts[:3] == (".claude", "magi-cross-check", ".tmp"), (
+                f"Temp dir not under .claude/magi-cross-check/.tmp/: {p}"
+            )
+        except ValueError:
+            pytest.fail(
+                f"Temp dir is system-temp ({p}), not project-relative. "
+                "Item B fix incomplete."
+            )
+
+
+def test_b3_long_path_handling_via_production_path(tmp_path, monkeypatch):
+    """B-3: long path (>=300 chars total) handling via REAL production path.
+
+    Constructs a long base via project-relative temp dir + nested run-id.
+    Asserts the production cross-check invocation succeeds without
+    OSError (works on Windows + POSIX after Item B fix).
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
+    import pre_merge_cmd
+
+    # Subagent populates this test with the actual production invocation
+    # chain after Step 1 investigation. The test must exercise the
+    # subprocess call to /requesting-code-review (or the prompt+diff
+    # write) where the long-filename failure originally occurred.
+    pytest.skip(
+        "Subagent populates with actual production invocation after Step 1 "
+        "investigation identifies the call chain for cross-check temp file write"
     )
-    # Post-fix behavior: write succeeds
-    long_path.write_text("test", encoding="utf-8")
-    assert long_path.read_text(encoding="utf-8") == "test"
 
 
-def test_b3_paths_300_plus_chars_work(tmp_path):
-    """B-3: paths >= 300 chars work post-fix (NF36 robustness).
+def test_b4_short_paths_backward_compat(tmp_path, monkeypatch):
+    """B-4: normal-length project-relative paths work (no regression).
 
-    Cross-platform reproduction: write + read at 300+ char path.
-    On Windows, requires Item B fix; on POSIX, always works (no MAX_PATH).
+    With project-relative temp dir at .claude/magi-cross-check/.tmp/<8-char-uuid>/,
+    typical paths are well under 260 chars on Windows. This test validates
+    the post-fix happy path.
     """
-    long_path = _make_long_synthetic_path(tmp_path, target_length=300)
-    assert len(str(long_path)) >= 300
-    long_path.write_text("payload", encoding="utf-8")
-    assert long_path.read_text(encoding="utf-8") == "payload"
-
-
-def test_b4_short_paths_backward_compat(tmp_path):
-    """B-4: normal-length paths (<260 chars) still work (no regression)."""
-    short_path = tmp_path / "short.json"
-    assert len(str(short_path)) < 260
-    short_path.write_text("ok", encoding="utf-8")
-    assert short_path.read_text(encoding="utf-8") == "ok"
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
+    pytest.skip(
+        "Subagent populates with end-to-end happy path test exercising "
+        "real cross-check invocation post Item B fix"
+    )
 
 
 def test_b5_posix_unaffected(tmp_path):
-    """B-5: POSIX runtime cross-check unaffected by fix (POSIX has no MAX_PATH)."""
+    """B-5: POSIX runtime cross-check works (project-relative path on POSIX).
+
+    POSIX has no MAX_PATH equivalent, so project-relative dir was never
+    needed for POSIX correctness — this test validates the fix doesn't
+    regress POSIX behavior. Effectively a smoke test that project-relative
+    dir resolves correctly on Linux/macOS.
+    """
     if os.name == "nt":
         pytest.skip("POSIX-only test")
-    # On POSIX, long paths just work
-    long_path = _make_long_synthetic_path(tmp_path, target_length=400)
-    long_path.write_text("posix-ok", encoding="utf-8")
-    assert long_path.read_text(encoding="utf-8") == "posix-ok"
+
+    project_temp = Path(".claude/magi-cross-check/.tmp")
+    project_temp.mkdir(parents=True, exist_ok=True)
+    test_subdir = project_temp / "smoke-test"
+    test_subdir.mkdir(exist_ok=True)
+    test_file = test_subdir / "f.json"
+    test_file.write_text("posix-smoke", encoding="utf-8")
+    assert test_file.read_text(encoding="utf-8") == "posix-smoke"
+    # Cleanup
+    test_file.unlink()
+    test_subdir.rmdir()
 ```
+
+**Implementation note for subagent**: the monkeypatch targets above
+are scaffolding. During Step 1 investigation, identify the exact
+production code path (likely `_loop2_with_cross_check` or a helper
+it calls — possibly `_dispatch_requesting_code_review` or
+`subprocess_utils` writer). Adapt the monkeypatch to intercept
+where `tempfile.mkdtemp` (or equivalent) is called. The test must
+fail PRE-fix (system-temp path) and pass POST-fix (project-relative).
+
+If the production code uses `tempfile.TemporaryDirectory` instead of
+`mkdtemp`, monkeypatch the class instead. If the code uses a custom
+helper, monkeypatch that helper.
 
 - [ ] **Step 3: Run test to verify Red signal**
 
@@ -687,11 +762,27 @@ Covers escenarios D-1, D-2, D-3, D-4 from spec sec.4.
 
 #### Red Phase
 
-- [ ] **Step 1: Investigate existing emit pattern**
+- [ ] **Step 1: Investigate existing emit pattern + state_file schema (iter 1 W2 fix)**
 
 Read `skills/sbtdd/scripts/spec_cmd.py` to locate `_run_magi_checkpoint2` post-MAGI-pass branch + existing `_mark_plan_approved_with_snapshot` helper (R10 v1.0.0 fix). Determine if autoregen is partially shipped or fully missing. If partially shipped (e.g., `_mark_plan_approved_with_snapshot` exists and is called from `--resume-from-magi` path), this task tightens vs adds.
 
-Read `skills/sbtdd/scripts/state_file.py` to verify `SessionState` dataclass has `spec_snapshot_emitted_at` field. If missing, add it.
+**state_file schema decision (W2 melchior iter 1)**: read
+`skills/sbtdd/scripts/state_file.py` to verify `SessionState`
+dataclass has `spec_snapshot_emitted_at` field. Two cases:
+
+- **Field exists** (with default, likely from v1.0.0 R10 fix): no
+  schema change. Item D just populates the field on autoregen.
+- **Field missing**: add field as `Optional[str] = None` (default
+  None for backward compat with v1.0.2 state files). NO migration
+  required because `Optional` defaults handle pre-existing JSON
+  state files without the field. Document the decision in commit
+  message: `feat: add spec_snapshot_emitted_at optional field`.
+
+Backward compat contract: existing v1.0.2 state files (without the
+field) load as `spec_snapshot_emitted_at=None`. v1.0.3 cycles populate
+the field. Reading code MUST tolerate None (treat as "snapshot
+emitted at unknown time"). v1.0.4+ may make field required after
+2-cycle migration window per Feature I migration tool pattern.
 
 - [ ] **Step 2: Write failing tests**
 
@@ -795,8 +886,36 @@ def test_d3_resume_from_magi_idempotent(tmp_path, monkeypatch):
     spec_cmd._run_magi_checkpoint2(root, cfg, ns)
     snapshot_after_second = (root / "planning" / "spec-snapshot.json").read_text(encoding="utf-8")
 
+    # Iter 1 W7+I7 balthasar+caspar fix: defensive idempotency guard,
+    # not just observable. Asserts byte-for-byte equality.
     assert snapshot_after_first == snapshot_after_second, (
-        "Idempotent autoregen: same spec content should yield same snapshot"
+        "Idempotent autoregen: same spec content MUST yield byte-identical "
+        "snapshot file across multiple --resume-from-magi invocations. "
+        "Iter 1 R4 risk mitigated via this assertion."
+    )
+
+
+def test_d_inv37_unaffected_by_autoregen(tmp_path, monkeypatch):
+    """W11 caspar iter 1 fix: INV-37 invocation-site tripwire.
+
+    Item D autoregen runs in _run_magi_checkpoint2 post-MAGI-pass branch,
+    NOT in _run_spec_flow lint timing path. Asserts that INV-37
+    composite-signature check (mtime + size + sha256) on
+    spec-behavior.md still fires correctly when autoregen has just
+    written spec-snapshot.json (which is a different file). The two
+    paths must not interfere.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sbtdd" / "scripts"))
+    import spec_cmd
+
+    # Setup: spec-behavior.md exists; record its INV-37 composite signature
+    # before autoregen, after autoregen, after _run_spec_flow.
+    # Assert signatures match where expected (spec-behavior unchanged
+    # across the autoregen call) and differ where expected (after
+    # _run_spec_flow rewrites it).
+    pytest.skip(
+        "Subagent populates with explicit INV-37 signature comparison "
+        "asserting autoregen does NOT alter spec-behavior.md mtime+size+sha256"
     )
 
 
@@ -1177,6 +1296,32 @@ python skills/sbtdd/scripts/run_sbtdd.py spec --resume-from-magi 2>&1 | tee /tmp
    - R4 autoregen-interaction observability.
 
 **Failure mode**: methodology activity is **non-gating for ship**. If E' fails (e.g., R10 commit conflict surfaces), document the specific failure mode + roll forward to v1.0.4 fix. Cycle continues to finalization regardless.
+
+**Rollback protocol** (iter 1 I2 melchior fix): if E' produces
+unwanted commits or state file mutations during the smoke test
+(e.g., `_commit_approved_artifacts` lands a commit that conflicts
+with the existing finalization sequence), apply rollback BEFORE
+proceeding to pre-merge gate:
+
+```bash
+# Identify any unexpected commits landed during E' invocation
+git log --oneline 10 --since="<E'-start-time>"
+
+# Hard-reset working tree to pre-E' commit (capture SHA before E'
+# invocation; subagent records it as part of Activity E' step 1)
+git reset --hard <pre-E-prime-sha>
+
+# Restore .claude/session-state.json from pre-E' state if mutated
+# (capture pre-E' content before invocation)
+echo '<pre-E-prime-state-json>' > .claude/session-state.json
+
+# Document the rollback + observable gap in CHANGELOG [1.0.3] Process notes
+```
+
+The rollback is reversible (no force-push, no branch destruction);
+captured pre-E' state ensures clean recovery. Subagent or orchestrator
+records pre-E' SHA + state file content explicitly in Activity E'
+step 1 BEFORE invocation as the rollback anchor.
 
 ---
 
