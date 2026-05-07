@@ -10,6 +10,7 @@ authors = [{name = "Julian Bolivar"}]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
     "pyyaml>=6.0",
     "types-pyyaml>=6.0",
     "ruff>=0.3",
@@ -51,3 +52,20 @@ disallow_incomplete_defs = false
 check_untyped_defs = false
 warn_return_any = false
 disable_error_code = ["type-arg", "misc", "unused-ignore"]
+
+[tool.coverage.run]
+source = ["skills/sbtdd/scripts"]
+omit = [
+    "skills/sbtdd/scripts/__init__.py",
+    "templates/*",
+]
+
+[tool.coverage.report]
+fail_under = 88
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "def __repr__",
+]

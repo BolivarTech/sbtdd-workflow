@@ -106,7 +106,9 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
         calls.append({"skill": "brainstorming", "args": args})
         # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# Feature spec behavior\n\n## §4 Escenarios BDD\n\n"
+            "# Feature spec behavior\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: stub**\n\n"
             "> **Given** g.\n> **When** w.\n> **Then** t.\n",
             encoding="utf-8",
@@ -118,7 +120,8 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
     ) -> object:
         calls.append({"skill": "writing-plans", "args": args})
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n### Task 1: sample\n- [ ] work\n",
+            encoding="utf-8",
         )
         return None
 
@@ -128,7 +131,8 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
         # so existing call-order assertions continue to match.
         calls.append({"skill": "writing-plans", "args": [spec_path]})
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n### Task 1: sample\n- [ ] work\n",
+            encoding="utf-8",
         )
         return None
 
@@ -168,7 +172,9 @@ def test_spec_invokes_writing_plans_after_spec_generated(
         calls.append("brainstorming")
         # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "# behavior\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: stub**\n\n"
             "> **Given** g.\n> **When** w.\n> **Then** t.\n",
             encoding="utf-8",
@@ -180,7 +186,8 @@ def test_spec_invokes_writing_plans_after_spec_generated(
     ) -> object:
         calls.append("writing-plans")
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n### Task 1: sample\n- [ ] work\n",
+            encoding="utf-8",
         )
         assert args is not None and any("spec-behavior.md" in tok for tok in args)
         return None
@@ -190,7 +197,8 @@ def test_spec_invokes_writing_plans_after_spec_generated(
         # invoke_writing_plans; mirror the spy contract on the wrapper.
         calls.append("writing-plans")
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n### Task 1: sample\n- [ ] work\n",
+            encoding="utf-8",
         )
         assert "spec-behavior.md" in spec_path
         return None
@@ -287,7 +295,9 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         # Minimal §4 Escenarios section so spec_snapshot.emit_snapshot
         # finds a non-empty snapshot at plan-approval time (R10).
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "# behavior\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: minimal stub**\n\n"
             "> **Given** a stub.\n> **When** parsed.\n> **Then** present.\n",
             encoding="utf-8",
@@ -298,7 +308,9 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n"
+            "### Task 1: First task\n- [ ] do it\n",
+            encoding="utf-8",
         )
         return None
 
@@ -306,7 +318,9 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         # v1.0.0 Loop 2 iter 2->3 R11: mirror fake_writing_plans on the
         # invoke_writing_plans wrapper that production uses.
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n"
+            "### Task 1: First task\n- [ ] do it\n",
+            encoding="utf-8",
         )
         return None
 
@@ -570,7 +584,9 @@ def test_spec_routes_writing_plans_through_invoke_writing_plans_wrapper(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "# behavior\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: stub**\n\n"
             "> **Given** g.\n> **When** w.\n> **Then** t.\n",
             encoding="utf-8",
@@ -582,7 +598,8 @@ def test_spec_routes_writing_plans_through_invoke_writing_plans_wrapper(
     def spy_invoke_writing_plans(*, spec_path: str, **kwargs) -> object:
         invoke_calls.append({"spec_path": spec_path, "kwargs": kwargs})
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n### Task 1: sample\n- [ ] work\n",
+            encoding="utf-8",
         )
         return None
 
@@ -649,7 +666,9 @@ def test_a0_1_brainstorming_silent_no_op_detected(
     _seed_a0_env(tmp_path)
     spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
     spec_behavior.write_text(
-        "# pre-existing behavior\n\n## §4 Escenarios BDD\n\n"
+        "# pre-existing behavior\n\n"
+        "> Generado 2026-05-06 a partir de x.md\n\n"
+        "## §4 Escenarios BDD\n\n"
         "**Escenario 1: stub**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
         encoding="utf-8",
     )
@@ -680,7 +699,9 @@ def test_a0_2_writing_plans_silent_no_op_detected(
     spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
     plan_org = tmp_path / "planning" / "claude-plan-tdd-org.md"
     spec_behavior.write_text(
-        "# pre-existing behavior\n\n## §4 Escenarios BDD\n\n"
+        "# pre-existing behavior\n\n"
+        "> Generado 2026-05-06 a partir de x.md\n\n"
+        "## §4 Escenarios BDD\n\n"
         "**Escenario 1: stub**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
         encoding="utf-8",
     )
@@ -689,7 +710,9 @@ def test_a0_2_writing_plans_silent_no_op_detected(
     def updating_brainstorming(*a: object, **kw: object) -> object:
         # Brainstorming WRITES new content (passes A0 check).
         spec_behavior.write_text(
-            "# updated behavior\n\n## §4 Escenarios BDD\n\n"
+            "# updated behavior\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: updated**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
             encoding="utf-8",
         )
@@ -729,7 +752,9 @@ def test_a0_3_first_run_with_no_prior_artifacts_succeeds(
 
     def writing_brainstorming(*a: object, **kw: object) -> object:
         spec_behavior.write_text(
-            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "# behavior\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: x**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
             encoding="utf-8",
         )
@@ -763,7 +788,9 @@ def test_a0_4_happy_path_both_subprocesses_write_correctly(
 
     def writing_brainstorming(*a: object, **kw: object) -> object:
         spec_behavior.write_text(
-            "# NEW spec\n\n## §4 Escenarios BDD\n\n"
+            "# NEW spec\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: new**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
             encoding="utf-8",
         )
@@ -798,7 +825,9 @@ def test_a0_5_same_content_rewrite_under_fast_clock_detected(
     _seed_a0_env(tmp_path)
     spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
     same_content = (
-        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "# behavior\n\n"
+        "> Generado 2026-05-06 a partir de x.md\n\n"
+        "## §4 Escenarios BDD\n\n"
         "**Escenario 1: stub**\n\n> **Given** g\n> **When** w\n> **Then** t\n"
     )
     spec_behavior.write_text(same_content, encoding="utf-8")
@@ -890,12 +919,17 @@ def _seed_a3_artifacts(tmp_path: Path) -> tuple[Path, Path]:
     spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
     plan_org = tmp_path / "planning" / "claude-plan-tdd-org.md"
     spec_behavior.write_text(
-        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "# behavior\n\n"
+        "> Generado 2026-05-06 a partir de x.md\n\n"
+        "## §4 Escenarios BDD\n\n"
         "**Escenario 1: hand-crafted**\n\n"
         "> **Given** g\n> **When** w\n> **Then** t\n",
         encoding="utf-8",
     )
-    plan_org.write_text("# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8")
+    plan_org.write_text(
+        "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n### Task 1: First task\n- [ ] do it\n",
+        encoding="utf-8",
+    )
     return spec_behavior, plan_org
 
 
@@ -1108,7 +1142,9 @@ def test_a3_6_malformed_plan_rejected_by_structural_validation(
     (tmp_path / "planning").mkdir(exist_ok=True)
     # Spec is structurally valid.
     (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "# behavior\n\n"
+        "> Generado 2026-05-06 a partir de x.md\n\n"
+        "## §4 Escenarios BDD\n\n"
         "**Escenario 1: ok**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
         encoding="utf-8",
     )
@@ -1162,3 +1198,94 @@ def test_a3_7_oserror_during_emit_snapshot_caught_as_precondition(
     msg = str(ei.value)
     assert "spec-behavior.md" in msg or "emit_snapshot" in msg, msg
     assert "simulated FS read failure" in msg, msg
+
+
+def test_c_int_1_lint_error_aborts_checkpoint2(tmp_path, monkeypatch):
+    """C-int-1: spec_lint R1 error aborts before magi_dispatch.invoke_magi."""
+    import spec_cmd
+    from errors import ValidationError
+
+    root = tmp_path
+    (root / "sbtdd").mkdir()
+    (root / "planning").mkdir()
+    spec = root / "sbtdd" / "spec-behavior.md"
+    plan = root / "planning" / "claude-plan-tdd-org.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n"
+        "## 1. Section\n\n**Escenario X-1: bad**\n\n"
+        "> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+    plan.write_text(
+        "# Plan\n> Generado 2026-05-06 a partir de y.md\n\n## 1. Section\n",
+        encoding="utf-8",
+    )
+
+    invoke_called = []
+    monkeypatch.setattr(
+        "magi_dispatch.invoke_magi",
+        lambda *a, **kw: invoke_called.append(True),
+    )
+
+    cfg = type("Cfg", (), {"magi_max_iterations": 3, "magi_threshold": "GO_WITH_CAVEATS"})()
+    ns = type(
+        "NS",
+        (),
+        {"override_checkpoint": False, "reason": None, "resume_from_magi": False},
+    )()
+    with pytest.raises(ValidationError) as exc:
+        spec_cmd._run_magi_checkpoint2(root, cfg, ns)
+
+    assert "spec_lint" in str(exc.value).lower()
+    assert "R1" in str(exc.value)
+    assert invoke_called == []
+
+
+def test_c_int_2_lint_warning_emits_breadcrumb_proceeds(tmp_path, monkeypatch, capsys):
+    """C-int-2: R3 warning emits stderr breadcrumb but does not abort."""
+    import spec_cmd
+
+    root = tmp_path
+    (root / "sbtdd").mkdir()
+    (root / "planning").mkdir()
+    spec = root / "sbtdd" / "spec-behavior.md"
+    plan = root / "planning" / "claude-plan-tdd-org.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n## 1. one\n\n## 2. two\n\n## 5. five\n",
+        encoding="utf-8",
+    )
+    plan.write_text(
+        "# Plan\n> Generado 2026-05-06 a partir de y.md\n\n## 1. Section\n",
+        encoding="utf-8",
+    )
+
+    invoke_called = []
+
+    def fake_invoke(*a, **kw):
+        invoke_called.append(True)
+        return type(
+            "V",
+            (),
+            {
+                "verdict": "GO",
+                "iterations": [],
+                "degraded": False,
+            },
+        )()
+
+    monkeypatch.setattr("magi_dispatch.invoke_magi", fake_invoke)
+    monkeypatch.setattr("magi_dispatch.verdict_is_strong_no_go", lambda v: False)
+    monkeypatch.setattr("magi_dispatch.verdict_passes_gate", lambda v, t: True)
+    monkeypatch.setattr(spec_cmd, "_write_plan_tdd", lambda *a, **kw: None)
+
+    cfg = type("Cfg", (), {"magi_max_iterations": 3, "magi_threshold": "GO_WITH_CAVEATS"})()
+    ns = type(
+        "NS",
+        (),
+        {"override_checkpoint": False, "reason": None, "resume_from_magi": False},
+    )()
+    spec_cmd._run_magi_checkpoint2(root, cfg, ns)
+
+    captured = capsys.readouterr()
+    assert "spec-lint" in captured.err.lower() or "R3" in captured.err
+    assert invoke_called == [True]

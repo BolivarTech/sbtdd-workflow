@@ -8,6 +8,270 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [1.0.2] - 2026-05-06
+
+> **Status**: Shipped. Cross-check completion + own-cycle dogfood. 5
+> plan tasks (A telemetry, B diff threading regression, C spec_lint,
+> F meta-test, G coverage threshold) + 2 methodology activities (D
+> own-cycle dogfood, E P7 recovery). Bundle accepted via Checkpoint 2
+> 3-iter convergence to STRONG GO unanimous (3C → 1C → 0C "textbook")
+> + Loop 2 3-iter convergence to GO_WITH_CAVEATS (3-0) at-threshold
+> with agreement_rate naming CRITICAL fix landed mid-cycle.
+
+### Added
+
+- **`scripts/cross_check_telemetry.py`** (Item A) — standalone
+  aggregator script for `.claude/magi-cross-check/iter*-*.json`
+  artifacts emitted by `pre_merge_cmd._loop2_with_cross_check` (v1.0.0
+  Feature G). Outputs markdown table + JSON. CLI:
+  `python scripts/cross_check_telemetry.py [--root PATH] [--cycle PATTERN] [--format markdown|json]`.
+  Per-iter breakdown of KEEP/DOWNGRADE/REJECT decisions, per-agent
+  rate, per-severity distribution, agreement rate, truncation rate.
+- **`skills/sbtdd/scripts/spec_lint.py`** (Item C) — H5-2 mechanical
+  lint gate with 5 rules (R1 escenario well-formed, R2 unique IDs,
+  R3 monotonic headers WARNING-severity per Q3, R4 INV-27 mechanical
+  extension reusing `spec_cmd._INV27_RE`, R5 frontmatter docstring).
+  Integrated in `spec_cmd._run_magi_checkpoint2` ONCE upstream of MAGI
+  iter loop (lint timing contract C1). CLI:
+  `python -m skills.sbtdd.scripts.spec_lint <path> [--severity error|warning|info] [--rule R1|R2|R3|R4|R5]`.
+- **`tests/test_invoke_skill_callsites_audit.py`** (Item F) —
+  AST-based meta-test enforcing `allow_interactive_skill=True` on
+  direct `invoke_skill` callsites for skills in
+  `_SUBPROCESS_INCOMPATIBLE_SKILLS` (v1.0.1 A2 set). Excludes
+  `skills/sbtdd/scripts/superpowers_dispatch.py` (wrappers safe path).
+- **`pytest-cov >= 4.1`** dev dependency (Item G) + `[tool.coverage.run]`
+  + `[tool.coverage.report]` config in `pyproject.toml` with
+  `fail_under = 88` (measured baseline 90.12%, threshold = `floor(90) - 2`
+  per Q4 measure-then-floor protocol).
+
+### Changed
+
+- `spec_cmd._run_magi_checkpoint2` now invokes `spec_lint.lint_spec`
+  on `sbtdd/spec-behavior.md` + `planning/claude-plan-tdd-org.md`
+  ONCE at top of function BEFORE MAGI iter loop (C1 timing contract).
+  Error-severity findings raise `ValidationError` aborting cycle
+  without consuming MAGI iter budget; warning-severity emit stderr
+  breadcrumb without blocking. R3 currently warning-only per Q3
+  brainstorming dictamen (promote to error in v1.0.5+ after empirical
+  false-positive data).
+- `Makefile` `verify` target dependencies changed from `test lint
+  format typecheck coverage` to `lint format typecheck coverage` —
+  `coverage` already runs `pytest --cov`, so including `test` would
+  double-execute the test suite breaking NF-A budget (~160s soft
+  target). Standalone `test:` target preserved for dev workflow with
+  `-v` verbose (no coverage instrumentation overhead).
+- Test fixtures in `tests/test_spec_cmd.py`,
+  `tests/test_integration_full_cycle.py`,
+  `tests/test_spec_cmd_escalation.py` updated to add
+  `> Generado YYYY-MM-DD a partir de X` frontmatter to inline spec
+  stubs so the new spec_lint R5 gate passes (atomic with Item C
+  Green commit `b14544e`). 14 existing tests affected — only literal
+  fixture data updated, NOT test logic or assertions.
+
+### Fixed
+
+- **Loop 2 iter 3 caspar CRITICAL agreement_rate naming**:
+  `cross_check_telemetry.aggregate()` local variables renamed
+  `severity_match` → `keep_count`, `severity_total` → `decision_count`
+  for clarity (commit `ed8c83c`). Public output field
+  `agreement_rate` preserved unchanged to avoid JSON/markdown shape
+  break. Docstring documents semantic: KEEP fraction = severity-match
+  fraction = fraction of MAGI findings the cross-check meta-reviewer
+  agrees with (per Feature G v1.0.0 contract).
+
+### Per-module coverage baseline (Item G)
+
+Measured 2026-05-06 during task 19 close. Threshold = `floor(baseline) - 2%`.
+
+| Module | Coverage % |
+|--------|------------|
+| `_plan_ops.py` | 100% |
+| `auto_cmd.py` | 87% |
+| `close_phase_cmd.py` | 96% |
+| `close_task_cmd.py` | 98% |
+| `commits.py` | 97% |
+| `config.py` | 86% |
+| `dependency_check.py` | 91% |
+| `drift.py` | 97% |
+| `errors.py` | 100% |
+| `escalation_prompt.py` | 94% |
+| `finalize_cmd.py` | 98% |
+| `heartbeat.py` | 89% |
+| `hooks_installer.py` | 100% |
+| `init_cmd.py` | 87% |
+| `magi_dispatch.py` | 89% |
+| `migrate_plugin_local.py` | 100% |
+| `models.py` | 100% |
+| `pre_merge_cmd.py` | 95% |
+| `quota_detector.py` | 100% |
+| `receiving_review_dispatch.py` | 100% |
+| `reporters/ctest_reporter.py` | 92% |
+| `reporters/rust_reporter.py` | 95% |
+| `reporters/tdd_guard_schema.py` | 92% |
+| `resume_cmd.py` | 89% |
+| `review_spec_compliance_cmd.py` | 100% |
+| `run_sbtdd.py` | 100% |
+| `spec_cmd.py` | 90% |
+| `spec_lint.py` | 94% |
+| `spec_review_dispatch.py` | 86% |
+| `spec_snapshot.py` | 88% |
+| `state_file.py` | 89% |
+| `status_cmd.py` | 90% |
+| `subprocess_utils.py` | 74% |
+| `superpowers_dispatch.py` | 83% |
+| `templates.py` | 100% |
+| **TOTAL** | **90%** |
+
+Final `--cov-fail-under` value: **88**.
+
+Excludes (per `[tool.coverage.run].omit`):
+- `skills/sbtdd/scripts/__init__.py` (package marker, no logic).
+- `templates/*` (template files, not Python code).
+
+Modules under 85% target eventual (v1.0.5+ raise candidates):
+`subprocess_utils.py` (74%), `superpowers_dispatch.py` (83%).
+
+### Process notes
+
+- **Methodology timing**: brainstorming + writing-plans + MAGI
+  Checkpoint 2 driven manually in interactive Claude Code session
+  (NOT via `claude -p` subprocess, per consistency with v1.0.1
+  Finding A precedent + memory `project_v101_shipped.md`). MAGI
+  Checkpoint 2 dispatched directly via
+  `python skills/magi/scripts/run_magi.py design <payload>` for all
+  3 iters. Track Alpha + Track Beta dispatched as 2 parallel
+  general-purpose subagents per spec sec.5.4 zero-overlap surfaces
+  (precedent v0.4.0 + v0.5.0 + v1.0.0).
+- **Checkpoint 2 convergence trajectory** (G1 cap=3 HARD respected;
+  NO INV-0 override): iter 1 GO_WITH_CAVEATS (3-0) all CONDITIONAL,
+  3 CRITICAL + 10 WARNING + 6 INFO; iter 2 GO_WITH_CAVEATS (3-0)
+  2A+1C, 1 CRITICAL + 6 WARNING + 11 INFO; iter 3 STRONG GO (3-0)
+  unanimous APPROVE Mel 90% / Bal 88% / Cas 85%, 0 CRITICAL +
+  1 WARNING + 17 INFO. "Textbook" 3C → 1C → 0C reduction (Caspar).
+  Triage: 13+3+0 KEEP, 5+4+0 REJECT, 1+1+1 DEFER across 3 iters.
+- **Loop 2 convergence trajectory**: iter 1 GO_WITH_CAVEATS (3-0)
+  all CONDITIONAL with meta-summary findings (no enumeration); iter 2
+  GO_WITH_CAVEATS (3-0) 2A+1C with similar meta-summary pattern;
+  iter 3 GO_WITH_CAVEATS (3-0) 2A+1C with 1 CRITICAL (agreement_rate
+  naming) + 5 WARNING + 9 INFO. Verdict at-threshold per spec sec.6
+  Gate MAGI; CRITICAL is naming/doc concern (bajo-riesgo) so per
+  spec rules sale sin re-evaluar after fix. agreement_rate fix
+  landed mid-Loop-2 (commit `ed8c83c`). Script auto-abandoned per
+  INV-11 + non-TTY default at safety valve exhaustion; orchestrator
+  override per spec sec.6 verdict acceptance.
+- **Cross-check infrastructure failure on Windows**:
+  `[sbtdd magi-cross-check] failed: [WinError 206] The filename or
+  extension is too long` fired during all 3 Loop 2 iters. Cross-check
+  meta-reviewer did NOT execute; system fell back to MAGI findings
+  as-is (Feature G graceful fallback per G5). Activity D's empirical
+  cross-check artifact production is therefore **incomplete** for
+  v1.0.2 — no `.claude/magi-cross-check/iter*-*.json` artifacts
+  generated this cycle, so `cross_check_telemetry.py` (Item A) was
+  unit-tested only, not exercised on real-cycle data. Root cause is
+  Windows MAX_PATH limit hit by the cross-check temp directory layout
+  (`C:\Users\...\AppData\Local\Temp\sbtdd-magi-<8chars>\` + nested
+  files). Deferred to v1.0.3+: Windows long-filename mitigation in
+  cross-check infrastructure (likely shorter temp prefix or
+  `\\?\` long-path syntax).
+- **Activity D outcome**: cross-check infrastructure failure
+  (above) prevented full empirical proof of cross-check path. Loop 2
+  itself ran end-to-end (3 iters via `_loop2_with_cross_check` graceful
+  fallback), so the OUTER pre-merge gate IS exercised. The INNER
+  cross-check meta-reviewer integration remains unvalidated empirically
+  on Windows. Linux/POSIX runs may succeed — track in v1.0.3 dogfood.
+- **Activity E outcome**: P7 empirical proof-of-recovery via
+  `/sbtdd spec --resume-from-magi` was deferred. The same code path
+  (`_run_magi_checkpoint2`) was exercised 3 times during Checkpoint 2
+  dispatch (commits `187945e` + `a082f87` + `d92bbe8` + `1fca611` +
+  `0c46d2f`). The `--resume-from-magi`-specific structural validation
+  (A3-5 spec_snapshot parse, A3-6 plan task+checkbox regex) was
+  verified manually via spec_lint dry-run (Activity E pre-flight per
+  W5 fix). Direct flag invocation post-implementation is structurally
+  inappropriate (state file already at `done`; would re-run MAGI on
+  approved artifacts redundantly). Deferred true end-to-end exercise
+  to v1.0.3 cycle which can drive `--resume-from-magi` in anger.
+- **Subagent dispatch deviations** (both tracks reported as
+  DONE_WITH_CONCERNS-equivalent): Track Alpha added
+  `# type: ignore[import-not-found]` for dynamic sys.path imports
+  (matches established pattern in `test_auto_cmd_b6_feedback_loop.py`
+  + `test_receiving_review_dispatch.py`); changed iter artifact
+  fixture filenames `iterN.json` → `iterN-x.json` to match default
+  `cycle_pattern = "iter*-*.json"` glob; moved `import time` to top of
+  file (ruff E402). Track Beta updated 14 existing test fixtures with
+  R5 frontmatter (atomic with Task 13 Green; outside explicit modify
+  list but necessary for `make verify` clean per spec_lint gate);
+  added `def invoke_skill(**kwargs: Any) -> None` annotations to
+  synthetic fixtures for mypy strict.
+- **Subagents marked task headings with `[x]`** instead of step
+  checkboxes per the I5 process notes pattern. Orchestrator
+  post-track checkbox sweep flipped all 102 step `- [ ]` to `- [x]`
+  in `planning/claude-plan-tdd.md` (commit `4e82edf`). Per the v1.0.2
+  I5 entry intent, the convention is per-step checkbox flip; subagent
+  interpretation diverged. v1.0.3+ should clarify either via task
+  template or by routing close-task through `/sbtdd close-task`
+  command (which automatically updates state file + plan).
+- **Drift detector false-positive on prose mentions of `- [ ]`**:
+  initial pre-merge dispatch raised DriftError because plan-tdd.md
+  contained 2 prose mentions of `\`- [ ]\`` (descriptive backticks,
+  not checkboxes) that the drift detector's substring match counted
+  as open tasks. Sanitized prose to break literal substring (commit
+  amended `4e82edf`). v1.0.3+ candidate: tighten drift detector to
+  line-anchored match (skill `_plan_all_tasks_complete` uses
+  `"- [ ]" in plan_text[start:end]` substring-match in `drift.py`).
+- **Spec-snapshot regeneration**: `planning/spec-snapshot.json`
+  carried v1.0.1 escenarios (A0/A1/A2/A3 series) from the prior
+  cycle. Regenerated for v1.0.2 escenarios (26 total) and committed
+  separately during pre-merge debug. v1.0.3+ should auto-regenerate
+  during `--resume-from-magi` plan-approval flow.
+- **W8 Windows test flake**:
+  `test_concurrent_write_audit_writers_serialize_via_file_lock`
+  intermittently fails on Windows per accepted-risk documented in
+  v1.0.0 release notes. Re-run passes consistently. No regression
+  introduced by v1.0.2 work.
+
+### Deferred (rolled to v1.0.3)
+
+- **MAGI gate template alignment audit** (sole pillar v1.0.3 per
+  memory `project_v103_template_alignment_audit.md`).
+- **Cross-check Windows long-filename infrastructure fix** —
+  WinError 206 mitigation (shorter temp dir prefix or `\\?\` long
+  paths).
+- **Activity D Linux/POSIX dogfood completion** — exercise
+  cross-check meta-reviewer + Item A telemetry script aggregation on
+  real iter*-*.json artifacts.
+- **Activity E true `--resume-from-magi` end-to-end** — fresh cycle
+  drive, not post-implementation reinvocation.
+- **Drift detector tightening** — line-anchored `- [ ]` match in
+  `drift._plan_all_tasks_complete` to avoid prose false-positives.
+- **Subagent close-task convention** — clarify per-step checkbox
+  flip pattern OR route through `/sbtdd close-task` automation.
+- **Spec-snapshot auto-regeneration** during `--resume-from-magi`
+  plan-approval flow.
+
+### Deferred (rolled to v1.0.4)
+
+- Parallel task dispatcher (memory `project_v104_parallel_task_dispatcher.md`).
+- Real headless detection (env var `SBTDD_HEADLESS=1` + `os.isatty(0)`)
+  replacing v1.0.1's whitelist + `allow_interactive_skill` override
+  (memory `project_v104_subprocess_headless_detection.md`).
+- `_SUBPROCESS_INCOMPATIBLE_SKILLS` audit + criteria for set
+  membership (bundled with v1.0.4 LOCKED real headless detection).
+- 600s subprocess hang full LOUD-FAST fix.
+
+### Deferred (rolled to v1.0.5+)
+
+- `agreement_rate` field rename to `keep_rate` (Loop 2 iter 3
+  caspar API consideration; would require schema_version bump per
+  Feature I migration tool).
+- `spec_lint` R3 monotonic headers severity promote from warning to
+  error (Q3 brainstorming + Loop 2 iter 3 caspar suggestion; collect
+  empirical false-positive data first).
+- Per-module coverage raise to 85% baseline for `subprocess_utils.py`
+  (74%) and `superpowers_dispatch.py` (83%).
+- `pytest-cov` registered as proper dev dep (Loop 2 iter 3 caspar
+  INFO 14 — `tomli` install in Task 17 step 4 fallback verification
+  isn't recorded in dev-deps).
+
 ## [1.0.1] - 2026-05-03
 
 > **Status**: Shipped. Plugin self-hosting fix per 3 dogfood findings of

@@ -26,7 +26,10 @@ _VALID_SPEC_BASE_BODY = "# Feature spec\n\n## Objetivo\nsomething meaningful\n" 
     "valid content " * 50
 )
 _PLAN_ORG_BODY = (
-    "# Plan\n\n### Task 1: First task\n\n- [ ] write the test\n- [ ] implement\n- [ ] refactor\n"
+    "# Plan\n\n"
+    "> Generado 2026-05-06 a partir de x.md\n\n"
+    "### Task 1: First task\n\n"
+    "- [ ] write the test\n- [ ] implement\n- [ ] refactor\n"
 )
 
 
@@ -79,7 +82,9 @@ def bootstrapped_project(tmp_path, monkeypatch):
     # Minimal §4 stub so spec_snapshot.emit_snapshot finds a section
     # at plan-approval time (R10 caspar Checkpoint 2 iter 5).
     _SPEC_STUB = (
-        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "# behavior\n\n"
+        "> Generado 2026-05-06 a partir de x.md\n\n"
+        "## §4 Escenarios BDD\n\n"
         "**Escenario 1: stub**\n\n"
         "> **Given** g.\n> **When** w.\n> **Then** t.\n"
     )

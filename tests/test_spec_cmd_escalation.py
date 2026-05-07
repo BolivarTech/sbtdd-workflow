@@ -96,7 +96,9 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     ) -> object:
         # R10: minimal §4 so spec_snapshot.emit_snapshot finds a section.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
-            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "# behavior\n\n"
+            "> Generado 2026-05-06 a partir de x.md\n\n"
+            "## §4 Escenarios BDD\n\n"
             "**Escenario 1: stub**\n\n"
             "> **Given** g.\n> **When** w.\n> **Then** t.\n",
             encoding="utf-8",
@@ -107,7 +109,9 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n"
+            "### Task 1: First task\n- [ ] do it\n",
+            encoding="utf-8",
         )
         return None
 
@@ -115,7 +119,9 @@ def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         # v1.0.0 Loop 2 iter 2->3 R11: production routes through
         # invoke_writing_plans wrapper.
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
-            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+            "# Plan\n\n> Generado 2026-05-06 a partir de x.md\n\n"
+            "### Task 1: First task\n- [ ] do it\n",
+            encoding="utf-8",
         )
         return None
 

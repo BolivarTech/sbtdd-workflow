@@ -1,4 +1,4 @@
-.PHONY: test lint format typecheck verify
+.PHONY: test lint format typecheck coverage verify
 
 test:
 	python -m pytest tests/ -v
@@ -12,4 +12,7 @@ format:
 typecheck:
 	python -m mypy .
 
-verify: test lint format typecheck
+coverage:
+	python -m pytest --cov=skills/sbtdd/scripts --cov-report=term-missing tests/
+
+verify: lint format typecheck coverage

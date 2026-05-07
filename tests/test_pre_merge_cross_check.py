@@ -1222,3 +1222,26 @@ def test_phase4_pre_merge_audit_dir_invoked_from_loop2(tmp_path, monkeypatch):
     assert captured["audit_dir"] == sentinel_dir, (
         "audit_dir threaded into _loop2_cross_check must be the helper's return"
     )
+
+
+def test_b1_cross_check_prompt_embeds_diff_when_provided():
+    """B-1: prompt contains '## Cumulative diff under review' when diff != ''."""
+    from pre_merge_cmd import _build_cross_check_prompt
+
+    diff = "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+    findings = [{"severity": "WARNING", "agent": "melchior", "title": "t", "detail": "d"}]
+    prompt = _build_cross_check_prompt(diff, "GO_WITH_CAVEATS", findings)
+
+    assert "## Cumulative diff under review" in prompt
+    assert "old" in prompt and "new" in prompt
+
+
+def test_b2_cross_check_prompt_omits_diff_when_empty():
+    """B-2: prompt does NOT contain diff section when diff == ''."""
+    from pre_merge_cmd import _build_cross_check_prompt
+
+    findings = [{"severity": "WARNING", "agent": "melchior", "title": "t", "detail": "d"}]
+    prompt = _build_cross_check_prompt("", "GO_WITH_CAVEATS", findings)
+
+    assert "## Cumulative diff under review" not in prompt
+    assert "MAGI verdict: GO_WITH_CAVEATS" in prompt
