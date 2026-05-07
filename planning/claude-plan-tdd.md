@@ -776,7 +776,7 @@ git commit -m "test: A-6 performance regression guard for aggregate()"
 
 ---
 
-### Task 6: Item B — Diff threading regression tests (escenarios B-1, B-2)
+### Task 6: Item B — Diff threading regression tests (escenarios B-1, B-2) [x]
 
 **Files:**
 - Modify: `tests/test_pre_merge_cross_check.py`
