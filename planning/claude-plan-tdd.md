@@ -58,7 +58,7 @@ Covers escenarios A-1, A-2, A-3, A-4, A-5 from spec sec.4.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_magi_template_alignment.py`:
 
@@ -202,7 +202,7 @@ def test_audit_doc_status_values_canonical():
     )
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 python -m pytest tests/test_magi_template_alignment.py -v
@@ -212,7 +212,7 @@ Expected: 5 tests; `test_template_file_exists` PASS (template exists or skip), `
 
 The Red phase signal here is: `test_audit_doc_exists` FAIL (`AssertionError: Audit doc missing`).
 
-- [ ] **Step 3: Verify + commit Red phase**
+- [x] **Step 3: Verify + commit Red phase**
 
 ```bash
 python -m ruff check tests/test_magi_template_alignment.py
@@ -224,7 +224,7 @@ git commit -m "test: A-1/A-2/A-3/A-5 alignment test scaffolding"
 
 #### Green Phase
 
-- [ ] **Step 4: Generate audit doc per template's 6 sections**
+- [x] **Step 4: Generate audit doc per template's 6 sections**
 
 Read template (`D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md`) section-by-section. For each of the 6 normative sections, audit the corresponding plugin impl path:
 
@@ -275,7 +275,7 @@ For each GAP row:
 - `tests/test_magi_template_alignment.py` passes (canonical strings present in plugin).
 ```
 
-- [ ] **Step 5: Run tests to verify pass**
+- [x] **Step 5: Run tests to verify pass**
 
 ```bash
 python -m pytest tests/test_magi_template_alignment.py -v
@@ -285,7 +285,7 @@ Expected: 5 tests PASS (assuming canonical strings present in plugin; if missing
 
 If `test_canonical_strings_present_in_plugin` FAILS with missing strings: this is a real CRITICAL GAP. Document in audit doc. Either (a) add canonical string to plugin code as part of Track Alpha minimum-viable-audit deliverable, OR (b) document as CRITICAL backlog entry for Track Beta and SKIP the failing assertion temporarily (use `pytest.skip` with explicit GAP reference). Subagent decision per scope.
 
-- [ ] **Step 6: Verify + commit Green phase**
+- [x] **Step 6: Verify + commit Green phase**
 
 ```bash
 make verify
@@ -296,7 +296,7 @@ git commit -m "feat: template alignment audit doc + cross-artifact test (Item A)
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor (audit doc polish)**
+- [x] **Step 7: Refactor (audit doc polish)**
 
 Review audit doc for:
 - Each row's Status field is one of {MATCH, GAP, OBSOLETE}.
@@ -306,7 +306,7 @@ Review audit doc for:
 
 If polish needed, apply + verify.
 
-- [ ] **Step 8: Verify + commit Refactor phase (skip if no changes)**
+- [x] **Step 8: Verify + commit Refactor phase (skip if no changes)**
 
 ```bash
 make verify
@@ -317,13 +317,13 @@ make verify
 
 #### Task close
 
-- [ ] **Step 9: Close task via `/sbtdd close-task` automation (Q2 Option B)**
+- [x] **Step 9: Close task via `/sbtdd close-task` automation (Q2 Option B)**
 
 ```bash
 python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
 ```
 
-Expected: all `- [ ]` step checkboxes in Task 1 section flipped to `- [x]`. Atomic `chore: mark task 1 complete` commit landed (plan diff only). State file advances to `current_task_id="2"` (Item B), `current_phase="red"`.
+Expected: all `- [x]` step checkboxes in Task 1 section flipped to `- [x]`. Atomic `chore: mark task 1 complete` commit landed (plan diff only). State file advances to `current_task_id="2"` (Item B), `current_phase="red"`.
 
 ---
 
