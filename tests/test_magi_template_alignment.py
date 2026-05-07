@@ -62,6 +62,25 @@ def _canonical_strings_from_template() -> list[str]:
     ]
 
 
+# Loop 1 iter 1 CRITICAL #1 REJECTED with technical rationale per
+# /receiving-code-review skill discipline:
+# - Reviewer claimed `magi_threshold` and `auto_skill_models` should be
+#   added to canonical strings to "expose a real GAP" in audit doc Cost
+#   awareness row.
+# - Verified empirically: NEITHER string appears in
+#   `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md` (grep
+#   returns zero hits for both).
+# - The test's purpose per spec sec.2.1 is "assert plugin code contains
+#   template canonical strings". Adding strings that are NOT in the
+#   template would change the test's contract from alignment to
+#   audit-conjecture-validation — out of scope.
+# - The audit doc Cost-awareness row's MATCH (with caveat) status is
+#   correct: plugin's per-skill model fields (`magi_dispatch_model`,
+#   `implementer_model`, etc.) are functionally equivalent to template
+#   prose's umbrella concept; the naming asymmetry is documented in the
+#   audit doc Action column. No silent GAP.
+
+
 def _grep_repo(pattern: str, search_paths: list[Path]) -> list[tuple[Path, int]]:
     """Return list of ``(path, line_number)`` where ``pattern`` appears literally.
 
