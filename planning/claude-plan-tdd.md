@@ -1952,7 +1952,7 @@ git commit -m "feat: add pytest-cov dev dep + coverage config (placeholder thres
 
 ---
 
-### Task 18: Item G — Extend Makefile `verify` target (escenario G-1)
+### Task 18: Item G — Extend Makefile `verify` target (escenario G-1) [x]
 
 **Files:**
 - Modify: `Makefile`
