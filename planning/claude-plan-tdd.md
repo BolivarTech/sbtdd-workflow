@@ -1775,7 +1775,7 @@ git commit -m "test: F-1/F-2 meta-test core (synthetic fixtures + AST walk)"
 
 ---
 
-### Task 16: Item F — Excludes + edge cases + production audit (F-3, F-4)
+### Task 16: Item F — Excludes + edge cases + production audit (F-3, F-4) [x]
 
 **Files:**
 - Modify: `tests/test_invoke_skill_callsites_audit.py`
