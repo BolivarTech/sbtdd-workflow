@@ -212,3 +212,39 @@ def test_c_r5_2_missing_frontmatter_fails(tmp_path):
     assert len(r5) == 1
     assert r5[0].severity == "error"
     assert r5[0].line == 1
+
+
+def test_c_cli_1_clean_spec_exit_0(tmp_path):
+    """C-cli-1: clean spec ⇒ exit 0."""
+    from spec_lint import main
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n> Generado 2026-05-06 a partir de x.md\n\n## 1. Section\n",
+        encoding="utf-8",
+    )
+
+    rc = main([str(spec)])
+    assert rc == 0
+
+
+def test_c_cli_1_error_exit_1(tmp_path):
+    """CLI returns 1 when error finding present (R5 missing frontmatter)."""
+    from spec_lint import main
+
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# T\n\n## 1. No frontmatter\n",
+        encoding="utf-8",
+    )
+
+    rc = main([str(spec)])
+    assert rc == 1
+
+
+def test_c_cli_1_missing_file_exit_2(tmp_path):
+    """CLI returns 2 when path does not exist."""
+    from spec_lint import main
+
+    rc = main([str(tmp_path / "ghost.md")])
+    assert rc == 2
