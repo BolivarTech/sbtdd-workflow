@@ -1,6 +1,6 @@
 {
   "name": "sbtdd-workflow",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "SBTDD + Superpowers multi-agent workflow orchestrator. Operationalizes the Spec + Behavior + Test Driven Development methodology with mandatory pre-merge gates (code review + MAGI consensus).",
   "author": {
     "name": "BolivarTech",

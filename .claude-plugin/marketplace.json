@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "bolivartech-sbtdd",
   "description": "SBTDD-workflow plugin marketplace by BolivarTech",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "owner": {
     "name": "BolivarTech",
     "url": "https://github.com/BolivarTech"
@@ -11,7 +11,7 @@
     {
       "name": "sbtdd-workflow",
       "description": "SBTDD + Superpowers multi-agent workflow orchestrator",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "author": {
         "name": "Julian Bolivar",
         "url": "https://github.com/BolivarTech"
