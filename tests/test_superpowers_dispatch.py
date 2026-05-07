@@ -704,3 +704,81 @@ class TestInvokeSkillMembershipGate:
         monkeypatch.setattr("subprocess_utils.run_with_timeout", explosive_run)
         with pytest.raises(PreconditionError):
             invoke_skill("receiving-code-review", args=["any prompt"])
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Item B (Task 4) -- _build_recovery_message + _PER_SKILL_RECOVERY +
+# _GENERIC_RECOVERY.
+# Covers escenarios B-1 (recovery options included), B-2 (per-skill paths),
+# B-3 (no subprocess hang -- gate fires < 1s) from spec sec.4.2.
+# Post iter 1 triage simplified: no env-var formatting (gate is membership-
+# based, not heuristic-based).
+# ---------------------------------------------------------------------------
+
+
+class TestBuildRecoveryMessage:
+    """v1.0.4 Item B escenarios B-1, B-2, B-3 -- recovery message."""
+
+    def test_b1_message_includes_recovery_options(self):
+        """B-1: PreconditionError message includes recovery options."""
+        from superpowers_dispatch import _build_recovery_message
+
+        msg = _build_recovery_message("receiving-code-review")
+        assert "Skill `/receiving-code-review` cannot run via `claude -p` subprocess" in msg
+        assert "empirically incompatible" in msg
+        assert "Run `/receiving-code-review` manually" in msg
+        assert "python skills/magi/scripts/run_magi.py" in msg
+        assert "spec sec.6.4" in msg
+        assert "allow_interactive_skill=True" in msg
+
+    def test_b2_per_skill_recovery_brainstorming(self):
+        """B-2: brainstorming recovery references --resume-from-magi."""
+        from superpowers_dispatch import _build_recovery_message
+
+        msg = _build_recovery_message("brainstorming")
+        assert "Run `/brainstorming` manually in interactive Claude Code session" in msg
+        assert "/sbtdd spec --resume-from-magi" in msg
+
+    def test_b2_per_skill_recovery_writing_plans(self):
+        """B-2: writing-plans recovery references --resume-from-magi."""
+        from superpowers_dispatch import _build_recovery_message
+
+        msg = _build_recovery_message("writing-plans")
+        assert "Run `/writing-plans` manually in interactive Claude Code session" in msg
+        assert "/sbtdd spec --resume-from-magi" in msg
+
+    def test_b2_per_skill_recovery_receiving_code_review(self):
+        """B-2: receiving-code-review recovery references run_magi.py + sec.6.4."""
+        from superpowers_dispatch import _build_recovery_message
+
+        msg = _build_recovery_message("receiving-code-review")
+        assert "Run `/receiving-code-review` manually in interactive session" in msg
+        assert "skills/magi/scripts/run_magi.py code-review" in msg
+        assert "spec sec.6.4" in msg
+
+    def test_b2_unknown_skill_uses_generic_recovery(self):
+        """B-2: unknown skill name falls back to generic recovery message."""
+        from superpowers_dispatch import _GENERIC_RECOVERY, _build_recovery_message
+
+        msg = _build_recovery_message("never-shipped-skill")
+        for line in _GENERIC_RECOVERY.splitlines():
+            stripped = line.strip()
+            if stripped:
+                assert stripped in msg, f"Generic recovery line missing: {stripped!r}"
+
+    def test_b3_no_subprocess_when_blocked_under_one_second(self, monkeypatch):
+        """B-3: PreconditionError raised within 1 second (NOT 600s hang)."""
+        import time
+
+        from errors import PreconditionError
+        from superpowers_dispatch import invoke_skill
+
+        def explosive_run(*a, **kw):  # pragma: no cover -- guarded by raise
+            raise AssertionError("subprocess spawned despite v1.0.4 Item A gate")
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", explosive_run)
+        start = time.monotonic()
+        with pytest.raises(PreconditionError):
+            invoke_skill("receiving-code-review", args=["any prompt"])
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.0, f"Expected <1s; took {elapsed:.2f}s"
