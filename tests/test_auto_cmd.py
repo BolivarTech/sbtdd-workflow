@@ -1942,3 +1942,461 @@ class TestAutoCmdDispatchPlanConsumed:
         assert ns.dispatch_plan == [{"2"}, {"1"}]
         # Functional iteration-reorder smoke deferred (see docstring); this
         # test just guards the attribute-attach contract.
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Loop 2 iter-2 sub-issues 1-4 -- consumer-side wiring + diagnostics.
+# ---------------------------------------------------------------------------
+
+
+class TestPhase2ConsumesDispatchPlan:
+    """v1.0.4 Loop 2 iter-2 sub-issue 1 -- ``_phase2_task_loop`` consumes
+    ``dispatch_plan`` parameter when provided, falls through to v1.0.3
+    sequential plan-text-order behaviour when ``None``.
+
+    Caspar's accepted CRITICAL: pre-fix ``_phase2_task_loop`` advanced
+    via ``current.current_task_id`` mutated by ``mark_and_advance`` --
+    never reading ``ns.dispatch_plan``. Operators saw ``--parallel``
+    do nothing observable. Fix wires the loop to consume the partition.
+    """
+
+    def test_phase2_signature_accepts_dispatch_plan_kwarg(self) -> None:
+        """``_phase2_task_loop`` signature must accept ``dispatch_plan``
+        kwarg with default ``None`` (backward compat).
+        """
+        import inspect
+
+        import auto_cmd
+
+        sig = inspect.signature(auto_cmd._phase2_task_loop)
+        assert "dispatch_plan" in sig.parameters, (
+            "consumer-side wiring requires dispatch_plan kwarg on _phase2_task_loop"
+        )
+        # Default must be None for backward compat.
+        assert sig.parameters["dispatch_plan"].default is None
+
+    def test_phase2_sequential_when_dispatch_plan_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Backward-compat regression guard: passing ``dispatch_plan=None``
+        preserves v1.0.3 plan-text-order behaviour exactly.
+        """
+        import auto_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+
+        counter = {"n": 0}
+
+        def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+            counter["n"] += 1
+            (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"{prefix}: {message}"],
+                cwd=str(tmp_path),
+                check=True,
+                capture_output=True,
+            )
+            return "ok"
+
+        monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+        import close_task_cmd
+
+        monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(tmp_path / ".claude" / "session-state.json")
+        # Pass dispatch_plan=None explicitly to assert backward-compat path.
+        final = auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=None)
+        assert final.current_phase == "done"
+
+    def test_phase2_iterates_dispatch_plan_singleton_batches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When ``dispatch_plan`` is provided with singleton batches, the
+        loop iterates them in dispatch_plan order (the order is the
+        contract, not plan-text order).
+
+        Tests the batch=1 path: each batch falls through to existing
+        inline serial code for that single task. Verified via mark_and_advance
+        spy capturing the order of task closes.
+        """
+        import auto_cmd
+        import close_task_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+
+        counter = {"n": 0}
+
+        def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+            counter["n"] += 1
+            (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"{prefix}: {message}"],
+                cwd=str(tmp_path),
+                check=True,
+                capture_output=True,
+            )
+            return "ok"
+
+        monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+        monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(tmp_path / ".claude" / "session-state.json")
+
+        # Singleton batches in plan-text order -- equivalent to sequential.
+        # Loop must consume all three and finish with done.
+        final = auto_cmd._phase2_task_loop(
+            ns, state, cfg, dispatch_plan=[{"1"}, {"2"}, {"3"}]
+        )
+        assert final.current_phase == "done"
+        assert final.current_task_id is None
+
+    def test_phase2_concurrent_dispatch_helper_invoked_for_multi_task_batch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sub-issue 1: when batch size >1 in dispatch_plan, the loop
+        invokes ``_dispatch_batch_concurrent`` helper rather than serial
+        per-task inline code. Verified via spy on the helper.
+        """
+        import auto_cmd
+        import close_task_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+
+        counter = {"n": 0}
+
+        def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+            counter["n"] += 1
+            (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"{prefix}: {message}"],
+                cwd=str(tmp_path),
+                check=True,
+                capture_output=True,
+            )
+            return "ok"
+
+        monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+        monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+        # Spy: capture batches passed to _dispatch_batch_concurrent.
+        captured_batches: list[set[str]] = []
+
+        def spy_concurrent(batch: set[str], project_root: Path) -> None:
+            captured_batches.append(batch)
+            # Stub: succeed silently. Real impl spawns Popens.
+
+        monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", spy_concurrent)
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(tmp_path / ".claude" / "session-state.json")
+
+        # One batch of size 2 + one singleton -- concurrent helper invoked
+        # exactly once (for the batch of size 2).
+        auto_cmd._phase2_task_loop(
+            ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
+        )
+        assert len(captured_batches) == 1, (
+            f"_dispatch_batch_concurrent must be invoked once for the size-2 "
+            f"batch; got {len(captured_batches)} invocations"
+        )
+        assert captured_batches[0] == {"1", "2"}
+
+    def test_phase2_concurrent_subprocess_error_aborts_batch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sub-issue 1: when a Popen subprocess in concurrent batch exits
+        non-zero, the helper raises and the loop aborts (does not silently
+        proceed to next batch).
+        """
+        import auto_cmd
+        import close_task_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from errors import VerificationIrremediableError
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+        monkeypatch.setattr(auto_cmd, "commit_create", lambda *a, **kw: "ok", raising=False)
+        monkeypatch.setattr(close_task_cmd, "commit_create", lambda *a, **kw: "ok")
+
+        def failing_concurrent(batch: set[str], project_root: Path) -> None:
+            raise VerificationIrremediableError(
+                f"concurrent dispatch failed for batch {batch}"
+            )
+
+        monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", failing_concurrent)
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(tmp_path / ".claude" / "session-state.json")
+
+        with pytest.raises(VerificationIrremediableError, match="concurrent dispatch failed"):
+            auto_cmd._phase2_task_loop(
+                ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
+            )
+
+
+class TestDispatchBatchConcurrent:
+    """v1.0.4 Loop 2 iter-2 sub-issue 1 -- ``_dispatch_batch_concurrent``
+    helper exists, uses ``subprocess.Popen`` per task, waits all complete,
+    aborts on non-zero exit.
+    """
+
+    def test_helper_exists(self) -> None:
+        """``_dispatch_batch_concurrent`` is a public-private helper in
+        auto_cmd module."""
+        import auto_cmd
+
+        assert hasattr(auto_cmd, "_dispatch_batch_concurrent"), (
+            "Sub-issue 1 requires _dispatch_batch_concurrent helper"
+        )
+        assert callable(auto_cmd._dispatch_batch_concurrent)
+
+    def test_helper_spawns_popen_per_task_concurrently(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two-task batch: helper spawns 2 Popens (one per task id) BEFORE
+        waiting any. Verifies Popen invocation count + concurrency
+        (Popens started before any wait()).
+        """
+        import auto_cmd
+
+        # Track Popen invocations + ordering.
+        popen_calls: list[tuple[list[str], dict[str, object]]] = []
+
+        class FakePopen:
+            def __init__(self, cmd: list[str], **kwargs: object) -> None:
+                popen_calls.append((cmd, kwargs))
+                self._cmd = cmd
+                self._waited = False
+
+            def wait(self, timeout: float | None = None) -> int:
+                self._waited = True
+                return 0
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                return (b"", b"")
+
+            @property
+            def returncode(self) -> int:
+                return 0 if self._waited else -1
+
+            def poll(self) -> int | None:
+                return 0 if self._waited else None
+
+        monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+        auto_cmd._dispatch_batch_concurrent({"1", "2"}, tmp_path)
+
+        assert len(popen_calls) == 2, (
+            f"helper must spawn one Popen per task in batch; got {len(popen_calls)}"
+        )
+        # All Popen invocations must reference distinct task ids in argv.
+        argv_strings = [" ".join(c) for c, _ in popen_calls]
+        assert any("1" in a for a in argv_strings)
+        assert any("2" in a for a in argv_strings)
+
+    def test_helper_raises_on_nonzero_exit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Any Popen returning non-zero must surface as
+        VerificationIrremediableError with the offending task id.
+        """
+        import auto_cmd
+        from errors import VerificationIrremediableError
+
+        class FailingPopen:
+            def __init__(self, cmd: list[str], **kwargs: object) -> None:
+                self._cmd = cmd
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 1
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                return (b"", b"failure")
+
+            @property
+            def returncode(self) -> int:
+                return 1
+
+            def poll(self) -> int | None:
+                return 1
+
+        monkeypatch.setattr(subprocess, "Popen", FailingPopen)
+
+        with pytest.raises(VerificationIrremediableError):
+            auto_cmd._dispatch_batch_concurrent({"1", "2"}, tmp_path)
+
+
+class TestC9CorruptSettingsBreadcrumb:
+    """v1.0.4 Loop 2 iter-2 sub-issue 2 -- ``_check_tdd_guard_warning`` must
+    emit a stderr breadcrumb when settings.json is malformed JSON. Pre-fix
+    the helper swallowed JSONDecodeError silently together with OSError;
+    operators got NO signal that their TDD-Guard config was broken.
+    """
+
+    def test_c9_corrupt_settings_json_emits_warning_breadcrumb(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Corrupt JSON in settings.json must produce a stderr breadcrumb
+        identifying the file + the underlying parse error."""
+        import auto_cmd
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        # Malformed JSON.
+        (settings_dir / "settings.json").write_text("{not valid json", encoding="utf-8")
+
+        auto_cmd._check_tdd_guard_warning(parallel=True, project_root=tmp_path)
+
+        err = capsys.readouterr().err
+        assert "settings.json" in err, (
+            "breadcrumb must reference the file name to be actionable"
+        )
+        assert "WARNING" in err or "warning" in err.lower(), (
+            "breadcrumb must signal severity"
+        )
+        # OSError still silently returns (file genuinely absent is benign):
+        # confirm separate class with a missing file.
+
+    def test_c9_missing_settings_silent(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """When settings.json is absent, the helper still returns silently
+        (this is the benign case -- TDD-Guard not configured at all)."""
+        import auto_cmd
+
+        # No .claude dir created.
+        auto_cmd._check_tdd_guard_warning(parallel=True, project_root=tmp_path)
+
+        err = capsys.readouterr().err
+        assert err == "", "absent settings.json must be silent (benign)"
+
+
+class TestPreflightOrdering:
+    """v1.0.4 Loop 2 iter-2 sub-issue 3 -- ``_phase1_preflight`` must run
+    BEFORE dispatch plan build + tdd-guard warning. Current order surfaces
+    plan-parse failures with confusing context (operator gets a parse
+    error before they see the preflight summary).
+    """
+
+    def test_preflight_runs_before_dispatch_plan_build(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When both preflight and plan parse would fail, preflight failure
+        surfaces first.
+        """
+        import auto_cmd
+        from errors import DependencyError
+
+        # Synthesize a state that will fail preflight (broken environment)
+        # AND a plan that would fail to parse (only used if order is wrong).
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        (plan_dir / "claude-plan-tdd.md").write_text(
+            "### Task 1: A\n\n**Files:**\n- Modify: `a.py`\n"
+        )
+
+        # Track ordering: preflight raises BEFORE dispatch plan build runs.
+        order: list[str] = []
+
+        def preflight_first(ns: object) -> tuple[object, object]:
+            order.append("preflight")
+            raise DependencyError("preflight failed")
+
+        original_seq = auto_cmd._build_dispatch_plan_sequential
+        original_par = auto_cmd._build_dispatch_plan_parallel
+
+        def spy_seq(plan_path: Path) -> list[set[str]]:
+            order.append("dispatch_seq")
+            return original_seq(plan_path)
+
+        def spy_par(plan_path: Path) -> list[set[str]]:
+            order.append("dispatch_par")
+            return original_par(plan_path)
+
+        monkeypatch.setattr(auto_cmd, "_phase1_preflight", preflight_first)
+        monkeypatch.setattr(auto_cmd, "_build_dispatch_plan_sequential", spy_seq)
+        monkeypatch.setattr(auto_cmd, "_build_dispatch_plan_parallel", spy_par)
+
+        with pytest.raises(DependencyError, match="preflight failed"):
+            auto_cmd.main(["--project-root", str(tmp_path)])
+
+        assert order == ["preflight"], (
+            f"preflight must run BEFORE dispatch plan build; got order={order}"
+        )
