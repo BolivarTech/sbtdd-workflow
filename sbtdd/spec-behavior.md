@@ -1,845 +1,792 @@
-# BDD overlay — sbtdd-workflow v1.0.2
+# BDD overlay — sbtdd-workflow v1.0.3
 
-> Generado 2026-05-06 a partir de `sbtdd/spec-behavior-base.md` v1.0.2.
-> Hand-crafted en sesion interactiva (sesion Claude Code activa, NO via
-> `claude -p /brainstorming` subprocess) por consistencia con
-> precedente v1.0.1 — el A2 whitelist shipped en v1.0.1 raisearia
-> `PreconditionError` automatically si se intentase, pero la
-> hand-craft pattern es metodologia validada y robusta.
+> Generado 2026-05-06 a partir de `sbtdd/spec-behavior-base.md` v1.0.3.
+> Hand-crafted en sesion interactiva (sesion Claude Code activa,
+> brainstorming via Skill tool in-session, NO via `claude -p`
+> subprocess) por consistencia con v1.0.1 + v1.0.2 precedent
+> (Finding A subprocess pattern preserved hasta v1.0.4 real headless
+> detection).
 >
-> v1.0.2 ships los items LOCKED rolled forward del ciclo v1.0.1
-> original (pre-pivot) + items defensive secondary E/F/G del
-> CHANGELOG `[1.0.1]` Deferred section. Brainstorming refinement
-> 2026-05-06 reclasifica D + E como methodology activities (no plan
-> task TDD-cycle); plan tasks bona-fide = A + B + C + F + G (5 items).
+> v1.0.3 ships los items LOCKED del original sole-pillar (template
+> alignment audit per memory `project_v103_template_alignment_audit.md`)
+> mas v1.0.2 carry-forward fixes (cross-check Windows long-filename,
+> drift detector tightening, spec-snapshot autoregen, subagent
+> close-task convention) mas methodology activities pendientes
+> (Activity D Linux/POSIX dogfood + Activity E true `--resume-from-magi`
+> end-to-end como smoke test post-Track-close per hybrid methodology).
 >
-> Source of truth autoritativo para v0.1+v0.2+v0.3+v0.4+v0.5+v1.0+v1.0.1
+> Source of truth autoritativo para v0.1+v0.2+v0.3+v0.4+v0.5+v1.0+v1.0.1+v1.0.2
 > frozen se mantiene en `sbtdd/sbtdd-workflow-plugin-spec-base.md`.
 >
 > INV-27 compliant: cero matches uppercase placeholder word-boundary
 > verificable con `spec_cmd._INV27_RE` regex (los tres tokens
 > uppercase enforced en spec-base + extension a este artifact via
-> Item C R4).
+> Item C R4 v1.0.2 ship).
 
 ---
 
 ## 1. Resumen ejecutivo
 
-**Objetivo v1.0.2**: completar los items LOCKED del ciclo v1.0.1
-original (rolled forward post-pivot) + items defensive de v1.0.1
-Loop 2 iter 1-2 disclosure, y ejercer el plugin contra el propio
-repositorio del plugin via `/sbtdd pre-merge` end-to-end por
-primera vez.
+**Objetivo v1.0.3 (revised iter 2 — scope-trimmed per pre-staged
+iter-2 CRITICAL trigger)**: completa la auditoria LOCKED original
+(MAGI gate template alignment vs `magi-gate-template.md`) + arregla
+el cross-check Windows infrastructure failure surfaced en v1.0.2
+own-cycle dogfood. Items C (drift line-anchored), D (spec-snapshot
+autoregen), E (close-task convention codification) **deferred to
+v1.0.4** per spec sec.6.1 iter-2 CRITICAL trigger pre-stage:
+Checkpoint 2 iter 2 still surfaced 1 CRITICAL (Task 2 test fidelity
++ refined Item B root-cause analysis), forcing immediate scope-trim
+rather than burning iter 3 on a multi-pillar bundle.
 
-Tres clases de work units:
+**Refined Item B root-cause (iter 2)**: WinError 206 fires because
+`superpowers_dispatch._build_skill_cmd` packs the cross-check prompt
+(including diff truncated to 200KB) into a single `-p <prompt>`
+argv argument. On Windows, total cmdline length triggers
+ERROR_FILENAME_EXCEEDS_RANGE (WinError 206). Fix: pass large prompts
+via `@<filepath>` reference in argv (small) with content written to
+project-relative temp file (`.claude/magi-cross-check/.tmp/prompt-<run-id>.md`).
+Combined with project-relative temp dir per R2 ladder step 3,
+addresses both possible failure modes (argv length AND MAX_PATH).
 
-- **Plan tasks bona-fide (5 items)**: A, B, C, F, G — TDD-cycle
-  tasks con archivos production + tests adicionales.
-- **Methodology activities (2 items)**: D (own-cycle dogfood), E
-  (P7 recovery empirical) — orchestrator-driven, sin plan task.
+Tres clases de work units (scope-trimmed iter 2):
+
+- **Plan tasks bona-fide (2 items)**: A, B — TDD-cycle tasks. Items
+  C+D+E **deferred to v1.0.4 per iter-2 CRITICAL trigger** (spec
+  sec.6.1 pre-stage; orig brainstorming Q1 partition collapses to
+  Track Alpha = A only / Track Beta = B only).
+- **Methodology activities (2 items)**: D' (Linux/POSIX dogfood
+  completion post Item B fix), E' (true `--resume-from-magi`
+  end-to-end smoke test post Track-close per hybrid methodology).
 - **Process notes (CHANGELOG)**: documentation de findings empiricos
-  de D + E.
+  de D' + E' + iter-2 trigger ship rationale.
+
+**Deferred to v1.0.4** (sections 2.3, 2.4, 2.5 below preserved for
+v1.0.4 cycle reference; Items C, D, E descriptions remain valid as
+backlog entries):
+- Item C: drift detector line-anchored regex (false-positive on
+  inline backtick prose mentions of `- [ ]`).
+- Item D: spec-snapshot auto-regeneration in
+  `_run_magi_checkpoint2` post-MAGI-pass branch.
+- Item E: close-task convention codification (Q2 Option B —
+  `/sbtdd close-task` automation enforcement via
+  `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template`).
 
 Decisiones de brainstorming 2026-05-06:
 
-- **Q1 — Subagent partition**: 2-track parallel.
-  - Track Alpha (subagent #1, sequential A → B): cross-check
-    completion + telemetry. ~6-9h wall-time.
-  - Track Beta (subagent #2, sequential C → F → G): spec_lint +
-    meta-test + coverage. ~16-25h wall-time.
-  - Mid-cycle methodology (orchestrator, no subagent): D + E.
-- **Q2 — Defensive items E/F/G handling**: Plan tasks =
-  A + B + C + F + G; D + E como methodology Process notes (no plan
-  task). Reduces visible scope a MAGI sin perder capability.
-- **Q3 — `spec_lint` R3 severity**: warning inicial; promote a
-  error en v1.0.5+ despues de empirical data sobre false-positive
-  rate.
-- **Q4 — Coverage threshold**: measure baseline first, set
-  `--cov-fail-under=floor(baseline) - 2%`. Final value documented
-  en task close de Item G + CHANGELOG `[1.0.2]`.
+- **Q1 — Subagent partition**: Option 2 — 2-track parallel.
+  - Track Alpha (subagent #1, single-purpose audit): Item A SOLO.
+    Output = audit doc + alignment test. NO production code.
+    ~1 dia wall-time.
+  - Track Beta (subagent #2, sequential B → C → D → E): all code
+    fixes + doc updates. ~3 dias wall-time.
+  - Cero file overlap verificado: Alpha solo escribe
+    `docs/audits/...` + `tests/test_magi_template_alignment.py`;
+    Beta touches `pre_merge_cmd.py`, `drift.py`, `spec_cmd.py`,
+    `spec_snapshot.py`, `state_file.py`, doc files.
+- **Q2 — Item E close-task convention**: Option B — codify via
+  `/sbtdd close-task` automation. v1.0.2 empirically proved
+  documentation alone (I5 process notes) doesn't enforce convention
+  (subagents diverged). `/sbtdd close-task` already shipped v0.1+;
+  forces structural consistency (per-step checkbox flip + atomic
+  chore commit + state file advance + INV-31 spec-reviewer integrated).
+  Implementation: doc/prompt updates only — NO core plugin code change.
+- **Hybrid methodology** (user decision pre-brainstorming): Activity
+  E' (true `--resume-from-magi` end-to-end) runs as **smoke test
+  post Track-close**, NOT as gating Checkpoint 2 dispatch path.
+  Rationale: lower risk vs Opcion A (manual run_magi.py for
+  Checkpoint 2 dispatch as v1.0.2 precedent). Allows empirical
+  observation of `_commit_approved_artifacts` conflict (R10) +
+  `--resume-from-magi` autoregen interaction (R4) without blocking
+  ship-readiness.
 
-**Criterio de exito v1.0.2 (refinado vs spec-base)**:
+**Criterio de exito v1.0.3 (refinado vs spec-base)**:
 
-- Tests baseline 1059 + 1 skipped preservados + ~30-35 nuevos =
-  ~1089-1094 final (revisado vs spec-base 30-50, refleja D+E como
-  methodology).
-- `make verify` runtime <= 160s (NF-A); soft-target <= 145s.
-- Coverage threshold = `floor(baseline) - 2%` (medido en task close
-  de Item G).
-- Empirical validation del path completo cross-check + own-cycle
-  dogfood documentado en CHANGELOG `[1.0.2]` Process notes (Item D).
-- Empirical proof-of-recovery del flag `--resume-from-magi`
-  documentado en CHANGELOG `[1.0.2]` Process notes (Item E).
-- v1.0.1 LOCKED commitments del CHANGELOG `[1.0.1]` Deferred
-  section enteramente cerrados excepto rolled-forward a v1.0.4.
-- G1 binding respetado: cap=3 HARD para Checkpoint 2; sin INV-0.
-- G2 binding respetado: si Loop 2 iter 3 no converge clean,
-  scope-trim default (defer F+G a v1.0.3).
+- Tests baseline 1093 + 1 skipped preservados + ~13-22 nuevos =
+  ~1106-1115 final (revisado vs spec-base 20-35; refleja Item E
+  doc-only sin tests).
+- `make verify` runtime <= 160s (NF-A); soft-target <= 150s.
+- Coverage threshold mantenido en 88% (per Q4 v1.0.2 baseline);
+  no regression below.
+- **Activity D' Linux/POSIX dogfood validated** end-to-end con
+  `magi_cross_check: true` + cross-check meta-reviewer artifacts
+  produced (post Item B fix).
+- **Activity E' true `--resume-from-magi` smoke-tested** post
+  Track-close; observable gaps documented.
+- v1.0.2 LOCKED carry-forward del CHANGELOG `[1.0.2]` Deferred
+  (v1.0.3) section enteramente cerrados.
+- G1 binding respetado: cap=3 HARD; sin INV-0. 3-cycle no-override
+  streak preserved (v1.0.0 + v1.0.1 + v1.0.2).
+- G2 binding respetado: scope-trim default si Loop 2 iter 3 no
+  converge — defer Pillar C (Items C+D+E) + methodology a v1.0.4.
+  Pillar A + Pillar B son hard-LOCKED.
 
 ---
 
 ## 2. Items LOCKED
 
-### 2.1 Item A — Cross-check telemetry aggregation script
+### 2.1 Item A — MAGI gate template alignment audit (Pillar A PRIMARY, Track Alpha)
 
-**Track**: Alpha (subagent #1).
-
-**Archivos**:
-- `scripts/cross_check_telemetry.py` (new, standalone tooling).
-- `tests/test_cross_check_telemetry.py` (new).
-
-**Interface**:
-
-```python
-def aggregate(
-    root: Path,
-    cycle_pattern: str = "iter*-*.json",
-) -> TelemetryReport:
-    """Aggregate cross-check artifacts under root.
-
-    Args:
-        root: Directory containing iter{N}-{ts}.json artifacts.
-        cycle_pattern: Glob pattern (default matches v1.0.0
-            Feature G output naming).
-
-    Returns:
-        TelemetryReport with totals, per-iter breakdown, agreement
-        rate, truncation rate.
-
-    Raises:
-        FileNotFoundError: root does not exist (guidance-rich
-            message). Malformed individual JSON files are skipped
-            with stderr breadcrumb (no abort).
-    """
-```
-
-**CLI**:
-
-```
-python scripts/cross_check_telemetry.py [--root <path>] \
-    [--cycle <pattern>] [--format markdown|json]
-```
-
-Defaults: `--root .claude/magi-cross-check`,
-`--cycle "iter*-*.json"`, `--format markdown`.
-
-**Output markdown** (human-readable tabla):
-- Total iters analizados.
-- Distribucion KEEP / DOWNGRADE / REJECT por iter.
-- Per-agent false-positive rate (REJECT count / total findings).
-- Per-severity distribution (CRITICAL / WARNING / INFO).
-- Agreement rate (% findings donde meta-reviewer matchea MAGI
-  severity).
-- Diff truncation rate (% iters donde `diff_truncated=true`).
-
-**Output JSON** (machine-readable):
-
-```json
-{
-  "total_iters": 5,
-  "decision_distribution": {"KEEP": 12, "DOWNGRADE": 3, "REJECT": 2},
-  "per_iter": [
-    {"iter": 1, "verdict": "GO_WITH_CAVEATS",
-     "decisions": {"KEEP": 8, "DOWNGRADE": 2, "REJECT": 1},
-     "agents": {"melchior": 4, "balthasar": 3, "caspar": 4},
-     "severity": {"CRITICAL": 0, "WARNING": 7, "INFO": 4},
-     "diff_truncated": false, "diff_original_bytes": 12345}
-  ],
-  "agreement_rate": 0.71,
-  "truncation_rate": 0.0
-}
-```
-
-**Error handling**:
-- `FileNotFoundError` cuando dir no existe; mensaje guidance-rich
-  ("expected `.claude/magi-cross-check/` from v1.0.0 Feature G
-  artifacts").
-- Malformed JSON files skipped con stderr breadcrumb identificando
-  file path + parse error; no abort.
-- Empty dir tolerated (output: "No iterations found").
-
-### 2.2 Item B — Cross-check diff threading regression test
-
-**Track**: Alpha (subagent #1, after Item A).
-
-**Estado actual** (verificado 2026-05-06; clarificado iter 1 W8 fix):
-
-- **Wiring shipped en v1.0.0** (mid-cycle iter 2→3 fix):
-  `_compute_loop2_diff_with_meta` existe en `pre_merge_cmd.py:1111`;
-  `_build_cross_check_prompt(diff, verdict, findings)` accepts diff
-  parameter en `pre_merge_cmd.py:1192` y embeds en
-  `## Cumulative diff under review (truncated to 200KB)` section
-  cuando `diff != ""`; threading via `_loop2_with_cross_check` en
-  `pre_merge_cmd.py:1484`.
-- **NOT shipped**: empirical observation of cumulative diff size,
-  truncation rate, meta-reviewer file:line referencing rate. v1.0.0
-  could not exercise this path because `/sbtdd pre-merge` was broken
-  by other defects.
-- **v1.0.2 closes the loop**: regression-guard tests (Task 6) verify
-  the wiring; empirical observation deferred to Activity D dogfood
-  (sec.2.4) and reported in CHANGELOG `[1.0.2]` Process notes.
-
-**Entrega v1.0.2**:
-
-- Regression tests adicionales en
-  `tests/test_pre_merge_cross_check.py`:
-  - `test_cross_check_prompt_embeds_diff_when_provided`:
-    monkeypatch `_dispatch_requesting_code_review` para capturar
-    el prompt; asserta substring `## Cumulative diff under review`
-    presente cuando `diff != ""`.
-  - `test_cross_check_prompt_omits_diff_when_empty`: asserta el
-    substring AUSENTE cuando `diff == ""`.
-- Empirical validation: durante Item D dogfood, capturar el prompt
-  literal enviado y verificar diff section presente. Document
-  observado size en CHANGELOG `[1.0.2]` Process notes.
-
-### 2.3 Item C — H5-2 `spec_lint` enforcement at Checkpoint 2
-
-**Track**: Beta (subagent #2, primary task).
+**Track**: Alpha (subagent #1, single-purpose audit-only).
 
 **Archivos**:
-- `skills/sbtdd/scripts/spec_lint.py` (new module).
-- `skills/sbtdd/scripts/spec_cmd.py` (extend `_run_magi_checkpoint2`).
-- `tests/test_spec_lint.py` (new).
-- `tests/test_spec_cmd.py` (extension para integration test).
+- Create: `docs/audits/v1.0.3-magi-gate-template-alignment.md` (audit
+  artifact, doc-only).
+- Create: `tests/test_magi_template_alignment.py` (alignment test,
+  cross-artifact pattern).
+- NO production code modifications by Track Alpha. GAP findings
+  produce backlog entries for Track Beta OR defer to v1.0.4.
 
-**Interface**:
+**Audit deliverable structure** — section-by-section table per
+template's 6 sections:
+
+```
+| Template Section          | Plugin Impl Path                    | Status              | Evidence                       | Action                |
+|---------------------------|-------------------------------------|---------------------|--------------------------------|------------------------|
+| Trigger criteria          | pre_merge_cmd._loop2 + auto_cmd     | MATCH/GAP/OBSOLETE  | file:line citation             | resolved/deferred     |
+| Pass threshold            | magi_dispatch.verdict_passes_gate   | ...                 | ...                            | ...                   |
+| Carry-forward format      | pre_merge_cmd._build_carry_forward  | ...                 | ...                            | ...                   |
+| Review summary artifact   | (likely missing)                    | likely GAP          | manual-only docs/reviews/      | auto-emit OR defer    |
+| Cost awareness            | config.auto_skill_models            | ...                 | ...                            | ...                   |
+| Per-project setup         | templates/CLAUDE.local.md.template  | ...                 | ...                            | ...                   |
+```
+
+**Alignment test** (`tests/test_magi_template_alignment.py`):
+
+Pattern follows `tests/test_changelog.py` HF1 cross-artifact alignment:
+- Read template content from
+  `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md` (or
+  copy fixture if portability concern).
+- Extract required canonical strings (verdicts table headers,
+  per-project setup checklist items, etc.) per template's normative
+  format.
+- Grep plugin's MAGI dispatch code (`pre_merge_cmd.py`,
+  `magi_dispatch.py`) + templates (`templates/CLAUDE.local.md.template`)
+  for those strings.
+- Assert presence of required strings (or absence if template removed
+  them).
+
+**GAP routing protocol** (revised iter 1 fix W3+W10+I5
+melchior+caspar+balthasar — Track Alpha truly audit-only):
+- For each row marked `GAP`: assess severity (CRITICAL = template
+  requires + plugin doesn't enforce; WARNING = plugin enforces stricter
+  than template; INFO = doc-only difference).
+- **ALL GAPs (CRITICAL + WARNING + INFO) → defer to v1.0.4 backlog by
+  default**. Track Alpha is purely audit-only; it does NOT interrupt
+  Track Beta with mid-cycle backlog entries. The audit doc Action
+  column captures GAP findings + recommended v1.0.4 fix; orchestrator
+  evaluates at finalization whether any GAP is severe enough to
+  warrant cycle-abort + scope-spike (rare; documented escape valve).
+- This preserves Q1 disjoint-surface contract: Track Alpha output =
+  audit doc + alignment test only; Track Beta scope is fixed at
+  cycle-start (B+C+D+E) and does NOT grow mid-cycle from Alpha
+  findings.
+- Template defects (template wrong, plugin right) → propose template
+  amendment in audit doc; physical update to template file
+  (`D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md`)
+  out-of-scope for this cycle (sister project).
+
+### 2.2 Item B — Cross-check Windows long-filename fix (Pillar B LOCKED, Track Beta)
+
+**Track**: Beta (subagent #2, first sequential task).
+
+**Archivos**:
+- Modify: `skills/sbtdd/scripts/pre_merge_cmd.py`
+  (`_loop2_with_cross_check` o downstream subprocess invocation —
+  exact location pending Beta subagent investigation).
+- Possibly modify: `skills/sbtdd/scripts/subprocess_utils.py` if
+  helper for long-path handling needed.
+- New tests in `tests/test_pre_merge_cross_check.py` (extend) for
+  WinError 206 reproduction + fix validation.
+
+**Empirical context (v1.0.2 ship)**:
+
+```
+[sbtdd magi-cross-check] failed (will fall back to MAGI findings as-is): [WinError 206] The filename or extension is too long
+```
+
+Fired during all 3 v1.0.2 Loop 2 iters. Cross-check meta-reviewer
+NEVER ran on Windows. Activity D' incomplete.
+
+**Mitigation strategy (revised iter 2 — actual root cause identified)**:
+
+Static read of `superpowers_dispatch._build_skill_cmd` (line 99)
+revealed: cross-check prompt is packed into a single `-p <prompt>`
+argv argument. For cross-check, this prompt includes the verdict +
+findings text + diff truncated to 200KB. On Windows, ERROR_FILENAME_EXCEEDS_RANGE
+(WinError 206) fires when total cmdline exceeds platform limits.
+
+**Defense-in-depth fix** (combines two mitigations addressing both
+possible root causes):
+
+1. **`@filepath` prompt reference** (primary fix, addresses argv
+   length): write the cross-check prompt content to a project-relative
+   temp file (`.claude/magi-cross-check/.tmp/prompt-<run-id>.md`) and
+   pass `@<filepath>` reference in argv. Argv stays short (<1KB);
+   prompt content unbounded. Per `_build_skill_cmd` docstring, claude
+   CLI supports `@file` references inside prompts — the sub-session
+   forwards them.
+2. **Project-relative temp dir** (secondary fix, addresses MAX_PATH):
+   the `<run-id>` is short UUID4 hex (8 chars), keeping path under
+   `.claude/magi-cross-check/.tmp/prompt-12345678.md` (<= 50 chars
+   from repo root) — well under MAX_PATH 260 limit. Side-steps
+   Windows MAX_PATH per R2 ladder step 3.
+
+Modification surfaces:
+- `pre_merge_cmd._dispatch_requesting_code_review` (line ~1243):
+  write prompt to temp file before invoking
+  `superpowers_dispatch.requesting_code_review`; pass file path as
+  argv `@<path>` reference instead of inline prompt content.
+- Cleanup: `finally`-block `Path(prompt_file).unlink(missing_ok=True)`
+  + `shutil.rmtree(temp_dir, ignore_errors=True)`.
+
+**Empirical validation**: Activity D' Linux/POSIX dogfood validates
+end-to-end. Project-relative path + @file reference eliminate
+Windows-specific test runtime dependency: any OS reproduces the
+fix's behavior via tests that capture argv content.
+
+### Items C, D, E — Deferred to v1.0.4 per iter-2 CRITICAL trigger
+
+The original v1.0.3 spec sec.2.3-2.5 (Items C drift detector, D spec-snapshot autoregen, E close-task convention codification) are **deferred to v1.0.4 per spec sec.6.1 iter-2 CRITICAL trigger pre-stage**. MAGI Checkpoint 2 iter 2 still surfaced 1 CRITICAL (Task 2 test fidelity + refined Item B root-cause); pre-staged decision (`Items C+D+E defer to v1.0.4 first`) executed.
+
+The Items C/D/E technical detail (problem statement, empirical context, implementation plan, escenarios) is preserved IN-PLACE below for v1.0.4 cycle reference. Track Alpha + Track Beta v1.0.3 implementation does NOT touch these items.
+
+### 2.3 Item C — Drift detector line-anchored match (DEFERRED to v1.0.4)
+
+**Track**: Beta (subagent #2, after Item B).
+
+**Archivos**:
+- Modify: `skills/sbtdd/scripts/drift.py` —
+  `_plan_all_tasks_complete` function.
+- Modify: `tests/test_drift.py` — append regression tests.
+
+**Empirical context (v1.0.2 ship)**:
+
+`drift._plan_all_tasks_complete` uses substring match
+`"- [ ]" in plan_text[start:end]` which detects inline backtick
+prose mentions of `\`- [ ]\`` literal as falsos pendientes. v1.0.2
+hit during pre-merge dispatch:
+
+```
+DriftError: drift detected: state=done, HEAD=chore:, plan=[ ]
+```
+
+Trigger: 2 inline `\`- [ ]\`` mentions in plan-tdd.md (lineas 8 +
+2238 documenting checkbox convention). Workaround was sanitize prose;
+permanent fix requires line-anchored regex.
+
+**Implementation**:
 
 ```python
-@dataclass(frozen=True)
-class LintFinding:
-    file: Path
-    line: int
-    rule: str        # "R1" | "R2" | "R3" | "R4" | "R5"
-    severity: str    # "error" | "warning" | "info"
-    message: str
+import re
 
-def lint_spec(path: Path) -> list[LintFinding]:
-    """Run mechanical lint checks against a spec file.
+_OPEN_CHECKBOX_RE = re.compile(r"^- \[ \]", re.MULTILINE)
 
-    Returns:
-        list of LintFinding (empty = clean). Error-severity findings
-        block Checkpoint 2; warning-severity emit stderr breadcrumb
-        but do not block.
-    """
+
+def _plan_all_tasks_complete(plan_text: str) -> str:
+    headers = list(_ANY_TASK_HEADER.finditer(plan_text))
+    if not headers:
+        return "[x]"
+    for i, match in enumerate(headers):
+        start = match.end()
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(plan_text)
+        section = plan_text[start:end]
+        if _OPEN_CHECKBOX_RE.search(section):
+            return "[ ]"
+    return "[x]"
 ```
 
-**5 reglas** (Q3 dictamina R3 severity = warning inicial):
+**Backward compat**: existing tests with real `- [ ]` checkboxes
+(line-start) continue to detect drift correctly. Inline backtick
+mentions no longer false-positive.
 
-| Rule | Check | Severity v1.0.2 |
-|------|-------|-----------------|
-| R1 | Cada bloque `**Escenario X: ...**` / `### Escenario X: ...` / `## Escenario X: ...` tiene Given / When / Then bullets no-vacios | error |
-| R2 | Cada Escenario tiene identifier unico (X-N format alphanumeric+dash) | error |
-| R3 | Section headers monotonous **top-level integer only** (matches `^##\s+\d+\.\s` strict; non-numeric `## Heading` y sub-numbered `## 9.5` correctamente skipean per W2/W7 iter 1 fix) | **warning** (Q3) |
-| R4 | Cero matches uppercase placeholder (los tres tokens word-boundary, reusa `spec_cmd._INV27_RE`) | error |
-| R5 | Frontmatter docstring con `Generado YYYY-MM-DD` line + reference a source artifact | error |
+### 2.4 Item D — Spec-snapshot auto-regeneration (DEFERRED to v1.0.4)
 
-**Integration en `spec_cmd._run_magi_checkpoint2`**:
+**Track**: Beta (subagent #2, after Item C).
+
+**Archivos**:
+- Modify: `skills/sbtdd/scripts/spec_cmd.py` —
+  `_run_magi_checkpoint2` post-MAGI-pass branch.
+- Modify: `skills/sbtdd/scripts/state_file.py` (if needed) for
+  `spec_snapshot_emitted_at` field handling.
+- Use existing: `skills/sbtdd/scripts/spec_snapshot.py`
+  (`emit_snapshot` + `persist_snapshot` already shipped v1.0.0
+  Feature H Group B option 2).
+- Modify: `tests/test_spec_cmd.py` — append autoregen tests.
+
+**Empirical context (v1.0.2 ship)**:
+
+`planning/spec-snapshot.json` carried v1.0.1 escenarios (A0/A1/A2/A3
+series) into v1.0.2 cycle. Required manual regeneration via direct
+Python invocation during pre-merge debug. Resulted in:
+
+```
+MAGIGateError: Spec scenarios changed since plan approval; re-approve plan via /writing-plans + Checkpoint 2.
+```
+
+**Implementation in `_run_magi_checkpoint2`**:
+
+After MAGI verdict converges to `>= GO_WITH_CAVEATS` full no-degraded
+(post-iter-loop branch, before `_create_state_file` +
+`_commit_approved_artifacts`):
 
 ```python
-def _run_magi_checkpoint2(...):
-    spec_path = root / "sbtdd" / "spec-behavior.md"
-    plan_path = root / "planning" / "claude-plan-tdd-org.md"
-
-    # NEW v1.0.2 Item C: lint pre-MAGI dispatch
-    for path in (spec_path, plan_path):
-        findings = spec_lint.lint_spec(path)
-        errors = [f for f in findings if f.severity == "error"]
-        warnings = [f for f in findings if f.severity == "warning"]
-        for w in warnings:
-            sys.stderr.write(
-                f"[sbtdd spec-lint] {w.file}:{w.line} "
-                f"({w.rule}) {w.message}\n"
-            )
-        if errors:
-            details = "\n".join(
-                f"  {e.file}:{e.line} ({e.rule}) {e.message}"
-                for e in errors
-            )
-            raise ValidationError(
-                f"spec_lint blocked Checkpoint 2 dispatch:\n{details}\n"
-                f"Fix violations and re-run /sbtdd spec."
-            )
-
-    # ... existing magi_dispatch.invoke_magi(...) iter loop
+# v1.0.3 Item D: spec-snapshot auto-regeneration
+import spec_snapshot
+snapshot = spec_snapshot.emit_snapshot(spec_path)
+spec_snapshot.persist_snapshot(snapshot, root / "planning" / "spec-snapshot.json")
+# state_file.spec_snapshot_emitted_at update happens via existing
+# _mark_plan_approved_with_snapshot pattern (R10 v1.0.0 fix).
 ```
 
-**Lint timing contract (C1 iter 1 fix)**: `spec_lint.lint_spec` runs
-**ONCE at the top of `_run_magi_checkpoint2`, BEFORE the MAGI iter
-loop begins**. If lint raises `ValidationError`, the cycle aborts
-without entering the iter loop — no MAGI iter budget is consumed.
-The safety valve cap=3 G1 binding remains intact for the next
-attempt after the operator fixes the lint violations and re-runs
-`/sbtdd spec`. This places the lint gate upstream of the safety
-valve, not inside it.
+**R4 risk mitigation** (revised iter 1 fix W7+I7 balthasar+caspar —
+defensive guard, not observable-only):
+- Idempotency assertion: autoregen test asserts that two consecutive
+  invocations over identical spec content produce byte-identical
+  snapshot file (escenario D-3 below codifies this).
+- Skip-on-resume guard option: if `--resume-from-magi` detected AND
+  spec-snapshot.json mtime is within 60s of spec-behavior.md mtime
+  (i.e., autoregen already happened recently), skip the autoregen
+  call to prevent redundant write. Defensive only — idempotency
+  means double-write is also safe, but skip avoids unnecessary I/O.
+- Activity E' validates the guard empirically (no surprise commit
+  conflicts).
 
-**CLI standalone**:
+**INV-37 invocation-site tripwire** (iter 1 fix W11 caspar):
+new test `test_d_inv37_unaffected_by_autoregen` asserts that
+`spec_cmd._run_spec_flow` mtime + size + sha256 composite-signature
+check still fires correctly when autoregen runs in the
+`_run_magi_checkpoint2` post-MAGI-pass branch. This codifies the
+spec sec.9.5 "INV-37 unaffected" claim as test enforcement, not
+just documentation.
 
-```
-python -m skills.sbtdd.scripts.spec_lint <path> \
-    [--severity error|warning|info] [--rule R1|R2|R3|R4|R5]
-```
+### 2.5 Item E — Close-task convention codification (DEFERRED to v1.0.4)
 
-Exit codes: 0 (clean), 1 (errors found), 2 (file missing or
-unreadable).
+**Track**: Beta (subagent #2, after Item D).
 
-### 2.4 Item D — Own-cycle cross-check dogfood (methodology)
+**Archivos** (doc-only, NO production code):
+- Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules — add
+  close-task automation requirement).
+- Modify: `templates/CLAUDE.local.md.template` (template guidance to
+  destination projects).
+- Document: convention in plan template generation (writing-plans
+  skill prompt extension).
+
+**Empirical context (v1.0.2 ship)**: subagents marked task headings
+(`### Task N: ... [x]`) instead of per-step checkboxes (`- [ ]` →
+`- [x]`). Drift detector + spec_lint expect per-step checkboxes per
+the convention documented in plan I5 Process notes; subagents
+diverged despite explicit documentation.
+
+**Q2 decision (brainstorming): Option B — codify via `/sbtdd close-task`
+automation**. The command already exists and does:
+1. Flip ALL `- [ ]` → `- [x]` in active task section atomically.
+2. Atomic `chore: mark task {id} complete` commit (plan diff only).
+3. Advance state file (next open task fresh red OR plan done).
+4. Bonus: dispatches spec-reviewer (INV-31 v0.2 default-on;
+   `--skip-spec-review` escape valve).
+
+**Implementation footprint (doc-only)**:
+- `skills/sbtdd/SKILL.md` orchestrator rules add explicit:
+  "Subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py
+  close-task` after Refactor phase verify-clean. Manual plan-file
+  edits for checkbox flips are NON-CONFORMING and trigger drift
+  detection."
+- `templates/CLAUDE.local.md.template` updated to include the
+  convention rule + reference to close-task command.
+- Smoke test in new file `tests/test_close_task_subagent_pattern.py`
+  asserts close-task invocation chain (existing tests cover the
+  command itself; smoke test covers the convention enforcement
+  point).
+
+**Cost (R9)**: ~1-2 min per task close (INV-31 spec-reviewer overhead,
+default-on). Track Beta has 4 tasks; total overhead ~4-8 min across
+cycle. Acceptable.
+
+### 2.6 Activity D' — Linux/POSIX dogfood completion (methodology)
 
 **Track**: Methodology mid-cycle (orchestrator, no subagent).
 
-**Archivos**: ninguno (config toggle + run de comandos).
+**Archivos**: ninguno (config + run de comandos).
 
-**Pasos del orchestrator durante pre-merge phase**:
+**Pasos del orchestrator post Track-Alpha + Track-Beta close,
+post-Item-B fix landed**:
 
-1. Set `magi_cross_check: true` en `.claude/plugin.local.md`.
-2. Run `/sbtdd pre-merge` end-to-end (Loop 1 + Loop 2 + cross-check).
-3. Capture artifacts `.claude/magi-cross-check/iter{N}-*.json`.
-4. Run `python scripts/cross_check_telemetry.py
-   --root .claude/magi-cross-check --format markdown` sobre los
-   artifacts producidos por el propio cycle.
-5. Document findings empiricos en CHANGELOG `[1.0.2]` Process notes:
-   - Cuantos iters Loop 2 (esperado: 1-2 para bundle 5 plan tasks).
+1. Verify `magi_cross_check: true` set in `.claude/plugin.local.md`
+   (already enabled since v1.0.0 Loop 2 iter 3 dogfood).
+2. Run `/sbtdd pre-merge` end-to-end:
+   ```bash
+   python skills/sbtdd/scripts/run_sbtdd.py pre-merge
+   ```
+3. Verify cross-check meta-reviewer ejecuta sin WinError 206 (Item B
+   fix validates here).
+4. Capture artifacts:
+   ```bash
+   ls .claude/magi-cross-check/iter*-*.json
+   ```
+5. Run telemetry script (Item A v1.0.2 ship) on real artifacts:
+   ```bash
+   python scripts/cross_check_telemetry.py --root .claude/magi-cross-check --format markdown > /tmp/v103-cross-check.md
+   ```
+6. Document findings in CHANGELOG `[1.0.3]` Process notes:
+   - Cross-check meta-reviewer succeeded vs failed.
+   - Iter count Loop 2.
    - Cross-check decision distribution.
-   - Meta-reviewer agreement rate vs MAGI verdicts.
-   - Cualquier gap observable (meta-reviewer no references
-     file:line; diff embedding ambiguo; carry-forward block missing
-     en iter 2+).
-- Si Item D surfaces production bug en cross-check path:
-  abort cycle, escalate al usuario, evaluate scope (mini-fix in
-  v1.0.2 vs new cycle v1.0.2.1).
+   - Observable gaps (meta-reviewer file:line referencing rate;
+     diff embedding effectiveness; carry-forward block presence).
 
-### 2.5 Item E — P7 empirical proof-of-recovery (methodology)
+**Failure mode** (R7 risk): if Item B fix incomplete or new failure
+mode surfaces, document and defer to v1.0.4 retry. Activity D' is
+non-blocking for ship.
+
+### 2.7 Activity E' — True `--resume-from-magi` smoke test (methodology)
 
 **Track**: Methodology mid-cycle (orchestrator, no subagent).
 
 **Archivos**: ninguno (test path exercise + Process notes).
 
-**Pasos del orchestrator** (post-Track-Alpha + Track-Beta close,
-pre-pre-merge):
+**Hybrid methodology placement**: Activity E' runs as **smoke test
+post Track-close + post Activity D'**, NOT as gating Checkpoint 2
+dispatch path. Per user pre-brainstorming decision, Opcion A (manual
+`run_magi.py`) handles the Checkpoint 2 dispatch (lower-risk, v1.0.2
+precedent); Opcion B (`/sbtdd spec --resume-from-magi`) is exercised
+afterwards as smoke test on already-approved artifacts.
 
-1. Verify spec-behavior.md + plan-tdd-org.md existen (producidos
-   durante este cycle por brainstorming + writing-plans
-   interactivos en sesion actual).
-2. Invoke `/sbtdd spec --resume-from-magi` desde esta sesion.
-3. Verify post-conditions:
-   - skipea brainstorming/writing-plans dispatch (no subprocess
-     spawn observable);
-   - ejecuta MAGI Checkpoint 2 sobre artifacts existentes;
-   - escribe state file `.claude/session-state.json` con
-     `plan_approved_at: <ts>` + commit chore: del bundle de
-     artifacts si verdict >= GO_WITH_CAVEATS.
-4. Document en CHANGELOG `[1.0.2]` Process notes:
-   - Resultado del exercise (success / failure).
-   - Tiempo wall-clock end-to-end.
-   - Cualquier gap observable (structural validation too strict,
-     mensaje de error confuso, edge case en `--resume-from-magi`).
+**Pasos del orchestrator** (post Activity D'):
 
-### 2.6 Item F — Meta-test enforcing `allow_interactive_skill=True`
+1. Verify spec-behavior.md + plan-tdd-org.md exist + are committed
+   (already true post-Track-close).
+2. Pre-flight spec_lint dry-run (W5 v1.0.1 fix):
+   ```bash
+   python -m skills.sbtdd.scripts.spec_lint sbtdd/spec-behavior.md
+   python -m skills.sbtdd.scripts.spec_lint planning/claude-plan-tdd-org.md
+   ```
+3. Invoke `/sbtdd spec --resume-from-magi`:
+   ```bash
+   python skills/sbtdd/scripts/run_sbtdd.py spec --resume-from-magi
+   ```
+4. Observe:
+   - Brainstorming/writing-plans subprocess NOT spawned (verifiable).
+   - MAGI Checkpoint 2 dispatched on existing artifacts.
+   - Item D autoregen interaction: spec-snapshot regenerated
+     idempotently OR conflict observable.
+   - `_commit_approved_artifacts` interaction: artifacts already
+     committed, behavior observable (no-op? amend? new commit?).
+   - State file mutations: existing post-impl state vs new
+     `_create_state_file` overwrite behavior.
+5. Document observable gaps in CHANGELOG `[1.0.3]` Process notes:
+   - Wall-clock end-to-end.
+   - R10 commit-conflict observability.
+   - R4 autoregen-interaction observability.
+   - Any other unexpected behavior.
 
-**Track**: Beta (subagent #2, after Item C).
-
-**Archivos**:
-- `tests/test_invoke_skill_callsites_audit.py` (new).
-
-**Implementacion (AST-based)**:
-
-```python
-import ast
-import pathlib
-
-_EXCLUDED_FILES = {
-    # Wrappers internamente pasan allow_interactive_skill=True;
-    # son safe path por design (Item A2 v1.0.1).
-    "skills/sbtdd/scripts/superpowers_dispatch.py",
-}
-_AUDITED_DIRS = (
-    "skills/sbtdd/scripts/",
-    "tests/",
-)
-_INTERACTIVE_SKILLS = frozenset({"brainstorming", "writing-plans"})
-
-
-def _walk_invoke_skill_calls(path: Path) -> list[ast.Call]:
-    """Yield ast.Call nodes calling invoke_skill in path."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        # Match foo.invoke_skill(...) or invoke_skill(...)
-        if isinstance(node.func, ast.Attribute):
-            if node.func.attr == "invoke_skill":
-                yield node
-        elif isinstance(node.func, ast.Name):
-            if node.func.id == "invoke_skill":
-                yield node
-
-
-def test_interactive_skill_callsites_pass_override():
-    violations = []
-    for d in _AUDITED_DIRS:
-        for path in pathlib.Path(d).rglob("*.py"):
-            if str(path).replace("\\", "/") in _EXCLUDED_FILES:
-                continue
-            for call in _walk_invoke_skill_calls(path):
-                # Find skill kwarg
-                skill_value = next(
-                    (kw.value for kw in call.keywords
-                     if kw.arg == "skill"
-                     and isinstance(kw.value, ast.Constant)
-                     and kw.value.value in _INTERACTIVE_SKILLS),
-                    None,
-                )
-                if skill_value is None:
-                    continue
-                # Skill is interactive — assert override present
-                has_override = any(
-                    kw.arg == "allow_interactive_skill"
-                    and isinstance(kw.value, ast.Constant)
-                    and kw.value.value is True
-                    for kw in call.keywords
-                )
-                if not has_override:
-                    violations.append(
-                        f"{path}:{call.lineno} invokes "
-                        f"invoke_skill(skill='{skill_value.value}') "
-                        f"without allow_interactive_skill=True"
-                    )
-    assert not violations, (
-        "Interactive skill callsites missing override:\n"
-        + "\n".join(violations)
-        + "\n\nFix: add allow_interactive_skill=True or use "
-        "wrapper (superpowers_dispatch.brainstorming / writing_plans)."
-    )
-```
-
-**Tests adicionales en mismo archivo**:
-
-- `test_meta_test_catches_synthetic_regression`: synthetic fixture
-  con call site SIN override; meta-test recognizes y fails con
-  guidance message (use `pytest.raises(AssertionError)`).
-- `test_wrapper_files_excluded`: smoke test que `superpowers_dispatch.py`
-  esta en `_EXCLUDED_FILES`.
-- `test_unknown_skill_passes_through`: callsite con
-  `skill="custom-skill"` (no en `_INTERACTIVE_SKILLS`) NO viola
-  contract (whitelist semantic).
-
-### 2.7 Item G — Per-module coverage threshold
-
-**Track**: Beta (subagent #2, after Item F).
-
-**Archivos**:
-- `pyproject.toml` (modificado: add `pytest-cov` + `[tool.coverage]`).
-- `Makefile` (modificado: extend `verify` target).
-- CHANGELOG `[1.0.2]` (documenta baseline + excludes).
-
-**Q4 dictamina**: measure baseline first, set
-`--cov-fail-under=floor(baseline) - 2%`. Final value documented
-en task close.
-
-**`pyproject.toml`** (extension):
-
-```toml
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
-    "pytest-cov>=4.1",   # NEW v1.0.2
-    "ruff>=0.1",
-    "mypy>=1.5",
-    "pyyaml>=6.0",
-]
-
-[tool.coverage.run]
-source = ["skills/sbtdd/scripts"]
-omit = [
-    "skills/sbtdd/scripts/__init__.py",
-    "templates/*",
-]
-
-[tool.coverage.report]
-fail_under = 0   # placeholder — real value committed in task close
-show_missing = true
-exclude_lines = [
-    "pragma: no cover",
-    "if TYPE_CHECKING:",
-    "raise NotImplementedError",
-    "def __repr__",
-]
-```
-
-Note: `fail_under = 0` es placeholder en initial commit. Task close
-de Item G measures baseline + commits real value (e.g., `82` if
-baseline is 84%) en separate atomic commit.
-
-**`Makefile`** (extension):
-
-```makefile
-.PHONY: test lint format typecheck coverage verify
-
-coverage:
-	python -m pytest --cov=skills/sbtdd/scripts --cov-report=term-missing tests/
-
-verify: lint format typecheck coverage
-```
-
-Note (C1 iter 2 fix — caspar CRITICAL NF-A breach): `verify`
-intentionally does NOT depend on `test` because `coverage` already
-runs `pytest` (with `--cov` instrumentation). Including `test` would
-double-execute the test suite, breaking NF-A budget (`make verify`
-runtime <= 160s). The standalone `test:` target remains for dev
-workflow (quick `-v` verbose runs without coverage instrumentation).
-
-Note (C2/W4 iter 1 fix): the threshold value is read from
-`pyproject.toml [tool.coverage.report] fail_under` automatically by
-`pytest-cov` when `--cov-fail-under` is omitted, so no `tomllib`
-runtime dep is needed. tomllib is Python 3.11+ stdlib and the project
-supports 3.9+; using pytest-cov's built-in TOML reader keeps the
-toolchain portable across the supported Python range.
-
-**CHANGELOG `[1.0.2]` documenta**:
-- Per-module coverage baseline (tabla de modulo / %coverage
-  measured during Item G implementation).
-- Final threshold value (`floor(baseline) - 2%`).
-- Excludes justificados con razon explicita.
-- Gap analysis: modulos under 85% (target eventual) listados como
-  v1.0.5+ raise candidates.
+**Failure mode**: methodology activity is **non-gating for ship**.
+If E' fails (e.g., R10 commit conflict surfaces), document the
+specific failure mode + roll forward to v1.0.4 fix. Cycle continues
+to finalization regardless.
 
 ---
 
 ## 3. Cross-module contracts
 
-v1.0.2 NO introduce nuevos cross-cuts. Items consumen helpers
+v1.0.3 NO introduce nuevos cross-cuts. Items consumen helpers
 existentes:
 
-- **Item A** consume frozen JSON shape de `_loop2_with_cross_check`
-  (v1.0.0 Feature G). Schema documented en spec-base sec.2.1; no
-  cambia en v1.0.2.
-- **Item B** monkeypatchea `pre_merge_cmd._dispatch_requesting_code_review`
-  en tests para capturar el prompt content; no muta el modulo.
-- **Item C `spec_lint.py`** importa `spec_cmd._INV27_RE` para R4
-  (reuse en lugar de redefinir). `spec_cmd._run_magi_checkpoint2`
-  importa `spec_lint.lint_spec` para Checkpoint 2 integration.
-- **Item F** AST-walks `skills/sbtdd/scripts/` + `tests/`; lookup
-  `_SUBPROCESS_INCOMPATIBLE_SKILLS` literal set en
-  `superpowers_dispatch.py` (frozenset constant, frozen v1.0.1).
-- **Item G** wiring puro (`pyproject.toml` + `Makefile`); no toca
-  codigo Python.
+- **Item A** alignment test follows `tests/test_changelog.py` HF1
+  cross-artifact alignment pattern (line-anchored grep template
+  strings vs plugin code paths).
+- **Item B** modifies cross-check temp dir construction in
+  `pre_merge_cmd.py` (likely `_loop2_with_cross_check` o downstream
+  subprocess invocation). May extend `subprocess_utils.py` if Windows
+  long-path helper needed.
+- **Item C** `drift._plan_all_tasks_complete` regex tightening —
+  preserved interface signature (input: plan_text str, output: "[x]"
+  or "[ ]" string).
+- **Item D** `spec_cmd._run_magi_checkpoint2` post-MAGI-pass branch
+  invokes existing `spec_snapshot.emit_snapshot` +
+  `spec_snapshot.persist_snapshot` (shipped v1.0.0 Feature H Group B
+  option 2).
+- **Item E** `/sbtdd close-task` command preserved as-is (already
+  shipped v0.1+; implementation in `close_task_cmd.py`); this item
+  is doc-only enforcement update.
 
 **Contratos preservados (no modificados)**:
 
-- `PreconditionError` / `ValidationError` (existing en `errors.py`):
-  Item C Checkpoint 2 abort raisea `ValidationError`.
+- `PreconditionError` / `ValidationError` / `MAGIGateError` (existing
+  en `errors.py`).
 - `subprocess_utils.run_with_timeout`: ningun item nuevo lo invoca
   directamente.
-- `_compute_loop2_diff_with_meta` (v1.0.0): Item B asserts sobre su
-  output integration en prompt builder, no muta.
-- `_loop2_with_cross_check` (v1.0.0): Item D toggle a
-  `magi_cross_check: true` ejerce el path; no muta.
+- `_compute_loop2_diff_with_meta` (v1.0.0): unchanged.
+- `_loop2_with_cross_check` (v1.0.0): Item B modifies temp dir
+  handling within this function; semantic preserved.
+- `_run_magi_checkpoint2` lint timing contract (v1.0.2 Item C C1
+  fix): preserved — autoregen happens AFTER MAGI iter loop converges,
+  not in lint gate.
+- INV-37 composite-signature output validation tripwire (v1.0.1):
+  unchanged.
 
 ---
 
-## §4 Escenarios BDD
+## 4. Escenarios BDD
 
 Distribuidos por item — la spec usa Tier 2 permissive regex de
 `spec_snapshot.emit_snapshot` (shipped en v1.0.1 Item A1) que
 acepta escenarios distribuidos a traves de cualquier seccion sin
-requerir literal `## §4 Escenarios` header.
+requerir literal `## §4 Escenarios` header. Top-level numbering uses
+`## 4.` (digit + dot + space) to satisfy R3 monotonic check (v1.0.2
+Item C R3 warning regression preventive).
 
-### Item A — Cross-check telemetry
+### Item A — Template alignment audit
 
-**Escenario A-1: happy path con multiple iter artifacts**
+**Escenario A-1: audit doc structure exists per template's 6 sections**
 
-> **Given** Directorio `tmp/.claude/magi-cross-check/` con 3
-> archivos `iter1-2026-05-XX.json`, `iter2-...json`,
-> `iter3-...json` con shape valido (cross_check_decisions list +
-> magi_verdict + diff_truncated fields).
-> **When** `aggregate(Path("tmp/.claude/magi-cross-check"))`.
-> **Then** Returns `TelemetryReport` con `total_iters == 3`,
-> `decision_distribution` agregado de los 3 files,
-> `per_iter` list con 3 entries en orden de iter ascending,
-> `agreement_rate` calculado como float entre 0.0 y 1.0,
-> `truncation_rate` calculado.
+> **Given** Template canonical at `D:\jbolivarg\BolivarTech\AI_Tools\
+> magi-gate-template.md` con 6 sections (Trigger criteria, Pass
+> threshold, Carry-forward, Review summary, Cost awareness,
+> Per-project setup).
+> **When** Audit doc `docs/audits/v1.0.3-magi-gate-template-alignment.md`
+> generated by Track Alpha subagent.
+> **Then** Doc contains tabla con minimum 6 rows (one per template
+> section). Each row has TEMPLATE_SECTION + PLUGIN_IMPL_PATH +
+> STATUS + EVIDENCE + ACTION columns.
 
-**Escenario A-2: empty directory tolerated**
+**Escenario A-2: each row has Status + Evidence + Action**
 
-> **Given** Directorio existe pero esta vacio.
-> **When** `aggregate(empty_dir)`.
-> **Then** Returns `TelemetryReport` con `total_iters == 0`. CLI
-> markdown output incluye literal `No iterations found`. NO error.
+> **Given** Audit doc rows generated.
+> **When** Inspecting per-row content.
+> **Then** Each row's STATUS field is one of {MATCH, GAP, OBSOLETE}.
+> EVIDENCE field is non-empty (contains file:line citation or doc
+> reference). ACTION field describes resolution (resolved en cycle
+> OR deferred to v1.0.4 OR template amendment proposed).
 
-**Escenario A-3: malformed JSON skipped with breadcrumb**
+**Escenario A-3: alignment test grep template strings**
 
-> **Given** Directorio con 2 files validos + 1 file con JSON
-> invalido (truncated mid-content).
-> **When** `aggregate(dir)`.
-> **Then** `total_iters == 2` (solo los validos contados).
-> stderr contiene breadcrumb identificando el file malformado +
-> parse error message. NO abort.
+> **Given** Template at known location + plugin source code in
+> `skills/sbtdd/scripts/`.
+> **When** `tests/test_magi_template_alignment.py` runs.
+> **Then** Test extracts canonical strings from template (verdicts
+> table headers, per-project setup checklist items, etc.) +
+> grep plugin code for required strings + asserts presence/absence
+> per template normative format.
 
-**Escenario A-4: markdown output well-formed**
+**Escenario A-4: GAP findings produce actionable items**
 
-> **Given** Aggregator output con valid TelemetryReport.
-> **When** `format_markdown(report)`.
-> **Then** Output es valid markdown table parseable: header row
-> presente, separator row con `|---|`, data rows con counts.
-> Tables identificadas: "Decision distribution", "Per-iter
-> breakdown", "Per-agent rate", "Per-severity distribution".
+> **Given** Audit identifies GAP row (template requires X, plugin
+> doesn't enforce X).
+> **When** ACTION column populated.
+> **Then** ACTION is either: code change ID for Track Beta backlog,
+> OR documentation update target, OR template amendment proposal,
+> OR explicit "deferred to v1.0.4 with rationale".
 
-**Escenario A-5: JSON output parseable**
+**Escenario A-5: cross-artifact alignment test detects regression**
 
-> **Given** Aggregator output con valid TelemetryReport.
-> **When** `format_json(report)`.
-> **Then** Output es valid JSON parseable via `json.loads`.
-> Top-level keys: `total_iters`, `decision_distribution`,
-> `per_iter`, `agreement_rate`, `truncation_rate`. `per_iter` es
-> list, otros son dict / float / int per shape.
+> **Given** Template string `XYZ` required + plugin code currently
+> includes `XYZ`.
+> **When** Plugin code modified to remove `XYZ` (hypothetical
+> regression).
+> **Then** Alignment test FAILS with message identifying which
+> template section + which plugin file lost the canonical string.
 
-**Escenario A-6: 100+ files linear performance (NF32 guard)**
+### Item B — Cross-check Windows long-filename fix
 
-> **Given** Directorio con 100 valid iter artifacts synthetically
-> generated.
-> **When** `aggregate(dir)` con timing measurement.
-> **Then** Wall-clock < 5 segundos en CI Linux runner. Memory
-> peak < 100MB. Single read-pass per file (no quadratic blowup).
+**Escenario B-1: synthetic long path triggers WinError 206 pre-fix**
 
-### Item B — Diff threading regression
+> **Given** Windows runtime + cross-check temp dir construction with
+> long base path (>= 260 chars total path length).
+> **When** Pre-fix `_loop2_with_cross_check` invokes subprocess
+> writing to that temp file.
+> **Then** OSError raised with `[WinError 206] The filename or
+> extension is too long` (or equivalent Windows long-path error).
 
-**Escenario B-1: prompt embeds diff section when non-empty**
+**Escenario B-2: fix applied passes**
 
-> **Given** `_dispatch_requesting_code_review` monkeypatched para
-> capturar prompt arg. `_loop2_with_cross_check` invoked con
-> `diff="--- a/foo.py\n+++ b/foo.py\n@@ ..."`.
-> **When** prompt construido por `_build_cross_check_prompt(diff,
-> verdict, findings)`.
-> **Then** Captured prompt contiene substring
-> `## Cumulative diff under review (truncated to 200KB)`. Diff
-> bytes presentes en el prompt body dentro del code block.
+> **Given** Same setup as B-1 + Item B fix applied (shorter prefix
+> OR `\\?\` syntax OR project-relative temp dir).
+> **When** `_loop2_with_cross_check` invokes subprocess.
+> **Then** No WinError 206. Cross-check meta-reviewer artifact
+> written successfully.
 
-**Escenario B-2: prompt omits diff section when empty**
+**Escenario B-3: paths >= 300 chars work post-fix**
 
-> **Given** Same setup pero `diff=""` (subprocess fallback).
-> **When** prompt construido.
-> **Then** Captured prompt NO contiene substring
-> `## Cumulative diff under review`. Findings text + verdict
-> presentes; diff section ausente.
+> **Given** Synthetic path construction with total length >= 300
+> chars (NF36 requirement).
+> **When** Cross-check temp file write.
+> **Then** Write succeeds. Validates fix robustness against
+> aggressive long paths, not just edge case at 260.
 
-### Item C — `spec_lint`
+**Escenario B-4: short paths still work (backward compat)**
 
-**Escenario C-R1-1: escenario block with all bullets passes**
+> **Given** Normal-length paths (< 260 chars).
+> **When** Cross-check runs.
+> **Then** No regression — cross-check works identically to v1.0.2
+> behavior when paths are short.
 
-> **Given** Spec con bloque
-> `**Escenario X-1: ejemplo**\n> **Given** ...\n> **When** ...\n>
-> **Then** ...`.
-> **When** `lint_spec(path)`.
-> **Then** Returns list sin LintFinding con rule="R1" para ese
-> bloque.
+**Escenario B-5: Linux/POSIX path unaffected**
 
-**Escenario C-R1-2: escenario missing Given block fails**
+> **Given** Linux/POSIX runtime + cross-check.
+> **When** Activity D' Linux dogfood runs.
+> **Then** No WinError 206 (POSIX has no MAX_PATH equivalent).
+> Behavior identical to pre-fix on POSIX systems.
 
-> **Given** Spec con bloque
-> `**Escenario X-1: ejemplo**\n> **When** ...\n> **Then** ...` (no
-> Given).
-> **When** `lint_spec(path)`.
-> **Then** Returns list con LintFinding(rule="R1",
-> severity="error") referencing the block's line. Message incluye
-> `missing Given block`.
+### Item C — Drift detector line-anchored match
 
-**Escenario C-R2-1: unique scenario IDs pass**
+**Escenario C-1: inline backtick prose mention NOT false-positive**
 
-> **Given** Spec con escenarios `X-1`, `X-2`, `Y-1` (todos
-> distintos).
-> **When** `lint_spec(path)`.
-> **Then** Returns list sin LintFinding rule="R2".
+> **Given** Plan file con `### Task 1:` header marked complete +
+> all step checkboxes flipped to `- [x]` + 2 inline backtick prose
+> mentions of `\`- [ ]\`` literal (descriptive, not actual checkboxes).
+> **When** `drift._plan_all_tasks_complete(plan_text)` invoked.
+> **Then** Returns `"[x]"` (no false-positive). Inline backtick
+> mentions NOT counted as open checkboxes.
 
-**Escenario C-R2-2: duplicate scenario IDs fail**
+**Escenario C-2: real `- [ ]` checkbox detected drift**
 
-> **Given** Spec con dos bloques `**Escenario X-1: ...**` (id
-> duplicado).
-> **When** `lint_spec(path)`.
-> **Then** Returns list con LintFinding(rule="R2",
-> severity="error") identifying both occurrences (file:line for
-> each).
+> **Given** Plan file with task section containing real
+> line-anchored `- [ ]` checkbox (not inside backticks).
+> **When** `_plan_all_tasks_complete` invoked.
+> **Then** Returns `"[ ]"`. Drift correctly detected.
 
-**Escenario C-R3-1: monotonic headers pass without warning**
+**Escenario C-3: line-anchored regex skipea backtick prose**
 
-> **Given** Spec con sections `## 1. ...`, `## 2. ...`, `## 3. ...`
-> (monotonic).
-> **When** `lint_spec(path)`.
-> **Then** Returns list sin LintFinding rule="R3".
+> **Given** Multi-task plan with mix of real `- [ ]` checkboxes +
+> inline backtick `\`- [ ]\`` prose mentions across multiple
+> sections.
+> **When** Detection invoked.
+> **Then** Only line-start `- [ ]` patterns counted; backtick mentions
+> ignored. Result reflects actual task completion state.
 
-**Escenario C-R3-2: header skip emits warning but does not block**
+**Escenario C-4: backward compat existing real-checkbox fixtures**
 
-> **Given** Spec con sections `## 1.`, `## 2.`, `## 5.` (skipea
-> `## 3.` y `## 4.`).
-> **When** `lint_spec(path)` y luego
-> `_run_magi_checkpoint2(spec_path=...)`.
-> **Then** lint returns list con LintFinding(rule="R3",
-> severity="warning"). `_run_magi_checkpoint2` emite stderr
-> breadcrumb pero NO raisea. MAGI dispatch proceeds. Q3 dictamen.
+> **Given** Existing test fixtures with real `- [ ]` checkboxes
+> (no backtick prose).
+> **When** Refactored regex applied.
+> **Then** All existing fixtures' detection results unchanged. No
+> regression.
 
-**Escenario C-R4-1: INV-27 mechanical extends to spec-behavior.md**
+### Item D — Spec-snapshot auto-regeneration
 
-> **Given** spec-behavior.md generado por brainstorming contiene
-> uppercase placeholder token uno-de-tres (synthetic fixture
-> incluye el word-boundary match).
-> **When** `lint_spec(spec_behavior_path)`.
-> **Then** Returns list con LintFinding(rule="R4", severity="error",
-> line=<line>, message=referencing INV-27).
+**Escenario D-1: post-MAGI-pass auto-regenerates snapshot**
 
-**Escenario C-R5-1: frontmatter docstring present passes**
+> **Given** `_run_magi_checkpoint2` invoked + MAGI verdict converges
+> to GO_WITH_CAVEATS full no-degraded + spec-behavior.md content
+> has 26 escenarios.
+> **When** Post-MAGI-pass branch executes.
+> **Then** `planning/spec-snapshot.json` contains all 26 escenarios
+> (current spec content). Old escenarios from prior cycle replaced.
 
-> **Given** Spec inicia con bloque `> Generado 2026-05-06 a partir
-> de sbtdd/spec-behavior-base.md` line en first 30 lines.
-> **When** `lint_spec(path)`.
-> **Then** Returns list sin LintFinding rule="R5".
+**Escenario D-2: state file `spec_snapshot_emitted_at` updated**
 
-**Escenario C-R5-2: missing frontmatter docstring fails**
+> **Given** Same setup as D-1.
+> **When** Autoregen completes.
+> **Then** `state_file.SessionState.spec_snapshot_emitted_at`
+> contains current UTC ISO 8601 timestamp.
 
-> **Given** Spec inicia directamente con `# Title` sin frontmatter
-> blockquote.
-> **When** `lint_spec(path)`.
-> **Then** Returns list con LintFinding(rule="R5",
-> severity="error", line=1).
+**Escenario D-3: `--resume-from-magi` interaction safe**
 
-**Escenario C-int-1: `_run_magi_checkpoint2` aborts on R1 error**
+> **Given** spec-behavior.md committed + spec-snapshot.json
+> previously emitted (from prior cycle's plan approval).
+> **When** `/sbtdd spec --resume-from-magi` invoked + MAGI verdict
+> passes.
+> **Then** Autoregen runs idempotently. If spec content unchanged
+> from prior emit, snapshot file content identical. If spec content
+> changed (current cycle), snapshot updated. NO MAGIGateError on
+> snapshot drift.
 
-> **Given** spec-behavior.md fixture viola R1 (escenario sin Given
-> bullet); plan-tdd-org.md fixture clean.
-> **When** `_run_magi_checkpoint2(root)`.
-> **Then** Raises `ValidationError` con guidance message
-> referencing R1 + file path + line. `magi_dispatch.invoke_magi`
-> NUNCA called (asserted via monkeypatch spy).
+**Escenario D-4: backward compat existing snapshot persistence**
 
-**Escenario C-int-2: warnings emit breadcrumb without blocking**
+> **Given** Plain `/sbtdd spec` (NOT --resume-from-magi) invoked
+> with `--brainstorming` + `--writing-plans` dispatched normally.
+> **When** Cycle reaches MAGI verdict pass.
+> **Then** Same autoregen behavior as D-1 + D-2. No regression
+> against pre-v1.0.3 manual emit pattern (which was via
+> `_mark_plan_approved_with_snapshot` per R10 v1.0.0 fix).
 
-> **Given** spec-behavior.md viola R3 (header skip) pero clean en
-> R1, R2, R4, R5.
-> **When** `_run_magi_checkpoint2(root)`.
-> **Then** stderr contiene breadcrumb identificando R3 violation +
-> file:line. `magi_dispatch.invoke_magi` IS called (proceeds).
+### Item E — Close-task convention codification
 
-**Escenario C-cli-1: standalone CLI exit codes**
+**Escenario E-1: close-task command flips per-step checkboxes correctly**
 
-> **Given** Path a spec clean (sin findings).
-> **When** `python -m skills.sbtdd.scripts.spec_lint <path>`.
-> **Then** Exit code 0. stdout vacio o "No findings".
-> Vs spec con error finding: exit 1, stdout lista findings.
+> **Given** Plan-tdd.md with active task containing 5 step
+> checkboxes (4 already `[x]`, 1 still `[ ]`) + state file
+> `current_task_id="3", current_phase="refactor"`.
+> **When** Subagent invokes `python skills/sbtdd/scripts/run_sbtdd.py
+> close-task --skip-spec-review` after Refactor verify-clean.
+> **Then** All 5 step checkboxes flipped to `[x]`. Atomic `chore:
+> mark task 3 complete` commit landed (plan diff only). State file
+> advances to next open task `current_task_id="4",
+> current_phase="red"` OR `done` if last task.
 
-### Item F — meta-test
+**Escenario E-2: documentation references close-task in subagent prompts**
 
-**Escenario F-1: callsite without override fails meta-test**
-
-> **Given** Synthetic fixture file con literal call
-> `invoke_skill(skill="brainstorming", args=[...])` (sin
-> `allow_interactive_skill`).
-> **When** Meta-test corre AST walk sobre el fixture file.
-> **Then** Raises AssertionError con message containing fixture
-> path + line + sugerencia "add allow_interactive_skill=True or
-> use wrapper".
-
-**Escenario F-2: callsite with override passes**
-
-> **Given** Synthetic fixture con literal call
-> `invoke_skill(skill="brainstorming", allow_interactive_skill=True,
-> args=[...])`.
-> **When** Meta-test runs sobre fixture.
-> **Then** No assertion failure for ese callsite.
-
-**Escenario F-3: wrapper files excluded from audit**
-
-> **Given** `superpowers_dispatch.py` (donde wrappers viven y
-> internamente llaman `invoke_skill(skill="brainstorming",
-> allow_interactive_skill=True)`) esta en `_EXCLUDED_FILES`.
-> **When** Meta-test runs full audit.
-> **Then** AST walk skipea ese file. No assertion sobre callsites
-> internos del wrapper.
-
-**Escenario F-4: unknown skill name passes through**
-
-> **Given** Fixture con call
-> `invoke_skill(skill="custom-skill", args=[...])` — `custom-skill`
-> NO en `_INTERACTIVE_SKILLS` set.
-> **When** Meta-test runs.
-> **Then** Skill name NOT en interactive set ⇒ no override
-> required. No assertion failure.
-
-### Item G — coverage
-
-**Escenario G-1: `make verify` invokes coverage gate**
-
-> **Given** Repo en estado clean (todos los tests passing).
-> **When** `make verify` runs.
-> **Then** `pytest --cov=skills/sbtdd/scripts
-> --cov-report=term-missing --cov-fail-under=<threshold>` invoked.
-> Exit code 0. Coverage table impresa en stdout.
-
-**Escenario G-2: coverage threshold violation fails verify**
-
-> **Given** Synthetic test scenario donde coverage measured esta
-> 1% bajo threshold (e.g., threshold=85, measured=84).
-> **When** `pytest --cov ... --cov-fail-under=85` corre.
-> **Then** Exit code != 0. Mensaje stderr containing
-> `Required test coverage of 85% not reached`.
+> **Given** Updated `skills/sbtdd/SKILL.md` orchestrator rules +
+> `templates/CLAUDE.local.md.template` + plan template generation
+> prompt (writing-plans skill extension).
+> **When** Grep for "close-task" pattern.
+> **Then** Each of these documents contains explicit instruction:
+> "after Refactor phase verify-clean, invoke `python
+> skills/sbtdd/scripts/run_sbtdd.py close-task` (--skip-spec-review
+> if appropriate). Manual plan-file checkbox edits are
+> NON-CONFORMING."
 
 ---
 
 ## 5. Subagent layout + execution timeline
 
-### 5.1 Track Alpha (subagent #1, sequential)
+### 5.1 Track Alpha (subagent #1, single-purpose audit)
 
-**Owner**: code-architect single subagent.
-**Scope**: Items A → B (5 plan tasks total en bundle, Alpha owns
-2).
-**Wall-time estimado**: 6-9h.
+**Owner**: code-architect or general-purpose subagent.
+**Scope**: Item A only (audit doc + alignment test + GAP findings
+backlog routing).
+**Wall-time estimado**: ~1 dia.
+
+Single task, no sequential ordering needed:
+
+1. **A** (~1 dia): read template at
+   `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md`. Audit
+   plugin's MAGI dispatch path code section-by-section. Generate
+   `docs/audits/v1.0.3-magi-gate-template-alignment.md` table.
+   Generate `tests/test_magi_template_alignment.py` cross-artifact
+   test. Route GAP findings: CRITICAL → Track Beta backlog;
+   WARNING/INFO → Process notes deferred. NO production code
+   modifications.
+
+Sin dependencias inter-track durante implementation phase. Track
+Alpha output (audit doc + test) is purely additive.
+
+### 5.2 Track Beta (subagent #2, sequential B → C → D → E)
+
+**Owner**: code-architect or general-purpose subagent.
+**Scope**: Items B + C + D + E (all code fixes + doc updates).
+**Wall-time estimado**: ~3 dias.
 
 Sequential ordering rationale:
 
-1. **A first** (~5-8h): telemetry script standalone, no
-   dependencies. Production code + tests.
-2. **B last** (~1h): regression test sobre prompt builder. Could
-   technically run before A (no dep), but B is a 1-test addition;
-   bundling with A keeps Track Alpha's mental model coherent.
-
-Sin dependencias inter-track durante implementation phase.
-
-### 5.2 Track Beta (subagent #2, sequential)
-
-**Owner**: code-architect single subagent.
-**Scope**: Items C → F → G (3 plan tasks).
-**Wall-time estimado**: 16-25h.
-
-Sequential ordering rationale:
-
-1. **C first** (~10-15h): spec_lint module + 5 rules + Checkpoint
-   2 integration. Heaviest item; sets foundation.
-2. **F second** (~3-5h): meta-test AST walk. Orthogonal a C, pero
-   secuenciado despues para que Beta subagent tenga continuity.
-3. **G last** (~3-5h): coverage wiring. Final task; measures
-   baseline AFTER F adds new tests (slightly higher count) so
-   threshold reflects post-bundle state.
+1. **B first** (~1 dia): cross-check Windows long-filename fix in
+   `pre_merge_cmd.py`. Critical infrastructure; landing first
+   unblocks Activity D' Linux/POSIX dogfood.
+2. **C second** (~0.5 dia): drift detector line-anchored regex in
+   `drift.py`. Independent of B.
+3. **D third** (~1 dia): spec-snapshot autoregen in `spec_cmd.py` +
+   state_file integration + tests. Independent of C.
+4. **E last** (~0.5 dia): close-task convention codification in
+   `SKILL.md` + `templates/CLAUDE.local.md.template` + smoke test.
+   Doc-only; no overlap with B/C/D code surfaces.
 
 Sin dependencias inter-track.
 
 ### 5.3 Mid-cycle methodology (orchestrator)
 
 **Owner**: orchestrator (single Claude Code session).
-**Scope**: Items D + E.
-**Wall-time estimado**: ~30-60min total.
+**Scope**: Activity D' + Activity E' (smoke test).
+**Wall-time estimado**: ~30-60 min total.
 
-Triggered AFTER ambos tracks completan AND BEFORE pre-merge phase:
+Triggered AFTER Track-Alpha + Track-Beta close + AFTER Item B fix
+landed:
 
-1. **E exercise** (~15-30min): exercise `/sbtdd spec
-   --resume-from-magi` end-to-end. Verify post-conditions. Document
-   en CHANGELOG `[1.0.2]` Process notes.
-2. **D dogfood** (~30-45min): set `magi_cross_check: true` +
-   run `/sbtdd pre-merge` end-to-end. Capture artifacts. Run
-   telemetry script (Item A produced output) sobre artifacts.
-   Document findings.
-
-Item D y E pueden ejecutarse en cualquier orden; E primero es
-recomendado porque ejerce el upstream path (Checkpoint 2 vs
-pre-merge) — si E falla, signal de issue mas fundamental que
-puede contaminar D.
+1. **D' first** (~30-45 min): Activity D Linux/POSIX dogfood
+   completion. Run `/sbtdd pre-merge` end-to-end con cross-check
+   enabled. Capture artifacts. Run telemetry script. Document.
+2. **E' last** (~15-30 min): True `--resume-from-magi` smoke test.
+   Pre-flight spec_lint dry-run. Exercise Opcion B path. Observe
+   R4 + R10 interactions. Document observable gaps. Non-gating.
 
 ### 5.4 True parallelism observado
 
@@ -847,16 +794,19 @@ Surfaces Track Alpha vs Track Beta:
 
 | Surface | Alpha | Beta |
 |---------|-------|------|
-| `scripts/cross_check_telemetry.py` | yes (new) | — |
-| `tests/test_cross_check_telemetry.py` | yes (new) | — |
-| `tests/test_pre_merge_cross_check.py` | yes (extend) | — |
-| `skills/sbtdd/scripts/spec_lint.py` | — | yes (new) |
-| `skills/sbtdd/scripts/spec_cmd.py` | — | yes (extend) |
-| `tests/test_spec_lint.py` | — | yes (new) |
-| `tests/test_spec_cmd.py` | — | yes (extend) |
-| `tests/test_invoke_skill_callsites_audit.py` | — | yes (new) |
-| `pyproject.toml` | — | yes (modify) |
-| `Makefile` | — | yes (modify) |
+| `docs/audits/v1.0.3-magi-gate-template-alignment.md` | yes (new) | — |
+| `tests/test_magi_template_alignment.py` | yes (new) | — |
+| `skills/sbtdd/scripts/pre_merge_cmd.py` | — | yes (Item B modify) |
+| `skills/sbtdd/scripts/subprocess_utils.py` | — | possibly (Item B helper) |
+| `tests/test_pre_merge_cross_check.py` | — | yes (Item B extend) |
+| `skills/sbtdd/scripts/drift.py` | — | yes (Item C modify) |
+| `tests/test_drift.py` | — | yes (Item C extend) |
+| `skills/sbtdd/scripts/spec_cmd.py` | — | yes (Item D modify) |
+| `skills/sbtdd/scripts/state_file.py` | — | possibly (Item D field handling) |
+| `tests/test_spec_cmd.py` | — | yes (Item D extend) |
+| `skills/sbtdd/SKILL.md` | — | yes (Item E modify) |
+| `templates/CLAUDE.local.md.template` | — | yes (Item E modify) |
+| `tests/test_close_task_subagent_pattern.py` | — | yes (Item E new smoke) |
 
 **Cero overlap**. Tracks pueden run truly parallel sin merge
 conflicts.
@@ -868,96 +818,78 @@ conflicts.
 ### 6.1 MAGI Checkpoint 2 (spec + plan)
 
 - **Cap=3 HARD** per G1 binding (CHANGELOG `[1.0.0]`, precedente
-  cerrado v1.0.1). NO INV-0 path.
-- Bundle scope acotado (5 plan tasks + 2 methodology) — esperamos
-  converger en 1-2 iters limpios.
-- Si llega a iter 3 sin convergencia, scope-trim mandatorio
-  (no override): defer F + G a v1.0.3 (E es methodology, puede
-  ejercerse en cualquier ciclo posterior; D dogfood es own-cycle
-  evidence intrinsica).
+  cerrado v1.0.1+v1.0.2 = 2-streak no-override). NO INV-0 path.
+- Bundle scope multi-pillar (5 plan tasks + 2 methodology) — esperamos
+  converger en 2-3 iters.
+- **Iter 2 CRITICAL trigger** (revised iter 1 fix W5+I1+I8
+  balthasar+melchior+caspar): if Loop 2 iter 2 still surfaces ANY
+  CRITICAL finding (post-iter-1-triage-fix), scope-trim immediately
+  rather than burning iter 3 on a multi-pillar bundle. Pre-staged
+  decision: Items C+D+E defer to v1.0.4 first; if needed, also
+  Item E only; only Pillar A + Pillar B are hard-LOCKED for v1.0.3
+  ship.
+- Si llega a iter 3 sin convergencia (despite iter-2 trigger), default
+  scope-trim ladder applies:
+  1. Defer Pillar C Items C+D+E to v1.0.4 (smaller scope).
+  2. Then Item E only deferred (codification can happen any cycle).
+  3. Then Item D only deferred (autoregen is opt-in convenience).
+  4. Pillar A audit + Pillar B Windows fix son hard-LOCKED.
 
-**Scope-trim ladder for Checkpoint 2 iter 3** (W6 iter 1 fix —
-balthasar pre-staged decision):
-
-If Checkpoint 2 iter 3 verdict < `GO_WITH_CAVEATS` full no-degraded,
-trim scope in this order (smallest impact first), re-emit spec+plan
-artifacts, and proceed directly to implementation phase without
-further MAGI iterations:
-
-1. **First trim**: defer Item G (coverage threshold) → v1.0.3.
-   Smallest scope — `pyproject.toml` + `Makefile` only, no production
-   code. Plan tasks 17-19 removed; ~2-3 nuevos tests removed.
-2. **Second trim** (if iter 3 verdict still blocks after Item G defer
-   in re-evaluation): defer Item F (meta-test) → v1.0.3. Plan tasks
-   15-16 removed; ~3-5 nuevos tests removed. Bundle reduces a
-   A + B + C + D + E (3 plan tasks + 2 methodology).
-3. **Third trim** (rarely needed): defer Item C (spec_lint) →
-   v1.0.3 standalone cycle. Plan tasks 7-14 removed; bundle reduces
-   to A + B + D + E (2 plan tasks + 2 methodology). At this point
-   v1.0.2 is essentially "telemetry script + own-cycle dogfood" —
-   ship-ready single-pillar.
-
-The orchestrator picks the trim level at iter 3 escalation; record
-the decision in CHANGELOG `[1.0.2]` Process notes alongside the
-deferred-to-v1.0.3 list.
+**Methodology decision**: Checkpoint 2 dispatch usa **Opcion A
+manual `run_magi.py`** per hybrid methodology + v1.0.2 precedent.
+Activity E' (Opcion B `/sbtdd spec --resume-from-magi`) corre
+DESPUES como smoke test, no como gating dispatch.
 
 ### 6.2 Loop 1 (`/requesting-code-review`)
 
 - **Cap=10**. Clean-to-go criterion: zero CRITICAL + zero
   high-impact WARNING.
-- Bundle scope minimal (5 plan tasks, ningun toca core path) —
+- Bundle scope minimal (5 plan tasks, mostly small fixes) —
   esperamos converger en 1 iter.
 
-### 6.3 Loop 2 (`/magi:magi`) — own-cycle dogfood
+### 6.3 Loop 2 (`/magi:magi`) — Activity D' dogfood
 
 - **Cap=5** per `auto_magi_max_iterations`.
-- **Cross-check enabled mid-cycle**: Item D ENTREGA es setear
-  `magi_cross_check: true` antes de invocar `/sbtdd pre-merge`.
-  Cycle valida su propia feature.
+- **Cross-check enabled mid-cycle**: Activity D' ENTREGA es running
+  `/sbtdd pre-merge` post Item B fix.
 - **Carry-forward block** (CLAUDE.local.md §6 v1.0.0+) presente
   desde iter 2.
 - **G2 binding fallback**: si Loop 2 iter 3 no converge clean,
-  scope-trim default — defer F + G a v1.0.3. D y E ya ejecutados
-  pre-Loop2 (mid-cycle methodology), no se pueden defer.
-- **Manual fallback** (R8 mitigation): si `/sbtdd pre-merge` hits
-  infinite loop o regresion en cross-check path, escape via Ctrl+C
-  + `python skills/magi/scripts/run_magi.py code-review <payload>
-  --model opus --timeout 900` (precedente v1.0.0, v1.0.1).
+  scope-trim per spec-base sec.6.1 ladder. Pillar C + methodology
+  defer to v1.0.4.
+- **Manual fallback** (R7 mitigation): si `/sbtdd pre-merge` hits
+  failure mode after Item B fix, escape via Ctrl+C + `python
+  skills/magi/scripts/run_magi.py code-review <payload>` (precedente
+  v1.0.0+v1.0.1+v1.0.2).
 
 ### 6.4 Loop 2 own-cycle fallback
 
-If `/sbtdd pre-merge` itself fails durante el v1.0.2 own-cycle
-(chicken-and-egg: cross-check path se ejerce por primera vez), el
-operator MUST fall back a manual `python skills/magi/scripts/run_magi.py`
-direct dispatch + manual mini-cycle commits. Document en CHANGELOG
-`[1.0.2]` Process notes. Precedentes v0.5.0 + v1.0.0 + v1.0.1
-todos demonstrate ship viability con manual fallback.
+If `/sbtdd pre-merge` itself fails durante el v1.0.3 own-cycle (e.g.,
+Item B fix incomplete, new regression), el operator MUST fall back
+a manual `python skills/magi/scripts/run_magi.py` direct dispatch +
+manual mini-cycle commits. Document en CHANGELOG `[1.0.3]` Process
+notes. Precedentes v0.5.0 + v1.0.0 + v1.0.1 + v1.0.2 todos demonstrate
+ship viability con manual fallback.
 
-**Verbatim fallback command** (warm + ready to copy-paste).
-**Operator preparation step** (W4 iter 2 fix — caspar): the
-`v102-loop2-iter1-header.md` file referenced below is
-operator-prepared per the iter-1 dispatch protocol (see
-`.claude/magi-runs/v102-checkpoint2-iter1-header.md` shipped this
-cycle as reference template; for Loop 2 own-cycle fallback, the
-operator copies that template + adapts the cycle-context section
-for Loop 2 mode). The header is NOT auto-generated.
+**Verbatim fallback command** (warm + ready to copy-paste,
+operator-prepared header per W4 v1.0.2 fix):
 
 ```bash
-mkdir -p .claude/magi-runs/v102-loop2-iter1
-# Step 0: operator prepares v102-loop2-iter1-header.md (Loop 2 mode
-# context; see .claude/magi-runs/v102-checkpoint2-iter1-header.md
+mkdir -p .claude/magi-runs/v103-loop2-iter1
+# Step 0: operator prepares v103-loop2-iter1-header.md (Loop 2 mode
+# context; see .claude/magi-runs/v103-checkpoint2-iter1-header.md
 # for the analogous Checkpoint 2 template).
 {
-  cat .claude/magi-runs/v102-loop2-iter1-header.md
+  cat .claude/magi-runs/v103-loop2-iter1-header.md
   echo "---"
   cat sbtdd/spec-behavior.md
   echo "---"
   cat planning/claude-plan-tdd.md
-} > .claude/magi-runs/v102-loop2-iter1-payload.md
+} > .claude/magi-runs/v103-loop2-iter1-payload.md
 python skills/magi/scripts/run_magi.py code-review \
-  .claude/magi-runs/v102-loop2-iter1-payload.md \
+  .claude/magi-runs/v103-loop2-iter1-payload.md \
   --model opus --timeout 900 \
-  --output-dir .claude/magi-runs/v102-loop2-iter1
+  --output-dir .claude/magi-runs/v103-loop2-iter1
 ```
 
 ---
@@ -966,216 +898,232 @@ python skills/magi/scripts/run_magi.py code-review \
 
 ### 7.1 Bump
 
-`plugin.json` + `marketplace.json`: 1.0.1 → 1.0.2.
+`plugin.json` + `marketplace.json`: 1.0.2 → 1.0.3.
 
-### 7.2 CHANGELOG `[1.0.2]` sections
+### 7.2 CHANGELOG `[1.0.3]` sections
 
-- **Added** — `scripts/cross_check_telemetry.py` (Item A);
-  `skills/sbtdd/scripts/spec_lint.py` con 5 reglas R1-R5 (Item C);
-  meta-test `tests/test_invoke_skill_callsites_audit.py` (Item F);
-  `pytest-cov` dev dep + coverage config (Item G).
-- **Changed** — `spec_cmd._run_magi_checkpoint2` ahora invoca
-  `spec_lint.lint_spec` antes de MAGI dispatch (Item C
-  integration); `Makefile verify` target extends con coverage check
-  (Item G).
-- **Process notes** — Item D dogfood findings (iter count,
-  decision distribution, agreement rate, observable gaps); Item E
-  recovery flag empirical findings (success/failure, wall-clock,
-  gaps); v1.0.1 LOCKED commitments cerrados; per-module coverage
-  baseline + final threshold value.
-- **Deferred (rolled to v1.0.3)** — MAGI gate template alignment
-  audit (sole pillar v1.0.3 per memory).
+- **Added** —
+  `docs/audits/v1.0.3-magi-gate-template-alignment.md` (Item A);
+  `tests/test_magi_template_alignment.py` (Item A);
+  Cross-check Windows long-filename fix in `pre_merge_cmd.py`
+  (Item B);
+  Drift detector line-anchored regex in `drift.py` (Item C);
+  Spec-snapshot autoregen in `spec_cmd._run_magi_checkpoint2`
+  (Item D);
+  Close-task convention codification in `skills/sbtdd/SKILL.md` +
+  `templates/CLAUDE.local.md.template` (Item E doc-only).
+- **Changed** — same as Added per item; no API breaks expected.
+- **Process notes** — Activity D' Linux/POSIX dogfood findings
+  (cross-check working, iter count, decision distribution);
+  Activity E' `--resume-from-magi` smoke test observable gaps (R4
+  autoregen interaction, R10 commit conflict); Item A audit
+  GAP/MATCH stats; v1.0.2 LOCKED carry-forward closed.
 - **Deferred (rolled to v1.0.4)** — parallel task dispatcher; real
   headless detection; `_SUBPROCESS_INCOMPATIBLE_SKILLS` audit; 600s
   subprocess hang full LOUD-FAST fix.
+- **Deferred (rolled to v1.0.5+)** — agreement_rate→keep_rate API
+  rename (schema bump); spec_lint R3 promote to error severity;
+  per-module coverage raise to 85% baseline for outliers;
+  pytest-cov proper dev dep registration; INV-31 default flip
+  cycle.
 
 ### 7.3 README + SKILL.md + CLAUDE.md
 
-- **README**: v1.0.2 docs section sobre `cross_check_telemetry.py`
-  CLI + `spec_lint.py` Checkpoint 2 integration.
-- **SKILL.md**: `### v1.0.2 notes` section documentando 5 plan
-  tasks + 2 methodology activities + cross-check dogfood
-  observations.
-- **CLAUDE.md**: v1.0.2 release notes pointer.
+- **README**: v1.0.3 docs section sobre template alignment audit
+  artifact + Item B Windows fix + close-task convention requirement.
+- **SKILL.md**: `### v1.0.3 notes` section documentando 5 plan
+  tasks + 2 methodology activities + close-task automation
+  enforcement (Q2 Option B).
+- **CLAUDE.md**: v1.0.3 release notes pointer.
 
 ---
 
-## 8. Risk register v1.0.2
+## 8. Risk register v1.0.3
 
-(Extends spec-base R1-R7 con adiciones de brainstorming
-2026-05-06.)
+(Extends spec-base R1-R8 + R9-R10 added per brainstorming Q2 +
+hybrid methodology.)
 
-- **R1** (spec-base): Item D dogfood puede surfacear production
-  bug en cross-check path no-cubierto por v1.0.0 unit tests.
-  Mitigation: if surfaces, mini-cycle TDD fix in v1.0.2 if scope
-  minimal; otherwise abort + new cycle v1.0.2.1.
-- **R2** (spec-base): Item C R1-R5 rules pueden ser too strict y
-  rechazar specs legitimas (especialmente R3 monotonous headers).
-  Mitigation: Q3 dictamina R3=warning inicial; promote a error en
-  v1.0.5+ despues de empirical confidence.
-- **R3** (spec-base): Item G coverage <85% baseline puede surfacear
-  modulos legitimamente bajo-coverage. Mitigation: Q4 dictamina
-  measure-baseline-first + threshold = floor(baseline) - 2%; final
-  value documented en task close + CHANGELOG.
-- **R4** (spec-base): Item E recovery exercise puede fail si
-  v1.0.2 own-cycle drives `/brainstorming` interactivamente Y
-  `--resume-from-magi` mid-cycle. Mitigation: empirical validation
-  con fallback a manual `python skills/magi/scripts/run_magi.py`
-  (precedente v1.0.0, v1.0.1).
-- **R5** (spec-base): Item F meta-test puede have false-positives
-  en wrappers internos. Mitigation: explicit `_EXCLUDED_FILES` con
-  `superpowers_dispatch.py` + 4 test escenarios (F-1..F-4)
-  cubriendo edge cases.
+- **R1** (spec-base): Item A audit may surface MANY gaps. Mitigation:
+  prioritize gaps by severity (CRITICAL = fix in Track Beta;
+  WARNING/INFO = defer to v1.0.4); audit doc allows Action column to
+  document deferral with rationale.
+- **R2** (spec-base): Item B Windows fix may require deeper changes
+  than expected. Mitigation: 3-step ladder (shorter prefix → `\\?\`
+  syntax → project-relative temp dir); if scope spike, reduce to
+  minimum viable + defer full to v1.0.4.
+- **R3** (spec-base): Item C drift detector regex may break existing
+  fixtures. Mitigation: thorough regression test suite covering both
+  true positives + false positives; backward compat verified by
+  existing test_drift.py passing.
+- **R4** (spec-base): Item D autoregen may interact unexpectedly
+  with `--resume-from-magi`. Mitigation: Activity E' empirical
+  validation catches; if surfaces, adjust autoregen to skip on
+  flag detected (or document idempotency works correctly).
+- **R5** (spec-base): Item E close-task convention may surface
+  fundamental disagreement between subagent ergonomics + drift
+  detector. Mitigation: Q2 brainstorming chose Option B (codify via
+  existing `/sbtdd close-task` command); enforced via doc + smoke
+  test; subagents can use `--skip-spec-review` escape valve for
+  speed.
 - **R6** (spec-base): Bundle scope multi-pillar aumenta riesgo de
-  Loop 2 non-convergence vs v1.0.1 single-pillar. Mitigation: Q2
-  reclasificacion D + E como methodology reduces visible scope a
-  MAGI; G2 binding fallback defer F + G a v1.0.3 si Loop 2 iter 3
-  no converge.
-- **R7** (spec-base): Telemetry script (Item A) consume artifacts
-  malformados de pre-v1.0.0 cycles si operator runs en project
-  con legacy `.claude/magi-cross-check/`. Mitigation: skip
-  malformed files con stderr breadcrumb (escenario A-3).
-- **R8** (NEW brainstorming): Item D dogfood puede surface
-  infinite loop en `_loop2_with_cross_check` (untested combination
-  cross-check + carry-forward + Loop 2 escalation). Mitigation:
-  `auto_magi_max_iterations: 5` cap protects budget; manual escape
-  via Ctrl+C + manual run_magi.py fallback (sec.6.4 verbatim
-  command warm).
-- **R9** (NEW brainstorming): Item G coverage measurement runtime
-  puede impactar NF-A target (~30-60s extra). Mitigation: scope
-  coverage source a `skills/sbtdd/scripts/` only; exclude `tests/`
-  y `templates/`. Re-evaluate threshold si NF-A breached en task
-  close.
-- **R10** (NEW brainstorming): spec-behavior.md generada por
-  brainstorming session puede fail R3 monotonic si tiene header
-  skips. Mitigation: hand-craft monotonic headers (este doc:
-  `## 1` a `## 10` monotonic); R3 es warning-only per Q3 anyway
-  (no bloquea Loop 2 propio).
+  Loop 2 non-convergence. Mitigation: G2 binding scope-trim ladder
+  defer Pillar C + methodology a v1.0.4 si Loop 2 iter 3 no converge.
+- **R7** (spec-base): Activity D' could fail again if Item B fix
+  incomplete; Activity E' could fail if `--resume-from-magi` path
+  has regression. Mitigation: methodology activities are non-blocking
+  for ship — document failures + defer to v1.0.4.
+- **R8** (spec-base): Template alignment may reveal template defects.
+  Mitigation: audit doc Action column allows "template amendment"
+  proposal; physical update to template file out-of-scope (sister
+  project).
+- **R9** (NEW Q2 brainstorming): Option B close-task codification
+  adds ~1-2 min per task close (INV-31 spec-reviewer overhead).
+  Mitigation: Track Beta has 4 tasks; total ~4-8 min across cycle;
+  `--skip-spec-review` escape valve available for non-INV-31-blocking
+  workflows.
+- **R10** (NEW hybrid methodology): Activity E' smoke test may hit
+  `_commit_approved_artifacts` conflict since artifacts are already
+  committed by orchestrator before E' runs. Mitigation: methodology
+  activity is non-gating; if conflict surfaces, document observable
+  + roll forward to v1.0.4 fix; Activity D' methodology runs FIRST
+  (validates cross-check infra), Activity E' runs LAST as final
+  smoke test, even failure doesn't block ship.
 
 ---
 
-## 9. Acceptance criteria final v1.0.2
+## 9. Acceptance criteria final v1.0.3
 
-v1.0.2 ship-ready cuando:
+v1.0.3 ship-ready cuando:
 
-### 9.1 Functional Items A-G
+### 9.1 Functional Items A-E + Activities D'-E'
 
-- **F1**. F100-F104: telemetry script exists, CLI flags, markdown
-  + JSON output, error handling.
-- **F2**. F105-F106: diff threading regression test +
-  empirical observation documented (Item D).
-- **F3**. F107-F112: spec_lint module + 5 rules + Checkpoint 2
-  integration + CLI standalone.
-- **F4**. F113-F115: dogfood cycle ran + telemetry consumed +
-  Process notes (Item D).
-- **F5**. F116-F117: recovery flag empirical exercised + Process
-  notes (Item E).
-- **F6**. F118-F120: meta-test AST walk + 4 escenarios (F-1..F-4).
-- **F7**. F121-F123: coverage config + Makefile + baseline doc +
-  final threshold.
+- **F1**. F124-F127: template alignment audit document + alignment
+  test + GAP fixes routed.
+- **F2**. F128-F131: Windows long-filename fix + reproduction test
+  + empirical Activity D' validation.
+- **F3**. F132-F134: drift detector line-anchored regex + regression
+  + backward compat.
+- **F4**. F135-F137: spec-snapshot autoregen + state file update +
+  test.
+- **F5**. F138-F139: close-task convention codification + impl + docs.
+- **F6**. F140-F142: Activity D' Linux/POSIX dogfood empirical
+  validation + telemetry consumption.
+- **F7**. F143-F144: Activity E' true `--resume-from-magi` smoke
+  test (non-gating) + observable gaps documented.
 
 ### 9.2 No-functional
 
-- **NF-A**. `make verify` clean: pytest + ruff check + ruff format
-  + mypy --strict + coverage >= floor(baseline) - 2%, runtime
-  <= 160s. Soft-target <= 145s.
-- **NF-B**. Tests baseline 1059 + 1 skipped + ~30-35 nuevos =
-  ~1089-1094 final.
-- **NF-C**. Cross-platform (Windows + POSIX).
+- **NF-A**. `make verify` clean: pytest + ruff check + ruff format +
+  mypy --strict + coverage >= 88%, runtime <= 160s. Soft-target
+  <= 150s.
+- **NF-B**. Tests baseline 1093 + 1 skipped + ~13-22 nuevos =
+  ~1106-1115 final (revised down vs spec-base 20-35).
+- **NF-C**. Cross-platform (Windows + POSIX) — Item B specifically
+  validates Windows.
 - **NF-D**. Author/Version/Date headers en archivos modificados/
   nuevos.
 - **NF-E**. Zero modificacion a modulos frozen excepto los
-  enumerados: `spec_cmd.py` (Item C integration),
-  `pre_merge_cmd.py` (Item B regression test only — no muta
-  modulo), nuevos modulos (`spec_lint.py`,
-  `cross_check_telemetry.py`, meta-test).
+  enumerados: `pre_merge_cmd.py` (Item B), `drift.py` (Item C),
+  `spec_cmd.py` (Item D), `state_file.py` (Item D field handling),
+  `subprocess_utils.py` (Item B helper if needed),
+  `skills/sbtdd/SKILL.md` + `templates/CLAUDE.local.md.template`
+  (Item E doc).
 
 ### 9.3 Process
 
 - **P1**. MAGI Checkpoint 2 verdict >= `GO_WITH_CAVEATS` full per
-  INV-28. Iter cap=3 HARD per G1 binding; NO INV-0 path.
+  INV-28. Iter cap=3 HARD per G1 binding; NO INV-0 path. 3-cycle
+  no-override streak preserved (becomes 4-cycle with v1.0.3 ship).
 - **P2**. Pre-merge Loop 1 clean-to-go + Loop 2 verdict >=
   `GO_WITH_CAVEATS` full no-degraded.
-- **P3**. CHANGELOG `[1.0.2]` entry written con secciones Added /
-  Changed / Process notes + Item D dogfood findings + Item E
-  recovery findings + per-module coverage baseline + cross-check
-  telemetry observations.
-- **P4**. Version bump 1.0.1 -> 1.0.2 sync `plugin.json` +
+- **P3**. CHANGELOG `[1.0.3]` entry written con secciones Added /
+  Changed / Process notes + Activity D' empirical findings +
+  Activity E' empirical findings + template alignment GAP/MATCH
+  stats + R10 commit-conflict observability.
+- **P4**. Version bump 1.0.2 -> 1.0.3 sync `plugin.json` +
   `marketplace.json`.
-- **P5**. Tag `v1.0.2` + push (con autorizacion explicita user).
+- **P5**. Tag `v1.0.3` + push (con autorizacion explicita user).
 - **P6**. `/receiving-code-review` skill applied to every Loop 2
   iter findings sin excepcion.
-- **P7**. Empirical proof-of-recovery for `--resume-from-magi`
-  ejercido end-to-end mid-cycle (cierra v1.0.1's deferred P7 W5
-  caspar disclosure).
-- **P8**. Empirical proof-of-cross-check: own-cycle dogfood ran +
-  telemetry artifacts produced + Process notes document
-  observations (cierra Item D).
+- **P7**. Activity D' Linux/POSIX dogfood: cross-check infrastructure
+  validated empirically post Item B fix.
+- **P8**. Activity E' true `--resume-from-magi` smoke test exercised
+  post Track-close; observable gaps documented (non-gating).
 
 ### 9.4 Distribution
 
 - **D1**. Plugin instalable desde `BolivarTech/sbtdd-workflow`
   marketplace (`bolivartech-sbtdd`).
 - **D2**. Cross-artifact coherence tests actualizados (CHANGELOG,
-  CLAUDE.md, README, SKILL.md mention v1.0.2 ship + 5 plan tasks
-  + 2 methodology activities).
-- **D3**. Nuevos modulos documentados:
-  - `cross_check_telemetry.py` en README + SKILL.md (CLI usage).
-  - `spec_lint.py` en README + SKILL.md (Checkpoint 2 integration).
-  - Coverage threshold en README (final value + rationale).
+  CLAUDE.md, README, SKILL.md mention v1.0.3 ship + 5 plan tasks
+  + 2 methodology activities + audit document).
+- **D3**. Nuevos artifacts documentados:
+  - `docs/audits/v1.0.3-magi-gate-template-alignment.md` (audit
+    artifact).
+  - `tests/test_magi_template_alignment.py` (alignment test).
+  - Item B cross-check Windows fix changes in CHANGELOG.
 
 ---
 
-## 9.5 Inherited invariants from v0.4.x and v1.0.1 (cross-artifact wording)
+## 9.5 Inherited invariants from v0.4.x and v1.0.1+v1.0.2 (cross-artifact wording)
 
 The HF1 manual-synthesis recovery breadcrumb wording (canonical
 single-line text `[sbtdd magi] synthesizer failed; manual synthesis
 recovery applied`) is preserved verbatim across spec / CHANGELOG /
 impl per the cross-artifact alignment contract
-(`tests/test_changelog.py`). v1.0.2 ships no behavioral change
-to this path; the wording is repeated here so the v0.4.x +
-v1.0.1 invariant survives the v1.0.2 spec rewrite.
+(`tests/test_changelog.py`). v1.0.3 ships no behavioral change to
+this path.
 
-The INV-37 composite-signature output validation tripwire
-(v1.0.1 Item A0) is also preserved verbatim — `_run_spec_flow`
-mtime + size + sha256 check applies during v1.0.2 own-cycle if
-operator drives `/sbtdd spec` instead of using
-`--resume-from-magi`. v1.0.2 Item E exercises the
-`--resume-from-magi` path, NOT the standard flow, so INV-37 does
-not fire during the recovery exercise (path skipped entirely).
+The INV-37 composite-signature output validation tripwire (v1.0.1
+Item A0) is also preserved verbatim — `_run_spec_flow` mtime + size
++ sha256 check applies during v1.0.3 own-cycle if operator drives
+`/sbtdd spec` instead of using `--resume-from-magi`. Item D autoregen
+runs in `_run_magi_checkpoint2` post-MAGI-pass branch, NOT in
+`_run_spec_flow` lint timing path; INV-37 unaffected.
+
+The Item C v1.0.2 `spec_lint` gate (R1-R5 rules with R3 warning per
+Q3) is preserved unchanged. v1.0.3 Activity E' pre-flight spec_lint
+dry-run (W5 v1.0.1 fix) catches self-inflicted R5/R1 violations
+before `--resume-from-magi` invocation.
+
+The Q4 v1.0.2 coverage threshold = `floor(baseline) - 2%` protocol
+is preserved at 88% (measured baseline 90.12% in v1.0.2 ship).
+v1.0.3 must not regress below 88%.
 
 ---
 
 ## 10. Referencias
 
-- Spec base v1.0.2: `sbtdd/spec-behavior-base.md`
-  (commit en branch `feature/v1.0.2-bundle`).
-- Contrato autoritativo v0.1+v0.2+v0.3+v0.4+v0.5+v1.0+v1.0.1
+- Spec base v1.0.3: `sbtdd/spec-behavior-base.md`
+  (commit en branch `feature/v1.0.3-bundle`).
+- Contrato autoritativo v0.1+v0.2+v0.3+v0.4+v0.5+v1.0+v1.0.1+v1.0.2
   frozen: `sbtdd/sbtdd-workflow-plugin-spec-base.md`.
+- v1.0.2 ship record: tag `v1.0.2` (commit `80731e6`); merge
+  `3169767` on `main`.
 - v1.0.1 ship record: tag `v1.0.1` (commit `8fc0db4` on `main`).
 - v1.0.0 ship record: tag `v1.0.0` (commit `0992407` on `main`).
-- v1.0.1 LOCKED commitments rolled forward a v1.0.2 per CHANGELOG
-  `[1.0.1]` Deferred section + Process notes rolled-forward
-  bullets.
-- v1.0.0 Feature G cross-check: `pre_merge_cmd._loop2_with_cross_check`
-  shipped en v1.0.0 con `magi_cross_check: false` default; v1.0.2
-  Item D primer empirical exercise con toggle a `true`.
-- v1.0.1 INV-37: composite-signature tripwire en
-  `spec_cmd._run_spec_flow` (preservado en v1.0.2; sec.9.5).
-- v1.0.3 LOCKED template alignment audit: memory
-  `project_v103_template_alignment_audit.md` (sole pillar, ~1-2
-  dias, sequenced first so v1.0.4+ runs against template-aligned
-  baseline).
+- v1.0.2 LOCKED carry-forward to v1.0.3 per CHANGELOG `[1.0.2]`
+  Process notes + Deferred (rolled to v1.0.3) section.
+- v1.0.3 LOCKED original sole-pillar: memory
+  `project_v103_template_alignment_audit.md` (template alignment
+  audit per user directive 2026-05-03).
+- Template canonical source:
+  `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md` (411
+  lines, synthesized 2026-05-01 from sbtdd-workflow + MAGI plugin
+  empirical learnings).
 - v1.0.4 LOCKED items: memory
   `project_v104_parallel_task_dispatcher.md` +
-  `project_v104_subprocess_headless_detection.md`.
+  `project_v104_subprocess_headless_detection.md` (sequenced AFTER
+  v1.0.3 so v1.0.4+ runs against template-aligned baseline).
 - Brainstorming refinement decisions (2026-05-06):
-  - Q1 — 2-track parallel partition (Alpha = A+B, Beta = C+F+G).
-  - Q2 — D + E reclassified as methodology activities (no plan
-    task TDD-cycle); plan tasks = A + B + C + F + G (5 items).
-  - Q3 — `spec_lint` R3 severity = warning inicial; promote a
-    error en v1.0.5+.
-  - Q4 — coverage threshold = floor(baseline) - 2%, measured
-    en task close de Item G.
-- Branch: trabajo en `feature/v1.0.2-bundle` (branched off `main`
-  HEAD `8fc0db4` = v1.0.1 ship).
+  - Q1 — 2-track parallel partition: Track Alpha = A audit-only
+    (no production code); Track Beta = B + C + D + E (all code +
+    doc fixes).
+  - Q2 — Item E close-task convention codification via Option B
+    (`/sbtdd close-task` automation, doc-only enforcement).
+  - Hybrid methodology (pre-brainstorming user decision): Opcion A
+    manual `run_magi.py` for Checkpoint 2 dispatch; Opcion B
+    `/sbtdd spec --resume-from-magi` as Activity E' smoke test post
+    Track-close.
+- Branch: trabajo en `feature/v1.0.3-bundle` (branched off `main`
+  HEAD `3169767` = v1.0.2 merge commit).

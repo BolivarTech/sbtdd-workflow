@@ -25,6 +25,7 @@ import dataclasses
 import json
 import re
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -1249,6 +1250,23 @@ def _dispatch_requesting_code_review(
 ) -> dict[str, Any]:
     """Dispatch ``/requesting-code-review`` skill with cross-check meta-prompt.
 
+    v1.0.3 Item B fix (Windows WinError 206): write the prompt content to a
+    project-relative temp file (``.claude/magi-cross-check/.tmp/prompt-<id>.md``)
+    and pass an ``@<filepath>`` reference in argv -- instead of packing the
+    entire prompt (including diff up to ~200KB) into a single ``-p <prompt>``
+    argv element which exceeds Windows cmdline limits. Defense-in-depth: the
+    project-relative path also stays well under the MAX_PATH 260 limit, so
+    Windows long-path issues are side-stepped at the same time.
+
+    The argv-side payload is a small ``@<relative-path>`` token; the claude
+    CLI resolves the ``@file`` reference inside the prompt body so the
+    receiving skill sees the full content.
+
+    The temp file is removed via ``try/finally`` after the dispatch, so a
+    crash mid-call still cleans up. We use a short ``uuid4().hex[:8]`` run
+    id to keep the filename short (defense-in-depth for MAX_PATH) and to
+    avoid collisions across concurrent dispatches.
+
     Parses the skill's stdout as JSON. Returns decisions dict per
     :func:`_build_cross_check_prompt` contract. Tests monkeypatch this
     function (or the underlying ``superpowers_dispatch.requesting_code_review``)
@@ -1273,11 +1291,12 @@ def _dispatch_requesting_code_review(
 
     Args:
         diff: Cumulative diff context (forwarded for callers that wire
-            it through ``args``; current minimal impl passes only the
-            prompt as a positional arg).
+            it through ``args``; current minimal impl writes the prompt
+            to a temp file and passes ``@<filepath>``).
         prompt: Meta-review prompt built by :func:`_build_cross_check_prompt`.
         cwd: Working directory for the skill invocation (typically
-            project root).
+            project root). Also used as repo root for the project-relative
+            temp file. ``None`` falls back to :func:`Path.cwd`.
         **kwargs: Forwarded to the wrapper.
 
     Returns:
@@ -1285,10 +1304,36 @@ def _dispatch_requesting_code_review(
         On JSON parse failure, additionally carries ``_dispatch_failure``
         and ``_failure_reason`` markers.
     """
-    result = superpowers_dispatch.requesting_code_review(
-        args=[prompt],
-        cwd=cwd,
-    )
+    # v1.0.3 Item B: project-relative temp dir + @file reference. The repo
+    # root is ``cwd`` when supplied (production wiring) else ``Path.cwd()``
+    # (test fixtures via ``monkeypatch.chdir``).
+    repo_root = Path(cwd) if cwd else Path.cwd()
+    tmp_dir = repo_root / ".claude" / "magi-cross-check" / ".tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    # Loop 2 iter 1 W7 caspar fix: bump uuid hex truncation to 16 chars
+    # (from 8) for v1.0.4 parallel task dispatcher forward-compat. With
+    # 8 hex chars (~4 billion combinations), parallel dispatch
+    # collision probability is non-zero under high concurrency; 16 hex
+    # chars (~1.8e19 combinations) is collision-safe by construction.
+    run_id = uuid.uuid4().hex[:16]
+    prompt_file = tmp_dir / f"prompt-{run_id}.md"
+
+    # Loop 2 iter 1 W6 caspar fix: theatrical `is_relative_to` precondition
+    # removed. tmp_dir is constructed as `repo_root / ".claude" / ...`,
+    # which structurally guarantees the relative_to call below cannot
+    # raise ValueError -- the precondition was vacuous in the happy path
+    # AND lacked test coverage for the unhappy path. The try/finally
+    # block already provides cleanup safety for any other error class.
+    try:
+        atfile_arg = f"@{prompt_file.relative_to(repo_root).as_posix()}"
+        prompt_file.write_text(prompt, encoding="utf-8")
+        result = superpowers_dispatch.requesting_code_review(
+            args=[atfile_arg],
+            cwd=cwd,
+        )
+    finally:
+        prompt_file.unlink(missing_ok=True)
+
     output_text = getattr(result, "stdout", "") or "{}"
     try:
         parsed: dict[str, Any] = json.loads(output_text)

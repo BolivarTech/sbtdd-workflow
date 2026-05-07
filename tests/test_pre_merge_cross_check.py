@@ -11,6 +11,7 @@ distinct-from-dispatch-failure (melchior iter 4 W).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -1245,3 +1246,198 @@ def test_b2_cross_check_prompt_omits_diff_when_empty():
 
     assert "## Cumulative diff under review" not in prompt
     assert "MAGI verdict: GO_WITH_CAVEATS" in prompt
+
+
+# -----------------------------------------------------------------------------
+# v1.0.3 Item B (Windows fix) — escenarios B-1..B-5 from spec sec.4
+#
+# Refined iter 2 root-cause: WinError 206 fires because the cross-check prompt
+# (with diff embedded ~200KB) is packed into a single ``-p <prompt>`` argv
+# argument that exceeds the Windows cmdline limit. The fix is to write the
+# prompt to a project-relative temp file (``.claude/magi-cross-check/.tmp/``)
+# and pass an ``@<filepath>`` reference in argv so the payload stays small.
+# Defense-in-depth: the project-relative path also stays under MAX_PATH 260.
+#
+# Tests below monkeypatch ``subprocess_utils.run_with_timeout`` (the lowest
+# layer the dispatch eventually hits) to capture the cmd argv list, so we can
+# directly assert the prompt content does NOT leak into argv. Names are
+# qualified ``v103_*`` to avoid pytest shadowing of the older ``test_b1_*`` /
+# ``test_b2_*`` prompt-content tests above.
+# -----------------------------------------------------------------------------
+
+
+def _capture_dispatch_argv(monkeypatch) -> list[list[str]]:
+    """Monkeypatch subprocess_utils.run_with_timeout to capture argv per call.
+
+    Returns the same list reference the fake appends to, so callers can
+    inspect captured invocations after dispatch returns.
+    """
+    import subprocess_utils
+
+    captured: list[list[str]] = []
+
+    def fake_run_with_timeout(cmd, *args, **kwargs):
+        captured.append(list(cmd))
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = '{"decisions": []}'
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run_with_timeout)
+    return captured
+
+
+def test_b1_b2_v103_cross_check_uses_atfile_reference(monkeypatch, tmp_path):
+    """B-1 + B-2: cross-check passes prompt via @<filepath>, not inline argv.
+
+    Captures the cmd argv passed to subprocess_utils.run_with_timeout by
+    superpowers_dispatch (invoked via pre_merge_cmd._dispatch_requesting_code_review).
+    Asserts the prompt content is NOT packed into argv (which would trigger
+    WinError 206 on Windows for ~200KB cross-check diffs); instead, an
+    ``@<filepath>`` reference appears.
+    """
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    captured_cmds = _capture_dispatch_argv(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    large_prompt = "## Cumulative diff under review\n\n" + ("x" * 50000)
+    diff = "--- a/foo.py\n+++ b/foo.py\n" + ("x" * 50000)
+
+    _dispatch_requesting_code_review(diff=diff, prompt=large_prompt)
+
+    assert captured_cmds, "No subprocess invocation captured"
+    cmd = captured_cmds[0]
+    cmd_text = " ".join(cmd)
+
+    # Structural assertion (Caspar W#1 polish): the prompt content MUST NOT
+    # leak into argv. Using a structural check on the actual prompt body
+    # rather than an arbitrary 2048-char threshold (which would be
+    # platform-fragile and meaningless if e.g. argv ever encodes other
+    # large fields legitimately).
+    assert ("x" * 50000) not in cmd_text, "Prompt content leaked into argv"
+    # Loop 2 iter 1 W5 caspar fix: tighten @ shape assertion. Verify a
+    # token starts with `@` AND the path component points under
+    # `.claude/magi-cross-check/.tmp/` (project-relative). Avoids the
+    # bare-substring false-positive class where any `@` anywhere in
+    # argv (e.g. email-style tokens) would pass.
+    atfile_tokens = [
+        part
+        for part in cmd
+        if isinstance(part, str)
+        and "@" in part
+        and "magi-cross-check/.tmp" in part.replace("\\", "/")
+    ]
+    assert atfile_tokens, (
+        f"Expected an @<filepath> token pointing under .claude/magi-cross-check/.tmp/; "
+        f"got argv: {cmd!r}"
+    )
+
+
+def test_b_content_equality_v103_temp_file_matches_prompt_body(monkeypatch, tmp_path):
+    """Loop 2 iter 1 W4 caspar fix: temp file content equals prompt body during dispatch.
+
+    Captures the prompt file path from argv + reads its content during
+    dispatch (BEFORE try/finally cleanup unlinks the file), asserts
+    byte-equality with the prompt argument. Closes the test-fidelity gap
+    where B-tests verified path SHAPE but never the actual write content.
+    """
+    import subprocess_utils
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    monkeypatch.chdir(tmp_path)
+    expected_prompt = "## Cumulative diff under review\n\n" + ("PAYLOAD" * 1000)
+    captured_content: list[str] = []
+
+    def fake_run_with_timeout(cmd, **kwargs):
+        # Find the @<filepath> token in argv and read it BEFORE cleanup
+        for tok in cmd:
+            if (
+                isinstance(tok, str)
+                and "@" in tok
+                and "magi-cross-check/.tmp" in tok.replace("\\", "/")
+            ):
+                # tok looks like "@<rel-posix-path>" embedded in the prompt body
+                idx = tok.index("@")
+                rel_path = tok[idx + 1 :].split()[0]
+                full_path = tmp_path / rel_path
+                if full_path.exists():
+                    captured_content.append(full_path.read_text(encoding="utf-8"))
+                break
+        from unittest.mock import MagicMock
+
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = '{"decisions": []}'
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run_with_timeout)
+    _dispatch_requesting_code_review(diff="d", prompt=expected_prompt)
+
+    assert captured_content, "Did not capture prompt file content during dispatch"
+    assert captured_content[0] == expected_prompt, (
+        "Temp file content must match prompt body byte-for-byte"
+    )
+
+
+def test_b3_v103_temp_file_is_project_relative(monkeypatch, tmp_path):
+    """B-3: temp prompt file lives under .claude/magi-cross-check/.tmp/ (project-relative).
+
+    Side-steps Windows MAX_PATH 260 limit by keeping the path short relative
+    to repo root. Defense-in-depth alongside the @file reference (B-1+B-2).
+    """
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    captured_cmds = _capture_dispatch_argv(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    _dispatch_requesting_code_review(diff="x", prompt="## Test prompt")
+
+    assert captured_cmds
+    cmd_text = " ".join(captured_cmds[0])
+
+    match = re.search(r"@(\S+)", cmd_text)
+    assert match, f"No @<filepath> reference in argv: {cmd_text!r}"
+    filepath_str = match.group(1)
+
+    posix_path = filepath_str.replace("\\", "/")
+    assert ".claude/magi-cross-check/.tmp" in posix_path, (
+        f"Temp file not project-relative: {filepath_str}"
+    )
+
+
+def test_b4_v103_short_prompts_use_uniform_path(monkeypatch, tmp_path):
+    """B-4: small prompts also use @file reference (no regression for typical case)."""
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    captured_cmds = _capture_dispatch_argv(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    _dispatch_requesting_code_review(diff="", prompt="## Tiny prompt")
+
+    assert captured_cmds, "Even short prompts dispatch via subprocess"
+    cmd_text = " ".join(captured_cmds[0])
+    assert "@" in cmd_text, "Uniform @file reference path even for small prompts"
+
+
+def test_b5_v103_temp_file_cleanup(monkeypatch, tmp_path):
+    """B-5: temp prompt file is cleaned up after dispatch (no leak).
+
+    Caspar W#3 polish: detect ANY leaked file in the temp dir post-dispatch
+    (not just prompt-*.md). If the implementation creates other temp files
+    unexpectedly, B-5 surfaces it.
+    """
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    monkeypatch.chdir(tmp_path)
+    tmp_dir = tmp_path / ".claude" / "magi-cross-check" / ".tmp"
+    initial_files = set(tmp_dir.glob("*")) if tmp_dir.exists() else set()
+
+    _capture_dispatch_argv(monkeypatch)
+    _dispatch_requesting_code_review(diff="x", prompt="## Cleanup test")
+
+    final_files = set(tmp_dir.glob("*")) if tmp_dir.exists() else set()
+    leaked = final_files - initial_files
+    assert not leaked, f"Files leaked under {tmp_dir} after dispatch: {leaked}"
