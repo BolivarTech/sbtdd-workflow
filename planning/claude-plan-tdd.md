@@ -755,7 +755,7 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_invoke_skill_callsites_audit.py`:
 
@@ -825,12 +825,12 @@ class TestHeadlessGateCallsiteConsistency:
         ast.parse(path.read_text(encoding="utf-8"))
 ```
 
-- [ ] **Step 2: Run tests to verify either PASS (if no offenders) OR FAIL (if surfaced)**
+- [x] **Step 2: Run tests to verify either PASS (if no offenders) OR FAIL (if surfaced)**
 
 Run: `pytest tests/test_invoke_skill_callsites_audit.py::TestHeadlessGateCallsiteConsistency -v`
 Expected: 2/2 PASS (whitelisted brainstorming + writing_plans wrappers; no other callsites pass override). If FAIL, investigate offenders + decide whitelist or remove.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -838,13 +838,13 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: No production code changes expected**
+- [x] **Step 4: No production code changes expected**
 
 The test is purely a regression guard. Production code is correct as of Task 4 close.
 
 If Step 2 surfaced offenders, fix each by either: (a) removing the override (preferred), OR (b) adding to WHITELIST with rationale (only if subagent has explicit reason e.g. interactive Loop 1 triage callsite).
 
-- [ ] **Step 5: Run tests to verify PASS**
+- [x] **Step 5: Run tests to verify PASS**
 
 Run: `pytest tests/test_invoke_skill_callsites_audit.py -v`
 Expected: All audit tests PASS.
@@ -852,14 +852,14 @@ Expected: All audit tests PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 6: close-phase Green (no-op or fix commit)**
+- [x] **Step 6: close-phase Green (no-op or fix commit)**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Refactor Phase
 
-- [ ] **Step 7: Skip refactor (audit test is canonical form)**
-- [ ] **Step 8: close-phase Refactor + Step 9: close-task**
+- [x] **Step 7: Skip refactor (audit test is canonical form)**
+- [x] **Step 8: close-phase Refactor + Step 9: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
