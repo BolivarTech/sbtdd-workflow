@@ -2210,6 +2210,18 @@ def _phase2_task_loop(
         state: Current :class:`SessionState` (entry phase may be
             ``red``, ``green``, or ``refactor``; auto starts from there).
         cfg: Plugin configuration (for ``auto_verification_retries``).
+        dispatch_plan: Optional batched dispatch plan from
+            :func:`_build_dispatch_plan_parallel` /
+            :func:`_build_dispatch_plan_sequential`. When ``None``
+            (default) or when all batches are singletons, the legacy
+            while-loop handles all tasks unchanged (v1.0.3 plan-text-
+            order behaviour). When supplied with multi-task batches,
+            those batches are dispatched concurrently via
+            :func:`_dispatch_batch_concurrent` and their tasks are
+            advanced via parent-side ``mark_and_advance`` per task.
+            Singleton batches in the plan still flow through the
+            legacy while-loop for the full inline TDD cycle. v1.0.4
+            sub-issue 1 (consumer-side wiring).
 
     Returns:
         The final :class:`SessionState` after the last task's close-task
@@ -2219,7 +2231,7 @@ def _phase2_task_loop(
     Raises:
         DriftError: Drift detected at entry.
         VerificationIrremediableError: Phase verification exhausted the
-            retry budget.
+            retry budget OR concurrent batch dispatch failed.
     """
     root: Path = ns.project_root
     retries = (
