@@ -5,7 +5,7 @@
 > Checkpoint 2 STRONG GO unanimous). Frontmatter required by spec_lint
 > R5 (Item C R5 enforced from this v1.0.2 cycle onward).
 >
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax (open + closed bracket forms) for tracking.
 
 **Goal:** Ship v1.0.2 — close the 4 LOCKED items rolled forward from the v1.0.1 pivot (cross-check telemetry, diff threading regression test, spec_lint enforcement, own-cycle dogfood) plus 3 defensive items (recovery empirical, meta-test, coverage threshold). 5 plan tasks (A, B, C, F, G) over 2 parallel subagent tracks; 2 methodology activities (D, E) executed by the orchestrator.
 
@@ -48,7 +48,7 @@ Covers escenarios A-1, A-2, A-3 from spec sec.§4.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 #!/usr/bin/env python3
@@ -183,7 +183,7 @@ def test_aggregate_missing_root_raises_filenotfounderror(tmp_path):
 
 Save to `tests/test_cross_check_telemetry.py`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 ```bash
 python -m pytest tests/test_cross_check_telemetry.py -v
@@ -191,7 +191,7 @@ python -m pytest tests/test_cross_check_telemetry.py -v
 
 Expected: 3 FAILures with `ModuleNotFoundError: No module named 'cross_check_telemetry'`.
 
-- [ ] **Step 3: Verify + commit Red phase**
+- [x] **Step 3: Verify + commit Red phase**
 
 Per `CLAUDE.local.md` §3 Red phase rule: test must fail "for the right reason" (absence of implementation). `ModuleNotFoundError` qualifies. Bypass `make verify` for Red commit (`pytest` would fail) by running individual non-pytest checks:
 
@@ -205,7 +205,7 @@ git commit -m "test: A-1/A-2/A-3 tripwires for cross_check_telemetry.aggregate()
 
 #### Green Phase
 
-- [ ] **Step 4: Implement minimum**
+- [x] **Step 4: Implement minimum**
 
 Create `scripts/` directory if it does not exist:
 
@@ -345,7 +345,7 @@ def aggregate(
     )
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 ```bash
 python -m pytest tests/test_cross_check_telemetry.py -v
@@ -353,7 +353,7 @@ python -m pytest tests/test_cross_check_telemetry.py -v
 
 Expected: 3 PASS.
 
-- [ ] **Step 6: Verify + commit Green phase**
+- [x] **Step 6: Verify + commit Green phase**
 
 ```bash
 make verify
@@ -363,11 +363,11 @@ git commit -m "feat: cross_check_telemetry.aggregate() core (A-1/A-2/A-3)"
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor (optional cleanup)**
+- [x] **Step 7: Refactor (optional cleanup)**
 
 Review `_parse_iter` — acceptable as-is. Confirm `from __future__ import annotations` at top. If no changes needed, skip step 8.
 
-- [ ] **Step 8: Verify + commit Refactor phase**
+- [x] **Step 8: Verify + commit Refactor phase**
 
 ```bash
 make verify
@@ -378,7 +378,7 @@ make verify
 
 #### Task close
 
-- [ ] **Step 9: Mark `[x]` in plan + close task**
+- [x] **Step 9: Mark `[x]` in plan + close task**
 
 Edit `planning/claude-plan-tdd.md` (the approved plan, copied from this org file post-Checkpoint-2) to mark Task 1 `[x]`.
 
@@ -397,7 +397,7 @@ git commit -m "chore: mark task 1 complete (A core aggregate)"
 
 #### Red Phase
 
-- [ ] **Step 1: Append failing tests**
+- [x] **Step 1: Append failing tests**
 
 Append to `tests/test_cross_check_telemetry.py`:
 
@@ -440,9 +440,9 @@ def test_a4_empty_markdown_no_iterations_message(tmp_path):
     assert "No iterations found" in md
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/test_cross_check_telemetry.py::test_a4_markdown_output_well_formed -v`. Expected FAIL with `ImportError: cannot import name 'format_markdown'`.
+- [x] **Step 2: Run** — `pytest tests/test_cross_check_telemetry.py::test_a4_markdown_output_well_formed -v`. Expected FAIL with `ImportError: cannot import name 'format_markdown'`.
 
-- [ ] **Step 3: Verify + commit Red**
+- [x] **Step 3: Verify + commit Red**
 
 ```bash
 python -m ruff check tests/test_cross_check_telemetry.py
@@ -454,7 +454,7 @@ git commit -m "test: A-4 markdown formatter tripwire"
 
 #### Green Phase
 
-- [ ] **Step 4: Append impl**
+- [x] **Step 4: Append impl**
 
 Append to `scripts/cross_check_telemetry.py`:
 
@@ -507,7 +507,7 @@ def format_markdown(report: TelemetryReport) -> str:
     return "\n".join(lines) + "\n"
 ```
 
-- [ ] **Step 5: Run all tests pass**
+- [x] **Step 5: Run all tests pass**
 
 ```bash
 python -m pytest tests/test_cross_check_telemetry.py -v
@@ -515,7 +515,7 @@ python -m pytest tests/test_cross_check_telemetry.py -v
 
 Expected: 5 PASS.
 
-- [ ] **Step 6: Verify + Green commit**
+- [x] **Step 6: Verify + Green commit**
 
 ```bash
 make verify
@@ -523,8 +523,8 @@ git add scripts/cross_check_telemetry.py
 git commit -m "feat: A-4 markdown formatter for TelemetryReport"
 ```
 
-- [ ] **Step 7-8: Refactor + verify (skip commit if no changes)**
-- [ ] **Step 9: Task close**
+- [x] **Step 7-8: Refactor + verify (skip commit if no changes)**
+- [x] **Step 9: Task close**
 
 ```bash
 git add planning/claude-plan-tdd.md
@@ -541,7 +541,7 @@ git commit -m "chore: mark task 2 complete (A markdown formatter)"
 
 #### Red Phase
 
-- [ ] **Step 1: Append test**
+- [x] **Step 1: Append test**
 
 ```python
 def test_a5_json_output_parseable(tmp_path):
@@ -572,12 +572,12 @@ def test_a5_json_output_parseable(tmp_path):
     assert isinstance(parsed["agreement_rate"], (int, float))
 ```
 
-- [ ] **Step 2: Run** — Expected FAIL `ImportError: cannot import name 'format_json'`.
-- [ ] **Step 3: Red commit `test: A-5 JSON formatter tripwire`**
+- [x] **Step 2: Run** — Expected FAIL `ImportError: cannot import name 'format_json'`.
+- [x] **Step 3: Red commit `test: A-5 JSON formatter tripwire`**
 
 #### Green Phase
 
-- [ ] **Step 4: Append impl**
+- [x] **Step 4: Append impl**
 
 ```python
 def format_json(report: TelemetryReport) -> str:
@@ -603,8 +603,8 @@ def format_json(report: TelemetryReport) -> str:
     return json.dumps(payload, indent=2)
 ```
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: A-5 JSON formatter`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 3 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: A-5 JSON formatter`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 3 complete`**
 
 ---
 
@@ -616,7 +616,7 @@ def format_json(report: TelemetryReport) -> str:
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 def test_cli_default_format_markdown(tmp_path, capsys):
@@ -676,11 +676,11 @@ def test_cli_missing_root_exit_2(tmp_path, capsys):
     assert "not found" in captured.err.lower()
 ```
 
-- [ ] **Step 2-3: Red commit `test: CLI flag handling for cross_check_telemetry`**
+- [x] **Step 2-3: Red commit `test: CLI flag handling for cross_check_telemetry`**
 
 #### Green Phase
 
-- [ ] **Step 4: Append CLI**
+- [x] **Step 4: Append CLI**
 
 ```python
 def main(argv: list[str] | None = None) -> int:
@@ -724,8 +724,8 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: CLI entrypoint for cross_check_telemetry`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 4 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: CLI entrypoint for cross_check_telemetry`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 4 complete`**
 
 ---
 
@@ -736,7 +736,7 @@ if __name__ == "__main__":
 
 #### Red Phase
 
-- [ ] **Step 1: Append test (regression-guard mode — impl already linear)**
+- [x] **Step 1: Append test (regression-guard mode — impl already linear)**
 
 ```python
 import time
@@ -767,9 +767,9 @@ def test_a6_linear_performance_100_files(tmp_path):
     assert elapsed < 5.0, f"NF32 violation: {elapsed:.2f}s for 100 files"
 ```
 
-- [ ] **Step 2: Run** — Expected PASS (impl is already linear). If fails: invoke `/systematic-debugging`; do NOT proceed without root cause.
+- [x] **Step 2: Run** — Expected PASS (impl is already linear). If fails: invoke `/systematic-debugging`; do NOT proceed without root cause.
 
-- [ ] **Step 3: Verify + commit (regression guard)**
+- [x] **Step 3: Verify + commit (regression guard)**
 
 ```bash
 make verify
@@ -777,7 +777,7 @@ git add tests/test_cross_check_telemetry.py
 git commit -m "test: A-6 performance regression guard for aggregate()"
 ```
 
-- [ ] **Step 9: Task close `chore: mark task 5 complete`** (no Green/Refactor needed since impl is already correct).
+- [x] **Step 9: Task close `chore: mark task 5 complete`** (no Green/Refactor needed since impl is already correct).
 
 ---
 
@@ -788,7 +788,7 @@ git commit -m "test: A-6 performance regression guard for aggregate()"
 
 #### Red Phase
 
-- [ ] **Step 1: Append regression tests**
+- [x] **Step 1: Append regression tests**
 
 Append to `tests/test_pre_merge_cross_check.py`:
 
@@ -818,7 +818,7 @@ def test_b2_cross_check_prompt_omits_diff_when_empty():
     assert "MAGI verdict: GO_WITH_CAVEATS" in prompt
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 ```bash
 python -m pytest tests/test_pre_merge_cross_check.py::test_b1_cross_check_prompt_embeds_diff_when_provided tests/test_pre_merge_cross_check.py::test_b2_cross_check_prompt_omits_diff_when_empty -v
@@ -828,7 +828,7 @@ Expected: 2 PASS (impl already exists per spec sec.2.2 — `_build_cross_check_p
 
 If either fails: invoke `/systematic-debugging`; do NOT proceed without root cause.
 
-- [ ] **Step 3: Verify + commit (regression guard)**
+- [x] **Step 3: Verify + commit (regression guard)**
 
 ```bash
 make verify
@@ -836,7 +836,7 @@ git add tests/test_pre_merge_cross_check.py
 git commit -m "test: B-1/B-2 regression guards for diff threading in cross-check prompt"
 ```
 
-- [ ] **Step 9: Task close `chore: mark task 6 complete`**
+- [x] **Step 9: Task close `chore: mark task 6 complete`**
 
 ---
 
@@ -854,7 +854,7 @@ git commit -m "test: B-1/B-2 regression guards for diff threading in cross-check
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `tests/test_spec_lint.py`:
 
@@ -916,12 +916,12 @@ def test_lint_spec_clean_file_returns_empty_list(tmp_path):
     assert findings == []
 ```
 
-- [ ] **Step 2: Run** — Expected FAIL `ModuleNotFoundError`.
-- [ ] **Step 3: Red commit `test: spec_lint LintFinding dataclass + clean-spec tripwire`**
+- [x] **Step 2: Run** — Expected FAIL `ModuleNotFoundError`.
+- [x] **Step 3: Red commit `test: spec_lint LintFinding dataclass + clean-spec tripwire`**
 
 #### Green Phase
 
-- [ ] **Step 4: Implement skeleton**
+- [x] **Step 4: Implement skeleton**
 
 Create `skills/sbtdd/scripts/spec_lint.py`:
 
@@ -974,9 +974,9 @@ def lint_spec(path: Path) -> list[LintFinding]:
     return findings
 ```
 
-- [ ] **Step 5: Run tests pass**
-- [ ] **Step 6: Green commit `feat: spec_lint module skeleton with LintFinding dataclass`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 7 complete`**
+- [x] **Step 5: Run tests pass**
+- [x] **Step 6: Green commit `feat: spec_lint module skeleton with LintFinding dataclass`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 7 complete`**
 
 ---
 
@@ -988,7 +988,7 @@ def lint_spec(path: Path) -> list[LintFinding]:
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 def test_c_r1_1_well_formed_escenario_passes(tmp_path):
@@ -1027,11 +1027,11 @@ def test_c_r1_2_missing_given_fails(tmp_path):
     assert "given" in r1[0].message.lower()
 ```
 
-- [ ] **Step 2-3: Red commit `test: C-R1 escenario well-formed checks`**
+- [x] **Step 2-3: Red commit `test: C-R1 escenario well-formed checks`**
 
 #### Green Phase
 
-- [ ] **Step 4: Implement R1**
+- [x] **Step 4: Implement R1**
 
 In `skills/sbtdd/scripts/spec_lint.py` add (after `LintFinding` dataclass, before `lint_spec`):
 
@@ -1080,8 +1080,8 @@ def lint_spec(path: Path) -> list[LintFinding]:
     return findings
 ```
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: spec_lint R1 escenario well-formed check`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 8 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: spec_lint R1 escenario well-formed check`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 8 complete`**
 
 ---
 
@@ -1093,7 +1093,7 @@ def lint_spec(path: Path) -> list[LintFinding]:
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 def test_c_r2_1_unique_ids_pass(tmp_path):
@@ -1131,11 +1131,11 @@ def test_c_r2_2_duplicate_id_fails(tmp_path):
     assert all(f.severity == "error" for f in r2)
 ```
 
-- [ ] **Step 2-3: Red commit `test: C-R2 unique escenario IDs`**
+- [x] **Step 2-3: Red commit `test: C-R2 unique escenario IDs`**
 
 #### Green Phase
 
-- [ ] **Step 4: Implement R2**
+- [x] **Step 4: Implement R2**
 
 Add to `skills/sbtdd/scripts/spec_lint.py`:
 
@@ -1164,8 +1164,8 @@ def _check_r2(path: Path, text: str) -> list[LintFinding]:
 
 Append `findings.extend(_check_r2(path, text))` to `lint_spec`.
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: spec_lint R2 unique IDs check`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 9 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: spec_lint R2 unique IDs check`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 9 complete`**
 
 ---
 
@@ -1177,7 +1177,7 @@ Append `findings.extend(_check_r2(path, text))` to `lint_spec`.
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 def test_c_r3_1_monotonic_headers_pass(tmp_path):
@@ -1212,11 +1212,11 @@ def test_c_r3_2_skip_emits_warning_severity(tmp_path):
     assert all(f.severity == "warning" for f in r3)
 ```
 
-- [ ] **Step 2-3: Red commit `test: C-R3 monotonic headers warning severity`**
+- [x] **Step 2-3: Red commit `test: C-R3 monotonic headers warning severity`**
 
 #### Green Phase
 
-- [ ] **Step 4: Implement R3**
+- [x] **Step 4: Implement R3**
 
 ```python
 _HEADER_RE = re.compile(r"^##\s+(\d+)\.\s", re.MULTILINE)
@@ -1241,8 +1241,8 @@ def _check_r3(path: Path, text: str) -> list[LintFinding]:
 
 Append `findings.extend(_check_r3(path, text))` to `lint_spec`.
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: spec_lint R3 monotonic headers warning`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 10 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: spec_lint R3 monotonic headers warning`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 10 complete`**
 
 ---
 
@@ -1254,7 +1254,7 @@ Append `findings.extend(_check_r3(path, text))` to `lint_spec`.
 
 #### Red Phase
 
-- [ ] **Step 1: Append test**
+- [x] **Step 1: Append test**
 
 ```python
 def test_c_r4_1_inv27_extends_to_spec_behavior(tmp_path):
@@ -1281,11 +1281,11 @@ def test_c_r4_1_inv27_extends_to_spec_behavior(tmp_path):
     assert any("INV-27" in f.message for f in r4)
 ```
 
-- [ ] **Step 2-3: Red commit `test: C-R4 INV-27 extends to spec-behavior.md`**
+- [x] **Step 2-3: Red commit `test: C-R4 INV-27 extends to spec-behavior.md`**
 
 #### Green Phase
 
-- [ ] **Step 4: Implement R4**
+- [x] **Step 4: Implement R4**
 
 Add to `skills/sbtdd/scripts/spec_lint.py`:
 
@@ -1308,8 +1308,8 @@ def _check_r4(path: Path, text: str) -> list[LintFinding]:
 
 Append `findings.extend(_check_r4(path, text))` to `lint_spec`.
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: spec_lint R4 INV-27 extension`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 11 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: spec_lint R4 INV-27 extension`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 11 complete`**
 
 ---
 
@@ -1321,7 +1321,7 @@ Append `findings.extend(_check_r4(path, text))` to `lint_spec`.
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 def test_c_r5_1_frontmatter_present_passes(tmp_path):
@@ -1356,11 +1356,11 @@ def test_c_r5_2_missing_frontmatter_fails(tmp_path):
     assert r5[0].line == 1
 ```
 
-- [ ] **Step 2-3: Red commit `test: C-R5 frontmatter docstring check`**
+- [x] **Step 2-3: Red commit `test: C-R5 frontmatter docstring check`**
 
 #### Green Phase
 
-- [ ] **Step 4: Implement R5**
+- [x] **Step 4: Implement R5**
 
 ```python
 _FRONTMATTER_RE = re.compile(
@@ -1383,8 +1383,8 @@ def _check_r5(path: Path, text: str) -> list[LintFinding]:
 
 Append `findings.extend(_check_r5(path, text))` to `lint_spec`.
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: spec_lint R5 frontmatter docstring check`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 12 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: spec_lint R5 frontmatter docstring check`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 12 complete`**
 
 ---
 
@@ -1396,7 +1396,7 @@ Append `findings.extend(_check_r5(path, text))` to `lint_spec`.
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 Append to `tests/test_spec_cmd.py`:
 
@@ -1475,11 +1475,11 @@ def test_c_int_2_lint_warning_emits_breadcrumb_proceeds(tmp_path, monkeypatch, c
     assert invoke_called == [True]
 ```
 
-- [ ] **Step 2-3: Red commit `test: C-int-1/C-int-2 spec_lint integration in checkpoint2`**
+- [x] **Step 2-3: Red commit `test: C-int-1/C-int-2 spec_lint integration in checkpoint2`**
 
 #### Green Phase
 
-- [ ] **Step 4: Patch `_run_magi_checkpoint2`**
+- [x] **Step 4: Patch `_run_magi_checkpoint2`**
 
 In `skills/sbtdd/scripts/spec_cmd.py`, locate `_run_magi_checkpoint2` (~line 525). At the top of the function body — AFTER any existing precondition checks (e.g., file existence) but BEFORE `magi_dispatch.invoke_magi` — insert:
 
@@ -1523,9 +1523,9 @@ starts a fresh iter budget. Verify the insertion point is upstream
 of any `for iter_n in range(cfg.magi_max_iterations):` loop in
 `_run_magi_checkpoint2`.
 
-- [ ] **Step 5: Run tests pass**
-- [ ] **Step 6: Green commit `feat: integrate spec_lint gate in _run_magi_checkpoint2`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 13 complete`**
+- [x] **Step 5: Run tests pass**
+- [x] **Step 6: Green commit `feat: integrate spec_lint gate in _run_magi_checkpoint2`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 13 complete`**
 
 ---
 
@@ -1537,7 +1537,7 @@ of any `for iter_n in range(cfg.magi_max_iterations):` loop in
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 def test_c_cli_1_clean_spec_exit_0(tmp_path):
@@ -1577,11 +1577,11 @@ def test_c_cli_1_missing_file_exit_2(tmp_path):
     assert rc == 2
 ```
 
-- [ ] **Step 2-3: Red commit `test: C-cli-1 spec_lint exit codes`**
+- [x] **Step 2-3: Red commit `test: C-cli-1 spec_lint exit codes`**
 
 #### Green Phase
 
-- [ ] **Step 4: Append CLI**
+- [x] **Step 4: Append CLI**
 
 Append to `skills/sbtdd/scripts/spec_lint.py`:
 
@@ -1629,8 +1629,8 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 5-6: Verify pass + Green commit `feat: spec_lint CLI standalone`**
-- [ ] **Step 7-9: Refactor + Task close `chore: mark task 14 complete`**
+- [x] **Step 5-6: Verify pass + Green commit `feat: spec_lint CLI standalone`**
+- [x] **Step 7-9: Refactor + Task close `chore: mark task 14 complete`**
 
 ---
 
@@ -1644,7 +1644,7 @@ if __name__ == "__main__":
 
 #### Red Phase
 
-- [ ] **Step 1: Write fixtures + test (regression-guard mode)**
+- [x] **Step 1: Write fixtures + test (regression-guard mode)**
 
 Create `tests/fixtures/audit_callsites/__init__.py` (empty file).
 
@@ -1766,9 +1766,9 @@ def test_f2_synthetic_fixture_with_override_passes():
     assert violations == []
 ```
 
-- [ ] **Step 2: Run tests** — Expected PASS (this is regression-guard mode; impl is in the test file itself + synthetic fixtures).
+- [x] **Step 2: Run tests** — Expected PASS (this is regression-guard mode; impl is in the test file itself + synthetic fixtures).
 
-- [ ] **Step 3: Verify + commit (regression guard)**
+- [x] **Step 3: Verify + commit (regression guard)**
 
 ```bash
 make verify
@@ -1776,7 +1776,7 @@ git add tests/test_invoke_skill_callsites_audit.py tests/fixtures/audit_callsite
 git commit -m "test: F-1/F-2 meta-test core (synthetic fixtures + AST walk)"
 ```
 
-- [ ] **Step 9: Task close `chore: mark task 15 complete`**
+- [x] **Step 9: Task close `chore: mark task 15 complete`**
 
 ---
 
@@ -1787,7 +1787,7 @@ git commit -m "test: F-1/F-2 meta-test core (synthetic fixtures + AST walk)"
 
 #### Red Phase
 
-- [ ] **Step 1: Append tests**
+- [x] **Step 1: Append tests**
 
 ```python
 def test_f3_wrapper_files_excluded_from_audit():
@@ -1834,11 +1834,11 @@ def test_production_callsites_pass_audit():
     )
 ```
 
-- [ ] **Step 2: Run** — Expected PASS (assuming v1.0.1 pre-A2 migration was complete).
+- [x] **Step 2: Run** — Expected PASS (assuming v1.0.1 pre-A2 migration was complete).
 
 If `test_production_callsites_pass_audit` FAILS: this is a real regression. Diagnose via `/systematic-debugging`. Either fix the offending callsite via mini-cycle TDD or add to `_EXCLUDED_FILES` with explicit justification.
 
-- [ ] **Step 3: Verify + commit**
+- [x] **Step 3: Verify + commit**
 
 ```bash
 make verify
@@ -1846,7 +1846,7 @@ git add tests/test_invoke_skill_callsites_audit.py
 git commit -m "test: F-3/F-4 excludes + production audit"
 ```
 
-- [ ] **Step 9: Task close `chore: mark task 16 complete`**
+- [x] **Step 9: Task close `chore: mark task 16 complete`**
 
 ---
 
@@ -1859,7 +1859,7 @@ This task has no test (config-only). Skip Red phase.
 
 #### Green Phase
 
-- [ ] **Step 1: Modify `pyproject.toml`**
+- [x] **Step 1: Modify `pyproject.toml`**
 
 Replace the `dev` deps list to add `pytest-cov`:
 
@@ -1936,7 +1936,7 @@ exclude_lines = [
    accept key 'source'`, the append landed inside the wrong table —
    undo the edit and retry following step 2 carefully.
 
-- [ ] **Step 2: Install dev deps + smoke test**
+- [x] **Step 2: Install dev deps + smoke test**
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -1945,7 +1945,7 @@ python -m pytest --cov=skills/sbtdd/scripts --cov-report=term -q tests/test_mode
 
 Expected: pytest runs with coverage instrumentation; one test file completes.
 
-- [ ] **Step 3: Verify + commit**
+- [x] **Step 3: Verify + commit**
 
 ```bash
 make verify
@@ -1953,7 +1953,7 @@ git add pyproject.toml
 git commit -m "feat: add pytest-cov dev dep + coverage config (placeholder threshold)"
 ```
 
-- [ ] **Step 9: Task close `chore: mark task 17 complete`**
+- [x] **Step 9: Task close `chore: mark task 17 complete`**
 
 ---
 
@@ -1964,7 +1964,7 @@ git commit -m "feat: add pytest-cov dev dep + coverage config (placeholder thres
 
 #### Green Phase
 
-- [ ] **Step 1: Replace `Makefile` contents**
+- [x] **Step 1: Replace `Makefile` contents**
 
 ```makefile
 .PHONY: test lint format typecheck coverage verify
@@ -1994,7 +1994,7 @@ test suite, breaking NF-A budget (`make verify` runtime <= 160s).
 The standalone `test:` target remains for dev workflow (`-v`
 verbose, no coverage instrumentation overhead).
 
-- [ ] **Step 2: Smoke test**
+- [x] **Step 2: Smoke test**
 
 ```bash
 make verify
@@ -2002,14 +2002,14 @@ make verify
 
 Expected: all 5 targets succeed (placeholder `fail_under=0` will not block coverage).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add Makefile
 git commit -m "feat: extend Makefile verify target with coverage check (G-1)"
 ```
 
-- [ ] **Step 9: Task close `chore: mark task 18 complete`**
+- [x] **Step 9: Task close `chore: mark task 18 complete`**
 
 ---
 
@@ -2021,7 +2021,7 @@ git commit -m "feat: extend Makefile verify target with coverage check (G-1)"
 
 #### Green Phase
 
-- [ ] **Step 1: Measure baseline**
+- [x] **Step 1: Measure baseline**
 
 ```bash
 python -m pytest --cov=skills/sbtdd/scripts --cov-report=term-missing tests/ 2>&1 | tee /tmp/coverage-baseline.txt
@@ -2029,15 +2029,15 @@ python -m pytest --cov=skills/sbtdd/scripts --cov-report=term-missing tests/ 2>&
 
 Capture the final `TOTAL` line; the third column is the percentage.
 
-- [ ] **Step 2: Compute threshold**
+- [x] **Step 2: Compute threshold**
 
 `threshold = floor(measured_pct) - 2`. Examples: 85% → 83; 92% → 90; 78% → 76.
 
-- [ ] **Step 3: Update `pyproject.toml`**
+- [x] **Step 3: Update `pyproject.toml`**
 
 Replace `fail_under = 0` with `fail_under = <computed_threshold>`.
 
-- [ ] **Step 4: Smoke test threshold**
+- [x] **Step 4: Smoke test threshold**
 
 ```bash
 make verify
@@ -2045,7 +2045,7 @@ make verify
 
 Expected: PASS (measured >= threshold by construction).
 
-- [ ] **Step 5: Append CHANGELOG `[1.0.2]` baseline section**
+- [x] **Step 5: Append CHANGELOG `[1.0.2]` baseline section**
 
 Add to top of `CHANGELOG.md` (above `[1.0.1]`):
 
@@ -2070,7 +2070,7 @@ Excludes (per `[tool.coverage.run].omit`):
 Modules under 85% target eventual (v1.0.5+ raise candidates): <list>.
 ```
 
-- [ ] **Step 6: Verify + commit**
+- [x] **Step 6: Verify + commit**
 
 ```bash
 make verify
@@ -2078,7 +2078,7 @@ git add pyproject.toml CHANGELOG.md
 git commit -m "feat: set coverage threshold to <N>% (baseline + 2% slack)"
 ```
 
-- [ ] **Step 9: Task close `chore: mark task 19 complete`**
+- [x] **Step 9: Task close `chore: mark task 19 complete`**
 
 ---
 
@@ -2235,7 +2235,7 @@ Tasks 2-19 step 9 reference this pattern by writing `Task close
 chore: mark task N complete`. The implicit convention is: open
 `planning/claude-plan-tdd.md` (the post-Checkpoint-2 approved plan,
 copied from this org file), find the `### Task N:` header, change its
-top-level `- [ ]` checkbox to `- [x]`, then run the `git add ... &&
+top-level open-bracket checkbox to closed-bracket form, then run the `git add ... &&
 git commit -m "chore: mark task N complete"` pair. Subagents executing
 the plan: this is non-negotiable — the chore commit MUST include the
 `planning/claude-plan-tdd.md` diff, never just an empty commit. The
