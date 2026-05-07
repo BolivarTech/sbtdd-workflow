@@ -1801,7 +1801,7 @@ Covers escenarios C-7, C-8, C-9 from spec sec.4.3.
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Append to `tests/test_auto_cmd.py`:
 
@@ -1941,18 +1941,18 @@ class TestAutoCmdParallelFlag:
         assert ns.parallel is False
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_auto_cmd.py::TestAutoCmdParallelFlag -v`
 Expected: All FAIL — `--parallel` flag not in argparse, helper functions absent.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: Wire `--parallel` flag into auto_cmd**
+- [x] **Step 4: Wire `--parallel` flag into auto_cmd**
 
 Modify `skills/sbtdd/scripts/auto_cmd.py`:
 
@@ -2057,7 +2057,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ...
 ```
 
-- [ ] **Step 5: Run tests to verify PASS**
+- [x] **Step 5: Run tests to verify PASS**
 
 Run: `pytest tests/test_auto_cmd.py::TestAutoCmdParallelFlag -v`
 Expected: 8/8 PASS.
@@ -2065,7 +2065,7 @@ Expected: 8/8 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 6: close-phase Green**
+- [x] **Step 6: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -2073,13 +2073,13 @@ Expected: `feat:` commit landed (e.g. `feat: wire --parallel flag into auto_cmd 
 
 #### Refactor Phase
 
-- [ ] **Step 7: Refactor — extract dispatch-plan-building if helpers grow**
+- [x] **Step 7: Refactor — extract dispatch-plan-building if helpers grow**
 
 Two helpers `_build_dispatch_plan_sequential` and
 `_build_dispatch_plan_parallel` are minimal and have clear separation.
 Skip refactor.
 
-- [ ] **Step 8: close-phase Refactor + Step 9: close-task**
+- [x] **Step 8: close-phase Refactor + Step 9: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
