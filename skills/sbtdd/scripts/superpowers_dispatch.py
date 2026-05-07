@@ -17,6 +17,35 @@ typed :class:`errors.SBTDDError` subclasses so dispatchers at
 Quota exhaustion (sec.S.11.4) is detected on stderr via
 :mod:`quota_detector` BEFORE a generic failure is reported -- the caller
 then sees :class:`errors.QuotaExhaustedError` and exits 11.
+
+Subprocess-incompatible skill audit history
+-------------------------------------------
+
+- v1.0.1 (Finding A discovery): brainstorming, writing-plans.
+  Manifestation: silent no-op (subprocess returns without producing
+  skill output). Caught post-spawn via INV-37 composite-signature
+  check (v1.0.1 Item A0).
+- v1.0.4 (v1.0.3 Activity D' empirical hang during Loop 1 fix-finding
+  triage step): receiving-code-review. Manifestation: 600s subprocess
+  hang waiting interactive input. Cannot be caught post-spawn
+  (operator-blocking); requires pre-spawn gate.
+
+A skill is subprocess-incompatible iff it requires multi-turn
+interactive dialogue with the operator. Adding a new entry to the
+set without empirical evidence (subprocess hang or silent-no-op
+observed) is forbidden -- operators must run the skill manually in
+interactive session and document the failure mode in CHANGELOG
+before promoting.
+
+Gate semantics (v1.0.4 post iter 1 triage): subprocess spawn for
+incompatible skills is BLOCKED UNCONDITIONALLY unless caller passes
+allow_interactive_skill=True. The override is the explicit opt-in
+for known-safe wrappers that have arranged for subprocess success
+(silent-no-op tolerated by v1.0.1 wrappers via INV-37 post-detection;
+or operator-controlled interactive callsites). NO env-var/isatty heuristic
+is used -- caspar Checkpoint 2 iter 1 CRITICAL verified the heuristic
+does not fix the v1.0.3 bug in operator main sessions (TTY=True so the
+gate would not fire, subprocess would spawn, hang persists).
 """
 
 from __future__ import annotations
@@ -49,6 +78,12 @@ _SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(
     {
         "brainstorming",
         "writing-plans",
+        # v1.0.4 (Item A.1, Task 1): added per v1.0.3 Activity D'
+        # empirical hang. /receiving-code-review requires multi-turn
+        # interactive triage of MAGI findings before the wrapper can
+        # accept/reject each; subprocess spawn hung 600s waiting for
+        # operator input.
+        "receiving-code-review",
     }
 )
 
