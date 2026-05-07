@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -361,6 +362,30 @@ def _run_magi_checkpoint2(
     plan = root / "planning" / "claude-plan-tdd.md"
     max_iter = int(getattr(cfg, "magi_max_iterations"))
     threshold = str(getattr(cfg, "magi_threshold"))
+
+    # v1.0.2 Item C: spec_lint pre-dispatch gate.
+    # Lint runs ONCE per /sbtdd spec invocation, BEFORE the MAGI iter loop,
+    # so safety-valve cap=3 (G1 binding) is NOT consumed by mechanical
+    # malformations. Operator fixes lint violations and re-runs /sbtdd spec
+    # which starts a fresh iter budget.
+    import spec_lint
+    from errors import ValidationError
+
+    for path in (spec, plan_org):
+        if not path.exists():
+            continue
+        findings = spec_lint.lint_spec(path)
+        for w in (f for f in findings if f.severity == "warning"):
+            sys.stderr.write(f"[sbtdd spec-lint] {w.file}:{w.line} ({w.rule}) {w.message}\n")
+        errors = [f for f in findings if f.severity == "error"]
+        if errors:
+            details = "\n".join(f"  {e.file}:{e.line} ({e.rule}) {e.message}" for e in errors)
+            raise ValidationError(
+                "spec_lint blocked Checkpoint 2 dispatch:\n"
+                f"{details}\n"
+                "Fix violations and re-run /sbtdd spec."
+            )
+
     verdict_history: list[magi_dispatch.MAGIVerdict] = []
     for iteration in range(1, max_iter + 1):
         verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
