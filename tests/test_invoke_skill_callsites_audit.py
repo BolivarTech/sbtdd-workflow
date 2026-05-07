@@ -81,3 +81,47 @@ def test_f2_synthetic_fixture_with_override_passes():
     violations = _check_path(fixture)
 
     assert violations == []
+
+
+def test_f3_wrapper_files_excluded_from_audit():
+    """F-3: superpowers_dispatch.py is in _EXCLUDED_FILES."""
+    assert "skills/sbtdd/scripts/superpowers_dispatch.py" in _EXCLUDED_FILES
+
+
+def test_f4_unknown_skill_passes_through(tmp_path):
+    """F-4: unknown skill name is not in interactive set ⇒ no violation."""
+    fixture = tmp_path / "unknown.py"
+    fixture.write_text(
+        "def f():\n"
+        '    invoke_skill(skill="custom-skill", args=["x"])\n'
+        "def invoke_skill(**kw): return None\n",
+        encoding="utf-8",
+    )
+
+    violations = _check_path(fixture)
+
+    assert violations == []
+
+
+def test_production_callsites_pass_audit():
+    """Full repo audit: all interactive-skill callsites in scripts/ + tests/
+    pass override check (excluding wrappers + without_override fixture)."""
+    audited_dirs = (
+        _REPO_ROOT / "skills" / "sbtdd" / "scripts",
+        _REPO_ROOT / "tests",
+    )
+    all_violations: list[str] = []
+    for d in audited_dirs:
+        for path in d.rglob("*.py"):
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            if rel in _EXCLUDED_FILES:
+                continue
+            if "without_override.py" in path.name:
+                continue
+            all_violations.extend(_check_path(path))
+
+    assert not all_violations, (
+        "Interactive-skill callsites missing override:\n"
+        + "\n".join(all_violations)
+        + "\n\nFix: add allow_interactive_skill=True or use wrapper."
+    )
