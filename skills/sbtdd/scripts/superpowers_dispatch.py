@@ -54,7 +54,8 @@ import subprocess
 import sys as _sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 import quota_detector
 import subprocess_utils
@@ -187,25 +188,79 @@ def _apply_inv0_model_check(
     return None
 
 
+#: v1.0.4 Item B (Task 4): per-skill recovery message body. Each entry
+#: is appended after the leading sentence in :func:`_build_recovery_message`
+#: so operators see a tailored recovery path matching the skill's role.
+#: Frozen via :class:`types.MappingProxyType` to prevent accidental
+#: runtime mutation (style consistent with ``_SUBPROCESS_INCOMPATIBLE_SKILLS``).
+#:
+#: - ``brainstorming`` and ``writing-plans``: spec-phase skills; the
+#:   recovery is to run the skill manually in an interactive Claude Code
+#:   session, then resume via ``/sbtdd spec --resume-from-magi`` (v1.0.1
+#:   Item A3).
+#: - ``receiving-code-review``: pre-merge-phase skill; the recovery is
+#:   either run the skill manually OR fall back to direct
+#:   ``run_magi.py code-review`` per spec sec.6.4.
+_PER_SKILL_RECOVERY: Mapping[str, str] = MappingProxyType(
+    {
+        "brainstorming": (
+            "  1. Run `/brainstorming` manually in interactive Claude Code session,\n"
+            "     then use `/sbtdd spec --resume-from-magi`."
+        ),
+        "writing-plans": (
+            "  1. Run `/writing-plans` manually in interactive Claude Code session,\n"
+            "     then use `/sbtdd spec --resume-from-magi`."
+        ),
+        "receiving-code-review": (
+            "  1. Run `/receiving-code-review` manually in interactive session, OR\n"
+            "  2. Fall back to manual `python skills/magi/scripts/run_magi.py code-review <payload>`\n"
+            "     per spec sec.6.4 + apply mini-cycle TDD fixes manually."
+        ),
+    }
+)
+
+
+#: Generic recovery body used when a skill name is not present in
+#: :data:`_PER_SKILL_RECOVERY`. Tailored entries are preferred, but a
+#: catch-all keeps :func:`_build_recovery_message` total over the
+#: input space.
+_GENERIC_RECOVERY = (
+    "  1. Run the skill manually in interactive session,\n     then resume the SBTDD workflow."
+)
+
+
 def _build_recovery_message(skill: str) -> str:
     """Construct the operator-facing recovery message for a blocked skill.
 
-    v1.0.4 Item A.2 (Task 3) ships a minimal placeholder; Task 4 replaces
-    it with a per-skill recovery dictionary (``_PER_SKILL_RECOVERY``).
-    The placeholder format is preserved verbatim across both tasks so
-    callsite tests that match the leading sentence keep passing
-    monotonically.
+    v1.0.4 Item B (Task 4): replaces the Task 3 placeholder with a per-skill
+    recovery body so the operator sees actionable guidance tailored to the
+    skill that was blocked. Post iter 1 triage simplified: NO env-var
+    formatting (the gate is membership-based, not heuristic-based -- there
+    is no env state to report).
+
+    The leading sentence is preserved verbatim from the Task 3 placeholder
+    so callsite tests that match the prefix keep passing monotonically.
 
     Args:
         skill: Slash-command name (e.g., ``"receiving-code-review"``).
 
     Returns:
-        Operator-facing message string.
+        Multi-line operator-facing message including:
+        - Reason (skill empirically incompatible).
+        - Per-skill recovery options (or generic fallback when the skill
+          is not present in :data:`_PER_SKILL_RECOVERY`).
+        - Override hint (``allow_interactive_skill=True`` for known-safe
+          callers that have arranged for subprocess success).
     """
+    per_skill = _PER_SKILL_RECOVERY.get(skill, _GENERIC_RECOVERY)
     return (
         f"Skill `/{skill}` cannot run via `claude -p` subprocess "
         f"(empirically incompatible: requires multi-turn interactive "
-        f"dialogue or hangs > 600s)."
+        f"dialogue or hangs > 600s). Recovery options:\n"
+        f"{per_skill}\n"
+        f"To override (only when caller has arranged interactive "
+        f"completion path), pass `allow_interactive_skill=True` to "
+        f"`invoke_skill(...)`."
     )
 
 
