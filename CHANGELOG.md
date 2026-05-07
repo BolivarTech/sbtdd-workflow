@@ -8,6 +8,60 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [1.0.2] - <ship-date>
+
+### Per-module coverage baseline (Item G)
+
+Measured 2026-05-06 during task 19 close. Threshold = `floor(baseline) - 2%`.
+
+| Module | Coverage % |
+|--------|------------|
+| `_plan_ops.py` | 100% |
+| `auto_cmd.py` | 87% |
+| `close_phase_cmd.py` | 96% |
+| `close_task_cmd.py` | 98% |
+| `commits.py` | 97% |
+| `config.py` | 86% |
+| `dependency_check.py` | 91% |
+| `drift.py` | 97% |
+| `errors.py` | 100% |
+| `escalation_prompt.py` | 94% |
+| `finalize_cmd.py` | 98% |
+| `heartbeat.py` | 89% |
+| `hooks_installer.py` | 100% |
+| `init_cmd.py` | 87% |
+| `magi_dispatch.py` | 89% |
+| `migrate_plugin_local.py` | 100% |
+| `models.py` | 100% |
+| `pre_merge_cmd.py` | 95% |
+| `quota_detector.py` | 100% |
+| `receiving_review_dispatch.py` | 100% |
+| `reporters/ctest_reporter.py` | 92% |
+| `reporters/rust_reporter.py` | 95% |
+| `reporters/tdd_guard_schema.py` | 92% |
+| `resume_cmd.py` | 89% |
+| `review_spec_compliance_cmd.py` | 100% |
+| `run_sbtdd.py` | 100% |
+| `spec_cmd.py` | 90% |
+| `spec_lint.py` | 94% |
+| `spec_review_dispatch.py` | 86% |
+| `spec_snapshot.py` | 88% |
+| `state_file.py` | 89% |
+| `status_cmd.py` | 90% |
+| `subprocess_utils.py` | 74% |
+| `superpowers_dispatch.py` | 83% |
+| `templates.py` | 100% |
+| **TOTAL** | **90%** |
+
+Final `--cov-fail-under` value: **88**.
+
+Excludes (per `[tool.coverage.run].omit`):
+- `skills/sbtdd/scripts/__init__.py` (package marker, no logic).
+- `templates/*` (template files, not Python code).
+
+Modules under 85% target eventual (v1.0.5+ raise candidates):
+`subprocess_utils.py` (74%), `superpowers_dispatch.py` (83%).
+
 ## [1.0.1] - 2026-05-03
 
 > **Status**: Shipped. Plugin self-hosting fix per 3 dogfood findings of
