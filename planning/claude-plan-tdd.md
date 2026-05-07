@@ -2008,7 +2008,7 @@ git commit -m "feat: extend Makefile verify target with coverage check (G-1)"
 
 ---
 
-### Task 19: Item G — Measure baseline + commit final threshold (escenario G-2)
+### Task 19: Item G — Measure baseline + commit final threshold (escenario G-2) [x]
 
 **Files:**
 - Modify: `pyproject.toml`
