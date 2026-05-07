@@ -223,14 +223,18 @@ Expected: Task 1 checkboxes flipped, `chore:` commit, state file advances `curre
 
 ---
 
-### Task 2: ABSORBED INTO TASK 1 (iter 1 triage CRITICAL #1+#2; iter 2 confirmed)
+## Task 2 (ABSORBED into Task 1) — iter 1 triage CRITICAL #1+#2; iter 2 confirmed
 
-**Status**: ABSORBED — no implementation work required.
+**Status**: ABSORBED — no implementation work required. Header
+collapsed from h3 to h2 (v1.0.4 Loop 2 iter-1 CRITICAL #2 Option b)
+so drift detector's section walker (`_ANY_TASK_HEADER` pinned to h3)
+does not visit this stub.
 
 iter 1 triage SIMPLIFIED Item A. Set extension that was Task 2's
-scope is part of Task 1 Step 4. Subagents skip this header entirely;
-orchestrator advances state file from `current_task_id: 1 → 3`
-upon Task 1 close. No commits, no tests, no execution work for T2.
+scope is part of Task 1 Step 4. Subagents skip this section
+entirely; orchestrator advances state file from `current_task_id:
+1 → 3` upon Task 1 close. No commits, no tests, no execution work
+for T2.
 
 ---
 
@@ -1967,9 +1971,14 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
 ---
 
-### Task 9: Item D — DEFERRED ENTIRELY to v1.0.5 (iter 2 scope-trim Option D)
+## Task 9 (DEFERRED to v1.0.5) — Item D iter 2 scope-trim Option D
 
-**Status**: DEFERRED — no v1.0.4 implementation work. Subagents skip this header entirely; orchestrator advances state file from `current_task_id: 8 → done` upon Task 8 close (no T9 work to perform).
+**Status**: DEFERRED — no v1.0.4 implementation work. Header
+collapsed from h3 to h2 (v1.0.4 Loop 2 iter-1 CRITICAL #2 Option b)
+so drift detector's section walker (`_ANY_TASK_HEADER` pinned to h3)
+does not visit this stub. Subagents skip this section entirely;
+orchestrator advances state file from `current_task_id: 8 → done`
+upon Task 8 close (no T9 work to perform).
 
 **Rationale (iter 2 Checkpoint 2 scope-trim per spec sec.6.1 G2 ladder)**: iter 2 surfaced 3 CRITICAL findings; caspar CRITICAL #3 ("§3 cross-module contract contradicts §2.4 + plan T9") + persistent 3-agent WARNING (melchior + balthasar + caspar) about Item D 3-touchpoint doc-only enforcement INSUFFICIENCY (third consecutive cycle of doc-only convention attempts: v1.0.2 Q2 Option B I5 process notes; v1.0.3 dogfood demonstrated divergence; v1.0.4 attempted 3-touchpoint multiplication + tripwire fold-in). Per spec sec.6.1 iter-2 CRITICAL trigger pre-stage: scope-trim ladder defers Item D first. User selected Option D (hybrid: surgical fixes for #1+#2 + scope-trim Item D for #3) on 2026-05-07.
 
