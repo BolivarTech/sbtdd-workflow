@@ -130,12 +130,25 @@ Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase
 | `resume` | Diagnose interrupted runs and delegate recovery | `/sbtdd resume` or `/sbtdd resume --discard-uncommitted` |
 | `review-spec-compliance` | Per-task spec-reviewer dispatch for manual flows (Feature B, new in v0.2). Exit 0 on approve, exit 12 on issues. | `/sbtdd review-spec-compliance <task-id>` |
 
-### New in v0.2
+### Recent release highlights
 
-- `--override-checkpoint --reason "<text>"` (on `spec`, `pre-merge`, `finalize`) -- INV-0 escape valve when a MAGI safety valve (INV-11) exhausts. `--reason` is mandatory; reason + verdict are persisted under `.claude/magi-escalations/`.
-- `--non-interactive` (on `spec`, `pre-merge`) -- force the headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
-- `--skip-spec-review` (on `close-task`) -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
-- `--resume-from-magi` (on `spec`, **new in v1.0.1**) -- skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against operator-produced `sbtdd/spec-behavior.md` + `planning/claude-plan-tdd-org.md`. Recovery path for v1.0.1 Finding A (interactive Skills like `/brainstorming` and `/writing-plans` are silently empty under `claude -p` subprocess transport). Run the two skills manually in an interactive Claude Code session, then invoke `/sbtdd spec --resume-from-magi` to drive Checkpoint 2 against the hand-crafted artifacts. The flag still enforces INV-27 (`spec-behavior-base.md` placeholder check) AND structural validation (spec yields `>=1` escenario via `spec_snapshot.emit_snapshot`; plan-org has `>=1` `### Task` heading + `>=1` `- [ ]` checkbox).
+**v0.2** flags (`spec`, `pre-merge`, `finalize`, `close-task`):
+- `--override-checkpoint --reason "<text>"` -- INV-0 escape valve when a MAGI safety valve (INV-11) exhausts. `--reason` is mandatory; reason + verdict are persisted under `.claude/magi-escalations/`.
+- `--non-interactive` -- force the headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
+- `--skip-spec-review` -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
+
+**v1.0.1** -- `--resume-from-magi` (on `spec`): skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against operator-produced `sbtdd/spec-behavior.md` + `planning/claude-plan-tdd-org.md`. Recovery path for v1.0.1 Finding A (interactive Skills like `/brainstorming` and `/writing-plans` are silently empty under `claude -p` subprocess transport). Run the two skills manually in an interactive Claude Code session, then invoke `/sbtdd spec --resume-from-magi` to drive Checkpoint 2 against the hand-crafted artifacts. The flag still enforces INV-27 (`spec-behavior-base.md` placeholder check) AND structural validation (spec yields `>=1` escenario via `spec_snapshot.emit_snapshot`; plan-org has `>=1` `### Task` heading + `>=1` `- [ ]` checkbox).
+
+**v1.0.2** -- cross-check completion + spec quality enforcement:
+- `scripts/cross_check_telemetry.py` -- standalone aggregator CLI for `.claude/magi-cross-check/iter*-*.json` artifacts (Feature G v1.0.0). Markdown + JSON output. Per-iter breakdown of KEEP/DOWNGRADE/REJECT decisions, agreement rate, truncation rate. Invocation: `python scripts/cross_check_telemetry.py [--root PATH] [--format markdown|json]`.
+- `skills/sbtdd/scripts/spec_lint.py` -- H5-2 mechanical lint gate with 5 rules (R1 escenario well-formed Given/When/Then bullets, R2 unique escenario IDs, R3 monotonic section headers WARNING-severity, R4 INV-27 mechanical extension to spec-behavior.md + plan-tdd-org.md, R5 frontmatter docstring `> Generado YYYY-MM-DD a partir de <source>`). Integrated in `spec_cmd._run_magi_checkpoint2` ONCE upstream of MAGI iter loop -- error-severity findings raise `ValidationError` aborting cycle without consuming MAGI iter budget; warning-severity emit stderr breadcrumb. CLI: `python -m skills.sbtdd.scripts.spec_lint <path> [--severity error|warning|info] [--rule R1|R2|R3|R4|R5]`.
+- `tests/test_invoke_skill_callsites_audit.py` -- AST-based meta-test enforcing `allow_interactive_skill=True` on direct `invoke_skill` callsites for skills in `_SUBPROCESS_INCOMPATIBLE_SKILLS`. Regression-guards future contributors adding callsites without the override.
+- **Coverage gate** (`pytest-cov >= 4.1` dev dep + `[tool.coverage.*]` config) -- `make verify` now enforces a per-module floor at **88%** (`floor(measured_baseline) - 2%` per Q4 brainstorming protocol). Excludes documented in CHANGELOG `[1.0.2]`.
+
+**v1.0.3** -- template alignment audit + cross-check Windows fix:
+- `docs/audits/v1.0.3-magi-gate-template-alignment.md` -- section-by-section audit of plugin's MAGI dispatch path against canonical template at `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md` (411 lines). 6 normative template sections audited; 2 MATCH + 4 GAP (1 INFO + 3 WARNING; 0 CRITICAL). All GAPs default-defer to v1.0.4 backlog as `L1.0.4-A` through `L1.0.4-D` LOCKED items.
+- `tests/test_magi_template_alignment.py` -- cross-artifact alignment test (pattern follows `tests/test_changelog.py` HF1). Asserts canonical strings (5 verdict labels + "Prior triage context" carry-forward heading) appear in plugin code via word-boundary regex. Detects template-vs-plugin drift.
+- **Cross-check Windows fix** (`pre_merge_cmd._dispatch_requesting_code_review`) -- WinError 206 root cause was argv length: cross-check prompt (with diff embedded ~200KB) packed into a single `-p <prompt>` argv exceeded Windows cmdline limits. Fix: write prompt to project-relative `<repo_root>/.claude/magi-cross-check/.tmp/prompt-<uuid16>.md` + pass `@<filepath>` reference in argv. Defense-in-depth: project-relative path side-steps MAX_PATH 260 + `@<file>` reference side-steps cmdline limit. `try/finally` cleanup. Items C+D+E (drift line-anchored, spec-snapshot autoregen, close-task convention codification) deferred to v1.0.4 per **first empirical fire of iter-2 CRITICAL trigger** (spec sec.6.1 pre-stage from v1.0.3 iter 1).
 
 > **BREAKING — INV-31 hard block (v0.2.0).** `close-task` and `auto` now invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts and the operator must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The v0.2 promise of routing reviewer issues through a `/receiving-code-review` + mini-cycle TDD feedback loop with up to 3 retry iterations is **deferred to v0.2.1** -- in v0.2.0 a single reviewer issue mid-`/sbtdd auto` aborts the whole run. Operators running quota-constrained or non-superpowers-enabled environments should set `--skip-spec-review` explicitly until v0.2.1 ships.
 
@@ -296,12 +309,14 @@ skills/sbtdd/
     dependency_check.py       -- 7-item pre-flight validator
     superpowers_dispatch.py   -- Invocation of Superpowers skills
     magi_dispatch.py          -- Invocation of /magi:magi + verdict parsing
+    spec_lint.py              -- H5-2 mechanical lint gate (R1-R5; v1.0.2)
+    spec_snapshot.py          -- spec escenarios -> spec-snapshot.json hashing
     init_cmd.py               -- bootstrap destination project
-    spec_cmd.py               -- spec pipeline with MAGI Checkpoint 2
+    spec_cmd.py               -- spec pipeline with MAGI Checkpoint 2 + spec_lint gate
     close_phase_cmd.py        -- three-step atomic phase close
     close_task_cmd.py         -- mark [x] + chore: commit + state advance
     status_cmd.py             -- structured read-only report
-    pre_merge_cmd.py          -- Loop 1 + Loop 2 sequential gate
+    pre_merge_cmd.py          -- Loop 1 + Loop 2 sequential gate (v1.0.3 cross-check Windows fix)
     finalize_cmd.py           -- sec.M.7 checklist + finishing-a-branch
     auto_cmd.py               -- shoot-and-forget full cycle
     resume_cmd.py             -- recovery from interrupted sessions
@@ -310,6 +325,8 @@ skills/sbtdd/
       tdd_guard_schema.py     -- test.json schema for TDD-Guard integration
       rust_reporter.py        -- cargo nextest -> tdd-guard-rust pipeline
       ctest_reporter.py       -- ctest JUnit XML -> TDD-Guard JSON
+scripts/
+  cross_check_telemetry.py    -- standalone aggregator CLI for cross-check artifacts (v1.0.2)
 templates/
   CLAUDE.local.md.template    -- Parameterized project rules
   plugin.local.md.template    -- Destination project configuration schema
@@ -317,8 +334,13 @@ templates/
   spec-behavior-base.md.template -- SBTDD spec skeleton
   conftest.py.template        -- pytest reporter for destination project
   gitignore.fragment          -- Entries to append to destination .gitignore
+docs/
+  audits/                     -- Per-cycle alignment audits (v1.0.3+)
+    v1.0.3-magi-gate-template-alignment.md
 tests/
   test_*.py                   -- One test module per scripts/ module
+  test_magi_template_alignment.py -- Cross-artifact alignment vs canonical template (v1.0.3)
+  test_invoke_skill_callsites_audit.py -- AST meta-test for allow_interactive_skill=True (v1.0.2)
   fixtures/
     plans/
     state-files/
@@ -326,9 +348,10 @@ tests/
     quota-errors/
     junit-xml/
     auto-run/
-pyproject.toml                -- Python >= 3.9, dual license, mypy strict, ruff
+    audit_callsites/          -- Synthetic fixtures for v1.0.2 meta-test
+pyproject.toml                -- Python >= 3.9, dual license, mypy strict, ruff, pytest-cov >= 4.1
 conftest.py                   -- pytest hook for TDD-Guard test.json
-Makefile                      -- verify, test, lint, format, typecheck targets
+Makefile                      -- verify (test + lint + format + typecheck + coverage), test, lint, format, typecheck, coverage targets
 CHANGELOG.md                  -- Human-curated release notes (Keep a Changelog format)
 CONTRIBUTING.md               -- Contributor guide
 LICENSE                       -- MIT
@@ -345,7 +368,7 @@ See the functional contract in `sbtdd/sbtdd-workflow-plugin-spec-base.md` for th
 # All tests
 python -m pytest tests/ -v
 
-# Full verification (tests + lint + format + types)
+# Full verification (tests + lint + format + types + coverage)
 make verify
 
 # Individual checks
@@ -353,7 +376,10 @@ make test        # pytest
 make lint        # ruff check
 make format      # ruff format --check
 make typecheck   # mypy --strict
+make coverage    # pytest --cov=skills/sbtdd/scripts --cov-fail-under=88 (v1.0.2+)
 ```
+
+The coverage target enforces a per-module floor of **88%** since v1.0.2 (`floor(measured_baseline) - 2%` per Q4 brainstorming protocol). `subprocess_utils.py` (74%) and `superpowers_dispatch.py` (83%) are documented v1.0.5+ raise candidates.
 
 ---
 
@@ -373,7 +399,7 @@ make typecheck   # mypy --strict
 ### Dev dependencies
 
 ```bash
-pip install pytest pytest-asyncio ruff mypy pyyaml
+pip install pytest pytest-asyncio pytest-cov ruff mypy pyyaml
 ```
 
 Or via `uv`:
@@ -381,6 +407,8 @@ Or via `uv`:
 ```bash
 uv sync
 ```
+
+`pytest-cov >= 4.1` is required since v1.0.2 (coverage gate in `make verify`).
 
 ---
 

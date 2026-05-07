@@ -353,6 +353,66 @@ v0.5.0 adds the observability pillar:
 
 See `docs/v0.5.0-config-matrix.md` for the full field/invariant matrix.
 
+### v1.0.2 notes
+
+v1.0.2 ships cross-check completion + spec quality enforcement:
+
+- **`scripts/cross_check_telemetry.py`** -- standalone aggregator CLI
+  for `.claude/magi-cross-check/iter*-*.json` artifacts (Feature G
+  v1.0.0). Markdown + JSON output; per-iter breakdown of KEEP /
+  DOWNGRADE / REJECT decisions, agreement rate, truncation rate.
+- **`spec_lint.py`** (Item C) -- H5-2 mechanical lint gate with 5
+  rules invoked from `spec_cmd._run_magi_checkpoint2` ONCE upstream
+  of MAGI iter loop:
+  - **R1** escenario well-formed (Given/When/Then bullets) -- error.
+  - **R2** unique escenario IDs -- error.
+  - **R3** monotonic top-level integer headers -- WARNING per Q3
+    (promote to error v1.0.5+ after empirical FP data).
+  - **R4** INV-27 mechanical extension to spec-behavior.md +
+    plan-tdd-org.md (uppercase placeholder tokens) -- error.
+  - **R5** frontmatter docstring `> Generado YYYY-MM-DD a partir de
+    <source>` -- error.
+- **Coverage gate** (`pytest-cov >= 4.1` + `[tool.coverage.*]` config) --
+  `make verify` enforces 88% per-module floor (`floor(measured) - 2%`
+  per Q4 brainstorming protocol).
+- **Subagent close-task convention** (Q2 Option B mandate): subagents
+  MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-task
+  --skip-spec-review` after Refactor verify-clean. Manual plan-file
+  checkbox edits are NON-CONFORMING and trigger drift detection.
+
+### v1.0.3 notes
+
+v1.0.3 ships template alignment audit + cross-check Windows fix:
+
+- **`docs/audits/v1.0.3-magi-gate-template-alignment.md`** (Item A) --
+  section-by-section audit of plugin's MAGI dispatch path against
+  canonical template at `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md`.
+  6 rows: 2 MATCH + 4 GAP (1 INFO + 3 WARNING; 0 CRITICAL). All
+  GAPs default-defer to v1.0.4 backlog as `L1.0.4-A` through
+  `L1.0.4-D` LOCKED items.
+- **`tests/test_magi_template_alignment.py`** (Item A) --
+  cross-artifact alignment test (pattern follows
+  `tests/test_changelog.py` HF1). Word-boundary regex match for
+  canonical strings (5 verdict labels + "Prior triage context"
+  carry-forward heading).
+- **Cross-check Windows fix** (Item B,
+  `pre_merge_cmd._dispatch_requesting_code_review`) -- WinError 206
+  root cause was argv length: cross-check prompt with diff embedded
+  (~200KB) packed into `-p <prompt>` argv exceeded Windows cmdline
+  limits. Fix: write prompt to project-relative
+  `.claude/magi-cross-check/.tmp/prompt-<uuid16>.md` + pass
+  `@<filepath>` reference in argv. Defense-in-depth: project-relative
+  path side-steps MAX_PATH 260 + `@<file>` reference side-steps
+  cmdline limit. `try/finally` cleanup.
+- **First empirical fire of iter-2 CRITICAL trigger**: pre-staged
+  in v1.0.3 spec sec.6.1, fired during v1.0.3 own Checkpoint 2 iter 2
+  with 1 CRITICAL persisting. Bundle reduced from 5 plan tasks to
+  2 (Items C+D+E deferred to v1.0.4). Pattern works as designed --
+  multi-pillar bundle + iter 2 still has CRITICAL → scope-trim
+  immediately.
+- **G1 cap=3 HARD streak now 4 cycles consecutive**: v1.0.0 (last
+  override) → v1.0.1 → v1.0.2 → v1.0.3 (all no-override).
+
 ## Notes
 
 - The plugin is pre-1.0 (`v0.1.x`); the schema of `session-state.json` and
