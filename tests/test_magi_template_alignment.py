@@ -46,9 +46,14 @@ def _canonical_strings_from_template() -> list[str]:
     cross-referenced in audit GAP/MATCH analysis (see
     ``docs/audits/v1.0.3-magi-gate-template-alignment.md`` rows 1-6).
     """
+    # Loop 2 iter 1 W1 melchior fix: bare verdict labels are fine for
+    # _canonical_strings_in_template (template uses bare forms), but
+    # the plugin-side substring match using bare `HOLD` or `GO` could
+    # spuriously match `WITHHOLD`, `placeholder`, `STRONG_GO`, etc.
+    # The plugin-side _grep_repo helper uses word-boundary matching
+    # (re module) to filter false positives. See
+    # `test_canonical_strings_present_in_plugin` impl.
     return [
-        # Verdict labels (Pass threshold + verdict action table) -- match
-        # plugin's underscore convention exactly (per template "Naming note").
         "STRONG_NO_GO",
         "HOLD",
         "GO_WITH_CAVEATS",
@@ -82,14 +87,22 @@ def _canonical_strings_from_template() -> list[str]:
 
 
 def _grep_repo(pattern: str, search_paths: list[Path]) -> list[tuple[Path, int]]:
-    """Return list of ``(path, line_number)`` where ``pattern`` appears literally.
+    """Return list of ``(path, line_number)`` where ``pattern`` appears as a token.
+
+    Loop 2 iter 1 W1 melchior fix: matching is **word-boundary aware**
+    (via :mod:`re`) so bare verdict labels like ``"GO"`` and ``"HOLD"``
+    do NOT spuriously match longer substrings like ``"STRONG_GO"``,
+    ``"WITHHOLD"``, or ``"placeholder"``. Pattern is treated as a
+    literal token (regex metacharacters in the pattern are escaped).
 
     Recursively scans every ``.py`` and ``.md`` file under each base in
     ``search_paths`` (silently skipping unreadable files / binaries to
     keep the test resilient to merge-conflict noise or future
-    additions). Pattern is treated as a literal substring -- no regex
-    metacharacter handling -- so callers pass exact tokens.
+    additions).
     """
+    import re as _re_for_grep
+
+    token_re = _re_for_grep.compile(rf"\b{_re_for_grep.escape(pattern)}\b")
     hits: list[tuple[Path, int]] = []
     for base in search_paths:
         if not base.exists():
@@ -104,7 +117,7 @@ def _grep_repo(pattern: str, search_paths: list[Path]) -> list[tuple[Path, int]]
             except (OSError, UnicodeDecodeError):
                 continue
             for lineno, line in enumerate(text.splitlines(), start=1):
-                if pattern in line:
+                if token_re.search(line):
                     hits.append((path, lineno))
     return hits
 

@@ -1317,12 +1317,68 @@ def test_b1_b2_v103_cross_check_uses_atfile_reference(monkeypatch, tmp_path):
     # platform-fragile and meaningless if e.g. argv ever encodes other
     # large fields legitimately).
     assert ("x" * 50000) not in cmd_text, "Prompt content leaked into argv"
-    # An @<filepath> reference must be present somewhere in argv.
-    assert "@" in cmd_text, "Argv should contain @<filepath> reference"
-    # Stronger: at least one argv token contains '@<path>' (file reference
-    # syntax recognized by the claude CLI inside the -p prompt body).
-    assert any("@" in part for part in cmd), (
-        "Expected at least one argv token containing '@<filepath>' reference"
+    # Loop 2 iter 1 W5 caspar fix: tighten @ shape assertion. Verify a
+    # token starts with `@` AND the path component points under
+    # `.claude/magi-cross-check/.tmp/` (project-relative). Avoids the
+    # bare-substring false-positive class where any `@` anywhere in
+    # argv (e.g. email-style tokens) would pass.
+    atfile_tokens = [
+        part
+        for part in cmd
+        if isinstance(part, str)
+        and "@" in part
+        and "magi-cross-check/.tmp" in part.replace("\\", "/")
+    ]
+    assert atfile_tokens, (
+        f"Expected an @<filepath> token pointing under .claude/magi-cross-check/.tmp/; "
+        f"got argv: {cmd!r}"
+    )
+
+
+def test_b_content_equality_v103_temp_file_matches_prompt_body(monkeypatch, tmp_path):
+    """Loop 2 iter 1 W4 caspar fix: temp file content equals prompt body during dispatch.
+
+    Captures the prompt file path from argv + reads its content during
+    dispatch (BEFORE try/finally cleanup unlinks the file), asserts
+    byte-equality with the prompt argument. Closes the test-fidelity gap
+    where B-tests verified path SHAPE but never the actual write content.
+    """
+    import subprocess_utils
+    from pre_merge_cmd import _dispatch_requesting_code_review
+
+    monkeypatch.chdir(tmp_path)
+    expected_prompt = "## Cumulative diff under review\n\n" + ("PAYLOAD" * 1000)
+    captured_content: list[str] = []
+
+    def fake_run_with_timeout(cmd, **kwargs):
+        # Find the @<filepath> token in argv and read it BEFORE cleanup
+        for tok in cmd:
+            if (
+                isinstance(tok, str)
+                and "@" in tok
+                and "magi-cross-check/.tmp" in tok.replace("\\", "/")
+            ):
+                # tok looks like "@<rel-posix-path>" embedded in the prompt body
+                idx = tok.index("@")
+                rel_path = tok[idx + 1 :].split()[0]
+                full_path = tmp_path / rel_path
+                if full_path.exists():
+                    captured_content.append(full_path.read_text(encoding="utf-8"))
+                break
+        from unittest.mock import MagicMock
+
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = '{"decisions": []}'
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run_with_timeout)
+    _dispatch_requesting_code_review(diff="d", prompt=expected_prompt)
+
+    assert captured_content, "Did not capture prompt file content during dispatch"
+    assert captured_content[0] == expected_prompt, (
+        "Temp file content must match prompt body byte-for-byte"
     )
 
 

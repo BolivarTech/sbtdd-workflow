@@ -1310,24 +1310,21 @@ def _dispatch_requesting_code_review(
     repo_root = Path(cwd) if cwd else Path.cwd()
     tmp_dir = repo_root / ".claude" / "magi-cross-check" / ".tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    # v1.0.3 Loop 1 iter 1 CRITICAL #2 fix: defensive precondition that
-    # tmp_dir is under repo_root before computing relative_to. Catches
-    # path-mismatch failure modes (cwd outside repo_root, symlink
-    # resolution differences, Windows case-folding) at the call site
-    # rather than letting ValueError propagate from relative_to.
-    if not tmp_dir.is_relative_to(repo_root):
-        raise PreconditionError(
-            f"cross-check tmp_dir {tmp_dir} is not relative to repo_root {repo_root}; "
-            "ensure cwd is the project root or pass cwd= explicitly"
-        )
-    run_id = uuid.uuid4().hex[:8]
+    # Loop 2 iter 1 W7 caspar fix: bump uuid hex truncation to 16 chars
+    # (from 8) for v1.0.4 parallel task dispatcher forward-compat. With
+    # 8 hex chars (~4 billion combinations), parallel dispatch
+    # collision probability is non-zero under high concurrency; 16 hex
+    # chars (~1.8e19 combinations) is collision-safe by construction.
+    run_id = uuid.uuid4().hex[:16]
     prompt_file = tmp_dir / f"prompt-{run_id}.md"
 
+    # Loop 2 iter 1 W6 caspar fix: theatrical `is_relative_to` precondition
+    # removed. tmp_dir is constructed as `repo_root / ".claude" / ...`,
+    # which structurally guarantees the relative_to call below cannot
+    # raise ValueError -- the precondition was vacuous in the happy path
+    # AND lacked test coverage for the unhappy path. The try/finally
+    # block already provides cleanup safety for any other error class.
     try:
-        # Loop 1 iter 1 CRITICAL #2 fix: keep all path operations and
-        # the write inside try/finally so cleanup runs even if the
-        # relative_to call (or platform-specific path normalisation)
-        # raises after prompt_file creation.
         atfile_arg = f"@{prompt_file.relative_to(repo_root).as_posix()}"
         prompt_file.write_text(prompt, encoding="utf-8")
         result = superpowers_dispatch.requesting_code_review(
