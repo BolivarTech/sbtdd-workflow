@@ -187,6 +187,28 @@ def _apply_inv0_model_check(
     return None
 
 
+def _build_recovery_message(skill: str) -> str:
+    """Construct the operator-facing recovery message for a blocked skill.
+
+    v1.0.4 Item A.2 (Task 3) ships a minimal placeholder; Task 4 replaces
+    it with a per-skill recovery dictionary (``_PER_SKILL_RECOVERY``).
+    The placeholder format is preserved verbatim across both tasks so
+    callsite tests that match the leading sentence keep passing
+    monotonically.
+
+    Args:
+        skill: Slash-command name (e.g., ``"receiving-code-review"``).
+
+    Returns:
+        Operator-facing message string.
+    """
+    return (
+        f"Skill `/{skill}` cannot run via `claude -p` subprocess "
+        f"(empirically incompatible: requires multi-turn interactive "
+        f"dialogue or hangs > 600s)."
+    )
+
+
 def invoke_skill(
     skill: str,
     args: list[str] | None = None,
@@ -242,22 +264,22 @@ def invoke_skill(
         ValidationError: If the subprocess timed out OR exited non-zero without
             matching a quota pattern. Mapped to exit 1 by run_sbtdd.py.
     """
-    # v1.0.1 Item A2 (sec.2.3): safe-by-default gate -- skills in
-    # ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g. ``/brainstorming``,
-    # ``/writing-plans``) raise BEFORE subprocess spawn unless the caller
-    # opts into the override. Wrappers built via ``_make_wrapper`` and
-    # the H5-1 ``_invoke_skill`` helper pass ``True`` automatically (per
-    # Pre-A2 migration); external callers must opt in explicitly.
+    # v1.0.1 Item A2 (sec.2.3) + v1.0.4 Item A.2 (Task 3): safe-by-default
+    # gate -- skills in ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g.
+    # ``/brainstorming``, ``/writing-plans``, ``/receiving-code-review``)
+    # raise BEFORE subprocess spawn unless the caller opts into the
+    # override. Wrappers built via ``_make_wrapper`` and the H5-1
+    # ``_invoke_skill`` helper pass ``True`` automatically (per Pre-A2
+    # migration); external callers must opt in explicitly.
+    #
+    # v1.0.4 (Task 3 + Task 4): the operator-facing recovery message is
+    # built by :func:`_build_recovery_message` so per-skill recovery
+    # paths can be tailored (Task 4 expansion). NO env-var/isatty
+    # heuristic -- caspar Checkpoint 2 iter 1 CRITICAL verified that
+    # heuristic does not fix the v1.0.3 bug because operator main
+    # sessions have TTY=True so the gate would not fire.
     if skill in _SUBPROCESS_INCOMPATIBLE_SKILLS and not allow_interactive_skill:
-        raise PreconditionError(
-            f"Skill /{skill} es interactivo y NO puede ser invocado via "
-            f"`claude -p` subprocess (output silently empty observed in v1.0.0 "
-            f"dogfood). Run /{skill} manualmente en sesion interactiva de "
-            f"Claude Code, o usa la wrapper function "
-            f"`superpowers_dispatch.{skill.replace('-', '_')}(...)` que pasa "
-            f"el override automaticamente. Para recovery despues de dispatch "
-            f"manual, usa `sbtdd spec --resume-from-magi`."
-        )
+        raise PreconditionError(_build_recovery_message(skill))
     effective_model = _apply_inv0_model_check(model, skill_field_name)
     cmd = _build_skill_cmd(skill, args, model=effective_model)
     # iter 2 finding #1 + #7: only pass stream_prefix when supplied so
