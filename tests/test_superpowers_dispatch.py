@@ -551,3 +551,156 @@ class TestSubprocessIncompatibleSkillsExtended:
         assert "BLOCKED UNCONDITIONALLY" in docstring
         assert "allow_interactive_skill=True" in docstring
         assert "NO env-var/isatty heuristic" in docstring
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Item A.2 (Task 3) -- invoke_skill membership gate.
+# Covers escenarios A-1 (gate fires unconditionally + no subprocess spawn),
+# A-3 (allow_interactive_skill=True bypasses), A-4 (existing wrappers
+# backward-compat), A-5 (skills NOT in set pass through) from spec sec.4.1.
+# Project convention: monkeypatch ``subprocess_utils.run_with_timeout``
+# rather than ``subprocess.run`` (production code goes through the helper);
+# args=[...] list per invoke_skill signature.
+# ---------------------------------------------------------------------------
+
+
+class TestInvokeSkillMembershipGate:
+    """v1.0.4 Item A.2 escenarios A-1, A-3, A-4, A-5 -- invoke_skill gate."""
+
+    def test_a1_receiving_code_review_raises_unconditionally(self, monkeypatch):
+        """A-1: invoke_skill('receiving-code-review', ...) raises without override."""
+        from errors import PreconditionError
+        from superpowers_dispatch import invoke_skill
+
+        def explosive_run(*a, **kw):  # pragma: no cover -- guarded by raise
+            raise AssertionError("subprocess spawned despite v1.0.4 Item A gate")
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", explosive_run)
+        with pytest.raises(PreconditionError) as exc_info:
+            invoke_skill("receiving-code-review", args=["any prompt"])
+        msg = str(exc_info.value)
+        assert "Skill `/receiving-code-review` cannot run via `claude -p` subprocess" in msg
+        assert "empirically incompatible" in msg
+
+    def test_a1_no_subprocess_spawned_when_blocked(self, monkeypatch):
+        """A-1: PreconditionError raised BEFORE subprocess spawn (run_with_timeout not called)."""
+        from errors import PreconditionError
+        from superpowers_dispatch import invoke_skill
+
+        calls: list[Any] = []
+
+        def fake_run(*a, **kw):  # pragma: no cover -- must NOT be reached
+            calls.append((a, kw))
+            raise AssertionError("subprocess spawned despite gate")
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        with pytest.raises(PreconditionError):
+            invoke_skill("receiving-code-review", args=["any prompt"])
+        assert calls == [], "subprocess_utils.run_with_timeout was invoked"
+
+    def test_a3_allow_interactive_skill_bypasses_gate(self, monkeypatch):
+        """A-3: allow_interactive_skill=True bypasses gate (override active)."""
+        from superpowers_dispatch import SkillResult, invoke_skill
+
+        class FakeProc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        called: list[Any] = []
+
+        def fake_run(cmd, timeout, capture=True, cwd=None):
+            called.append(cmd)
+            return FakeProc()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        result = invoke_skill(
+            "receiving-code-review",
+            args=["any prompt"],
+            allow_interactive_skill=True,
+        )
+        assert isinstance(result, SkillResult)
+        assert len(called) == 1, "subprocess should be spawned when override is True"
+
+    def test_a4_brainstorming_wrapper_backward_compat(self, monkeypatch):
+        """A-4: existing brainstorming wrapper preserves v1.0.1 behavior."""
+        from superpowers_dispatch import SkillResult, brainstorming
+
+        class FakeProc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        called: list[Any] = []
+
+        def fake_run(cmd, timeout, capture=True, cwd=None):
+            called.append(cmd)
+            return FakeProc()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        result = brainstorming(args=["any prompt"])
+        assert isinstance(result, SkillResult)
+        assert len(called) == 1, "wrapper should bypass gate via override"
+
+    def test_a4_writing_plans_wrapper_backward_compat(self, monkeypatch):
+        """A-4: existing writing_plans wrapper preserves v1.0.1 behavior."""
+        from superpowers_dispatch import SkillResult, writing_plans
+
+        class FakeProc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        called: list[Any] = []
+
+        def fake_run(cmd, timeout, capture=True, cwd=None):
+            called.append(cmd)
+            return FakeProc()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        result = writing_plans(args=["any prompt"])
+        assert isinstance(result, SkillResult)
+        assert len(called) == 1, "wrapper should bypass gate via override"
+
+    def test_a5_skills_not_in_set_pass_through(self, monkeypatch):
+        """A-5: skills NOT in _SUBPROCESS_INCOMPATIBLE_SKILLS pass through."""
+        from superpowers_dispatch import SkillResult, invoke_skill
+
+        class FakeProc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        called: list[Any] = []
+
+        def fake_run(cmd, timeout, capture=True, cwd=None):
+            called.append(cmd)
+            return FakeProc()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        result = invoke_skill("systematic-debugging", args=["any prompt"])
+        assert isinstance(result, SkillResult)
+        assert len(called) == 1, "non-incompatible skills should pass through gate"
+
+    def test_a1_gate_fires_in_tty_session(self, monkeypatch):
+        """A-1 (post iter 1 triage CRITICAL #1+#2): gate fires regardless of TTY state.
+
+        This is the key fix vs caspar's CRITICAL -- operator main session has
+        TTY=True but gate must STILL fire to prevent v1.0.3 hang. Test
+        emulates the TTY-true main-session scenario by monkeypatching
+        ``sys.stdin.isatty`` and confirms the gate is unaffected.
+        """
+        from errors import PreconditionError
+        from superpowers_dispatch import invoke_skill
+
+        # Even if some hypothetical TTY-detection heuristic evaluates True,
+        # the gate must NOT depend on it. Force isatty=True and confirm the
+        # gate still fires.
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+        def explosive_run(*a, **kw):  # pragma: no cover -- guarded by raise
+            raise AssertionError("subprocess spawned despite gate (TTY=True)")
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", explosive_run)
+        with pytest.raises(PreconditionError):
+            invoke_skill("receiving-code-review", args=["any prompt"])
