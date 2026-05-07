@@ -1432,3 +1432,206 @@ def test_auto_never_toggles_tdd_guard(
     # (c) No tdd-guard toggle prompt emitted.
     assert "tdd-guard on" not in out
     assert "tdd-guard off" not in out
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Item C.3 -- ``--parallel`` flag wiring (escenarios C-7, C-8, C-9).
+# ---------------------------------------------------------------------------
+
+
+class TestAutoCmdParallelFlag:
+    """v1.0.4 Item C.3 escenarios C-7, C-8, C-9 — ``--parallel`` flag wiring."""
+
+    def test_c7_parallel_flag_dispatches_batches(self, tmp_path: Path) -> None:
+        """C-7: ``--parallel`` flag dispatches parallelizable tasks in batches."""
+        import textwrap
+
+        from auto_cmd import _build_dispatch_plan_parallel
+
+        plan = tmp_path / "plan.md"
+        plan.write_text(
+            textwrap.dedent(
+                """\
+                ### Task 1: A
+
+                **Files:**
+                - Modify: `a.py`
+
+                ### Task 2: B
+
+                **Files:**
+                - Modify: `b.py`
+                """
+            )
+        )
+
+        dispatch_plan = _build_dispatch_plan_parallel(plan)
+        # Expect single batch with both tasks
+        assert len(dispatch_plan) == 1
+        assert dispatch_plan[0] == {"1", "2"}
+
+    def test_c8_sequential_default_preserves_order(self, tmp_path: Path) -> None:
+        """C-8: ``--parallel`` NOT specified preserves v1.0.3 sequential order."""
+        import textwrap
+
+        from auto_cmd import _build_dispatch_plan_sequential
+
+        plan = tmp_path / "plan.md"
+        plan.write_text(
+            textwrap.dedent(
+                """\
+                ### Task 1: A
+
+                **Files:**
+                - Modify: `a.py`
+
+                ### Task 2: B
+
+                **Files:**
+                - Modify: `b.py`
+                """
+            )
+        )
+
+        dispatch_plan = _build_dispatch_plan_sequential(plan)
+        # Sequential: each batch is single-task in plan order
+        assert dispatch_plan == [{"1"}, {"2"}]
+
+    def test_c8_collision_forces_sequential_in_parallel_mode(
+        self, tmp_path: Path
+    ) -> None:
+        """C-8: file-colliding tasks split into sub-batches even under parallel."""
+        import textwrap
+
+        from auto_cmd import _build_dispatch_plan_parallel
+
+        plan = tmp_path / "plan.md"
+        plan.write_text(
+            textwrap.dedent(
+                """\
+                ### Task 1: A
+
+                **Files:**
+                - Modify: `shared.py`
+
+                ### Task 2: B
+
+                **Files:**
+                - Modify: `shared.py`
+                """
+            )
+        )
+
+        dispatch_plan = _build_dispatch_plan_parallel(plan)
+        # Both tasks modify shared.py → 2 sub-batches
+        assert len(dispatch_plan) == 2
+        sizes = sorted(len(b) for b in dispatch_plan)
+        assert sizes == [1, 1]
+
+    def test_c9_tdd_guard_warning_in_parallel_mode(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """C-9: ``--parallel`` emits warning when TDD-Guard hooks detected."""
+        import json
+
+        from auto_cmd import _check_tdd_guard_warning
+
+        # Synthesize .claude/settings.json with TDD-Guard hook
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Write|Edit",
+                                "hooks": [
+                                    {"type": "command", "command": "tdd-guard"}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        _check_tdd_guard_warning(parallel=True, project_root=tmp_path)
+        captured = capsys.readouterr()
+        assert "Parallel mode" in captured.err
+        assert "TDD-Guard" in captured.err
+        assert "tdd-guard off" in captured.err
+        assert "/using-git-worktrees" in captured.err
+
+    def test_c9_no_warning_in_sequential_mode(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """C-9: sequential mode (no ``--parallel``) emits no TDD-Guard warning."""
+        import json
+
+        from auto_cmd import _check_tdd_guard_warning
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Write",
+                                "hooks": [
+                                    {"type": "command", "command": "tdd-guard"}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        _check_tdd_guard_warning(parallel=False, project_root=tmp_path)
+        captured = capsys.readouterr()
+        assert "Parallel mode" not in captured.err
+
+    def test_c9_no_warning_when_tdd_guard_absent(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """C-9: ``--parallel`` without TDD-Guard hooks emits no warning."""
+        from auto_cmd import _check_tdd_guard_warning
+
+        # No .claude/settings.json
+        _check_tdd_guard_warning(parallel=True, project_root=tmp_path)
+        captured = capsys.readouterr()
+        assert "TDD-Guard" not in captured.err
+
+    def test_c7_auto_cmd_parser_accepts_parallel_flag(self) -> None:
+        """C-7: argparse on ``auto`` subcommand accepts ``--parallel``."""
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args(["--parallel"])
+        assert ns.parallel is True
+
+    def test_c7_auto_cmd_parser_default_parallel_false(self) -> None:
+        """C-7/C-8: default value of ``--parallel`` is ``False`` (preserves sequential)."""
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args([])
+        assert ns.parallel is False
+
+    def test_c9_check_function_handles_corrupt_settings_json(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Defensive: corrupt settings.json silently bypasses warning."""
+        from auto_cmd import _check_tdd_guard_warning
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        (settings_dir / "settings.json").write_text("{not valid json")
+
+        _check_tdd_guard_warning(parallel=True, project_root=tmp_path)
+        captured = capsys.readouterr()
+        # No crash; no warning emitted because hooks dict cannot be read
+        assert "TDD-Guard" not in captured.err
