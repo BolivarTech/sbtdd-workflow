@@ -73,6 +73,13 @@ def _install_happy_path_patches(
     captured.setdefault("new_sha", "f00dcafe")
 
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
+    # v1.0.5 Item D Q3-A: bypass HARD-BLOCK in spec-review happy-path tests
+    # (no real git history in tmp_path; preflight gate is exercised
+    # exclusively in TestPreflightHardBlock).
+    monkeypatch.setattr(
+        "close_task_cmd._preflight_triplet_check",
+        lambda state, project_root=None, *, skip_preflight=False: None,
+    )
 
     def fake_run(cmd: list[str], timeout: int = 0, cwd: str | None = None):  # type: ignore[no-untyped-def]
         if "rev-parse" in cmd:

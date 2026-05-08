@@ -110,11 +110,21 @@ def _install_happy_path_patches(
     Collects side-effects into ``captured`` so tests can assert on them:
     - ``commit_calls``: list of ``(prefix, message)`` tuples.
     - ``new_sha``: short SHA returned by rev-parse.
+
+    v1.0.5 Item D Q3-A: also monkeypatches ``_preflight_triplet_check``
+    to a no-op so the happy-path tests (which run against ``tmp_path``
+    with no real git history) bypass the new HARD-BLOCK introduced in
+    Task 4. Tests that exercise the preflight gate explicitly target
+    :class:`TestPreflightHardBlock`.
     """
     captured.setdefault("commit_calls", [])
     captured.setdefault("new_sha", "f00dcafe")
 
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "close_task_cmd._preflight_triplet_check",
+        lambda state, project_root=None, *, skip_preflight=False: None,
+    )
 
     def fake_run(cmd: list[str], timeout: int = 0, cwd: str | None = None):  # type: ignore[no-untyped-def]
         # git add ... and git rev-parse --short HEAD both route through here.
@@ -187,6 +197,11 @@ def test_close_task_chore_commit_contains_only_plan_edit(
     captured["git_add_args"] = []
 
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
+    # v1.0.5 Item D Q3-A: bypass HARD-BLOCK in this happy-path test.
+    monkeypatch.setattr(
+        "close_task_cmd._preflight_triplet_check",
+        lambda state, project_root=None, *, skip_preflight=False: None,
+    )
 
     def fake_run(cmd: list[str], timeout: int = 0, cwd: str | None = None):  # type: ignore[no-untyped-def]
         if cmd[:2] == ["git", "add"]:

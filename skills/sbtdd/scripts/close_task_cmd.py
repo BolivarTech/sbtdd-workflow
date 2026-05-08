@@ -50,6 +50,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip spec-reviewer dispatch (INV-31 escape valve)",
     )
+    p.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        default=False,
+        help=(
+            "v1.0.5 Item D Q3-A emergency override: bypass phase advance "
+            "gate enforcement. Audit-logged via stderr breadcrumb."
+        ),
+    )
     return p
 
 
@@ -252,6 +261,136 @@ def _merge_scratch_plans(tracks: list[list[str]], project_root: Path) -> None:
         _atomic_write(main_path, main_text)
 
 
+# ---------------------------------------------------------------------------
+# v1.0.5 Item D Q3 OPTION A -- close_task_cmd preflight HARD-BLOCK
+# (escenarios D-1..D-4).
+#
+# v1.0.5 replaces v1.0.4's scope-trimmed Q3 Option B 3-touchpoint doc-only
+# attempt with code-side enforcement. ``_preflight_triplet_check`` walks
+# the commit chain since the last ``chore: mark task <N> complete`` commit
+# (or branch root for the very first task) and asserts the canonical
+# Red/Green/Refactor commit triplet (``test:`` + ``feat:|fix:`` +
+# ``refactor:``). A missing prefix raises :class:`PreconditionError`
+# with operator-actionable recovery guidance. ``--skip-preflight`` is
+# the explicit emergency operator override (audit-logged to stderr).
+# ---------------------------------------------------------------------------
+
+
+def _git_log_between(start_sha: str | None, project_root: Path | None = None) -> list[str]:
+    """Return commit subjects between ``start_sha`` (exclusive) and HEAD.
+
+    v1.0.5 iter-1 CRITICAL #5 fix: when ``start_sha`` is ``None`` (no
+    prior chore commit on branch), returns ALL commits on the current
+    branch (boundary = branch root).
+
+    Args:
+        start_sha: Boundary SHA (exclusive) or ``None`` for branch
+            root.
+        project_root: Working directory for ``git log``.
+
+    Returns:
+        List of stripped commit subject lines (newest first per
+        ``git log`` default).
+    """
+    cwd = str(project_root) if project_root else None
+    rev_range = "HEAD" if start_sha is None else f"{start_sha}..HEAD"
+    result = subprocess_utils.run_with_timeout(
+        ["git", "log", rev_range, "--format=%s"], timeout=10, cwd=cwd
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
+    """Return SHA of the most recent ``chore: mark task <N> complete`` commit.
+
+    v1.0.5 iter-1 CRITICAL #5 fix: this is the canonical "previous task
+    close" boundary for the :func:`_preflight_triplet_check` triplet
+    sweep. Returns ``None`` if no such commit exists on the current
+    branch (first task in plan).
+
+    Rebase/squash limitation: if the operator squashed prior task-close
+    commits, this returns the most recent surviving ``chore:`` subject
+    matching the pattern; risk: false-positive triplet detection if
+    squash produced a hybrid subject. Mitigated by the
+    ``--skip-preflight`` flag for emergency operator override.
+    """
+    cwd = str(project_root) if project_root else None
+    result = subprocess_utils.run_with_timeout(
+        ["git", "log", "HEAD", "--format=%H%x09%s"], timeout=10, cwd=cwd
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        sha, subject = line.split("\t", 1)
+        # Match: "chore: mark task <N> complete" (allow trailing variants)
+        if subject.startswith("chore: mark task ") and " complete" in subject:
+            return sha
+    return None
+
+
+def _preflight_triplet_check(
+    state: Any, project_root: Path | None = None, *, skip_preflight: bool = False
+) -> None:
+    """Hard-block when the phase advance gate has been bypassed.
+
+    v1.0.5 Item D Q3 OPTION A (iter-1 CRITICAL #5 fix): detects when the
+    commit chain since the last ``chore: mark task <N> complete`` commit
+    (or branch root if none exists) lacks the canonical TDD triplet
+    (``test:`` + ``feat:|fix:`` + ``refactor:``). Raises
+    :class:`PreconditionError` with operator-actionable guidance.
+    Operator emergency override via ``--skip-preflight`` flag
+    (audit-logged via stderr breadcrumb).
+
+    Why "since last chore commit" instead of
+    ``phase_started_at_commit`` (iter-1 CRITICAL #5 rationale):
+    ``phase_started_at_commit`` advances on every phase close within a
+    task, so when ``_preflight_triplet_check`` runs at task-close time
+    it sees only the LAST phase's commits -- never the full
+    Red+Green+Refactor triplet. Boundary "since last chore: mark task"
+    reliably brackets the entire current task's phase-close commits
+    without phase-state coupling.
+
+    Args:
+        state: SessionState dataclass or plain dict carrying at least
+            ``current_task_id``.
+        project_root: Project root.
+        skip_preflight: Operator emergency override (--skip-preflight).
+    """
+    task_id = _state_field(state, "current_task_id")
+    if skip_preflight:
+        sys.stderr.write(
+            f"[sbtdd close-task] WARNING: --skip-preflight active; "
+            f"phase advance gate enforcement BYPASSED for "
+            f"task_id={task_id}. Audit-logged.\n"
+        )
+        sys.stderr.flush()
+        return
+
+    last_chore_sha = _last_chore_task_close_sha(project_root)
+    boundary_label = (
+        f"last chore commit {last_chore_sha}" if last_chore_sha is not None else "branch root"
+    )
+    subjects = _git_log_between(last_chore_sha, project_root=project_root)
+    has_test = any(s.startswith("test:") for s in subjects)
+    has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
+    has_refactor = any(s.startswith("refactor:") for s in subjects)
+    if not (has_test and has_green and has_refactor):
+        raise PreconditionError(
+            f"Phase advance gate bypassed: commit chain since "
+            f"{boundary_label} lacks test:/feat:|fix:/refactor: triplet. "
+            f"Per SBTDD INV-1 + INV-5..7, each task close requires "
+            f"close-phase invocation per Red/Green/Refactor phase. "
+            f"Recovery: invoke `python skills/sbtdd/scripts/run_sbtdd.py "
+            f"close-phase` once per pending phase OR pass --skip-preflight "
+            f"if emergency operator override is appropriate (audit-logged "
+            f"via stderr breadcrumb)."
+        )
+
+
 def _state_field(state: Any, key: str) -> Any:
     """Return ``state[key]`` (dict) or ``getattr(state, key)`` (dataclass).
 
@@ -416,6 +555,9 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = ns.project_root
     state = _preflight(root)
     closed_task_id = state.current_task_id or ""
+    # v1.0.5 Item D Q3-A: HARD-BLOCK when phase advance gate bypassed.
+    # Operator emergency override available via --skip-preflight.
+    _preflight_triplet_check(state, root, skip_preflight=getattr(ns, "skip_preflight", False))
     if not ns.skip_spec_review:
         _run_spec_review(closed_task_id, state, root)
     new_state = mark_and_advance(state, root)
