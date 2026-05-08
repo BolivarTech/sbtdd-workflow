@@ -1255,6 +1255,174 @@ class AutoRunAudit:
 
 
 # ---------------------------------------------------------------------------
+# v1.0.5 Item I-1 -- per-worker sidecar audit-trail pattern (escenarios
+# I1-1..I1-6). Workers redirect their per-track audit data to deterministic
+# sidecar files; the parent merges the sidecars post-batch into the canonical
+# .claude/auto-run.json so concurrent worker writes never clobber the parent's
+# pre-dispatch record (INV-26 audit-trail integrity).
+# ---------------------------------------------------------------------------
+
+
+import hashlib  # noqa: E402  (ordered with the I-1 helpers for locality)
+
+
+def _audit_sidecar_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
+    """Per-worker audit sidecar path.
+
+    v1.0.5 Item I-1: deterministic name per task-IDs hash. Each worker
+    writes its audit to its own sidecar; the parent post-batch merges all
+    sidecars into the canonical ``.claude/auto-run.json``.
+
+    Args:
+        task_ids: Sorted tuple of task IDs assigned to this worker.
+        project_root: Project root path.
+
+    Returns:
+        Path to the per-worker sidecar file.
+    """
+    digest = hashlib.sha1(",".join(task_ids).encode("utf-8")).hexdigest()[:12]
+    return project_root / ".claude" / f"auto-run-track-{digest}.json"
+
+
+def _atomic_write_json(path: Path, data: object) -> None:
+    """Atomic JSON write via tempfile.mkstemp + os.replace (cross-platform).
+
+    Uses ``tempfile.mkstemp`` so concurrent writers in the same directory
+    receive unique tmp names (no collision risk under parallel dispatch
+    per v1.0.5 iter-2 WARNING). The destination ``os.replace`` is atomic
+    on POSIX and Windows; on failure the tmp file is cleaned up so
+    nothing leaks.
+    """
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_str = tempfile.mkstemp(suffix=".tmp", prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_str, path)
+    except Exception:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
+        raise
+
+
+def _write_audit(audit: dict[str, Any], project_root: Path, ns: argparse.Namespace) -> None:
+    """Write a v1.0.5-style audit record.
+
+    Worker mode (``--no-recursive`` + ``--task-ids``) redirects to a
+    per-worker sidecar (see :func:`_audit_sidecar_path`). Orchestrator
+    mode writes to the canonical ``.claude/auto-run.json`` directly.
+
+    Note: this helper is the v1.0.5 I-1 generic-dict writer used by
+    workers and the post-batch merge. It is distinct from the typed
+    :func:`_write_auto_run_audit` writer that persists
+    :class:`AutoRunAudit` instances during the orchestrator's own
+    Phase 5 audit summary.
+
+    Args:
+        audit: JSON-serialisable dict payload.
+        project_root: Project root.
+        ns: Parent or worker argparse namespace (read-only).
+    """
+    if getattr(ns, "no_recursive", False) and getattr(ns, "task_ids", None):
+        task_ids_tuple = tuple(sorted(ns.task_ids.split(",")))
+        audit_path = _audit_sidecar_path(task_ids_tuple, project_root)
+    else:
+        audit_path = project_root / ".claude" / "auto-run.json"
+    _atomic_write_json(audit_path, audit)
+
+
+def _merge_audit_sidecars(tracks: list[list[str]], project_root: Path) -> dict[str, Any]:
+    """Parent post-batch: merge per-worker sidecars into canonical audit.
+
+    v1.0.5 Item I-1: collects per-worker sidecar files (created by
+    workers during dispatch) and folds them into the canonical
+    ``.claude/auto-run.json``. Preserves the parent's pre-dispatch
+    record (e.g. ``start_time``, planned tasks) and adds:
+
+    * ``per_worker``: list of per-worker dicts (one entry per track).
+      A missing sidecar becomes a placeholder
+      ``{"status": "no_audit_data", ...}`` so the merge never fails
+      silently when a worker crashed before its sidecar write.
+    * ``aggregate_task_count``: sum of task IDs across all tracks.
+
+    Sidecar files are unlinked after their content has been folded in
+    so subsequent dispatches start clean.
+
+    Args:
+        tracks: List of dispatched track task-ID lists.
+        project_root: Project root.
+
+    Returns:
+        Merged audit dict.
+    """
+    canonical_path = project_root / ".claude" / "auto-run.json"
+    if canonical_path.exists():
+        try:
+            canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
+            if not isinstance(canonical, dict):
+                canonical = {}
+        except (OSError, json.JSONDecodeError):
+            canonical = {}
+    else:
+        canonical = {}
+
+    per_worker: list[dict[str, Any]] = []
+    for task_ids in tracks:
+        sidecar_path = _audit_sidecar_path(tuple(sorted(task_ids)), project_root)
+        if sidecar_path.exists():
+            try:
+                sidecar_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                sidecar_data = {
+                    "task_ids": list(task_ids),
+                    "status": "no_audit_data",
+                    "note": "Worker terminated before sidecar write",
+                }
+            else:
+                sidecar_path.unlink(missing_ok=True)
+            per_worker.append(sidecar_data)
+        else:
+            per_worker.append(
+                {
+                    "task_ids": list(task_ids),
+                    "status": "no_audit_data",
+                    "note": "Worker terminated before sidecar write",
+                }
+            )
+    canonical["per_worker"] = per_worker
+    canonical["aggregate_task_count"] = sum(len(tids) for tids in tracks)
+    return canonical
+
+
+def _reap_orphans(project_root: Path, dispatch_start_epoch: float) -> None:
+    """Clean stale per-worker sidecar/scratch files from a prior crashed run.
+
+    v1.0.5 iter-1 WARNING + iter-2 race-safety mtime guard: only reaps
+    files older than ``dispatch_start_epoch - 300s`` (5min margin). This
+    avoids clobbering sidecars/scratches from a CONCURRENT SBTDD instance
+    that started just before this dispatch (iter-2 caspar WARNING).
+    Concurrent instances are rare but possible (operator running parallel
+    ``--parallel`` jobs). Idempotent: safe to invoke multiple times.
+    """
+    claude_dir = project_root / ".claude"
+    if not claude_dir.exists():
+        return
+    cutoff = dispatch_start_epoch - 300.0  # 5min margin
+    for pattern in ("auto-run-track-*.json", "plan-scratch-*.md"):
+        for stale in claude_dir.glob(pattern):
+            try:
+                mtime = stale.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                stale.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
 # v1.0.4 Item C -- parallel dispatch plan helpers (escenarios C-7, C-8, C-9).
 # ---------------------------------------------------------------------------
 
@@ -1547,6 +1715,13 @@ def _dispatch_tracks_concurrent(
     plugin_root = Path(__file__).resolve().parent
     run_sbtdd_path = plugin_root / "run_sbtdd.py"
 
+    # v1.0.5 iter-1 WARNING + iter-2 race-safety: reap stale per-worker
+    # sidecar/scratch files from a prior crashed run BEFORE new dispatch
+    # so workers never inherit contaminated state. mtime guard inside
+    # ``_reap_orphans`` avoids clobbering concurrent SBTDD instances.
+    dispatch_start_epoch = time.time()
+    _reap_orphans(project_root, dispatch_start_epoch=dispatch_start_epoch)
+
     # FIFO queue of tracks awaiting dispatch + collector for results.
     track_queue: queue.Queue[list[str]] = queue.Queue()
     for t in tracks:
@@ -1604,6 +1779,27 @@ def _dispatch_tracks_concurrent(
         th.start()
     for th in threads:
         th.join()
+
+    # v1.0.5 Item I-1: merge per-worker audit sidecars into the canonical
+    # ``.claude/auto-run.json``. Performed unconditionally (even when some
+    # workers failed) so the audit reflects whatever per-worker progress
+    # landed before the failure.
+    merged_audit = _merge_audit_sidecars(tracks, project_root)
+    _atomic_write_json(project_root / ".claude" / "auto-run.json", merged_audit)
+
+    # v1.0.5 Item I-2 (iter-1 CRITICAL #4 wiring): Track Alpha owns ALL
+    # ``_dispatch_tracks_concurrent`` post-batch hooks; Track Beta provides
+    # ``_merge_scratch_plans`` as a pure module-level function in
+    # close_task_cmd.py. Late import keeps the cross-track dependency
+    # runtime-only so module load of auto_cmd.py never depends on
+    # close_task_cmd's I-2 helper being present at the same revision.
+    # ``getattr`` fallback to a no-op preserves resilience while Track Beta
+    # T3 lands -- once Item I-2 ships the real helper is invoked.
+    import close_task_cmd as _ctc
+
+    _merge_scratch_plans = getattr(_ctc, "_merge_scratch_plans", None)
+    if _merge_scratch_plans is not None:
+        _merge_scratch_plans(tracks, project_root)
 
     if failures:
         details = "; ".join(f"track {tids} exit={rc}: {msg[:300]}" for tids, rc, msg in failures)
