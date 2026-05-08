@@ -1270,6 +1270,15 @@ def _build_dispatch_plan_sequential(plan_path: Path) -> list[set[str]]:
     Returns:
         List of single-element sets, one per task, in the order the
         tasks appear in the plan. Each batch is dispatched serially.
+
+    Notes:
+        Task order is derived from ``graph.tasks`` insertion order, which
+        :func:`dag_parser.parse_plan` populates from
+        :func:`dag_parser._split_task_blocks` in document order. This
+        relies on the Python 3.7+ dict insertion-order guarantee
+        (project requires Python >= 3.9 per ``pyproject.toml``); a
+        future refactor of ``TaskGraph.tasks`` to a non-insertion-
+        ordered mapping would silently break sequential plan-text order.
     """
     graph = parse_plan(plan_path)
     return [{tid} for tid in graph.tasks.keys()]
