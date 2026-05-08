@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -2419,6 +2420,84 @@ class TestC9CorruptSettingsBreadcrumb:
 
         err = capsys.readouterr().err
         assert err == "", "absent settings.json must be silent (benign)"
+
+
+class TestCheckTddGuardWarningFlushesStderr:
+    """v1.0.4 Loop 1 iter-2 IMPORTANT-1 -- every ``sys.stderr.write`` in
+    ``_check_tdd_guard_warning`` must be followed by ``sys.stderr.flush()``
+    so warnings reach the operator before subprocess buffers swallow them.
+    Pre-fix the function omitted both flushes (corrupt-JSON branch + the
+    TDD-Guard-detected branch), violating the convention used by every
+    other ``sys.stderr.write`` in ``auto_cmd.py`` (lines 248, 272, 458,
+    473, 486, 886, 1119 all flush explicitly).
+    """
+
+    class _StderrSpy:
+        """Stand-in for ``sys.stderr`` that records write/flush ordering."""
+
+        def __init__(self) -> None:
+            self.events: list[str] = []
+
+        def write(self, text: str) -> int:
+            self.events.append(f"write:{text}")
+            return len(text)
+
+        def flush(self) -> None:
+            self.events.append("flush")
+
+    def _last_write_followed_by_flush(self, events: list[str]) -> bool:
+        for idx, ev in enumerate(events):
+            if ev.startswith("write:"):
+                if idx + 1 >= len(events) or events[idx + 1] != "flush":
+                    return False
+        return True
+
+    def test_corrupt_json_warning_is_flushed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Corrupt JSON branch must flush stderr after writing the breadcrumb."""
+        import auto_cmd
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        (settings_dir / "settings.json").write_text("{not valid json", encoding="utf-8")
+
+        spy = self._StderrSpy()
+        monkeypatch.setattr(auto_cmd.sys, "stderr", spy)
+
+        auto_cmd._check_tdd_guard_warning(parallel=True, project_root=tmp_path)
+
+        assert any(ev.startswith("write:") for ev in spy.events), "write must be observed"
+        assert self._last_write_followed_by_flush(spy.events), (
+            f"every write must be followed by flush; got events={spy.events}"
+        )
+
+    def test_tdd_guard_detected_warning_is_flushed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """TDD-Guard-ON branch must flush stderr after writing the warning."""
+        import auto_cmd
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings = {
+            "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "tdd-guard"}]}]}
+        }
+        (settings_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+
+        spy = self._StderrSpy()
+        monkeypatch.setattr(auto_cmd.sys, "stderr", spy)
+
+        auto_cmd._check_tdd_guard_warning(parallel=True, project_root=tmp_path)
+
+        assert any(ev.startswith("write:") for ev in spy.events), "write must be observed"
+        assert self._last_write_followed_by_flush(spy.events), (
+            f"every write must be followed by flush; got events={spy.events}"
+        )
 
 
 class TestPreflightOrdering:
