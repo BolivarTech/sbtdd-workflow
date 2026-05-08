@@ -8,6 +8,74 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [Unreleased — v1.0.5 LOCKED commitments]
+
+The following items are **NON-NEGOTIABLE for v1.0.5 ship** per user
+mandate 2026-05-08 ("documenta I-1, I-2 e I-3 para el proximo patch,
+deben quedar resueltos"). Surfaced by v1.0.4 pre-merge iter-6b Loop 1
+review (HEAD `c264cd8`). These gaps DO NOT block sequential users
+(byte-identical to v1.0.3 behavior) but ARE operationally risky for
+any operator running `--parallel` opt-in path end-to-end.
+
+### v1.0.5 LOCKED — `--parallel` opt-in path correctness
+
+- **I-1 — Worker subprocesses overwrite parent audit trail (INV-26
+  violation)**. Location: `auto_cmd.py:3593-3605`. Workers re-write
+  `.claude/auto-run.json` clobbering parent's start-time + aggregate
+  task counts. Fix options: (a) per-worker sidecar files merged by
+  parent post-batch; (b) workers signal via stdout, parent owns
+  audit; (c) workers self-identify and skip audit write. Acceptance:
+  parent audit-run.json after parallel dispatch contains original
+  start_time + aggregate task counts + per-worker completion
+  records.
+
+- **I-2 — Plan checkbox lost-update race in `mark_and_advance`**.
+  Location: `close_task_cmd.py:108-123`. Concurrent workers calling
+  `mark_and_advance` have no cross-process lock around plan-tdd.md
+  RMW. One worker's `[x]` flip can be silently overwritten. Fix
+  options: (a) `fcntl.flock` POSIX / `msvcrt.locking` Windows around
+  plan RMW; (b) workers don't flip plan checkboxes, parent flips all
+  atomically post-batch; (c) per-worker scratch plan files merged
+  by parent. Acceptance: race regression test with N concurrent
+  `multiprocessing.Process` workers asserts all N flips visible
+  (Windows-portable via `multiprocessing.get_context("spawn")`).
+
+- **I-3 — Worker subprocesses don't inherit operator CLI flags**.
+  Location: `auto_cmd.py:1564-1576`. Only `--task-ids` +
+  `--no-recursive` propagated to workers. Missing: `--plugins-root`,
+  `--magi-max-iterations`, `--magi-threshold`,
+  `--verification-retries`, `--model-override`. Fix:
+  `_dispatch_tracks_concurrent` builds each worker's argv with
+  parent's flag values for every relevant flag. Acceptance:
+  forwarding test pass `--magi-threshold=GO --verification-retries=5`
+  to parent + assert each worker subprocess receives those values
+  (intercept via mock `subprocess.Popen`). Document explicit
+  forwardable-flags list in helper docstring.
+
+**Combined acceptance criterion for v1.0.5 ship**: integration test
+exercising `--parallel` end-to-end on real synthetic 2-track plan
+with 4 disjoint tasks. After dispatch, ALL of:
+
+- Parent's `.claude/auto-run.json` well-formed + 4 task records (I-1)
+- Plan-tdd.md has 4 `[x]` flips (no lost updates) (I-2)
+- Each worker received forwarded operator flags (I-3)
+- All TDD triplet commits per task in git log
+- State file `current_phase: "done"` post-completion
+
+This is the PRODUCTION READINESS CRITERION for `--parallel`. Without
+these fixes, `--parallel` ships v1.0.4 as **OPT-IN / experimental**
+for sequential-disjoint plans only; production-grade end-to-end
+parallel dispatch lands v1.0.5.
+
+### v1.0.5 LOCKED — other carry-forward (existing)
+
+- Item D Q3 OPTION A (close_task_cmd._preflight code-side
+  enforcement) — deferred from v1.0.4 iter-2 scope-trim Option D.
+- Spec-behavior.md sec.8 stale risk-register sweep (R1+R-NEW1+R5
+  references to eliminated v1.0.4 mechanisms).
+- Plan archaeology trim (CHANGELOG-ize iter-by-iter context per
+  Balthasar INFO #17 from iter-6b).
+
 ## [1.0.3] - 2026-05-07
 
 > **Status**: Shipped. Template alignment audit + cross-check Windows fix.
