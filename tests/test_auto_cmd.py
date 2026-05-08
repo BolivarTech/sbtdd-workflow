@@ -3409,9 +3409,7 @@ class TestPath3WorkerTaskIdsFilter:
         # Pre-fix: ns.task_ids is just the raw string "1,3,5"; helper absent.
         # Post-fix: a parser helper splits it OR main() does.
         parsed = auto_cmd._parse_task_ids_filter(ns.task_ids)
-        assert parsed == frozenset({"1", "3", "5"}), (
-            f"Expected frozenset of ids, got {parsed!r}"
-        )
+        assert parsed == frozenset({"1", "3", "5"}), f"Expected frozenset of ids, got {parsed!r}"
 
     def test_parse_task_ids_filter_handles_whitespace_and_empty(self) -> None:
         """``_parse_task_ids_filter`` strips whitespace and ignores empty tokens."""
@@ -3422,66 +3420,55 @@ class TestPath3WorkerTaskIdsFilter:
         assert auto_cmd._parse_task_ids_filter(None) is None
         assert auto_cmd._parse_task_ids_filter("") is None
 
-    def test_real_multiprocessing_workers_do_not_collide(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Two REAL workers (multiprocessing.Process) processing disjoint
-        tracks must NOT both close the same task.
+    def test_real_subprocess_worker_filter_signature_stable(self, tmp_path: Path) -> None:
+        """API surface for filter-aware workers is stable across processes.
 
-        This is the integration smoke test the prior 4 mini-cycles
-        skipped: FakePopen returned rc=0 without ever exercising the
-        worker code path. Here we spawn two child processes that each
-        invoke ``_phase2_task_loop`` with their own ``task_ids_filter``;
-        the shared ``.claude/session-state.json`` becomes the rendezvous
-        point and ``mark_and_advance``'s atomic ``os.replace`` must
-        keep the plan + state file consistent.
+        ``_dispatch_tracks_concurrent`` spawns workers via
+        ``subprocess.Popen([..., "--task-ids", ids, "--no-recursive"])``.
+        Those children re-enter ``main()`` which parses the namespace
+        and calls ``_phase2_task_loop(..., task_ids_filter=...)``. This
+        test exercises the cross-process invariant by running the same
+        helpers in a real subprocess and asserting the parsed filter
+        survives the round-trip.
 
-        We assert: each track's chore commits reference ONLY their
-        assigned task ids (no double-close, no cross-track confusion).
+        We use ``subprocess.run`` (not ``multiprocessing.Process``) so
+        the test is portable across Windows + POSIX without depending
+        on serialization of test-method-local closures.
         """
-        import multiprocessing as mp
-
-        # Reuse the in-process happy-path stub harness, but check that
-        # the public helper supports the kwarg shape that real workers
-        # would invoke. The "real multiprocessing" check focuses on the
-        # API surface (signature) being stable across process boundaries
-        # rather than spawning git-aware children (which would require
-        # pickling the entire monkeypatch suite -- not portable).
+        import inspect
+        import sys
         import auto_cmd
 
         # Sanity: signature includes the new parameter so child processes
         # can pass it without TypeError.
-        import inspect
-
         sig = inspect.signature(auto_cmd._phase2_task_loop)
         assert "task_ids_filter" in sig.parameters, (
             "Real workers expect _phase2_task_loop(task_ids_filter=...) signature"
         )
         # Default must be None to preserve sequential default behaviour.
         param = sig.parameters["task_ids_filter"]
-        assert param.default is None, (
-            "task_ids_filter default must be None (sequential preserved)"
+        assert param.default is None, "task_ids_filter default must be None (sequential preserved)"
+
+        # Cross-process smoke: spawn a Python subprocess that imports
+        # auto_cmd, parses a filter, and emits the result. This is the
+        # exact code path the Path 3 worker subprocess hits at startup.
+        scripts_root = (Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts").resolve()
+        code = (
+            "import sys, json\n"
+            f"sys.path.insert(0, {repr(str(scripts_root))})\n"
+            "import auto_cmd\n"
+            "parsed = auto_cmd._parse_task_ids_filter('1,3')\n"
+            "print(json.dumps(sorted(parsed) if parsed else None))\n"
         )
-
-        # Pickle-compatibility smoke: the helper used to parse the filter
-        # must be importable + invocable from a spawned process. This is
-        # a degenerate multiprocessing call: it asserts the module loads
-        # in a worker context without import-time side effects that would
-        # break Popen-spawned children of _dispatch_tracks_concurrent.
-        ctx = mp.get_context("spawn")
-        result_q: mp.Queue[object] = ctx.Queue()
-
-        def child_proc(q: mp.Queue) -> None:  # type: ignore[type-arg]
-            import auto_cmd as _auto_cmd_child
-
-            parsed = _auto_cmd_child._parse_task_ids_filter("1,3")
-            q.put(sorted(parsed) if parsed else None)
-
-        p = ctx.Process(target=child_proc, args=(result_q,))
-        p.start()
-        p.join(timeout=30)
-        assert p.exitcode == 0, f"child process failed (exitcode={p.exitcode})"
-        result = result_q.get(timeout=5)
-        assert result == ["1", "3"], (
-            f"child must parse --task-ids into sorted ids; got {result!r}"
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
+        assert result.returncode == 0, (
+            f"child subprocess failed (rc={result.returncode}); stderr={result.stderr!r}"
+        )
+        parsed = json.loads(result.stdout.strip())
+        assert parsed == ["1", "3"], f"child must parse --task-ids into sorted ids; got {parsed!r}"

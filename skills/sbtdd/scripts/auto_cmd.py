@@ -55,6 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any, Callable, cast
 
+import _plan_ops
 import close_task_cmd
 import commits
 import receiving_review_dispatch
@@ -1384,6 +1385,85 @@ def _check_tdd_guard_warning(parallel: bool, project_root: Path) -> None:
 _PATH3_AUTO_WORKER_CEILING: int = 4
 
 
+def _next_open_task_in_filter(
+    plan_path: Path,
+    current_task_id: str,
+    task_ids_filter: frozenset[str],
+) -> tuple[str, str] | None:
+    """Return ``(id, title)`` of the next plan task that is open AND in filter.
+
+    v1.0.4 iter-5 Loop 1 CRITICAL #1 helper. Used by the worker skip-
+    fast-forward to advance past tasks the worker does not own. Scans
+    plan-text in source order, INCLUDING ``current_task_id`` if it is
+    open (caller decides whether to start at-or-after) -- this helper
+    returns the first match WHOSE position is at-or-after
+    ``current_task_id``. The caller's filter check already excluded
+    ``current_task_id`` from the filter, so a match at-or-after is
+    correctly the next-assigned-and-open candidate.
+
+    Args:
+        plan_path: Absolute path to ``planning/claude-plan-tdd.md``.
+        current_task_id: Worker's current cursor (a task id NOT in
+            ``task_ids_filter`` -- the caller's precondition).
+        task_ids_filter: Frozenset of task ids assigned to this worker.
+
+    Returns:
+        ``(id, title)`` of the first open task at-or-after
+        ``current_task_id`` whose id is in the filter, or ``None``
+        when the filter is exhausted (worker has no more work).
+    """
+    plan_text = plan_path.read_text(encoding="utf-8")
+    # Scan all task headers in plan source order (same regex used by
+    # _plan_ops.next_task / first_open_task to keep semantics aligned).
+    headers = list(_plan_ops._TASK_HEADER_RE.finditer(plan_text))
+    started = False
+    for m in headers:
+        tid = m.group(1)
+        title = m.group(2).strip()
+        if tid == current_task_id:
+            started = True
+        if not started:
+            continue
+        if tid not in task_ids_filter:
+            continue
+        # Verify the task is still open (has at least one ``- [ ]``
+        # checkbox in its section). A previously-closed task in filter
+        # is not work we should redo; skip it.
+        start, end = _plan_ops._task_section_bounds(plan_text, tid)
+        if "- [ ]" in plan_text[start:end]:
+            return (tid, title)
+    return None
+
+
+def _parse_task_ids_filter(raw: str | None) -> frozenset[str] | None:
+    """Decode the ``--task-ids`` argument into a worker filter set.
+
+    v1.0.4 iter-5 Loop 1 CRITICAL #1: pre-fix ``main()`` only checked
+    truthiness of ``ns.task_ids`` to set ``is_worker_mode`` -- the
+    comma-separated string was never split, so ``_phase2_task_loop``
+    had no way to filter which task ids the worker should process.
+    This helper produces an explicit filter consumed by the loop.
+
+    Args:
+        raw: Raw value of ``ns.task_ids`` (e.g. ``"1,3,5"``) or
+            ``None`` when the flag was not supplied.
+
+    Returns:
+        ``None`` when ``raw`` is ``None`` or an empty string (no
+        filter active; sequential default behaviour). Otherwise a
+        :class:`frozenset` of task ids with surrounding whitespace
+        stripped and empty tokens (from trailing or duplicate commas)
+        ignored.
+    """
+    if raw is None:
+        return None
+    tokens = [t.strip() for t in raw.split(",")]
+    cleaned = [t for t in tokens if t]
+    if not cleaned:
+        return None
+    return frozenset(cleaned)
+
+
 def _resolve_effective_workers(natural_n: int, user_max: int | None) -> int:
     """Resolve the effective parallel worker count for Path 3 dispatch.
 
@@ -2400,6 +2480,7 @@ def _phase2_task_loop(
     state: SessionState,
     cfg: PluginConfig,
     dispatch_plan: list[set[str]] | None = None,
+    task_ids_filter: frozenset[str] | None = None,
 ) -> SessionState:
     """Run Phase 2 -- sequential task loop with TDD cycles per task.
 
@@ -2455,6 +2536,18 @@ def _phase2_task_loop(
             in the plan skip the gate. v1.0.4 Loop 2 iter-3
             architectural pivot (Path 2: parallel verify + sequential
             close).
+        task_ids_filter: v1.0.4 iter-5 Loop 1 CRITICAL #1. When set,
+            the worker processes ONLY task ids in the filter --
+            unassigned tasks are skipped by advancing
+            ``state.current_task_id`` to the next plan task in source
+            order WITHOUT touching the plan checkbox or running TDD
+            cycles (the OTHER worker that owns that task is
+            responsible for closing it). When ``None`` (default),
+            sequential / orchestrator behaviour is preserved exactly.
+            Pre-fix the worker subprocess raced on the shared state
+            file's ``current_task_id``; both Path 3 children read
+            ``current_task_id=1`` at entry and processed task 1
+            concurrently, corrupting plan + git index.
 
     Returns:
         The final :class:`SessionState` after the last task's close-task
@@ -2590,6 +2683,47 @@ def _phase2_task_loop(
             # v0.5.0 S1-13: bound heartbeat counter persistence latency
             # to <= 30s even when no transition fires (long dispatches).
             _periodic_drain_if_due(auto_run)
+            # v1.0.4 iter-5 Loop 1 CRITICAL #1: worker filter skip-
+            # fast-forward. When a Path 3 worker subprocess was spawned
+            # with ``--task-ids T3,T5``, state.current_task_id may
+            # initially point at task 1 (the global cursor) -- a task
+            # belonging to a SIBLING worker. The legacy code would then
+            # process task 1 in this worker, racing the other worker's
+            # commit and corrupting state.
+            #
+            # Fix: when filter is set AND current task is NOT in filter,
+            # advance the in-memory cursor to the next plan task that IS
+            # in filter (and still open). This DOES NOT touch the plan
+            # checkbox or the chore commit chain -- only the local cursor
+            # moves. If no remaining task in filter is open, exit the
+            # loop cleanly (worker has nothing left to do; sibling
+            # workers own the rest).
+            #
+            # The state file IS persisted with the new cursor so a mid-
+            # run crash + resume reads a coherent value; ``mark_and_
+            # advance`` later uses ``_plan_ops.next_task`` which advances
+            # forward in source order, so global cursor monotonicity is
+            # preserved across all workers' writes (last-writer wins on
+            # the file but the value is always a valid open-task id).
+            if task_ids_filter is not None and current.current_task_id not in task_ids_filter:
+                next_in_filter = _next_open_task_in_filter(
+                    plan_path, current.current_task_id, task_ids_filter
+                )
+                if next_in_filter is None:
+                    break
+                next_id, next_title = next_in_filter
+                current = SessionState(
+                    plan_path=current.plan_path,
+                    current_task_id=next_id,
+                    current_task_title=next_title,
+                    current_phase="red",
+                    phase_started_at_commit=current.phase_started_at_commit,
+                    last_verification_at=current.last_verification_at,
+                    last_verification_result=current.last_verification_result,
+                    plan_approved_at=current.plan_approved_at,
+                    spec_snapshot_emitted_at=current.spec_snapshot_emitted_at,
+                )
+                save_state(current, state_path)
             phase_idx = (
                 _PHASE_ORDER.index(current.current_phase)
                 if current.current_phase in _PHASE_ORDER
@@ -3418,9 +3552,12 @@ def main(argv: list[str] | None = None) -> int:
     #     side (workers handle TDD). After workers complete, reload state
     #     and run phases 3-5.
     #   - sequential default: behaviour byte-identical to v1.0.3.
-    is_worker_mode = bool(getattr(ns, "task_ids", None)) and bool(
-        getattr(ns, "no_recursive", False)
-    )
+    # v1.0.4 iter-5 Loop 1 CRITICAL #1: parse --task-ids into an explicit
+    # frozenset filter so the worker code path can skip tasks belonging
+    # to sibling workers. Pre-fix this was only used as a boolean gate;
+    # ``_phase2_task_loop`` had no way to honour the per-worker scope.
+    ns.task_ids_filter = _parse_task_ids_filter(getattr(ns, "task_ids", None))
+    is_worker_mode = ns.task_ids_filter is not None and bool(getattr(ns, "no_recursive", False))
     is_orchestrator_parallel = bool(ns.parallel) and not is_worker_mode
     if plan_path_for_dispatch.exists():
         if is_orchestrator_parallel:
@@ -3475,10 +3612,17 @@ def main(argv: list[str] | None = None) -> int:
             # the concurrent helper. Sequential default + dispatch_plan-None
             # both fall through to the legacy while-loop body unchanged.
             # Worker mode also lands here -- legacy body honours --task-ids
-            # via the dispatch_plan filter (one batch per task in the worker
-            # scope).
+            # via the new ``task_ids_filter`` kwarg (v1.0.4 iter-5 Loop 1
+            # CRITICAL #1 fix). The filter scopes the loop to ONLY the
+            # task ids assigned to this subprocess; tasks owned by sibling
+            # workers are skipped via cursor-only state advance (no plan
+            # write, no chore commit).
             state = _phase2_task_loop(
-                ns, state, cfg, dispatch_plan=getattr(ns, "dispatch_plan", None)
+                ns,
+                state,
+                cfg,
+                dispatch_plan=getattr(ns, "dispatch_plan", None),
+                task_ids_filter=getattr(ns, "task_ids_filter", None),
             )
     # v1.0.4 Path 3 worker mode: skip phases 3-5 because parent
     # orchestrator owns the gate + finalize. Worker exits 0 once its
