@@ -669,7 +669,7 @@ Covers escenarios I2-1 through I2-4 from spec sec.4.2.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_close_task_cmd.py`:
 
@@ -687,7 +687,7 @@ class TestPerWorkerScratchPlan:
         plan_dir.mkdir()
         main_plan = plan_dir / "claude-plan-tdd.md"
         main_plan.write_text(
-            "### Task 3: Demo\n\n- [ ] **Step 1**\n- [ ] **Step 2**\n",
+            "### Task 3: Demo\n\n- [x] **Step 1**\n- [x] **Step 2**\n",
             encoding="utf-8",
         )
         (tmp_path / ".claude").mkdir()
@@ -713,7 +713,7 @@ class TestPerWorkerScratchPlan:
         plan_dir.mkdir()
         main_plan = plan_dir / "claude-plan-tdd.md"
         main_plan.write_text(
-            "### Task 3: Demo\n\n- [ ] **Step 1**\n",
+            "### Task 3: Demo\n\n- [x] **Step 1**\n",
             encoding="utf-8",
         )
 
@@ -732,8 +732,8 @@ class TestPerWorkerScratchPlan:
         plan_dir.mkdir()
         main_plan = plan_dir / "claude-plan-tdd.md"
         main_plan.write_text(
-            "### Task 1\n- [ ] T1 step\n\n### Task 2\n- [ ] T2 step\n\n"
-            "### Task 3\n- [ ] T3 step\n\n### Task 4\n- [ ] T4 step\n",
+            "### Task 1\n- [x] T1 step\n\n### Task 2\n- [x] T2 step\n\n"
+            "### Task 3\n- [x] T3 step\n\n### Task 4\n- [x] T4 step\n",
             encoding="utf-8",
         )
         (tmp_path / ".claude").mkdir()
@@ -741,15 +741,15 @@ class TestPerWorkerScratchPlan:
         # Worker A scratch (T1 + T3 flipped)
         scratch_a = _scratch_plan_path(("1", "3"), tmp_path)
         scratch_a.write_text(
-            "### Task 1\n- [x] T1 step\n\n### Task 2\n- [ ] T2 step\n\n"
-            "### Task 3\n- [x] T3 step\n\n### Task 4\n- [ ] T4 step\n",
+            "### Task 1\n- [x] T1 step\n\n### Task 2\n- [x] T2 step\n\n"
+            "### Task 3\n- [x] T3 step\n\n### Task 4\n- [x] T4 step\n",
             encoding="utf-8",
         )
         # Worker B scratch (T2 + T4 flipped)
         scratch_b = _scratch_plan_path(("2", "4"), tmp_path)
         scratch_b.write_text(
-            "### Task 1\n- [ ] T1 step\n\n### Task 2\n- [x] T2 step\n\n"
-            "### Task 3\n- [ ] T3 step\n\n### Task 4\n- [x] T4 step\n",
+            "### Task 1\n- [x] T1 step\n\n### Task 2\n- [x] T2 step\n\n"
+            "### Task 3\n- [x] T3 step\n\n### Task 4\n- [x] T4 step\n",
             encoding="utf-8",
         )
 
@@ -777,8 +777,8 @@ class TestPerWorkerScratchPlan:
         plan_dir.mkdir()
         main_plan_path = plan_dir / "claude-plan-tdd.md"
         original_plan = (
-            "### Task 1\n- [ ] step\n\n### Task 2\n- [ ] step\n\n"
-            "### Task 3\n- [ ] step\n\n### Task 4\n- [ ] step\n"
+            "### Task 1\n- [x] step\n\n### Task 2\n- [x] step\n\n"
+            "### Task 3\n- [x] step\n\n### Task 4\n- [x] step\n"
         )
         (tmp_path / ".claude").mkdir()
 
@@ -838,8 +838,8 @@ class TestPerWorkerScratchPlan:
         plan_dir.mkdir()
         main_plan = plan_dir / "claude-plan-tdd.md"
         main_plan.write_text(
-            "### Task 1\n- [ ] step\n\n### Task 2\n- [ ] step\n\n"
-            "### Task 3\n- [ ] step\n\n### Task 4\n- [ ] step\n",
+            "### Task 1\n- [x] step\n\n### Task 2\n- [x] step\n\n"
+            "### Task 3\n- [x] step\n\n### Task 4\n- [x] step\n",
             encoding="utf-8",
         )
         (tmp_path / ".claude").mkdir()
@@ -885,7 +885,7 @@ class TestPerWorkerScratchPlan:
         # Plan: Task 3 has NO [ ] checkbox; Task 4 has [ ]
         plan_text = (
             "### Task 3\nThe operator already removed the checkbox.\n\n"
-            "### Task 4\n- [ ] step\n"
+            "### Task 4\n- [x] step\n"
         )
 
         # Flip T3 — pre-fix would match Task 4's [ ] across the boundary
@@ -918,25 +918,25 @@ def _scratch_writer_worker(project_root_str: str, task_ids: list[str], barrier) 
     for tid in task_ids:
         # Flip the [ ] checkbox under "### Task N" header
         text = text.replace(
-            f"### Task {tid}\n- [ ] step",
+            f"### Task {tid}\n- [x] step",
             f"### Task {tid}\n- [x] step",
             1,
         )
     scratch.write_text(text, encoding="utf-8")
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_close_task_cmd.py::TestPerWorkerScratchPlan -v`
 Expected: 4/4 FAIL (helpers don't exist yet).
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: Implement `_scratch_plan_path` + `mark_and_advance` redirect + `_merge_scratch_plans`**
+- [x] **Step 4: Implement `_scratch_plan_path` + `mark_and_advance` redirect + `_merge_scratch_plans`**
 
 Modify `skills/sbtdd/scripts/close_task_cmd.py`:
 
@@ -1016,14 +1016,14 @@ def _section_has_flipped(plan_text: str, task_id: str) -> bool:
 
 
 def _flip_checkbox(plan_text: str, task_id: str) -> str:
-    """Flip first `- [ ]` checkbox in task's section to `- [x]`.
+    """Flip first `- [x]` checkbox in task's section to `- [x]`.
 
     v1.0.5 iter-1 CRITICAL #2 fix: regex anchored to current task's
     section bounded by next `### Task ` header (or EOF). Prevents the
     pre-fix `(### Task {tid}.*?)(- \\[ \\])` with `re.DOTALL` from
     matching a `[ ]` checkbox belonging to a LATER task when the
     current task has no `[ ]` of its own. Idempotent: returns plan_text
-    unchanged if section has no `- [ ]` (already flipped or no
+    unchanged if section has no `- [x]` (already flipped or no
     checkbox).
     """
     bounds = _section_bounds(plan_text, task_id)
@@ -1031,7 +1031,7 @@ def _flip_checkbox(plan_text: str, task_id: str) -> str:
         raise ValueError(f"Task {task_id} not found in plan")
     section_start, section_end = bounds
     section = plan_text[section_start:section_end]
-    flipped_section = section.replace("- [ ]", "- [x]", 1)
+    flipped_section = section.replace("- [x]", "- [x]", 1)
     if flipped_section == section:
         return plan_text  # idempotent: already flipped or no checkbox
     return plan_text[:section_start] + flipped_section + plan_text[section_end:]
@@ -1111,7 +1111,7 @@ def mark_and_advance(state: dict, project_root: Path, ns: argparse.Namespace = N
 
 Confirm `import os`, `import argparse`, `from pathlib import Path` are present.
 
-- [ ] **Step 5: NO `auto_cmd.py` modification (iter-1 CRITICAL #4 architectural fix — Track Beta is helper-only)**
+- [x] **Step 5: NO `auto_cmd.py` modification (iter-1 CRITICAL #4 architectural fix — Track Beta is helper-only)**
 
 Per iter-1 CRITICAL #4 fix: Track Beta provides the
 `_merge_scratch_plans` helper as a pure function in
@@ -1134,7 +1134,7 @@ python -c "from close_task_cmd import _merge_scratch_plans; print(_merge_scratch
 
 No git commit produced by this step (no auto_cmd.py modification).
 
-- [ ] **Step 6: Run tests to verify PASS**
+- [x] **Step 6: Run tests to verify PASS**
 
 Run: `pytest tests/test_close_task_cmd.py::TestPerWorkerScratchPlan -v`
 Expected: 4/4 PASS.
@@ -1142,7 +1142,7 @@ Expected: 4/4 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 7: close-phase Green**
+- [x] **Step 7: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1150,7 +1150,7 @@ Expected: `feat:` commit landed (e.g. `feat: per-worker scratch plan flip-merge 
 
 #### Refactor Phase
 
-- [ ] **Step 8: Refactor — DRY-consolidate `_atomic_write_json` to `state_file.py` (UNCONDITIONAL per iter-2 WARNING fix)**
+- [x] **Step 8: Refactor — DRY-consolidate `_atomic_write_json` to `state_file.py` (UNCONDITIONAL per iter-2 WARNING fix)**
 
 iter-2 WARNING (mel + bal): atomic-write helpers duplicated across `auto_cmd.py` + `close_task_cmd.py` + temp-file naming collision under concurrent writers. Pre-fix design said "Likely YAGNI; skip if minimal duplication" — RETRACTED. iter-2 mandates unconditional consolidation.
 
@@ -1208,7 +1208,7 @@ Then in `close_task_cmd.py`: replace local `_atomic_write` definition with `from
 
 Run: `make verify` — expected clean. Commit `refactor:` (e.g., `refactor: DRY-consolidate atomic_write_{json,text} to state_file per v1.0.5 iter-2`).
 
-- [ ] **Step 9: close-phase Refactor + Step 10: close-task**
+- [x] **Step 9: close-phase Refactor + Step 10: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
