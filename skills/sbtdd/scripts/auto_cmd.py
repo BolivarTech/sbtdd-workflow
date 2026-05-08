@@ -55,7 +55,8 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Callable, cast
+from types import MappingProxyType
+from typing import IO, Any, Callable, Mapping, cast
 
 import _plan_ops
 import close_task_cmd
@@ -1425,6 +1426,84 @@ def _reap_orphans(project_root: Path, dispatch_start_epoch: float) -> None:
 
 
 # ---------------------------------------------------------------------------
+# v1.0.5 Item I-3 -- worker CLI flag forwarding (escenarios I3-1..I3-3).
+# Operator-supplied flags (--plugins-root, --magi-max-iterations,
+# --magi-threshold, --verification-retries, --model-override) propagate
+# from the parent argparse namespace to each worker subprocess argv so
+# concurrent dispatch honours operator intent end-to-end.
+# ---------------------------------------------------------------------------
+
+
+#: Maps argparse-namespace attribute names to their CLI flag names. Frozen
+#: at module load via :class:`MappingProxyType` so callers cannot mutate
+#: the forwarding contract at runtime. Keep in sync with the matching
+#: ``add_argument`` calls in :func:`_build_parser`.
+_FORWARDABLE_FLAGS: Mapping[str, str] = MappingProxyType(
+    {
+        "plugins_root": "--plugins-root",
+        "magi_max_iterations": "--magi-max-iterations",
+        "magi_threshold": "--magi-threshold",
+        "verification_retries": "--verification-retries",
+        "model_override": "--model-override",
+    }
+)
+
+
+def _run_sbtdd_path() -> Path:
+    """Return path to ``run_sbtdd.py`` entry point.
+
+    Centralises the per-script lookup so worker subprocess argv builders
+    do not duplicate the ``Path(__file__).resolve().parent`` boilerplate.
+    """
+    return Path(__file__).resolve().parent / "run_sbtdd.py"
+
+
+def _build_worker_argv(task_ids: list[str], ns: argparse.Namespace) -> list[str]:
+    """Build subprocess argv for a worker, forwarding parent's CLI flags.
+
+    v1.0.5 Item I-3: forwards :data:`_FORWARDABLE_FLAGS` values from the
+    parent's argparse namespace to the worker subprocess. Documented
+    forwardable list: ``--plugins-root``, ``--magi-max-iterations``,
+    ``--magi-threshold``, ``--verification-retries``,
+    ``--model-override``. Worker-mode markers ``--task-ids`` and
+    ``--no-recursive`` are always present so the worker stays on the
+    Path 3 worker code path (no recursive parallel dispatch).
+
+    Repeated flags (``--model-override`` is ``action='append'``) flatten
+    to one ``flag value`` pair per element in the parent list. ``None``
+    values (and empty lists) are omitted so the worker argparse parser
+    sees a clean argv.
+
+    Args:
+        task_ids: Task IDs assigned to this worker.
+        ns: Parent's argparse namespace.
+
+    Returns:
+        Worker argv list ready for :class:`subprocess.Popen`.
+    """
+    argv: list[str] = [
+        sys.executable,
+        str(_run_sbtdd_path()),
+        "auto",
+        "--task-ids",
+        ",".join(task_ids),
+        "--no-recursive",
+    ]
+    for ns_attr, cli_flag in _FORWARDABLE_FLAGS.items():
+        value = getattr(ns, ns_attr, None)
+        if value is None:
+            continue
+        # ``--model-override`` is ``action='append'``: namespace value is a
+        # list. Empty lists are equivalent to "flag never supplied" -- skip.
+        if isinstance(value, list):
+            for item in value:
+                argv.extend([cli_flag, str(item)])
+        else:
+            argv.extend([cli_flag, str(value)])
+    return argv
+
+
+# ---------------------------------------------------------------------------
 # v1.0.4 Item C -- parallel dispatch plan helpers (escenarios C-7, C-8, C-9).
 # ---------------------------------------------------------------------------
 
@@ -1669,6 +1748,7 @@ def _dispatch_tracks_concurrent(
     tracks: list[list[str]],
     effective_workers: int,
     project_root: Path,
+    ns: argparse.Namespace | None = None,
 ) -> None:
     """Dispatch one subprocess worker per track concurrently (Path 3).
 
@@ -1703,6 +1783,11 @@ def _dispatch_tracks_concurrent(
         project_root: Project root passed to each child as
             ``--project-root``. Each child inherits the same plan +
             state-file paths.
+        ns: Parent's argparse namespace. v1.0.5 Item I-3 forwards a
+            documented set of operator flags (:data:`_FORWARDABLE_FLAGS`)
+            to every worker subprocess via :func:`_build_worker_argv`.
+            ``None`` (legacy callers / tests) preserves the v1.0.4
+            minimal-argv shape exactly.
 
     Raises:
         ConcurrentDispatchError: At least one worker exited non-zero
@@ -1738,17 +1823,30 @@ def _dispatch_tracks_concurrent(
             except queue.Empty:
                 return
             try:
-                task_ids_arg = ",".join(track)
-                argv = [
-                    sys.executable,
-                    str(run_sbtdd_path),
-                    "auto",
-                    "--project-root",
-                    str(project_root),
-                    "--task-ids",
-                    task_ids_arg,
-                    "--no-recursive",
-                ]
+                # v1.0.5 Item I-3: build worker argv via the shared helper
+                # so operator flags (--magi-threshold, --verification-retries,
+                # etc.) propagate from parent to worker. Legacy callers that
+                # do not supply ``ns`` get the minimal v1.0.4 argv shape
+                # extended only with --project-root.
+                if ns is not None:
+                    argv = _build_worker_argv(track, ns)
+                    # Inject --project-root so the worker keeps targeting the
+                    # parent's project (otherwise it falls back to cwd at
+                    # parse time, which Popen sets to project_root anyway,
+                    # but be explicit so worker logs / breadcrumbs name it).
+                    argv.extend(["--project-root", str(project_root)])
+                else:
+                    task_ids_arg = ",".join(track)
+                    argv = [
+                        sys.executable,
+                        str(run_sbtdd_path),
+                        "auto",
+                        "--project-root",
+                        str(project_root),
+                        "--task-ids",
+                        task_ids_arg,
+                        "--no-recursive",
+                    ]
                 proc = subprocess.Popen(
                     argv,
                     cwd=str(project_root),
@@ -3818,6 +3916,7 @@ def main(argv: list[str] | None = None) -> int:
                 tracks=tracks,
                 effective_workers=effective,
                 project_root=ns.project_root,
+                ns=ns,
             )
             # Reload state after workers mutated it; downstream phases
             # need the up-to-date view (current_phase should be "done"
