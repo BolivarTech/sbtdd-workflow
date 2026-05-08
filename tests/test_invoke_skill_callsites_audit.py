@@ -15,7 +15,7 @@ import ast
 from pathlib import Path
 
 
-_INTERACTIVE_SKILLS = frozenset({"brainstorming", "writing-plans"})
+_INTERACTIVE_SKILLS = frozenset({"brainstorming", "writing-plans", "receiving-code-review"})
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _EXCLUDED_FILES = {
     "skills/sbtdd/scripts/superpowers_dispatch.py",
