@@ -103,6 +103,28 @@ def test_f4_unknown_skill_passes_through(tmp_path):
     assert violations == []
 
 
+def test_audit_set_tracks_subprocess_incompatible_skills():
+    """v1.0.4 Loop 1 mini-cycle (IMPORTANT-2 finding): the audit set MUST
+    superset the production ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` frozenset.
+
+    Rationale: ``_check_path`` only flags missing-override callsites for
+    skills in ``_INTERACTIVE_SKILLS``. If a new skill is added to the
+    production set without updating the audit set, ``invoke_skill(
+    skill='<new-skill>', ...)`` callsites without ``allow_interactive_skill=
+    True`` slip past the regression guard. Meta-test catches the desync
+    directly, future-proofing against any v1.x.y extension.
+    """
+    from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
+
+    missing = _SUBPROCESS_INCOMPATIBLE_SKILLS - _INTERACTIVE_SKILLS
+    assert not missing, (
+        f"Audit set out of sync with production: {sorted(missing)} "
+        f"present in _SUBPROCESS_INCOMPATIBLE_SKILLS but missing from "
+        f"_INTERACTIVE_SKILLS. Update line 18 of "
+        f"test_invoke_skill_callsites_audit.py."
+    )
+
+
 def test_production_callsites_pass_audit():
     """Full repo audit: all interactive-skill callsites in scripts/ + tests/
     pass override check (excluding wrappers + without_override fixture)."""
