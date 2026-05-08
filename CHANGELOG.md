@@ -76,6 +76,311 @@ parallel dispatch lands v1.0.5.
 - Plan archaeology trim (CHANGELOG-ize iter-by-iter context per
   Balthasar INFO #17 from iter-6b).
 
+## [1.0.4] - 2026-05-08
+
+> **Status**: Shipped via INV-0 override at iter-6b verdict
+> GO_WITH_CAVEATS (3-0) full no-degraded with 2 caspar CRITICALs
+> verified false-positive. **5-cycle no-override streak broken**
+> (v1.0.0 was last allowed override; v1.0.1+v1.0.2+v1.0.3 sequential
+> no-override 3-streak; v1.0.4 = allowed override). **Pillar A**
+> (Items A+B subprocess-incompatible gate) shipped end-to-end.
+> **Pillar B** (Item C parallel task dispatcher) shipped Path 3
+> architecture (track-based partition + subprocess fan-out +
+> `--task-ids` filter) with documented v1.0.5 LOCKED gaps for
+> opt-in `--parallel` end-to-end production readiness (I-1/I-2/I-3
+> per Unreleased section above). **Pillar C** (Item D) correctly
+> DEFERRED to v1.0.5 per iter-2 scope-trim Option D. NO MAGI
+> Checkpoint 2 INV-0 — Checkpoint 2 cleanly converged at iter 3
+> STRONG GO unanimous (Mel 86 / Bal 78 / Cas 82); the INV-0 override
+> applies ONLY to the pre-merge Loop 2 gate after 6+ iterations of
+> diminishing-returns triage with consistent Mel APPROVE signal
+> at iter-6b.
+
+### Added
+
+- **`skills/sbtdd/scripts/superpowers_dispatch.py`** (Items A+B) —
+  membership-based subprocess-incompatible gate. Extends
+  `_SUBPROCESS_INCOMPATIBLE_SKILLS` set to include
+  `receiving-code-review` (v1.0.4 added per v1.0.3 Activity D'
+  empirical hang). New helpers `_build_recovery_message(skill)` +
+  `_PER_SKILL_RECOVERY` MappingProxyType + `_GENERIC_RECOVERY`
+  constant. Gate fires PRE-spawn UNCONDITIONALLY (no env-var/isatty
+  heuristic — caspar Checkpoint 2 iter-1 verified the heuristic
+  does not fix the v1.0.3 bug in operator main sessions). Override
+  hatch `allow_interactive_skill=True` preserved for v1.0.1
+  wrappers (silent-no-op + INV-37 post-detection path).
+  `_build_recovery_message` provides per-skill operator-actionable
+  guidance: brainstorming/writing-plans → `/sbtdd spec
+  --resume-from-magi`; receiving-code-review → manual interactive
+  session OR fallback `python skills/magi/scripts/run_magi.py
+  code-review <payload>` per spec sec.6.4.
+
+- **`skills/sbtdd/scripts/dag_parser.py`** (NEW module — Item C.1) —
+  parses `planning/claude-plan-tdd.md` task blocks + dependency
+  markers + file surfaces. Code-fence-aware via `_strip_code_fences`
+  helper (skips example `### Task N:` patterns inside markdown
+  fences). Iterative Kahn's cycle detection (no recursion limit
+  failure mode for plans > 1000 deep). Public API: `parse_plan(path)
+  -> TaskGraph`, `class Task` (id+title+files frozenset),
+  `class TaskGraph` (with `.tasks`, `.edges`, `.antichains()`).
+  ValidationError raised on cycles + unknown dependency targets.
+
+- **`skills/sbtdd/scripts/parallel_dispatcher.py`** (NEW module —
+  Item C.2 + Path 3 architecture) — track-based partitioning for
+  `--parallel` opt-in path. New API: `partition_by_tracks(graph) ->
+  list[list[str]]` uses union-find on (deps UNION file-conflicts)
+  edges + topological sort within track. Returns ordered task
+  sequences per weakly-connected component (each track = one
+  subagent assignment). Legacy `partition_by_collision(antichain,
+  graph) -> list[set[str]]` deprecated via `warnings.warn`
+  (preserved for backward compat per v1.x deletion timeline).
+  `_files_collide` helper + sorted-ascending greedy first-fit
+  packing for deterministic batches.
+
+- **`skills/sbtdd/scripts/auto_cmd.py` `--parallel` end-to-end
+  wiring** (Path 3 architecture) — new helpers:
+  `_build_dispatch_plan_parallel(plan_path) -> list[list[str]]`
+  (returns tracks via `partition_by_tracks`),
+  `_build_dispatch_plan_sequential(plan_path) -> list[list[str]]`
+  (singleton-per-task for backward compat),
+  `_resolve_effective_workers(natural_n, user_max)` cascade
+  (None=auto / 0=unlimited / N=explicit cap; auto default
+  `min(natural_n, cpu_count, 4)`),
+  `_check_tdd_guard_warning(parallel, project_root)` (stderr
+  warning when `--parallel` + TDD-Guard hooks detected per spec
+  sec.3 multi-agent rules; corrupt JSON breadcrumb per Caspar
+  iter-2),
+  `_dispatch_tracks_concurrent(tracks, effective_workers,
+  project_root)` (thread-pool + Queue + subprocess.Popen workers,
+  each invoking `python run_sbtdd.py auto --task-ids T1,T3,T4
+  --no-recursive`; aggregates errors into
+  `ConcurrentDispatchError` exit 2). New CLI flags: `--parallel`,
+  `--task-ids T1,T3,T4` (worker mode comma-separated task list),
+  `--no-recursive` (prevent infinite spawning), `--parallel-max N`
+  (cap). `_phase2_task_loop` accepts `task_ids_filter:
+  frozenset[str] | None` parameter (when set: skip tasks not in
+  filter via cursor advance, no plan write, no chore commit —
+  sibling worker owns those). Worker mode parses `ns.task_ids`
+  into frozenset + filters task loop accordingly.
+
+- **`tests/test_dag_parser.py`** (NEW) — 15 tests covering
+  escenarios C-1 through C-4 + code-fence skip + iterative
+  Kahn's depth-1500 + self-loop edge cases.
+
+- **`tests/test_parallel_dispatcher.py`** (NEW) — 12 tests
+  covering escenarios C-5 + C-6 + C-10 deterministic +
+  `test_c11_no_partial_writes_under_concurrent_replace` (real
+  `multiprocessing.get_context("spawn")` + Barrier + module-level
+  picklable writer + 2 disjoint task IDs concurrent
+  `state_file.save` calls + final JSON validation) +
+  `partition_by_tracks` core algorithm tests.
+
+- **`tests/test_auto_cmd.py` extended** — `TestAutoCmdParallelFlag`
+  (9 tests covering C-7 + C-8 + C-9 +
+  `test_c9_check_function_handles_corrupt_settings_json` defensive
+  branch), `TestAutoCmdParallelEndToEnd` (Path 3 integration),
+  `TestPath3WorkerTaskIdsFilter` (4 tests including real
+  `subprocess.run` cross-process smoke).
+
+- **`tests/test_pre_merge_callsite_audit.py`** (NEW) — 2 tests
+  AST-asserting `pre_merge_cmd`'s `/receiving-code-review`
+  invocations route through `superpowers_dispatch.invoke_skill`
+  (gate-enforcing path), not raw subprocess.
+
+- **`tests/test_invoke_skill_callsites_audit.py` extended** —
+  `TestHeadlessGateCallsiteConsistency` 2 tests; whitelist
+  granularity tightened from file-level to function-level via
+  `_innermost_function_name_at_line` AST helper. Whitelist now
+  lists `(file, function)` pairs with rationale (`_wrapper` +
+  `_invoke_skill` in `superpowers_dispatch.py`).
+
+### Changed
+
+- `auto_cmd.main()` re-orders pipeline: `parse_args` →
+  `_phase1_preflight(ns)` → `_check_tdd_guard_warning(ns.parallel,
+  project_root)` → build dispatch plan via
+  `_build_dispatch_plan_parallel/sequential` → stash on
+  `ns.dispatch_plan` → `_phase2_task_loop(ns)`. Preflight ordering
+  fix per Caspar iter-2 finding (plan-parse failures now surface
+  with correct context).
+
+- `_check_tdd_guard_warning` JSONDecodeError handling split:
+  malformed `settings.json` → stderr breadcrumb identifying
+  parse error (operator-visible); absent file → silent return
+  (benign).
+
+- Worker mode classification in `auto_cmd.main()`: `is_worker_mode
+  = bool(ns.no_recursive)` short-circuits orchestrator pipeline
+  steps after `_phase2_task_loop` completes (workers don't run
+  Phase 3-5 gate / finalize).
+
+- `partition_by_collision` marked DEPRECATED via
+  `warnings.warn(DeprecationWarning, stacklevel=2)`. Module
+  docstring split into "Public API" (partition_by_tracks) +
+  "Deprecated" (partition_by_collision). v1.x deletion timeline.
+
+- `_dispatch_batch_concurrent` exception type changed from
+  `VerificationIrremediableError` (exit 6) to new
+  `ConcurrentDispatchError` (exit 2 PRECONDITION_FAILED) for
+  worker dispatch failures. Operators reading `.claude/auto-run.json`
+  now get correct fault classifier.
+
+- Test rename for honest naming:
+  `test_c11_synthetic_concurrent_state_file_write` →
+  `test_c11_no_partial_writes_under_concurrent_replace` (Mel
+  iter-3 WARNING fold-in — test asserts last-writer-wins
+  determinism via `state_file.save` atomic `os.replace`, not
+  race-free locking).
+
+### Process notes
+
+**Cycle convergence pattern**: 4 mini-cycles + 6+ pre-merge runs +
+1 INV-0 override at ship-time.
+
+- **MAGI Checkpoint 2** (interactive plan-approval): cap=3 HARD
+  G1 binding. Iter convergence: 1C → 1C → 0C STRONG GO unanimous
+  (Mel 86 / Bal 86 / Cas 78) at iter-3. NO INV-0 override at
+  Checkpoint 2 (Checkpoint 2 G1 cap=3 streak now 5 cycles
+  consecutive: v1.0.0 + v1.0.1 + v1.0.2 + v1.0.3 + v1.0.4).
+
+- **Pre-merge Loop 1 + Loop 2** (auto cap=5): cumulatively 6+
+  iters across 5 iter-trigger pre-merge invocations. Verdict
+  trajectory:
+  - Activity D' iter-1: Loop 1 4 iters → Loop 2 GO_WITH_CAVEATS
+    3-0 + 3 CRITICAL (Mel #1+#2 surgical + Cas #3 stale
+    reference).
+  - iter-2 mini-cycle (commits `5a3a2c5..233b10a`): producer-only
+    `--parallel` wiring. Pre-merge → 0 CRITICAL + 1 accepted
+    Caspar condition.
+  - iter-3 mini-cycle (commits `8cf274c..ea2722c`): Path 2
+    parallel-verify + sequential-close (chosen explicitly to
+    avoid Path 1 architectural complexity). Plus 5 surgical
+    fixes including `ConcurrentDispatchError` exception class.
+    Pre-merge → 0 CRITICAL + 2 accepted MAGI conditions.
+  - iter-4 self-applied via Loop 1 internal mini-cycles
+    (commits `ccfa78f..81a388e`): 6 self-applied fixes +
+    audit-set sync + stderr flush + dispatch order docstring.
+    Pre-merge → 0 CRITICAL + 3 accepted MAGI conditions
+    (verdict-summary statements).
+  - iter-5 / Path 3 mini-cycle (commits `49049a4..387366b`):
+    track-based partition + subprocess fan-out via union-find
+    on dep+file-conflict edges. Pre-merge → 6 CRITICAL
+    REGRESSION (Path 3 introduced wrong-task-closed wiring +
+    plan checkbox false positives). User chose H (continuation)
+    over F (INV-0 ship) and G (revert).
+  - iter-5 continuation (commits `0bfc8c2..b552165` +
+    `c264cd8` snapshot regen): all 6 CRITICALs addressed. 4
+    fixed (`--task-ids` filter properly wired with real
+    subprocess test, partition_by_collision deprecated,
+    Activity D' resume-path doc clarification, C-11 API
+    verified) + 2 rejected as false positives (plan checkbox
+    Mel+Bal CRITICALs verified by `git log "chore: mark
+    task"` showing 7 legitimate task closes per CLAUDE.local.md
+    sec.2.3). Make verify back within 165s NF-A target (151s).
+  - iter-6b (post snapshot regen): GO_WITH_CAVEATS 3-0 with
+    Mel APPROVE 82% (best post-Path-3 signal), Bal CONDITIONAL
+    72%, Cas CONDITIONAL 72%. 2 caspar CRITICALs verified
+    FALSE POSITIVES (C-11 multiprocessing already module-level
+    picklable + already renamed to honest name). 5 Loop 1
+    IMPORTANT findings (I-1 through I-5) all confined to
+    opt-in `--parallel` path — DEFERRED to v1.0.5 LOCKED
+    per Unreleased section.
+
+- **INV-0 override rationale at iter-6b**: per spec sec.6.1
+  "Si despues de 3 iteraciones el veredicto sigue por debajo
+  del umbral, detener y escalar al usuario", we crossed the
+  3-iter threshold long ago. Verdict has been at-threshold
+  (GO_WITH_CAVEATS) consistently since iter-2. Mel upgraded
+  to APPROVE at iter-6b (strongest pragmatic signal). Caspar's
+  remaining 2 CRITICALs verified false positives via direct
+  code inspection. Continued iteration showed diminishing
+  returns + risk of regression (iter-5 Path 3 introduced
+  6 new CRITICALs while fixing prior ones). User chose J
+  (INV-0 ship) on 2026-05-08 after honest assessment of
+  cumulative iteration history.
+
+- **Items A+B simplification** (post Checkpoint 2 iter-1
+  triage, applied 2026-05-07): caspar Checkpoint 2 iter-1
+  CRITICAL #1 + #2 verified that env-var/isatty heuristic
+  does NOT fix v1.0.3 bug (operator main sessions have
+  TTY=True; gate would not fire; subprocess spawns + hangs).
+  Simplified to membership-based gate UNCONDITIONALLY +
+  override hatch only. Drops `_is_headless_context()` helper
+  + `SBTDD_HEADLESS`/`SBTDD_INTERACTIVE` env vars + isatty
+  detection entirely.
+
+- **Item D scope-trim** (post Checkpoint 2 iter-2 trigger,
+  applied 2026-05-07): iter-2 surfaced 3 CRITICAL + persistent
+  3-agent WARNING about Item D 3-touchpoint doc-only
+  enforcement (third consecutive cycle of doc-only convention
+  attempts — v1.0.2 Q2 Option B I5 process notes; v1.0.3
+  dogfood divergence; v1.0.4 attempted multiplication).
+  User selected Option D scope-trim per spec sec.6.1 G2
+  ladder. v1.0.5 LOCKED commitment: Q3 OPTION A code-side
+  enforcement via `close_task_cmd._preflight` modification.
+
+- **`/receiving-code-review` interactive subprocess**: ran
+  successfully across 6+ pre-merge runs WITHOUT 600s hang.
+  v1.0.3 Activity D' empirical hang was situational, not
+  systemic (or v1.0.4 Items A+B fix actually working for
+  some path despite wrapper layer). Worth confirming in
+  v1.0.5 with explicit regression test.
+
+- **Path 3 architecture complete + deferred operational
+  hygiene**: `--parallel` provides DAG validation +
+  partition_by_tracks + worker fan-out via subprocess.Popen
+  + `--task-ids` filter (verified end-to-end via
+  `multiprocessing.Process` + real `subprocess.run` smoke).
+  Operational gaps documented as v1.0.5 LOCKED I-1/I-2/I-3
+  per user mandate 2026-05-08 (worker audit-trail clobber
+  + plan checkbox lost-update race + worker CLI flag
+  forwarding gap). Sequential default byte-identical to
+  v1.0.3.
+
+### Deferred (rolled to v1.0.5 LOCKED — see Unreleased section)
+
+- **I-1**: worker audit-trail clobber (INV-26 violation)
+- **I-2**: plan checkbox lost-update race in `mark_and_advance`
+- **I-3**: worker CLI flag forwarding gap (`--plugins-root`,
+  `--magi-*`, `--verification-retries`, `--model-override`)
+- **Item D Q3 OPTION A**: close_task_cmd._preflight code-side
+  enforcement (replaces v1.0.4 Item D 3-touchpoint doc-only
+  attempt that was scope-trimmed)
+- **Spec sec.8 stale risk-register sweep** (R1+R-NEW1+R5
+  references to eliminated v1.0.4 mechanisms)
+- **Plan archaeology trim** (collapse iter-by-iter triage
+  context into CHANGELOG narrative per Balthasar INFO #17)
+
+### Deferred (rolled to v1.0.5+)
+
+- I-4 stale INV-22 docstring (cosmetic)
+- I-5 partition_by_collision DeprecationWarning CI handling
+- `_run_single_task_isolated` removal candidate
+- `partition_by_collision` deletion (v1.x timeline)
+- Real-world `--parallel` end-to-end dogfood validation
+- Audit GAPs L1.0.4-A through L1.0.4-D (v1.0.3 carry-forward)
+- `make verify` runtime polish (151-167s vs 155s soft / 165s
+  hard NF-A — ~12s incremental from new multi-task batch
+  tests with real git operations)
+- All other v1.0.5+ items inherited from v1.0.3 backlog
+
+### Tests + verify final
+
+- Tests: **1226 passed + 1 skipped** (vs v1.0.3 baseline 1105 + 1
+  skipped = +121 net new across 6 mini-cycles + Track Alpha + Track
+  Beta).
+- Coverage: **90.37%** (above 88% NF-A threshold per Q4 v1.0.2
+  baseline).
+- `make verify` runtime: **194.98s** at ship (vs 151s mid-cycle;
+  ~30-40s incremental from concurrent state-file write tests with
+  real `multiprocessing.Process` spawn semantics + new `subprocess.run`
+  smoke for `--task-ids` filter cross-process verification). ABOVE
+  165s NF-A hard target. Flagged as v1.0.5+ deferred polish item;
+  acceptable at INV-0 ship per spec sec.6 bajo-riesgo (test
+  infrastructure performance, not production code correctness).
+- ruff check: clean | ruff format: clean | mypy --strict: 138
+  source files, no issues.
+
 ## [1.0.3] - 2026-05-07
 
 > **Status**: Shipped. Template alignment audit + cross-check Windows fix.
