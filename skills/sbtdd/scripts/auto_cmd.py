@@ -2402,14 +2402,21 @@ def _dispatch_batch_concurrent(batch: set[str], project_root: Path) -> None:
         return
     procs: list[tuple[str, Any]] = []  # (task_id, Popen)
     plugin_root = Path(__file__).resolve().parent
+    # v1.0.4 iter-5 Loop 1 sub-issue #4 (Caspar): use ``repr()`` consistently
+    # for path arguments so paths with apostrophes (e.g. project root in
+    # ``D:\My's Project\``) round-trip through Python literal-eval safely.
+    # Pre-fix the bare ``r'{path}'`` raw-string literal would break on any
+    # apostrophe in the path; ``repr()`` emits Python-safe quoted strings.
+    plugin_root_lit = repr(str(plugin_root))
+    project_root_lit = repr(str(project_root))
     for task_id in sorted(batch):
         argv = [
             sys.executable,
             "-c",
             (
-                f"import sys; sys.path.insert(0, r'{plugin_root}'); "
+                f"import sys; sys.path.insert(0, {plugin_root_lit}); "
                 f"from auto_cmd import _run_single_task_isolated; "
-                f"_run_single_task_isolated({task_id!r}, r'{project_root}')"
+                f"_run_single_task_isolated({task_id!r}, {project_root_lit})"
             ),
         ]
         proc = subprocess.Popen(
@@ -2446,23 +2453,35 @@ def _dispatch_batch_concurrent(batch: set[str], project_root: Path) -> None:
 
 
 def _run_single_task_isolated(task_id: str, project_root_str: str) -> None:
-    """Run a minimal pre-verification check for a single task (v1.0.4 Path 2).
+    """V1.0.5-DEFERRED PLACEHOLDER: per-task pre-verification stub.
+
+    .. note::
+        **v1.0.4 iter-5 Loop 1 sub-issue #3 marker (Caspar)**: with
+        Path 3 track-based dispatch (``_dispatch_tracks_concurrent`` +
+        ``--task-ids`` filter, shipped iter-4 + iter-5 CRITICAL #1
+        wiring) doing the heavy lifting, this Path 2 ``--single-task``
+        stub no longer appears in the orchestrator-parallel flow.
+        It IS still invoked by the legacy ``_dispatch_batch_concurrent``
+        helper consumed when ``dispatch_plan`` is supplied with
+        multi-task batches (see :func:`_phase2_task_loop` ``dispatch_plan``
+        parameter).
+
+        Function is preserved as a v1.0.5-deferred placeholder for the
+        full per-task verification command execution (running
+        ``cfg.verification_commands`` list per task in isolation). The
+        Popen entry-point shape (callable from ``python -c``) is the
+        external contract pinned here; tests monkeypatch
+        ``subprocess.Popen`` and validate dispatch wiring without
+        spinning up the full verification machinery.
+
+        Removal candidate for v1.0.5 IF Path 3 fully subsumes the
+        Path 2 dispatch_plan-multi-batch call site; pending dogfood
+        confirmation.
 
     Invoked via ``python -c`` from :func:`_dispatch_batch_concurrent`.
     Does NOT touch the shared ``.claude/session-state.json`` -- per-task
     TDD work runs through the legacy inline body in
     :func:`_phase2_task_loop` after this gate clears.
-
-    **v1.0.4 Path 2 semantics**: this entry point validates that the
-    working tree is in a state where per-task TDD work CAN begin
-    concurrently for the batch (the verification step is what gets
-    parallelised). Currently emits a single breadcrumb line and exits 0;
-    full per-task verification command execution (running the
-    ``cfg.verification_commands`` list per task in isolation) is v1.0.5
-    scope alongside richer concurrency primitives. The contract pinned
-    here is the entry point shape (callable from ``python -c``) so tests
-    can monkeypatch ``subprocess.Popen`` and validate dispatch wiring
-    without spinning up the full verification machinery.
 
     Args:
         task_id: Plan task id (string).
