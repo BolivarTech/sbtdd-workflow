@@ -3642,3 +3642,85 @@ class TestPerWorkerSidecarAudit:
         assert not old_orphan.exists()
         assert not old_scratch.exists()
         assert recent.exists()
+
+
+# ---------------------------------------------------------------------------
+# v1.0.5 Item I-3 -- worker CLI flag forwarding (escenarios I3-1..I3-3)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerFlagForwarding:
+    """v1.0.5 Item I-3 escenarios I3-1 through I3-3 -- worker CLI flag forwarding."""
+
+    def test_i3_1_forwardable_flags_propagate_to_worker_argv(self) -> None:
+        """I3-1: forwardable flags propagate to worker argv with non-None values."""
+        import argparse
+
+        import auto_cmd
+
+        ns = argparse.Namespace(
+            plugins_root=None,
+            magi_max_iterations=None,
+            magi_threshold="GO",
+            verification_retries=5,
+            model_override=None,
+        )
+        argv = auto_cmd._build_worker_argv(["1", "3"], ns)
+
+        assert "--task-ids" in argv
+        assert "1,3" in argv
+        assert "--no-recursive" in argv
+        assert "--magi-threshold" in argv
+        assert "GO" in argv
+        assert "--verification-retries" in argv
+        assert "5" in argv
+        # Non-None flags propagated; None flags omitted
+        assert "--plugins-root" not in argv
+        assert "--magi-max-iterations" not in argv
+        assert "--model-override" not in argv
+
+    def test_i3_2_missing_flags_omit_from_worker_argv(self) -> None:
+        """I3-2: all-None flags produce minimal argv (no empty/None flags)."""
+        import argparse
+
+        import auto_cmd
+
+        ns = argparse.Namespace(
+            plugins_root=None,
+            magi_max_iterations=None,
+            magi_threshold=None,
+            verification_retries=None,
+            model_override=None,
+        )
+        argv = auto_cmd._build_worker_argv(["1", "3"], ns)
+
+        # Only the minimal set: python, run_sbtdd.py, auto, --task-ids, IDs, --no-recursive
+        assert "--task-ids" in argv
+        assert "--no-recursive" in argv
+        for flag_name in (
+            "--plugins-root",
+            "--magi-max-iterations",
+            "--magi-threshold",
+            "--verification-retries",
+            "--model-override",
+        ):
+            assert flag_name not in argv
+
+    def test_i3_3_documented_forwardable_list_matches(self) -> None:
+        """I3-3: _FORWARDABLE_FLAGS matches documented helper docstring."""
+        import auto_cmd
+
+        # Documented forwardable list (per spec sec.2.3)
+        expected_keys = {
+            "plugins_root",
+            "magi_max_iterations",
+            "magi_threshold",
+            "verification_retries",
+            "model_override",
+        }
+        assert set(auto_cmd._FORWARDABLE_FLAGS.keys()) == expected_keys
+
+        # Helper docstring mentions all forwardable flag names
+        docstring = auto_cmd._build_worker_argv.__doc__ or ""
+        for flag_value in auto_cmd._FORWARDABLE_FLAGS.values():
+            assert flag_value in docstring, f"Helper docstring missing: {flag_value}"
