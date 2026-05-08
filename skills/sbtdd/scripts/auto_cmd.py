@@ -55,6 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any, Callable, cast
 
+import _plan_ops
 import close_task_cmd
 import commits
 import receiving_review_dispatch
@@ -63,11 +64,14 @@ import subprocess_utils
 import superpowers_dispatch
 from commits import create as commit_create
 from config import PluginConfig, load_plugin_local
+from dag_parser import parse_plan
 from dependency_check import check_environment
 from drift import detect_drift
+from parallel_dispatcher import partition_by_tracks
 from errors import (
     ChecklistError,
     CommitError,
+    ConcurrentDispatchError,
     DependencyError,
     DriftError,
     MAGIGateError,
@@ -1250,6 +1254,362 @@ class AutoRunAudit:
         )
 
 
+# ---------------------------------------------------------------------------
+# v1.0.4 Item C -- parallel dispatch plan helpers (escenarios C-7, C-8, C-9).
+# ---------------------------------------------------------------------------
+
+
+def _build_dispatch_plan_sequential(plan_path: Path) -> list[set[str]]:
+    """Sequential dispatch plan -- each task in its own batch in plan order.
+
+    Preserves v1.0.3 behaviour exactly. Default when ``--parallel`` is
+    NOT specified.
+
+    Args:
+        plan_path: Path to ``planning/claude-plan-tdd.md``.
+
+    Returns:
+        List of single-element sets, one per task, in the order the
+        tasks appear in the plan. Each batch is dispatched serially.
+
+    Notes:
+        Task order is derived from ``graph.tasks`` insertion order, which
+        :func:`dag_parser.parse_plan` populates from
+        :func:`dag_parser._split_task_blocks` in document order. This
+        relies on the Python 3.7+ dict insertion-order guarantee
+        (project requires Python >= 3.9 per ``pyproject.toml``); a
+        future refactor of ``TaskGraph.tasks`` to a non-insertion-
+        ordered mapping would silently break sequential plan-text order.
+    """
+    graph = parse_plan(plan_path)
+    return [{tid} for tid in graph.tasks.keys()]
+
+
+def _build_dispatch_plan_parallel(plan_path: Path) -> list[list[str]]:
+    """Parallel dispatch plan -- track-based partitioning (Path 3).
+
+    v1.0.4 Path 3 architecture: tasks partitioned into TRACKS where each
+    track is a weakly-connected component in the (deps UNION
+    file-conflicts) graph. Tracks between each other are file-disjoint
+    AND dep-disjoint, so they may be dispatched as N concurrent
+    subprocess workers (one per track). Within each track, tasks must
+    serialize because of internal deps/conflicts; the worker processes
+    them sequentially with full TDD discipline.
+
+    Replaces the prior Path 2 antichain + greedy collision-packing which
+    parallelised inside antichains but not across them. Path 3 maps
+    directly to the manual Track Alpha + Track Beta dispatch precedent
+    used in v0.4.0/v0.5.0/v1.0.0/v1.0.2/v1.0.3 cycles.
+
+    Args:
+        plan_path: Path to ``planning/claude-plan-tdd.md``.
+
+    Returns:
+        List of tracks. Each track is a ``list[str]`` of task ids in
+        dependency-respecting (topological) execution order. Order
+        BETWEEN tracks does not matter for correctness; the parent
+        dispatcher hands each track to one subprocess worker.
+    """
+    graph = parse_plan(plan_path)
+    return partition_by_tracks(graph)
+
+
+def _check_tdd_guard_warning(parallel: bool, project_root: Path) -> None:
+    """Emit stderr warning when ``--parallel`` + TDD-Guard hooks detected.
+
+    Per spec sec.3 multi-agent rules: parallel mode in same worktree
+    with TDD-Guard ON produces falsos bloqueos because TDD-Guard's
+    per-process state file is shared across subagents. The warning
+    documents the two escape valves: toggle off via ``tdd-guard off``
+    OR run each subagent in its own worktree via ``/using-git-worktrees``.
+
+    Args:
+        parallel: ``True`` if the run is opting into parallel dispatch.
+        project_root: Project root containing ``.claude/settings.json``.
+
+    Returns:
+        ``None``. Warning (when applicable) is written to ``sys.stderr``.
+    """
+    if not parallel:
+        return
+    settings_path = project_root / ".claude" / "settings.json"
+    if not settings_path.exists():
+        return
+    # v1.0.4 Loop 2 iter-2 sub-issue 2 (C9): split JSONDecodeError vs OSError
+    # so corrupted JSON surfaces a stderr breadcrumb. OSError remains silent
+    # (genuine missing file is benign -- TDD-Guard simply not configured).
+    # Pre-fix both were swallowed silently; operators got NO signal that
+    # their TDD-Guard config was malformed.
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(
+            f"[sbtdd auto] WARNING: cannot parse {settings_path}: {exc}; "
+            f"TDD-Guard hook detection skipped. Restore valid JSON to "
+            f"re-enable the parallel-mode multi-agent caveat.\n"
+        )
+        sys.stderr.flush()
+        return
+    except OSError:
+        return
+    hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return
+    has_tdd_guard = False
+    for hook_list in hooks.values():
+        if not isinstance(hook_list, list):
+            continue
+        for entry in hook_list:
+            if not isinstance(entry, dict):
+                continue
+            for h in entry.get("hooks", []):
+                if isinstance(h, dict) and "tdd-guard" in str(h.get("command", "")).lower():
+                    has_tdd_guard = True
+                    break
+    if has_tdd_guard:
+        sys.stderr.write(
+            "[sbtdd auto] WARNING: Parallel mode in same worktree with "
+            "TDD-Guard ON may produce falsos bloqueos. Toggle off with "
+            "`tdd-guard off` per spec sec.3 multi-agent rules, OR use "
+            "`/using-git-worktrees` for per-subagent worktree.\n"
+        )
+        sys.stderr.flush()
+
+
+#: Hard ceiling on auto-resolved parallel workers. Operators may override
+#: with explicit ``--parallel-max`` (positive cap) or 0 (unlimited). The
+#: ceiling exists because beyond ~4 concurrent subprocesses the wall-time
+#: gain saturates while contention on shared file system surfaces (git
+#: index lock, .claude/auto-run.json, plan-tdd.md) increases sub-linearly
+#: in benefit. v1.0.5+ may make this a configurable per-machine knob.
+_PATH3_AUTO_WORKER_CEILING: int = 4
+
+
+def _next_open_task_in_filter(
+    plan_path: Path,
+    current_task_id: str,
+    task_ids_filter: frozenset[str],
+) -> tuple[str, str] | None:
+    """Return ``(id, title)`` of the next plan task that is open AND in filter.
+
+    v1.0.4 iter-5 Loop 1 CRITICAL #1 helper. Used by the worker skip-
+    fast-forward to advance past tasks the worker does not own. Scans
+    plan-text in source order, INCLUDING ``current_task_id`` if it is
+    open (caller decides whether to start at-or-after) -- this helper
+    returns the first match WHOSE position is at-or-after
+    ``current_task_id``. The caller's filter check already excluded
+    ``current_task_id`` from the filter, so a match at-or-after is
+    correctly the next-assigned-and-open candidate.
+
+    Args:
+        plan_path: Absolute path to ``planning/claude-plan-tdd.md``.
+        current_task_id: Worker's current cursor (a task id NOT in
+            ``task_ids_filter`` -- the caller's precondition).
+        task_ids_filter: Frozenset of task ids assigned to this worker.
+
+    Returns:
+        ``(id, title)`` of the first open task at-or-after
+        ``current_task_id`` whose id is in the filter, or ``None``
+        when the filter is exhausted (worker has no more work).
+    """
+    plan_text = plan_path.read_text(encoding="utf-8")
+    # Scan all task headers in plan source order (same regex used by
+    # _plan_ops.next_task / first_open_task to keep semantics aligned).
+    headers = list(_plan_ops._TASK_HEADER_RE.finditer(plan_text))
+    started = False
+    for m in headers:
+        tid = m.group(1)
+        title = m.group(2).strip()
+        if tid == current_task_id:
+            started = True
+        if not started:
+            continue
+        if tid not in task_ids_filter:
+            continue
+        # Verify the task is still open (has at least one ``- [ ]``
+        # checkbox in its section). A previously-closed task in filter
+        # is not work we should redo; skip it.
+        start, end = _plan_ops._task_section_bounds(plan_text, tid)
+        if "- [ ]" in plan_text[start:end]:
+            return (tid, title)
+    return None
+
+
+def _parse_task_ids_filter(raw: str | None) -> frozenset[str] | None:
+    """Decode the ``--task-ids`` argument into a worker filter set.
+
+    v1.0.4 iter-5 Loop 1 CRITICAL #1: pre-fix ``main()`` only checked
+    truthiness of ``ns.task_ids`` to set ``is_worker_mode`` -- the
+    comma-separated string was never split, so ``_phase2_task_loop``
+    had no way to filter which task ids the worker should process.
+    This helper produces an explicit filter consumed by the loop.
+
+    Args:
+        raw: Raw value of ``ns.task_ids`` (e.g. ``"1,3,5"``) or
+            ``None`` when the flag was not supplied.
+
+    Returns:
+        ``None`` when ``raw`` is ``None`` or an empty string (no
+        filter active; sequential default behaviour). Otherwise a
+        :class:`frozenset` of task ids with surrounding whitespace
+        stripped and empty tokens (from trailing or duplicate commas)
+        ignored.
+    """
+    if raw is None:
+        return None
+    tokens = [t.strip() for t in raw.split(",")]
+    cleaned = [t for t in tokens if t]
+    if not cleaned:
+        return None
+    return frozenset(cleaned)
+
+
+def _resolve_effective_workers(natural_n: int, user_max: int | None) -> int:
+    """Resolve the effective parallel worker count for Path 3 dispatch.
+
+    Cascade (most-restrictive wins):
+        - ``user_max is None`` → auto: ``min(natural_n, cpu_count, 4)``.
+        - ``user_max == 0`` → unlimited (operator override): ``natural_n``.
+        - ``user_max > 0`` → explicit cap: ``min(natural_n, user_max)``.
+
+    The natural worker count is the number of tracks emitted by
+    :func:`parallel_dispatcher.partition_by_tracks`. Effective workers
+    can never exceed natural — there is no point spawning idle workers.
+
+    Args:
+        natural_n: Number of tracks (from ``partition_by_tracks``).
+        user_max: Operator-specified cap from ``--parallel-max``. None
+            triggers auto resolution; 0 disables the ceiling; positive
+            caps natural at that value.
+
+    Returns:
+        Effective worker count (>= 0).
+    """
+    if natural_n <= 0:
+        return 0
+    if user_max is None:
+        cpu = os.cpu_count() or _PATH3_AUTO_WORKER_CEILING
+        return min(natural_n, cpu, _PATH3_AUTO_WORKER_CEILING)
+    if user_max == 0:
+        return natural_n
+    return min(natural_n, user_max)
+
+
+def _dispatch_tracks_concurrent(
+    tracks: list[list[str]],
+    effective_workers: int,
+    project_root: Path,
+) -> None:
+    """Dispatch one subprocess worker per track concurrently (Path 3).
+
+    Each track is dispatched as a child invocation of
+    ``python skills/sbtdd/scripts/run_sbtdd.py auto --task-ids T1,T2,...
+    --no-recursive``. The child processes the supplied task ids
+    sequentially with full TDD discipline (red/green/refactor commits +
+    spec-reviewer + close-task per task) via the legacy ``_phase2_task_loop``
+    body. ``--no-recursive`` ensures the child does NOT itself call
+    ``_dispatch_tracks_concurrent`` again, preventing infinite spawning.
+
+    Concurrency model: a thread pool with ``effective_workers`` slots
+    pulls tracks off a FIFO queue and ``Popen``-spawns each child. The
+    parent waits for all children to complete before returning. If
+    ``effective_workers < len(tracks)``, tracks beyond the first
+    ``effective_workers`` queue and run as slots free up.
+
+    State-file coordination: each worker mutates the shared
+    ``.claude/session-state.json`` via ``state_file.save`` whose atomic
+    write-temp + ``os.replace`` semantics serialize concurrent writers
+    at the OS level (last writer wins, no partial-merge file). This
+    matches the existing project convention (see ``parallel_dispatcher``
+    module docstring). Worker-side commits also serialize via the git
+    index lock; parallel git operations on the same worktree are safe.
+
+    Args:
+        tracks: Output of :func:`parallel_dispatcher.partition_by_tracks`.
+            Each inner list is one track in topological execution order.
+        effective_workers: Resolved by :func:`_resolve_effective_workers`.
+            Number of concurrent ``Popen`` slots. Must be >= 1 when
+            ``tracks`` is non-empty.
+        project_root: Project root passed to each child as
+            ``--project-root``. Each child inherits the same plan +
+            state-file paths.
+
+    Raises:
+        ConcurrentDispatchError: At least one worker exited non-zero
+            (exit 2, PRECONDITION_FAILED). Message includes the offending
+            track (its task ids) and best-effort captured stderr text.
+    """
+    if not tracks:
+        return
+    if effective_workers <= 0:
+        # Defensive: caller already resolved; treat as serial fallback.
+        effective_workers = 1
+    plugin_root = Path(__file__).resolve().parent
+    run_sbtdd_path = plugin_root / "run_sbtdd.py"
+
+    # FIFO queue of tracks awaiting dispatch + collector for results.
+    track_queue: queue.Queue[list[str]] = queue.Queue()
+    for t in tracks:
+        track_queue.put(t)
+    failures: list[tuple[list[str], int, str]] = []
+    failures_lock = threading.Lock()
+
+    def worker_loop() -> None:
+        while True:
+            try:
+                track = track_queue.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                task_ids_arg = ",".join(track)
+                argv = [
+                    sys.executable,
+                    str(run_sbtdd_path),
+                    "auto",
+                    "--project-root",
+                    str(project_root),
+                    "--task-ids",
+                    task_ids_arg,
+                    "--no-recursive",
+                ]
+                proc = subprocess.Popen(
+                    argv,
+                    cwd=str(project_root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                try:
+                    _stdout_b, stderr_b = proc.communicate(timeout=7200)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    _stdout_b, stderr_b = proc.communicate()
+                    with failures_lock:
+                        failures.append((track, -1, "subprocess timeout (7200s)"))
+                    continue
+                rc = proc.returncode
+                if rc != 0:
+                    err_text = (
+                        stderr_b.decode("utf-8", errors="replace")
+                        if isinstance(stderr_b, bytes)
+                        else str(stderr_b)
+                    )
+                    with failures_lock:
+                        failures.append((track, rc, err_text))
+            finally:
+                track_queue.task_done()
+
+    n_threads = min(effective_workers, len(tracks))
+    threads = [threading.Thread(target=worker_loop, daemon=False) for _ in range(n_threads)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+
+    if failures:
+        details = "; ".join(f"track {tids} exit={rc}: {msg[:300]}" for tids, rc, msg in failures)
+        raise ConcurrentDispatchError(f"concurrent track dispatch failed: {details}")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Return the argparse parser for ``sbtdd auto``."""
     p = argparse.ArgumentParser(prog="sbtdd auto")
@@ -1278,6 +1638,60 @@ def _build_parser() -> argparse.ArgumentParser:
             "Valid skill names: implementer, spec_reviewer, code_review, "
             "magi_dispatch. Cascade: CLAUDE.md > CLI override > "
             "plugin.local.md > None (inherit session)."
+        ),
+    )
+    # v1.0.4 Item C: opt-in parallel task dispatch via DAG analysis +
+    # file-surface collision detection. Default False preserves the v1.0.3
+    # sequential dispatch behaviour exactly. See spec sec.3 multi-agent
+    # rules for the TDD-Guard interaction caveats.
+    p.add_argument(
+        "--parallel",
+        action="store_true",
+        default=False,
+        help=(
+            "v1.0.4 Item C: dispatch parallelizable task batches "
+            "concurrently. Requires TDD-Guard OFF in same worktree, "
+            "OR per-subagent worktree (see spec sec.3)."
+        ),
+    )
+    # v1.0.4 Path 3: track-based subprocess dispatch flags.
+    # Worker mode: when ``--task-ids`` is set AND ``--no-recursive`` is
+    # set, this invocation is a worker subprocess spawned by a parent
+    # ``--parallel`` orchestrator. The worker processes EXACTLY the
+    # comma-separated task ids in sequence (full TDD discipline per task)
+    # and skips the parent-side track partition + concurrent spawn.
+    p.add_argument(
+        "--task-ids",
+        type=str,
+        default=None,
+        help=(
+            "v1.0.4 Path 3 worker mode: comma-separated task ids the "
+            "current invocation must process sequentially with full TDD "
+            "discipline. Used internally by --parallel dispatch to fan "
+            "out tracks. Operators may also set it manually to scope a "
+            "single auto run to a subset of tasks."
+        ),
+    )
+    p.add_argument(
+        "--no-recursive",
+        action="store_true",
+        default=False,
+        help=(
+            "v1.0.4 Path 3 worker mode: prevent recursive subprocess "
+            "spawning. When set, this invocation never calls "
+            "_dispatch_tracks_concurrent itself. Used by parent dispatch "
+            "to ensure workers do not re-fan-out into infinite spawning."
+        ),
+    )
+    p.add_argument(
+        "--parallel-max",
+        type=int,
+        default=None,
+        help=(
+            "v1.0.4 Path 3: cap on parallel worker count. None=auto "
+            "(min(natural_tracks, cpu_count, 4)). 0=unlimited (operator "
+            "override). >0=explicit cap. Effective worker count is "
+            "resolved by _resolve_effective_workers."
         ),
     )
     return p
@@ -1936,8 +2350,156 @@ def _apply_spec_review_findings_via_mini_cycle(
     )
 
 
+def _dispatch_batch_concurrent(batch: set[str], project_root: Path) -> None:
+    """Parallel pre-verification gate for a multi-task batch (v1.0.4 Path 2).
+
+    **v1.0.4 Loop 2 iter-3 architectural pivot (Path 2)**. The iter-2
+    incarnation attempted to drive per-task TDD cycles inside concurrent
+    subprocesses but introduced the wrong-task-closed wiring bug because
+    :func:`_run_single_task_isolated` was a stub: parent-side
+    ``mark_and_advance`` advanced state without any TDD triplet commits.
+    This iter-3 rewrite re-positions the helper as a **parallel pre-
+    verification gate**: per-task TDD work flows through the legacy
+    inline body in :func:`_phase2_task_loop` (preserving INV-1, INV-31,
+    INV-5..7 per task), and this helper merely parallelises the
+    verification step at batch entry so operators get the wall-time
+    benefit of ``--parallel`` (verification is the slowest part of a TDD
+    cycle empirically) without the architectural complexity of state-file
+    isolation + recursion guards that Path 1 would require.
+
+    Concretely: spawns one ``subprocess.Popen`` per task in the batch
+    (the Popen invokes :func:`_run_single_task_isolated` which runs a
+    minimal pre-verification check), waits for all processes to complete,
+    and raises :class:`ConcurrentDispatchError` on any non-zero exit.
+    The Popen-per-task shape is preserved so test fixtures that
+    monkeypatch ``subprocess.Popen`` still observe N invocations.
+
+    Args:
+        batch: Set of task ids to pre-verify concurrently. Must have
+            ``len(batch) > 1`` for the helper to do useful work; size-1
+            batches are short-circuited by the caller.
+        project_root: Project root containing ``planning/claude-plan-tdd.md``
+            and ``.claude/session-state.json``.
+
+    Raises:
+        ConcurrentDispatchError: At least one Popen subprocess returned
+            non-zero (exit 2, PRECONDITION_FAILED). Message includes the
+            offending task ids and (best-effort) captured stderr text.
+            Distinct from :class:`VerificationIrremediableError` (exit 6)
+            which is reserved for per-phase verification budget exhaustion
+            during the inline TDD body.
+
+    Notes:
+        State-file write coordination is structural, not lock-based: the
+        helper does NOT mutate ``.claude/session-state.json`` -- the
+        outer ``_phase2_task_loop`` runs each task through the legacy
+        inline body in ``sorted(batch)`` order after this gate clears,
+        so per-task ``mark_and_advance`` advances the shared state file
+        sequentially as part of each task's own refactor close.
+    """
+    if len(batch) <= 1:
+        # Defensive: caller short-circuits singletons.
+        return
+    procs: list[tuple[str, Any]] = []  # (task_id, Popen)
+    plugin_root = Path(__file__).resolve().parent
+    # v1.0.4 iter-5 Loop 1 sub-issue #4 (Caspar): use ``repr()`` consistently
+    # for path arguments so paths with apostrophes (e.g. project root in
+    # ``D:\My's Project\``) round-trip through Python literal-eval safely.
+    # Pre-fix the bare ``r'{path}'`` raw-string literal would break on any
+    # apostrophe in the path; ``repr()`` emits Python-safe quoted strings.
+    plugin_root_lit = repr(str(plugin_root))
+    project_root_lit = repr(str(project_root))
+    for task_id in sorted(batch):
+        argv = [
+            sys.executable,
+            "-c",
+            (
+                f"import sys; sys.path.insert(0, {plugin_root_lit}); "
+                f"from auto_cmd import _run_single_task_isolated; "
+                f"_run_single_task_isolated({task_id!r}, {project_root_lit})"
+            ),
+        ]
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        procs.append((task_id, proc))
+    # Wait for all spawned processes BEFORE checking returncode so concurrent
+    # tasks complete even if one fails early.
+    failures: list[tuple[str, int, str]] = []
+    for task_id, proc in procs:
+        try:
+            stdout_bytes, stderr_bytes = proc.communicate(timeout=3600)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout_bytes, stderr_bytes = proc.communicate()
+            failures.append((task_id, -1, "subprocess timeout (3600s)"))
+            continue
+        rc = proc.returncode
+        if rc != 0:
+            err_text = (
+                stderr_bytes.decode("utf-8", errors="replace")
+                if isinstance(stderr_bytes, bytes)
+                else str(stderr_bytes)
+            )
+            failures.append((task_id, rc, err_text))
+    if failures:
+        details = "; ".join(f"task {tid} exit={rc}: {msg[:200]}" for tid, rc, msg in failures)
+        raise ConcurrentDispatchError(
+            f"concurrent pre-verification failed for batch {sorted(batch)}: {details}"
+        )
+
+
+def _run_single_task_isolated(task_id: str, project_root_str: str) -> None:
+    """V1.0.5-DEFERRED PLACEHOLDER: per-task pre-verification stub.
+
+    .. note::
+        **v1.0.4 iter-5 Loop 1 sub-issue #3 marker (Caspar)**: with
+        Path 3 track-based dispatch (``_dispatch_tracks_concurrent`` +
+        ``--task-ids`` filter, shipped iter-4 + iter-5 CRITICAL #1
+        wiring) doing the heavy lifting, this Path 2 ``--single-task``
+        stub no longer appears in the orchestrator-parallel flow.
+        It IS still invoked by the legacy ``_dispatch_batch_concurrent``
+        helper consumed when ``dispatch_plan`` is supplied with
+        multi-task batches (see :func:`_phase2_task_loop` ``dispatch_plan``
+        parameter).
+
+        Function is preserved as a v1.0.5-deferred placeholder for the
+        full per-task verification command execution (running
+        ``cfg.verification_commands`` list per task in isolation). The
+        Popen entry-point shape (callable from ``python -c``) is the
+        external contract pinned here; tests monkeypatch
+        ``subprocess.Popen`` and validate dispatch wiring without
+        spinning up the full verification machinery.
+
+        Removal candidate for v1.0.5 IF Path 3 fully subsumes the
+        Path 2 dispatch_plan-multi-batch call site; pending dogfood
+        confirmation.
+
+    Invoked via ``python -c`` from :func:`_dispatch_batch_concurrent`.
+    Does NOT touch the shared ``.claude/session-state.json`` -- per-task
+    TDD work runs through the legacy inline body in
+    :func:`_phase2_task_loop` after this gate clears.
+
+    Args:
+        task_id: Plan task id (string).
+        project_root_str: Project root as a string (Popen-safe).
+    """
+    # v1.0.4 Path 2 minimal: emit breadcrumb + exit 0. Full per-task
+    # verification command execution is v1.0.5 scope; this stub keeps the
+    # Popen shape tests rely on while not bypassing INV-1/INV-31/INV-5..7
+    # (which the legacy inline body in _phase2_task_loop enforces per task).
+    sys.stdout.write(f"[sbtdd auto pre-verify] task {task_id} ready at {project_root_str}\n")
+
+
 def _phase2_task_loop(
-    ns: argparse.Namespace, state: SessionState, cfg: PluginConfig
+    ns: argparse.Namespace,
+    state: SessionState,
+    cfg: PluginConfig,
+    dispatch_plan: list[set[str]] | None = None,
+    task_ids_filter: frozenset[str] | None = None,
 ) -> SessionState:
     """Run Phase 2 -- sequential task loop with TDD cycles per task.
 
@@ -1975,6 +2537,36 @@ def _phase2_task_loop(
         state: Current :class:`SessionState` (entry phase may be
             ``red``, ``green``, or ``refactor``; auto starts from there).
         cfg: Plugin configuration (for ``auto_verification_retries``).
+        dispatch_plan: Optional batched dispatch plan from
+            :func:`_build_dispatch_plan_parallel` /
+            :func:`_build_dispatch_plan_sequential`. When ``None``
+            (default) or when all batches are singletons, the legacy
+            while-loop handles all tasks unchanged (v1.0.3 plan-text-
+            order behaviour). When supplied with multi-task batches,
+            each multi-task batch runs through
+            :func:`_dispatch_batch_concurrent` as a **parallel pre-
+            verification gate** (Path 2) BEFORE the legacy while-loop
+            consumes the batch's tasks via the full inline TDD body
+            in plan-text order. This preserves INV-1/INV-31/INV-5..7
+            per task because the actual TDD work (red/green/refactor
+            commits + spec-reviewer + ``mark_and_advance``) flows
+            through the existing legacy code path, not through the
+            stub :func:`_run_single_task_isolated`. Singleton batches
+            in the plan skip the gate. v1.0.4 Loop 2 iter-3
+            architectural pivot (Path 2: parallel verify + sequential
+            close).
+        task_ids_filter: v1.0.4 iter-5 Loop 1 CRITICAL #1. When set,
+            the worker processes ONLY task ids in the filter --
+            unassigned tasks are skipped by advancing
+            ``state.current_task_id`` to the next plan task in source
+            order WITHOUT touching the plan checkbox or running TDD
+            cycles (the OTHER worker that owns that task is
+            responsible for closing it). When ``None`` (default),
+            sequential / orchestrator behaviour is preserved exactly.
+            Pre-fix the worker subprocess raced on the shared state
+            file's ``current_task_id``; both Path 3 children read
+            ``current_task_id=1`` at entry and processed task 1
+            concurrently, corrupting plan + git index.
 
     Returns:
         The final :class:`SessionState` after the last task's close-task
@@ -1983,8 +2575,10 @@ def _phase2_task_loop(
 
     Raises:
         DriftError: Drift detected at entry.
-        VerificationIrremediableError: Phase verification exhausted the
-            retry budget.
+        ConcurrentDispatchError: Parallel pre-verification gate failed
+            for one or more multi-task batches (exit 2).
+        VerificationIrremediableError: Per-phase verification exhausted
+            the retry budget during the legacy inline TDD body (exit 6).
     """
     root: Path = ns.project_root
     retries = (
@@ -2077,11 +2671,78 @@ def _phase2_task_loop(
         task_total=_t_total,
         dispatch_label=current.current_phase,
     )
+    # v1.0.4 Loop 2 iter-3 architectural pivot (Path 2): when
+    # ``dispatch_plan`` is supplied AND contains multi-task batches, run
+    # :func:`_dispatch_batch_concurrent` as a **parallel pre-verification
+    # gate** for each multi-task batch BEFORE the legacy while-loop. The
+    # gate spawns N Popens (one per task in the batch) running the
+    # minimal pre-verification check in parallel; on any non-zero exit
+    # it raises :class:`ConcurrentDispatchError` (exit 2,
+    # PRECONDITION_FAILED) BEFORE any per-task TDD work begins, so the
+    # state file is never partially advanced.
+    #
+    # After the pre-verify gate clears, control falls through to the
+    # legacy while-loop which consumes tasks in plan-text order via the
+    # full inline TDD body (red -> green -> refactor + INV-31 spec-
+    # reviewer + commits + ``mark_and_advance``). This preserves
+    # INV-1/INV-31/INV-5..7 per task -- the iter-2 incarnation broke
+    # those invariants by calling ``mark_and_advance`` directly inside
+    # the dispatch_plan loop, which advanced state without TDD triplet
+    # commits because :func:`_run_single_task_isolated` was a stub.
+    #
+    # Singleton batches in dispatch_plan skip the gate (size-1 batches
+    # have nothing to parallelise). When ``dispatch_plan is None`` the
+    # gate is skipped entirely and behaviour is byte-identical to v1.0.3.
+    if dispatch_plan is not None:
+        for batch in dispatch_plan:
+            if len(batch) > 1:
+                _dispatch_batch_concurrent(batch, root)
     try:
         while current.current_task_id is not None:
             # v0.5.0 S1-13: bound heartbeat counter persistence latency
             # to <= 30s even when no transition fires (long dispatches).
             _periodic_drain_if_due(auto_run)
+            # v1.0.4 iter-5 Loop 1 CRITICAL #1: worker filter skip-
+            # fast-forward. When a Path 3 worker subprocess was spawned
+            # with ``--task-ids T3,T5``, state.current_task_id may
+            # initially point at task 1 (the global cursor) -- a task
+            # belonging to a SIBLING worker. The legacy code would then
+            # process task 1 in this worker, racing the other worker's
+            # commit and corrupting state.
+            #
+            # Fix: when filter is set AND current task is NOT in filter,
+            # advance the in-memory cursor to the next plan task that IS
+            # in filter (and still open). This DOES NOT touch the plan
+            # checkbox or the chore commit chain -- only the local cursor
+            # moves. If no remaining task in filter is open, exit the
+            # loop cleanly (worker has nothing left to do; sibling
+            # workers own the rest).
+            #
+            # The state file IS persisted with the new cursor so a mid-
+            # run crash + resume reads a coherent value; ``mark_and_
+            # advance`` later uses ``_plan_ops.next_task`` which advances
+            # forward in source order, so global cursor monotonicity is
+            # preserved across all workers' writes (last-writer wins on
+            # the file but the value is always a valid open-task id).
+            if task_ids_filter is not None and current.current_task_id not in task_ids_filter:
+                next_in_filter = _next_open_task_in_filter(
+                    plan_path, current.current_task_id, task_ids_filter
+                )
+                if next_in_filter is None:
+                    break
+                next_id, next_title = next_in_filter
+                current = SessionState(
+                    plan_path=current.plan_path,
+                    current_task_id=next_id,
+                    current_task_title=next_title,
+                    current_phase="red",
+                    phase_started_at_commit=current.phase_started_at_commit,
+                    last_verification_at=current.last_verification_at,
+                    last_verification_result=current.last_verification_result,
+                    plan_approved_at=current.plan_approved_at,
+                    spec_snapshot_emitted_at=current.spec_snapshot_emitted_at,
+                )
+                save_state(current, state_path)
             phase_idx = (
                 _PHASE_ORDER.index(current.current_phase)
                 if current.current_phase in _PHASE_ORDER
@@ -2880,7 +3541,54 @@ def main(argv: list[str] | None = None) -> int:
     if ns.dry_run:
         _print_dry_run_preview(ns)
         return 0
+    # v1.0.4 Item C end-to-end wiring (MAGI Loop 2 iter-1 CRITICAL #3 fix).
+    # ``ns.parallel`` (default ``False``) drives:
+    #   1. TDD-Guard warning emission AFTER phase 1 preflight -- operators
+    #      get a clean preflight summary first, then any multi-agent caveat.
+    #   2. Dispatch plan construction -- ``_build_dispatch_plan_parallel``
+    #      partitions tasks via DAG antichains + file-surface collision
+    #      detection; ``_build_dispatch_plan_sequential`` preserves v1.0.3
+    #      plan-text order. Result is stashed on ``ns.dispatch_plan`` so
+    #      ``_phase2_task_loop`` consumes the partitioned shape without
+    #      re-parsing the plan.
+    # Pre-fix, the flag was DEAD-WIRED: argparse accepted it but main()
+    # never read ``ns.parallel`` and the helpers were orphaned. v1.0.4 iter-2
+    # sub-issue 3 (preflight ordering): preflight now runs FIRST so failures
+    # surface in the documented context (env / state validation), not via
+    # confusing plan-parse errors.
     state, cfg = _phase1_preflight(ns)
+    _check_tdd_guard_warning(parallel=ns.parallel, project_root=ns.project_root)
+    plan_path_for_dispatch = ns.project_root / "planning" / "claude-plan-tdd.md"
+    # v1.0.4 Path 3 mode classification:
+    #   - worker mode: --task-ids set AND --no-recursive set (subprocess
+    #     spawned by parent --parallel orchestrator). Skip track partition;
+    #     run legacy _phase2_task_loop with task-id filter. The
+    #     --no-recursive guard prevents the worker from re-spawning workers
+    #     of its own (would be infinite spawning).
+    #   - orchestrator parallel: --parallel set AND not worker mode.
+    #     Build tracks via partition_by_tracks, dispatch via
+    #     _dispatch_tracks_concurrent, skip _phase2_task_loop on parent
+    #     side (workers handle TDD). After workers complete, reload state
+    #     and run phases 3-5.
+    #   - sequential default: behaviour byte-identical to v1.0.3.
+    # v1.0.4 iter-5 Loop 1 CRITICAL #1: parse --task-ids into an explicit
+    # frozenset filter so the worker code path can skip tasks belonging
+    # to sibling workers. Pre-fix this was only used as a boolean gate;
+    # ``_phase2_task_loop`` had no way to honour the per-worker scope.
+    ns.task_ids_filter = _parse_task_ids_filter(getattr(ns, "task_ids", None))
+    is_worker_mode = ns.task_ids_filter is not None and bool(getattr(ns, "no_recursive", False))
+    is_orchestrator_parallel = bool(ns.parallel) and not is_worker_mode
+    if plan_path_for_dispatch.exists():
+        if is_orchestrator_parallel:
+            ns.dispatch_plan = _build_dispatch_plan_parallel(plan_path_for_dispatch)
+        else:
+            ns.dispatch_plan = _build_dispatch_plan_sequential(plan_path_for_dispatch)
+    else:
+        # Plan absent at this stage -- preflight already validated and
+        # passed (state.current_phase == 'done' OR plan path implicitly
+        # accepted by preflight). Attach empty plan so downstream
+        # consumers see a deterministic (empty) iterable.
+        ns.dispatch_plan = []
     started = _now_iso()
     auto_run = ns.project_root / ".claude" / "auto-run.json"
     _write_auto_run_audit(
@@ -2899,7 +3607,48 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     if state.current_phase != "done":
-        state = _phase2_task_loop(ns, state, cfg)
+        if is_orchestrator_parallel:
+            # v1.0.4 Path 3 orchestrator: bypass _phase2_task_loop on the
+            # parent side. tracks (list[list[str]]) come from
+            # partition_by_tracks; each track is dispatched as one
+            # subprocess worker via _dispatch_tracks_concurrent. Workers
+            # mutate the shared state file via the existing
+            # _phase2_task_loop body invoked with --task-ids filter.
+            tracks = ns.dispatch_plan  # list[list[str]] in Path 3
+            effective = _resolve_effective_workers(len(tracks), getattr(ns, "parallel_max", None))
+            _dispatch_tracks_concurrent(
+                tracks=tracks,
+                effective_workers=effective,
+                project_root=ns.project_root,
+            )
+            # Reload state after workers mutated it; downstream phases
+            # need the up-to-date view (current_phase should be "done"
+            # if workers completed all tasks).
+            state = load_state(ns.project_root / ".claude" / "session-state.json")
+        else:
+            # v1.0.4 Loop 2 iter-2 sub-issue 1: pass dispatch_plan into the
+            # task loop so the consumer can route multi-task batches through
+            # the concurrent helper. Sequential default + dispatch_plan-None
+            # both fall through to the legacy while-loop body unchanged.
+            # Worker mode also lands here -- legacy body honours --task-ids
+            # via the new ``task_ids_filter`` kwarg (v1.0.4 iter-5 Loop 1
+            # CRITICAL #1 fix). The filter scopes the loop to ONLY the
+            # task ids assigned to this subprocess; tasks owned by sibling
+            # workers are skipped via cursor-only state advance (no plan
+            # write, no chore commit).
+            state = _phase2_task_loop(
+                ns,
+                state,
+                cfg,
+                dispatch_plan=getattr(ns, "dispatch_plan", None),
+                task_ids_filter=getattr(ns, "task_ids_filter", None),
+            )
+    # v1.0.4 Path 3 worker mode: skip phases 3-5 because parent
+    # orchestrator owns the gate + finalize. Worker exits 0 once its
+    # task slice completes (or non-zero on irrecoverable failure, which
+    # surfaces as ConcurrentDispatchError on the parent).
+    if is_worker_mode:
+        return 0
     try:
         verdict = _phase3_pre_merge(ns, cfg)
     except MAGIGateError as exc:

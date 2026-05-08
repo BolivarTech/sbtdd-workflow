@@ -338,6 +338,80 @@ def test_plan_all_tasks_complete_returns_x_when_no_task_headers():
     assert _plan_all_tasks_complete("no task headers here") == "[x]"
 
 
+def test_any_task_header_regex_skips_h2_collapsed_form():
+    """v1.0.4 Loop 2 iter-1 CRITICAL #2 regression — h2-collapsed ABSORBED /
+    DEFERRED stubs MUST NOT be matched by ``_ANY_TASK_HEADER``.
+
+    Fix per Option (b) for v1.0.4 stale T2/T9 stubs: collapse to
+    ``## Task N (ABSORBED into ...)`` (h2) instead of ``### Task N:`` (h3).
+    Drift detector's ``_ANY_TASK_HEADER`` regex pins to h3 + colon, so h2
+    collapsed-form is structurally invisible to the section walker.
+
+    Asserts the regex matches h3 form but NOT h2 collapsed form. Combined
+    with ``test_v104_plan_has_no_h3_task_headers_for_absorbed_deferred_stubs``
+    below this is the contract guaranteeing future authors cannot
+    accidentally re-introduce checkbox-bearing stubs that trip drift.
+    """
+    from drift import _ANY_TASK_HEADER
+
+    # h3 form: matches (real Task header).
+    assert _ANY_TASK_HEADER.search("### Task 1: real task\n") is not None
+
+    # h2 collapsed form: does NOT match (annotation, not visited by walker).
+    assert _ANY_TASK_HEADER.search("## Task 2 (ABSORBED into Task 1)\n") is None
+    assert _ANY_TASK_HEADER.search("## Task 9 (DEFERRED to v1.0.5)\n") is None
+
+    # Bold inline form: also does NOT match (alternative collapsed form).
+    assert _ANY_TASK_HEADER.search("**Task 2 (ABSORBED)** — see T1\n") is None
+
+
+def test_v104_plan_has_no_h3_task_headers_for_absorbed_deferred_stubs():
+    """v1.0.4 Loop 2 iter-1 CRITICAL #2 regression — concrete plan-tdd.md must
+    use collapsed-form (h2 or non-h3) for T2 ABSORBED + T9 DEFERRED stubs so
+    drift detector does not visit them. Stubs that retain ``### Task N:``
+    header are OK ONLY if they contain zero ``- [ ]`` markers.
+
+    Asserts current plan body either:
+      * uses collapsed-form (no ``### Task 2:`` / ``### Task 9:`` h3 header), OR
+      * uses h3 header BUT carries no ``- [ ]`` markers in section body.
+
+    Either form satisfies drift safety; this test pins the contract so a
+    future author touching either stub does not accidentally re-introduce
+    the failure mode.
+    """
+    from pathlib import Path
+
+    from drift import _plan_all_tasks_complete, _ANY_TASK_HEADER
+
+    plan_path = Path(__file__).resolve().parent.parent / "planning" / "claude-plan-tdd.md"
+    if not plan_path.exists():
+        pytest.skip("plan file absent; test only meaningful in own-cycle dogfood")
+    plan = plan_path.read_text(encoding="utf-8")
+
+    # Top-level invariant: state=done + this plan -> drift detector returns [x].
+    assert _plan_all_tasks_complete(plan) == "[x]", (
+        "Plan should be fully complete; T2/T9 stubs must not introduce open checkboxes."
+    )
+
+    # Structural invariant: every header visited by drift detector regex must
+    # NOT correspond to an ABSORBED/DEFERRED stub that carries open checkboxes.
+    headers = list(_ANY_TASK_HEADER.finditer(plan))
+    for i, match in enumerate(headers):
+        header_line_start = plan.rfind("\n", 0, match.start()) + 1
+        header_line_end = plan.find("\n", match.start())
+        header_line = plan[header_line_start:header_line_end]
+        section_start = match.end()
+        section_end = headers[i + 1].start() if i + 1 < len(headers) else len(plan)
+        section = plan[section_start:section_end]
+        is_stub = "ABSORBED" in header_line or "DEFERRED" in header_line
+        if is_stub:
+            assert "- [ ]" not in section, (
+                f"ABSORBED/DEFERRED stub header `{header_line}` carries `- [ ]` "
+                f"markers in body; drift detector will flag false-positive when "
+                f"state=done. Collapse to non-h3 form OR strip body checkboxes."
+            )
+
+
 def test_detect_drift_done_with_no_current_task_and_all_tasks_complete(tmp_path, monkeypatch):
     """state=done + current_task_id=None + plan fully flipped -> no drift.
 

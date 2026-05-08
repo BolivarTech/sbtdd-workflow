@@ -17,6 +17,35 @@ typed :class:`errors.SBTDDError` subclasses so dispatchers at
 Quota exhaustion (sec.S.11.4) is detected on stderr via
 :mod:`quota_detector` BEFORE a generic failure is reported -- the caller
 then sees :class:`errors.QuotaExhaustedError` and exits 11.
+
+Subprocess-incompatible skill audit history
+-------------------------------------------
+
+- v1.0.1 (Finding A discovery): brainstorming, writing-plans.
+  Manifestation: silent no-op (subprocess returns without producing
+  skill output). Caught post-spawn via INV-37 composite-signature
+  check (v1.0.1 Item A0).
+- v1.0.4 (v1.0.3 Activity D' empirical hang during Loop 1 fix-finding
+  triage step): receiving-code-review. Manifestation: 600s subprocess
+  hang waiting interactive input. Cannot be caught post-spawn
+  (operator-blocking); requires pre-spawn gate.
+
+A skill is subprocess-incompatible iff it requires multi-turn
+interactive dialogue with the operator. Adding a new entry to the
+set without empirical evidence (subprocess hang or silent-no-op
+observed) is forbidden -- operators must run the skill manually in
+interactive session and document the failure mode in CHANGELOG
+before promoting.
+
+Gate semantics (v1.0.4 post iter 1 triage): subprocess spawn for
+incompatible skills is BLOCKED UNCONDITIONALLY unless caller passes
+allow_interactive_skill=True. The override is the explicit opt-in
+for known-safe wrappers that have arranged for subprocess success
+(silent-no-op tolerated by v1.0.1 wrappers via INV-37 post-detection;
+or operator-controlled interactive callsites). NO env-var/isatty heuristic
+is used -- caspar Checkpoint 2 iter 1 CRITICAL verified the heuristic
+does not fix the v1.0.3 bug in operator main sessions (TTY=True so the
+gate would not fire, subprocess would spawn, hang persists).
 """
 
 from __future__ import annotations
@@ -25,7 +54,8 @@ import subprocess
 import sys as _sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 import quota_detector
 import subprocess_utils
@@ -49,6 +79,12 @@ _SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(
     {
         "brainstorming",
         "writing-plans",
+        # v1.0.4 (Item A.1, Task 1): added per v1.0.3 Activity D'
+        # empirical hang. /receiving-code-review requires multi-turn
+        # interactive triage of MAGI findings before the wrapper can
+        # accept/reject each; subprocess spawn hung 600s waiting for
+        # operator input.
+        "receiving-code-review",
     }
 )
 
@@ -152,6 +188,82 @@ def _apply_inv0_model_check(
     return None
 
 
+#: v1.0.4 Item B (Task 4): per-skill recovery message body. Each entry
+#: is appended after the leading sentence in :func:`_build_recovery_message`
+#: so operators see a tailored recovery path matching the skill's role.
+#: Frozen via :class:`types.MappingProxyType` to prevent accidental
+#: runtime mutation (style consistent with ``_SUBPROCESS_INCOMPATIBLE_SKILLS``).
+#:
+#: - ``brainstorming`` and ``writing-plans``: spec-phase skills; the
+#:   recovery is to run the skill manually in an interactive Claude Code
+#:   session, then resume via ``/sbtdd spec --resume-from-magi`` (v1.0.1
+#:   Item A3).
+#: - ``receiving-code-review``: pre-merge-phase skill; the recovery is
+#:   either run the skill manually OR fall back to direct
+#:   ``run_magi.py code-review`` per spec sec.6.4.
+_PER_SKILL_RECOVERY: Mapping[str, str] = MappingProxyType(
+    {
+        "brainstorming": (
+            "  1. Run `/brainstorming` manually in interactive Claude Code session,\n"
+            "     then use `/sbtdd spec --resume-from-magi`."
+        ),
+        "writing-plans": (
+            "  1. Run `/writing-plans` manually in interactive Claude Code session,\n"
+            "     then use `/sbtdd spec --resume-from-magi`."
+        ),
+        "receiving-code-review": (
+            "  1. Run `/receiving-code-review` manually in interactive session, OR\n"
+            "  2. Fall back to manual `python skills/magi/scripts/run_magi.py code-review <payload>`\n"
+            "     per spec sec.6.4 + apply mini-cycle TDD fixes manually."
+        ),
+    }
+)
+
+
+#: Generic recovery body used when a skill name is not present in
+#: :data:`_PER_SKILL_RECOVERY`. Tailored entries are preferred, but a
+#: catch-all keeps :func:`_build_recovery_message` total over the
+#: input space.
+_GENERIC_RECOVERY = (
+    "  1. Run the skill manually in interactive session,\n     then resume the SBTDD workflow."
+)
+
+
+def _build_recovery_message(skill: str) -> str:
+    """Construct the operator-facing recovery message for a blocked skill.
+
+    v1.0.4 Item B (Task 4): replaces the Task 3 placeholder with a per-skill
+    recovery body so the operator sees actionable guidance tailored to the
+    skill that was blocked. Post iter 1 triage simplified: NO env-var
+    formatting (the gate is membership-based, not heuristic-based -- there
+    is no env state to report).
+
+    The leading sentence is preserved verbatim from the Task 3 placeholder
+    so callsite tests that match the prefix keep passing monotonically.
+
+    Args:
+        skill: Slash-command name (e.g., ``"receiving-code-review"``).
+
+    Returns:
+        Multi-line operator-facing message including:
+        - Reason (skill empirically incompatible).
+        - Per-skill recovery options (or generic fallback when the skill
+          is not present in :data:`_PER_SKILL_RECOVERY`).
+        - Override hint (``allow_interactive_skill=True`` for known-safe
+          callers that have arranged for subprocess success).
+    """
+    per_skill = _PER_SKILL_RECOVERY.get(skill, _GENERIC_RECOVERY)
+    return (
+        f"Skill `/{skill}` cannot run via `claude -p` subprocess "
+        f"(empirically incompatible: requires multi-turn interactive "
+        f"dialogue or hangs > 600s). Recovery options:\n"
+        f"{per_skill}\n"
+        f"To override (only when caller has arranged interactive "
+        f"completion path), pass `allow_interactive_skill=True` to "
+        f"`invoke_skill(...)`."
+    )
+
+
 def invoke_skill(
     skill: str,
     args: list[str] | None = None,
@@ -207,22 +319,22 @@ def invoke_skill(
         ValidationError: If the subprocess timed out OR exited non-zero without
             matching a quota pattern. Mapped to exit 1 by run_sbtdd.py.
     """
-    # v1.0.1 Item A2 (sec.2.3): safe-by-default gate -- skills in
-    # ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g. ``/brainstorming``,
-    # ``/writing-plans``) raise BEFORE subprocess spawn unless the caller
-    # opts into the override. Wrappers built via ``_make_wrapper`` and
-    # the H5-1 ``_invoke_skill`` helper pass ``True`` automatically (per
-    # Pre-A2 migration); external callers must opt in explicitly.
+    # v1.0.1 Item A2 (sec.2.3) + v1.0.4 Item A.2 (Task 3): safe-by-default
+    # gate -- skills in ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g.
+    # ``/brainstorming``, ``/writing-plans``, ``/receiving-code-review``)
+    # raise BEFORE subprocess spawn unless the caller opts into the
+    # override. Wrappers built via ``_make_wrapper`` and the H5-1
+    # ``_invoke_skill`` helper pass ``True`` automatically (per Pre-A2
+    # migration); external callers must opt in explicitly.
+    #
+    # v1.0.4 (Task 3 + Task 4): the operator-facing recovery message is
+    # built by :func:`_build_recovery_message` so per-skill recovery
+    # paths can be tailored (Task 4 expansion). NO env-var/isatty
+    # heuristic -- caspar Checkpoint 2 iter 1 CRITICAL verified that
+    # heuristic does not fix the v1.0.3 bug because operator main
+    # sessions have TTY=True so the gate would not fire.
     if skill in _SUBPROCESS_INCOMPATIBLE_SKILLS and not allow_interactive_skill:
-        raise PreconditionError(
-            f"Skill /{skill} es interactivo y NO puede ser invocado via "
-            f"`claude -p` subprocess (output silently empty observed in v1.0.0 "
-            f"dogfood). Run /{skill} manualmente en sesion interactiva de "
-            f"Claude Code, o usa la wrapper function "
-            f"`superpowers_dispatch.{skill.replace('-', '_')}(...)` que pasa "
-            f"el override automaticamente. Para recovery despues de dispatch "
-            f"manual, usa `sbtdd spec --resume-from-magi`."
-        )
+        raise PreconditionError(_build_recovery_message(skill))
     effective_model = _apply_inv0_model_check(model, skill_field_name)
     cmd = _build_skill_cmd(skill, args, model=effective_model)
     # iter 2 finding #1 + #7: only pass stream_prefix when supplied so

@@ -99,6 +99,22 @@ class VerificationIrremediableError(SBTDDError):
     """Phase verification failed after auto retry budget (exit 6)."""
 
 
+class ConcurrentDispatchError(SBTDDError):
+    """Concurrent batch pre-verification failed -- exit 2 (PRECONDITION_FAILED).
+
+    Introduced in v1.0.4 Loop 2 iter-3 (IMPORTANT #3). Distinct from
+    :class:`VerificationIrremediableError` (which is reserved for per-phase
+    verification budget exhaustion at exit 6). When ``--parallel`` mode runs
+    a multi-task batch through :func:`auto_cmd._dispatch_batch_concurrent`
+    as a parallel pre-verification gate and any subprocess returns non-zero,
+    this error fires BEFORE per-task TDD work begins, so the batch is
+    aborted in a precondition-class state (no commits made, state file
+    unchanged). Using exit 6 would conflate this transactional pre-flight
+    failure with phase-budget exhaustion and mislead operators inspecting
+    the audit trail.
+    """
+
+
 class SpecReviewError(SBTDDError):
     """Spec-reviewer safety valve exhausted — exit 12 (SPEC_REVIEW_ISSUES).
 
@@ -126,6 +142,7 @@ _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     CommitError: 1,
     DependencyError: 2,
     PreconditionError: 2,
+    ConcurrentDispatchError: 2,
     DriftError: 3,
     VerificationIrremediableError: 6,
     Loop1DivergentError: 7,

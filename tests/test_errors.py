@@ -69,6 +69,9 @@ def test_quota_exhausted_error_derives_from_sbtdd():
 
 
 def test_all_ten_subclasses_exist():
+    """Verify the full exception subclass roster (v1.0.4 iter-3 +1
+    ConcurrentDispatchError per IMPORTANT #3).
+    """
     import errors
 
     expected = {
@@ -84,6 +87,7 @@ def test_all_ten_subclasses_exist():
         "ChecklistError",
         "VerificationIrremediableError",
         "SpecReviewError",
+        "ConcurrentDispatchError",
     }
     actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
@@ -161,6 +165,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         EXIT_CODES,
         ChecklistError,
         CommitError,
+        ConcurrentDispatchError,
         DependencyError,
         DriftError,
         Loop1DivergentError,
@@ -186,6 +191,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         ChecklistError,
         VerificationIrremediableError,
         SpecReviewError,
+        ConcurrentDispatchError,
     }
     assert set(EXIT_CODES.keys()) == expected_classes
 
@@ -213,6 +219,11 @@ def test_exit_codes_match_canonical_taxonomy():
     assert EXIT_CODES[DriftError] == 3
     assert EXIT_CODES[MAGIGateError] == 8
     assert EXIT_CODES[QuotaExhaustedError] == 11
+    # v1.0.4 iter-3 IMPORTANT #3: ConcurrentDispatchError is precondition-
+    # class (exit 2), distinct from VerificationIrremediableError (exit 6).
+    from errors import ConcurrentDispatchError
+
+    assert EXIT_CODES[ConcurrentDispatchError] == 2
 
 
 def test_exit_codes_is_read_only():
@@ -228,6 +239,7 @@ def test_mro_is_flat_single_inheritance():
     from errors import (
         ChecklistError,
         CommitError,
+        ConcurrentDispatchError,
         DependencyError,
         DriftError,
         Loop1DivergentError,
@@ -252,6 +264,7 @@ def test_mro_is_flat_single_inheritance():
         Loop1DivergentError,
         ChecklistError,
         VerificationIrremediableError,
+        ConcurrentDispatchError,
     ]
     for cls in subclasses:
         assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"
