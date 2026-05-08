@@ -323,6 +323,7 @@ def test_mark_and_advance_skips_commit_when_plan_already_fully_checked(
     assert isinstance(calls, list)
     assert len(calls) == 0
     # State still advances to next task despite the skipped commit.
+    assert new_state is not None  # v1.0.5 I-2: orchestrator path returns SessionState
     assert new_state.current_task_id == "3"
     assert new_state.current_phase == "red"
 
@@ -350,6 +351,7 @@ def test_mark_and_advance_is_public_api(tmp_path: Path, monkeypatch: pytest.Monk
     calls = captured["commit_calls"]
     assert isinstance(calls, list)
     assert len(calls) == 1
+    assert new_state is not None  # v1.0.5 I-2: orchestrator path returns SessionState
     assert new_state.current_task_id == "3"
     assert new_state.current_phase == "red"
 

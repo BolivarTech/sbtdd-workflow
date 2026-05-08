@@ -3232,8 +3232,17 @@ def _phase2_task_loop(
                                 spec_review_breadcrumb_emitted = True
                     # W1: delegate to public helper in close_task_cmd instead
                     # of duplicating the entire flip / commit chore / advance
-                    # sequence.
-                    current = close_task_cmd.mark_and_advance(current, root)
+                    # sequence. v1.0.5 I-2 widened the helper return type
+                    # to ``SessionState | None`` (worker mode returns None
+                    # because the parent owns post-batch advance); this
+                    # call site is the orchestrator path (no ``ns`` kwarg)
+                    # so the result is always a SessionState -- assert
+                    # for mypy + defensive tripwire.
+                    advanced = close_task_cmd.mark_and_advance(current, root)
+                    assert advanced is not None, (
+                        "orchestrator-path mark_and_advance must return SessionState"
+                    )
+                    current = advanced
                     tasks_completed += 1
                     # Feature D3 + D4: breadcrumb + progress AFTER
                     # mark_and_advance, BEFORE the first dispatch on the
