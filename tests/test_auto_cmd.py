@@ -1444,7 +1444,9 @@ class TestAutoCmdParallelFlag:
     """v1.0.4 Item C.3 escenarios C-7, C-8, C-9 — ``--parallel`` flag wiring."""
 
     def test_c7_parallel_flag_dispatches_batches(self, tmp_path: Path) -> None:
-        """C-7: ``--parallel`` flag dispatches parallelizable tasks in batches."""
+        """C-7 (Path 3): ``--parallel`` flag emits TRACKS (not antichain
+        sub-batches) — each track is a list of task ids per Path 3
+        partition_by_tracks. Two file-disjoint tasks → 2 single-task tracks."""
         import textwrap
 
         from auto_cmd import _build_dispatch_plan_parallel
@@ -1467,9 +1469,14 @@ class TestAutoCmdParallelFlag:
         )
 
         dispatch_plan = _build_dispatch_plan_parallel(plan)
-        # Expect single batch with both tasks
-        assert len(dispatch_plan) == 1
-        assert dispatch_plan[0] == {"1", "2"}
+        # Path 3: file-disjoint, dep-disjoint tasks → 2 single-task tracks.
+        # Each track is list[str] (ordered) not set[str].
+        assert len(dispatch_plan) == 2
+        for track in dispatch_plan:
+            assert isinstance(track, list)
+        track_sets = [set(t) for t in dispatch_plan]
+        assert {"1"} in track_sets
+        assert {"2"} in track_sets
 
     def test_c8_sequential_default_preserves_order(self, tmp_path: Path) -> None:
         """C-8: ``--parallel`` NOT specified preserves v1.0.3 sequential order."""
@@ -1499,7 +1506,11 @@ class TestAutoCmdParallelFlag:
         assert dispatch_plan == [{"1"}, {"2"}]
 
     def test_c8_collision_forces_sequential_in_parallel_mode(self, tmp_path: Path) -> None:
-        """C-8: file-colliding tasks split into sub-batches even under parallel."""
+        """C-8 (Path 3): file-colliding tasks unify into the SAME track
+        (forced serialization within the track via topological sort).
+        Pre-Path-3 they would split into 2 sub-batches; Path 3 keeps them
+        in one track because the track-based partition uses (deps UNION
+        file-conflicts) edges."""
         import textwrap
 
         from auto_cmd import _build_dispatch_plan_parallel
@@ -1522,10 +1533,12 @@ class TestAutoCmdParallelFlag:
         )
 
         dispatch_plan = _build_dispatch_plan_parallel(plan)
-        # Both tasks modify shared.py → 2 sub-batches
-        assert len(dispatch_plan) == 2
-        sizes = sorted(len(b) for b in dispatch_plan)
-        assert sizes == [1, 1]
+        # Path 3: both tasks share shared.py → unified into 1 track.
+        # Track has length 2 (both ids in same list, sequenced for one
+        # worker). This is the architectural shift from Path 2 (split into
+        # 2 sub-batches) to Path 3 (group into 1 serializing track).
+        assert len(dispatch_plan) == 1
+        assert set(dispatch_plan[0]) == {"1", "2"}
 
     def test_c9_tdd_guard_warning_in_parallel_mode(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1730,7 +1743,18 @@ class TestAutoCmdParallelEndToEnd:
             raise sentinel
 
         monkeypatch.setattr(auto_cmd, "_phase1_preflight", _ok_preflight)
-        monkeypatch.setattr(auto_cmd, "_phase2_task_loop", _boom)
+        # Path 3 architecture: --parallel orchestrator mode bypasses
+        # _phase2_task_loop and dispatches via _dispatch_tracks_concurrent.
+        # Stub the dispatcher to raise the sentinel so we can observe the
+        # call site.
+        monkeypatch.setattr(auto_cmd, "_dispatch_tracks_concurrent", _boom)
+        # Synthesize a plan so the dispatch-plan build does not crash
+        # (Path 3 builds tracks BEFORE the dispatch helper is invoked).
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir(exist_ok=True)
+        (plan_dir / "claude-plan-tdd.md").write_text(
+            "### Task 1: A\n\n**Files:**\n- Modify: `a.py`\n"
+        )
 
         with pytest.raises(RuntimeError, match="phase2-reached"):
             auto_cmd.main(["--project-root", str(tmp_path), "--parallel"])
@@ -1825,16 +1849,14 @@ class TestAutoCmdParallelEndToEnd:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """``main(['--parallel'])`` must attach a dispatch plan to ``ns`` (or
-        equivalent surface) so ``_phase2_task_loop`` consumes the partition.
+        equivalent surface) consumed by the dispatch helper.
 
-        Pre-fix, ``ns.parallel`` was read by no one; ``_build_dispatch_plan
-        _parallel`` was an orphan. Fix wires the helper at the top of
-        ``main()`` (or just before phase 2) and stashes the resulting
-        ``list[set[str]]`` on the namespace as ``ns.dispatch_plan``.
-
-        v1.0.4 iter-2 sub-issue 3 update: dispatch plan build now happens
-        AFTER preflight (not before), so capture ``ns.dispatch_plan`` via
-        an intercept on ``_phase2_task_loop`` instead of preflight.
+        v1.0.4 Path 3 update: --parallel orchestrator now builds tracks via
+        partition_by_tracks (returns list[list[str]]) and bypasses
+        _phase2_task_loop on the parent side; the tracks are dispatched via
+        _dispatch_tracks_concurrent (one subprocess worker per track). This
+        test now intercepts _dispatch_tracks_concurrent to capture
+        ns.dispatch_plan instead of _phase2_task_loop.
         """
         import auto_cmd
         from state_file import SessionState
@@ -1855,12 +1877,16 @@ class TestAutoCmdParallelEndToEnd:
             )
             return (stub_state, object())
 
-        def _capture_phase2(ns: object, *args: object, **kwargs: object) -> object:
-            captured_dispatch_plan.append(getattr(ns, "dispatch_plan", "MISSING"))
+        def _capture_dispatch(*args: object, **kwargs: object) -> object:
+            # Tracks are passed positionally as `tracks=` kwarg or first arg.
+            tracks = kwargs.get("tracks")
+            if tracks is None and args:
+                tracks = args[0]
+            captured_dispatch_plan.append(tracks)
             raise RuntimeError("phase2-stop")
 
         monkeypatch.setattr(auto_cmd, "_phase1_preflight", _ok_preflight)
-        monkeypatch.setattr(auto_cmd, "_phase2_task_loop", _capture_phase2)
+        monkeypatch.setattr(auto_cmd, "_dispatch_tracks_concurrent", _capture_dispatch)
 
         # Synthesize a trivial plan so dispatch plan build does not crash.
         plan_dir = tmp_path / "planning"
@@ -1875,16 +1901,13 @@ class TestAutoCmdParallelEndToEnd:
 
         assert len(captured_dispatch_plan) == 1
         plan = captured_dispatch_plan[0]
-        # Contract: ns.dispatch_plan is set (not "MISSING") and is a non-empty
-        # list of sets (the parallel partition shape).
-        assert plan != "MISSING", (
-            "ns.dispatch_plan was not attached to namespace by main(); "
-            "--parallel flag is dead-wired"
-        )
+        # Contract Path 3: dispatch plan is non-empty list of TRACKS
+        # (each track is list[str] of task ids).
+        assert plan is not None
         assert isinstance(plan, list)
         assert len(plan) >= 1
-        # All elements are sets of task ids.
-        assert all(isinstance(b, set) for b in plan)
+        # All elements are lists of task ids (Path 3 contract).
+        assert all(isinstance(t, list) for t in plan)
 
     def test_main_sequential_attaches_sequential_dispatch_plan(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2538,7 +2561,7 @@ class TestPreflightOrdering:
             order.append("dispatch_seq")
             return original_seq(plan_path)
 
-        def spy_par(plan_path: Path) -> list[set[str]]:
+        def spy_par(plan_path: Path) -> list[list[str]]:
             order.append("dispatch_par")
             return original_par(plan_path)
 
@@ -2994,9 +3017,7 @@ class TestPath3CLIFlags:
 class TestPath3ResolveEffectiveWorkers:
     """v1.0.4 Path 3 -- _resolve_effective_workers(natural_n, user_max)."""
 
-    def test_path3_user_max_none_uses_auto_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_path3_user_max_none_uses_auto_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """user_max=None → min(natural, cpu_count, 4)."""
         import os
 
@@ -3006,9 +3027,7 @@ class TestPath3ResolveEffectiveWorkers:
         # natural=5, cpu=16 → cap is 4 (the hard ceiling)
         assert auto_cmd._resolve_effective_workers(5, None) == 4
 
-    def test_path3_user_max_none_caps_at_natural(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_path3_user_max_none_caps_at_natural(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """user_max=None + natural=2 → 2 (natural < 4 ceiling)."""
         import os
 
@@ -3086,8 +3105,7 @@ class TestPath3DispatchTracksConcurrent:
         )
 
         assert len(popen_calls) == 2, (
-            f"one subprocess per track expected; got {len(popen_calls)} "
-            f"calls"
+            f"one subprocess per track expected; got {len(popen_calls)} calls"
         )
         # Each invocation must include --task-ids + --no-recursive.
         argv_strs = [" ".join(c) for c in popen_calls]
@@ -3181,8 +3199,7 @@ class TestPath3DispatchTracksConcurrent:
             project_root=tmp_path,
         )
         assert popen_count["n"] == 5, (
-            f"all 5 tracks must be dispatched (queued through 2 workers); "
-            f"got {popen_count['n']}"
+            f"all 5 tracks must be dispatched (queued through 2 workers); got {popen_count['n']}"
         )
 
 
@@ -3205,13 +3222,9 @@ class TestPath3WorkerModeFlowControl:
 
         monkeypatch.setattr(auto_cmd, "_dispatch_tracks_concurrent", spy_dispatch)
         # Stub everything else so main() doesn't crash on missing prereqs.
-        monkeypatch.setattr(
-            auto_cmd, "_phase1_preflight", lambda ns: (None, None), raising=False
-        )
+        monkeypatch.setattr(auto_cmd, "_phase1_preflight", lambda ns: (None, None), raising=False)
         monkeypatch.setattr(auto_cmd, "_check_tdd_guard_warning", lambda **k: None)
-        monkeypatch.setattr(
-            auto_cmd, "_phase2_task_loop", lambda *a, **k: a[1], raising=False
-        )
+        monkeypatch.setattr(auto_cmd, "_phase2_task_loop", lambda *a, **k: a[1], raising=False)
         # Build dispatch_plan returns empty so phase loop is short-circuited.
         # Use --no-recursive + --task-ids to enter worker mode.
         # (We expect main to skip _dispatch_tracks_concurrent entirely.)
@@ -3261,8 +3274,7 @@ class TestPath3MainWiresTrackDispatch:
         # Each track is a list (Path 3) not a set (Path 2 partition_by_collision).
         for track in plan:
             assert isinstance(track, list), (
-                "Path 3: tracks are ordered list[str], not set[str]; got "
-                f"{type(track).__name__}"
+                f"Path 3: tracks are ordered list[str], not set[str]; got {type(track).__name__}"
             )
         # 2 tracks total
         assert len(plan) == 2
