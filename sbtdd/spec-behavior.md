@@ -465,6 +465,25 @@ automation mandate (single I5 touchpoint) remains in force unchanged.
    guidance, applies findings + mini-cycle TDD fixes, then
    resumes `/sbtdd pre-merge` (ideally via `--resume` or
    re-invocation).
+   **Resume-path semantics (v1.0.4 iter-5 Loop 2 CRITICAL #3 clarification, Caspar)**:
+   `/sbtdd pre-merge` has NO special "resume" flag (no equivalent to
+   `/sbtdd spec --resume-from-magi`). The recovery sequence is
+   purely idempotent re-invocation:
+   1. After `PreconditionError` is raised on `/receiving-code-review`
+      subprocess attempt, no state-file mutation has occurred (the
+      gate fires PRE-spawn).
+   2. Operator runs `/receiving-code-review` MANUALLY in an
+      interactive Claude Code session (not via plugin subprocess).
+   3. Operator applies any findings as mini-cycle TDD commits
+      (`test:` → `fix:` → `refactor:`) on the same branch, per
+      CLAUDE.local.md sec.6 mini-cycle protocol.
+   4. Operator re-runs `python skills/sbtdd/scripts/run_sbtdd.py
+      pre-merge` from a clean working tree. Pre-merge re-evaluates
+      from current branch HEAD; Loop 1 sees the new commits in the
+      diff and either converges (clean-to-go) or surfaces residual
+      findings for further triage.
+   5. NO special "resume" semantics needed; the gate is stateless
+      with respect to prior triage attempts.
 5. Verify Loop 1 fix-finding triage step completes WITHOUT 600s
    hang.
 6. Capture Loop 2 cross-check artifacts:
