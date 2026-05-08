@@ -473,7 +473,7 @@ Covers escenarios I3-1 through I3-3 from spec sec.4.3.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_auto_cmd.py`:
 
@@ -548,12 +548,12 @@ class TestWorkerFlagForwarding:
             assert flag_value in docstring, f"Helper docstring missing: {flag_value}"
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_auto_cmd.py::TestWorkerFlagForwarding -v`
 Expected: 3/3 FAIL with `ImportError` (helpers don't exist yet).
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -561,7 +561,7 @@ Expected: `test:` commit landed.
 
 #### Green Phase
 
-- [ ] **Step 4: Implement `_FORWARDABLE_FLAGS` + `_build_worker_argv`**
+- [x] **Step 4: Implement `_FORWARDABLE_FLAGS` + `_build_worker_argv`**
 
 Modify `skills/sbtdd/scripts/auto_cmd.py`:
 
@@ -614,11 +614,11 @@ def _run_sbtdd_path() -> Path:
     return Path(__file__).resolve().parent / "run_sbtdd.py"
 ```
 
-- [ ] **Step 5: Wire `_build_worker_argv` into `_dispatch_tracks_concurrent`**
+- [x] **Step 5: Wire `_build_worker_argv` into `_dispatch_tracks_concurrent`**
 
 Replace inline argv build in `_dispatch_tracks_concurrent` with `_build_worker_argv(task_ids, ns)` call. Pass `ns` parameter through the call chain if not already present.
 
-- [ ] **Step 6: Run tests to verify PASS**
+- [x] **Step 6: Run tests to verify PASS**
 
 Run: `pytest tests/test_auto_cmd.py::TestWorkerFlagForwarding -v`
 Expected: 3/3 PASS.
@@ -626,7 +626,7 @@ Expected: 3/3 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 7: close-phase Green**
+- [x] **Step 7: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -634,11 +634,11 @@ Expected: `feat:` commit landed (e.g. `feat: worker CLI flag forwarding for v1.0
 
 #### Refactor Phase
 
-- [ ] **Step 8: Refactor — confirm `_run_sbtdd_path` not duplicated**
+- [x] **Step 8: Refactor — confirm `_run_sbtdd_path` not duplicated**
 
 If `_run_sbtdd_path` (or equivalent) already exists in another module, import + use. Otherwise leave as-is.
 
-- [ ] **Step 9: close-phase Refactor + Step 10: close-task**
+- [x] **Step 9: close-phase Refactor + Step 10: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
