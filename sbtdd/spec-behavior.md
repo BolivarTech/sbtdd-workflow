@@ -656,8 +656,8 @@ ladder; Item D entirely DEFERRED to v1.0.5 LOCKED with Q3 OPTION A
 
    def _last_chore_task_close_sha(project_root: Path | None) -> str | None:
        """Return SHA of most recent commit with subject matching
-       `chore: mark task <N> complete` (or `chore: mark task-N-complete`
-       variant), or None if no such commit exists on current branch.
+       `chore: mark task <N> complete`, or None if no such commit
+       exists on current branch.
 
        v1.0.5 iter-1 CRITICAL #5: this is the canonical "previous
        task close" boundary used by `_preflight` triplet check.

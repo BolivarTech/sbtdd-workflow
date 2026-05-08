@@ -372,10 +372,12 @@ def _preflight_triplet_check(
     """
     task_id = _state_field(state, "current_task_id")
     if skip_preflight:
+        last_chore_sha = _last_chore_task_close_sha(project_root)
+        sha_label = last_chore_sha if last_chore_sha is not None else "branch root"
         sys.stderr.write(
             f"[sbtdd close-task] WARNING: --skip-preflight active; "
             f"phase advance gate enforcement BYPASSED for "
-            f"task_id={task_id}. Audit-logged.\n"
+            f"task_id={task_id} since SHA {sha_label}. Audit-logged.\n"
         )
         sys.stderr.flush()
         return

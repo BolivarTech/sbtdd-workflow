@@ -705,8 +705,7 @@ class TestPreflightHardBlock:
         _preflight_triplet_check(state, tmp_path)
 
     def test_d3_skip_preflight_bypasses_with_breadcrumb(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """D-3: --skip-preflight bypasses + emits stderr breadcrumb.
 
@@ -736,8 +735,7 @@ class TestPreflightHardBlock:
         assert "Audit-logged" in captured.err
 
     def test_d3b_skip_preflight_bypasses_first_task_branch_root_in_breadcrumb(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """D-3 (Loop 1 iter-2 fix): first-task case (no prior chore commit)
         renders 'since SHA branch root' in the bypass breadcrumb."""
