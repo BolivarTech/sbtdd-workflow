@@ -29,6 +29,26 @@
 > soft-warning tripwire en `close_task_cmd._preflight`. dag_parser
 > code-fence-aware regex + iterative cycle detection. Deterministic
 > antichain partition + synthetic concurrent state-file write test.
+>
+> **iter 3 triage applied 2026-05-07** (post Loop 2 iter 1 verdict
+> GO_WITH_CAVEATS 3-0 con 0 CRITICAL + 7 WARNING + 7 INFO; user chose
+> Option E full-fix over D scope-trim or F INV-0 override): Architectural
+> pivot to **Path 2** (parallel pre-verification + sequential close) for
+> the wrong-task-closed wiring bug introduced by iter-2's mark_and_advance
+> direct-call pattern. New `ConcurrentDispatchError` (exit 2,
+> PRECONDITION_FAILED) replaces VerificationIrremediableError (exit 6) as
+> the gate-failure error class. **Stale references** to Item D 3-touchpoint
+> enforcement, SBTDD_INTERACTIVE env var, R1/R-NEW1/R5 risk register
+> entries, sec.5.4 surface table Item D files, sec.9.1 F4 marker, and
+> sec.10 Q3 "Option B mandate close-phase per Red/Green/Refactor commit"
+> wording all reflect the cumulative iter-1+iter-2 scope-trim aftermath
+> (Item D was deferred entirely to v1.0.5 LOCKED per spec sec.6.1 G2
+> ladder). MAGI Loop 2 iter 1 (Mel + Caspar) accepted these as
+> informational; v1.0.5 polish pillar covers the full sweep alongside
+> the v1.0.3 audit GAPs (L1.0.4-A through L1.0.4-D). For v1.0.4 ship,
+> readers should interpret all "Item D" references in §2.4, §4.4, §5.x,
+> §8 (R1/R5), §9.1 F4, §10 Q3 as **DEFERRED-to-v1.0.5 backlog markers**
+> rather than active v1.0.4 contracts.
 
 ---
 
