@@ -2924,3 +2924,348 @@ class TestPhase2DispatchLoopVariableRemoved:
             "`for _task_id in sorted(batch):` directly invokes "
             "mark_and_advance which closes wrong task ids"
         )
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Path 3 -- track-based dispatch architecture.
+#
+# `--parallel` semantics (corrected per user clarification): partition tasks
+# into TRACKS (weakly-connected components in (deps UNION file-conflicts)
+# graph), then dispatch one subprocess WORKER per track. Each worker
+# processes its track's task list SEQUENTIALLY with full TDD discipline
+# (R→G→R per task + verify + commit per phase). Multiple tracks (workers)
+# run in parallel.
+#
+# Worker subprocess invocation shape:
+#     python skills/sbtdd/scripts/run_sbtdd.py auto \
+#         --task-ids T1,T3,T4,T5 \
+#         --no-recursive
+# ---------------------------------------------------------------------------
+
+
+class TestPath3CLIFlags:
+    """v1.0.4 Path 3 -- new CLI flags `--task-ids`, `--no-recursive`,
+    `--parallel-max` recognized by argparse.
+    """
+
+    def test_path3_argparse_accepts_task_ids(self) -> None:
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args(["--task-ids", "T1,T2,T3"])
+        assert ns.task_ids == "T1,T2,T3"
+
+    def test_path3_argparse_task_ids_default_none(self) -> None:
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args([])
+        assert ns.task_ids is None
+
+    def test_path3_argparse_accepts_no_recursive(self) -> None:
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args(["--no-recursive"])
+        assert ns.no_recursive is True
+
+    def test_path3_argparse_no_recursive_default_false(self) -> None:
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args([])
+        assert ns.no_recursive is False
+
+    def test_path3_argparse_accepts_parallel_max(self) -> None:
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args(["--parallel-max", "3"])
+        assert ns.parallel_max == 3
+
+    def test_path3_argparse_parallel_max_zero_unlimited(self) -> None:
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args(["--parallel-max", "0"])
+        assert ns.parallel_max == 0
+
+    def test_path3_argparse_parallel_max_default_none(self) -> None:
+        import auto_cmd
+
+        ns = auto_cmd._build_parser().parse_args([])
+        assert ns.parallel_max is None
+
+
+class TestPath3ResolveEffectiveWorkers:
+    """v1.0.4 Path 3 -- _resolve_effective_workers(natural_n, user_max)."""
+
+    def test_path3_user_max_none_uses_auto_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """user_max=None → min(natural, cpu_count, 4)."""
+        import os
+
+        import auto_cmd
+
+        monkeypatch.setattr(os, "cpu_count", lambda: 16)
+        # natural=5, cpu=16 → cap is 4 (the hard ceiling)
+        assert auto_cmd._resolve_effective_workers(5, None) == 4
+
+    def test_path3_user_max_none_caps_at_natural(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """user_max=None + natural=2 → 2 (natural < 4 ceiling)."""
+        import os
+
+        import auto_cmd
+
+        monkeypatch.setattr(os, "cpu_count", lambda: 16)
+        assert auto_cmd._resolve_effective_workers(2, None) == 2
+
+    def test_path3_user_max_zero_unlimited(self) -> None:
+        """user_max=0 (unlimited): use natural without ceiling."""
+        import auto_cmd
+
+        assert auto_cmd._resolve_effective_workers(7, 0) == 7
+
+    def test_path3_user_max_explicit_cap(self) -> None:
+        """user_max=N positive: min(natural, N)."""
+        import auto_cmd
+
+        # natural=6, user=3 → 3
+        assert auto_cmd._resolve_effective_workers(6, 3) == 3
+        # natural=2, user=8 → 2 (natural is the floor)
+        assert auto_cmd._resolve_effective_workers(2, 8) == 2
+
+    def test_path3_user_max_one_serial(self) -> None:
+        """user_max=1: effectively serial (caller may skip threading)."""
+        import auto_cmd
+
+        assert auto_cmd._resolve_effective_workers(10, 1) == 1
+
+
+class TestPath3DispatchTracksConcurrent:
+    """v1.0.4 Path 3 -- _dispatch_tracks_concurrent(tracks, ...) helper."""
+
+    def test_path3_helper_exists(self) -> None:
+        import auto_cmd
+
+        assert hasattr(auto_cmd, "_dispatch_tracks_concurrent")
+        assert callable(auto_cmd._dispatch_tracks_concurrent)
+
+    def test_path3_helper_spawns_one_subprocess_per_track(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two tracks → 2 subprocess invocations, each with --task-ids
+        comma-joined for that track + --no-recursive."""
+        import auto_cmd
+
+        popen_calls: list[list[str]] = []
+
+        class FakePopen:
+            def __init__(self, cmd: list[str], **kwargs: object) -> None:
+                popen_calls.append(list(cmd))
+                self.returncode: int | None = None
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                self.returncode = 0
+                return (b"", b"")
+
+            def wait(self, timeout: float | None = None) -> int:
+                self.returncode = 0
+                return 0
+
+            def kill(self) -> None:
+                self.returncode = -9
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+        monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+        tracks = [["T1", "T2"], ["T3"]]
+        auto_cmd._dispatch_tracks_concurrent(
+            tracks=tracks,
+            effective_workers=2,
+            project_root=tmp_path,
+        )
+
+        assert len(popen_calls) == 2, (
+            f"one subprocess per track expected; got {len(popen_calls)} "
+            f"calls"
+        )
+        # Each invocation must include --task-ids + --no-recursive.
+        argv_strs = [" ".join(c) for c in popen_calls]
+        assert any("T1,T2" in a for a in argv_strs)
+        assert any("T3" in a and "T1" not in a for a in argv_strs)
+        for s in argv_strs:
+            assert "--no-recursive" in s
+            assert "--task-ids" in s
+
+    def test_path3_helper_raises_concurrent_dispatch_error_on_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Any worker non-zero exit raises ConcurrentDispatchError."""
+        import auto_cmd
+        from errors import ConcurrentDispatchError
+
+        class FailingPopen:
+            def __init__(self, cmd: list[str], **kwargs: object) -> None:
+                pass
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                return (b"", b"track failed: T1 failed during green phase")
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 1
+
+            @property
+            def returncode(self) -> int:
+                return 1
+
+            def kill(self) -> None:
+                pass
+
+            def poll(self) -> int | None:
+                return 1
+
+        monkeypatch.setattr(subprocess, "Popen", FailingPopen)
+
+        with pytest.raises(ConcurrentDispatchError):
+            auto_cmd._dispatch_tracks_concurrent(
+                tracks=[["T1"]],
+                effective_workers=1,
+                project_root=tmp_path,
+            )
+
+    def test_path3_helper_empty_tracks_noop(self, tmp_path: Path) -> None:
+        """Empty tracks list → no-op (no subprocess, no error)."""
+        import auto_cmd
+
+        # Should not raise even with no Popen monkeypatch
+        auto_cmd._dispatch_tracks_concurrent(
+            tracks=[],
+            effective_workers=4,
+            project_root=tmp_path,
+        )
+
+    def test_path3_helper_more_tracks_than_workers_queues(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """5 tracks + effective_workers=2 → all 5 still dispatched
+        (queueing); not silently dropped."""
+        import auto_cmd
+
+        popen_count = {"n": 0}
+
+        class FakePopen:
+            def __init__(self, cmd: list[str], **kwargs: object) -> None:
+                popen_count["n"] += 1
+                self.returncode: int | None = None
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                self.returncode = 0
+                return (b"", b"")
+
+            def wait(self, timeout: float | None = None) -> int:
+                self.returncode = 0
+                return 0
+
+            def kill(self) -> None:
+                self.returncode = -9
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+        monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+        tracks = [["T1"], ["T2"], ["T3"], ["T4"], ["T5"]]
+        auto_cmd._dispatch_tracks_concurrent(
+            tracks=tracks,
+            effective_workers=2,
+            project_root=tmp_path,
+        )
+        assert popen_count["n"] == 5, (
+            f"all 5 tracks must be dispatched (queued through 2 workers); "
+            f"got {popen_count['n']}"
+        )
+
+
+class TestPath3WorkerModeFlowControl:
+    """v1.0.4 Path 3 -- worker mode (--task-ids + --no-recursive) does NOT
+    re-spawn parent dispatcher; processes given task IDs sequentially.
+    """
+
+    def test_path3_worker_mode_does_not_recurse_dispatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When `--no-recursive` set, main() must NOT call
+        _dispatch_tracks_concurrent (no infinite spawning)."""
+        import auto_cmd
+
+        called_dispatch: list[bool] = []
+
+        def spy_dispatch(*a: object, **k: object) -> None:
+            called_dispatch.append(True)
+
+        monkeypatch.setattr(auto_cmd, "_dispatch_tracks_concurrent", spy_dispatch)
+        # Stub everything else so main() doesn't crash on missing prereqs.
+        monkeypatch.setattr(
+            auto_cmd, "_phase1_preflight", lambda ns: (None, None), raising=False
+        )
+        monkeypatch.setattr(auto_cmd, "_check_tdd_guard_warning", lambda **k: None)
+        monkeypatch.setattr(
+            auto_cmd, "_phase2_task_loop", lambda *a, **k: a[1], raising=False
+        )
+        # Build dispatch_plan returns empty so phase loop is short-circuited.
+        # Use --no-recursive + --task-ids to enter worker mode.
+        # (We expect main to skip _dispatch_tracks_concurrent entirely.)
+        try:
+            auto_cmd.main(
+                [
+                    "--project-root",
+                    str(tmp_path),
+                    "--task-ids",
+                    "T1,T2",
+                    "--no-recursive",
+                    "--dry-run",  # short-circuit before complex logic
+                ]
+            )
+        except SystemExit:
+            pass
+        assert called_dispatch == [], (
+            "Worker mode (--no-recursive) MUST NOT spawn _dispatch_tracks_concurrent"
+        )
+
+
+class TestPath3MainWiresTrackDispatch:
+    """v1.0.4 Path 3 -- main() with --parallel uses partition_by_tracks +
+    _dispatch_tracks_concurrent. Without --parallel, behavior unchanged.
+    """
+
+    def test_path3_build_dispatch_plan_parallel_uses_partition_by_tracks(
+        self, tmp_path: Path
+    ) -> None:
+        """`_build_dispatch_plan_parallel` must invoke `partition_by_tracks`
+        (Path 3) instead of antichain + collision packing (old Path 2)."""
+        import auto_cmd
+
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        plan_path = plan_dir / "claude-plan-tdd.md"
+        plan_path.write_text(
+            "### Task 1: A\n\n**Files:**\n- Modify: `alpha.py`\n\n"
+            "### Task 2: B\n\n**Files:**\n- Modify: `alpha.py`\n\n"
+            "### Task 3: C\n\n**Files:**\n- Modify: `beta.py`\n"
+        )
+
+        plan = auto_cmd._build_dispatch_plan_parallel(plan_path)
+        # Path 3: each batch is a TRACK = list[str]. Two tracks expected:
+        # T1+T2 share alpha.py, T3 alone with beta.py.
+        assert isinstance(plan, list)
+        # Each track is a list (Path 3) not a set (Path 2 partition_by_collision).
+        for track in plan:
+            assert isinstance(track, list), (
+                "Path 3: tracks are ordered list[str], not set[str]; got "
+                f"{type(track).__name__}"
+            )
+        # 2 tracks total
+        assert len(plan) == 2
+        track_sets = [set(t) for t in plan]
+        assert {"1", "2"} in track_sets
+        assert {"3"} in track_sets
