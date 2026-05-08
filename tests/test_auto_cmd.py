@@ -2465,7 +2465,7 @@ class TestCheckTddGuardWarningFlushesStderr:
         (settings_dir / "settings.json").write_text("{not valid json", encoding="utf-8")
 
         spy = self._StderrSpy()
-        monkeypatch.setattr(auto_cmd.sys, "stderr", spy)
+        monkeypatch.setattr("sys.stderr", spy)
 
         auto_cmd._check_tdd_guard_warning(parallel=True, project_root=tmp_path)
 
@@ -2490,7 +2490,7 @@ class TestCheckTddGuardWarningFlushesStderr:
         (settings_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
 
         spy = self._StderrSpy()
-        monkeypatch.setattr(auto_cmd.sys, "stderr", spy)
+        monkeypatch.setattr("sys.stderr", spy)
 
         auto_cmd._check_tdd_guard_warning(parallel=True, project_root=tmp_path)
 

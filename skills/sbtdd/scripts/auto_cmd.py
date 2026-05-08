@@ -1333,6 +1333,7 @@ def _check_tdd_guard_warning(parallel: bool, project_root: Path) -> None:
             f"TDD-Guard hook detection skipped. Restore valid JSON to "
             f"re-enable the parallel-mode multi-agent caveat.\n"
         )
+        sys.stderr.flush()
         return
     except OSError:
         return
@@ -1357,6 +1358,7 @@ def _check_tdd_guard_warning(parallel: bool, project_root: Path) -> None:
             "`tdd-guard off` per spec sec.3 multi-agent rules, OR use "
             "`/using-git-worktrees` for per-subagent worktree.\n"
         )
+        sys.stderr.flush()
 
 
 def _build_parser() -> argparse.ArgumentParser:
