@@ -624,3 +624,150 @@ class TestPerWorkerScratchPlan:
         assert not _section_has_flipped(result, "4"), (
             "T4 boundary violated -- iter-1 CRITICAL #2 regression"
         )
+
+
+# ---------------------------------------------------------------------------
+# v1.0.5 Item D Q3 OPTION A -- close_task_cmd._preflight HARD-BLOCK
+# (escenarios D-1..D-4)
+# ---------------------------------------------------------------------------
+
+
+class TestPreflightHardBlock:
+    """v1.0.5 Item D Q3-A escenarios D-1 through D-4 -- preflight enforcement."""
+
+    def test_d1_bypass_detected_raises_precondition(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-1: commit chain without TDD triplet -> PreconditionError."""
+        from close_task_cmd import _preflight_triplet_check
+        from errors import PreconditionError
+
+        # Mock _git_log_between to return chain without triplet
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "raw commit 1",
+                "another raw commit",
+            ],
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc123",
+        )
+        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+
+        with pytest.raises(PreconditionError) as exc_info:
+            _preflight_triplet_check(state, tmp_path)
+
+        msg = str(exc_info.value)
+        assert "Phase advance gate bypassed" in msg
+        assert "test:/feat:|fix:/refactor: triplet" in msg
+        assert "INV-1" in msg
+        assert "close-phase" in msg
+        assert "--skip-preflight" in msg
+
+    def test_d2_canonical_triplet_no_trigger(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-2: canonical TDD triplet in commit chain -> no PreconditionError."""
+        from close_task_cmd import _preflight_triplet_check
+
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",
+                "feat: implement minimum",
+                "refactor: clean up",
+            ],
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc123",
+        )
+        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+
+        # Should NOT raise
+        _preflight_triplet_check(state, tmp_path)
+
+    def test_d3_skip_preflight_bypasses_with_breadcrumb(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """D-3: --skip-preflight bypasses + emits stderr breadcrumb."""
+        from close_task_cmd import _preflight_triplet_check
+
+        # Bypass scenario: no triplet, but skip_preflight=True
+        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+
+        # Should NOT raise (override active)
+        _preflight_triplet_check(state, tmp_path, skip_preflight=True)
+
+        captured = capsys.readouterr()
+        assert "[sbtdd close-task] WARNING" in captured.err
+        assert "--skip-preflight active" in captured.err
+        assert "task_id=3" in captured.err
+        assert "Audit-logged" in captured.err
+
+    def test_d4_no_chore_commit_first_task_branch_root_boundary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-2b (iter-1 CRITICAL #5 fix): no prior `chore: mark task` commit
+        -> boundary is branch root + canonical triplet OK -> no raise."""
+        from close_task_cmd import _preflight_triplet_check
+
+        # Simulate: first task in plan, no prior chore commit exists
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: None,
+        )
+        # Branch root -> HEAD contains canonical triplet
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",
+                "feat: implement",
+                "refactor: extract helper",
+            ],
+        )
+        state = {"current_task_id": "1"}
+
+        # Should NOT raise (first task, branch-root boundary, full triplet)
+        _preflight_triplet_check(state, tmp_path)
+
+    def test_d5_partial_triplet_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-1 (iter-1 CRITICAL #5 fix): commit chain since last chore: mark
+        task with only 2 of 3 triplet prefixes -> still raises."""
+        from close_task_cmd import _preflight_triplet_check
+        from errors import PreconditionError
+
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc123",
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",
+                "feat: implement",
+                # missing refactor
+            ],
+        )
+        state = {"current_task_id": "3"}
+
+        with pytest.raises(PreconditionError) as excinfo:
+            _preflight_triplet_check(state, tmp_path)
+        # iter-1 CRITICAL #5: error message references "since last chore commit"
+        # boundary (or "branch root") -- NOT phase_started_at_commit
+        assert "since" in str(excinfo.value)
+        assert "abc123" in str(excinfo.value) or "chore" in str(excinfo.value)
+
+    def test_d6_skip_preflight_argparse_flag_exposed(self) -> None:
+        """D-3 (argparse): close-task --skip-preflight is exposed via argparse."""
+        from close_task_cmd import _build_parser
+
+        parser = _build_parser()
+        ns = parser.parse_args(["--skip-preflight"])
+        assert ns.skip_preflight is True
+        ns_default = parser.parse_args([])
+        assert ns_default.skip_preflight is False
