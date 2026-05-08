@@ -1144,6 +1144,11 @@ def _build_run_sbtdd_argv(
     Centralising argv construction in a single helper means future
     callers can never forget the ``-u`` flag and break streaming.
 
+    v1.0.5 T2 Refactor: the per-script lookup now routes through the
+    shared :func:`_run_sbtdd_path` helper introduced for Item I-3 worker
+    flag forwarding so ``run_sbtdd.py`` resolution lives in exactly one
+    place.
+
     Args:
         subcommand: SBTDD subcommand name (``close-phase``, ``status``,
             etc.).
@@ -1153,7 +1158,7 @@ def _build_run_sbtdd_argv(
     Returns:
         ``[sys.executable, "-u", "<run_sbtdd.py>", subcommand, *extra_args]``.
     """
-    run_sbtdd = (Path(__file__).resolve().parent / "run_sbtdd.py").as_posix()
+    run_sbtdd = _run_sbtdd_path().as_posix()
     argv: list[str] = [sys.executable, "-u", run_sbtdd, subcommand]
     if extra_args:
         argv.extend(extra_args)
@@ -1799,8 +1804,10 @@ def _dispatch_tracks_concurrent(
     if effective_workers <= 0:
         # Defensive: caller already resolved; treat as serial fallback.
         effective_workers = 1
-    plugin_root = Path(__file__).resolve().parent
-    run_sbtdd_path = plugin_root / "run_sbtdd.py"
+    # v1.0.5 T2 Refactor: route through the shared helper so the legacy
+    # ``ns is None`` argv branch and ``_build_worker_argv`` agree on the
+    # same ``run_sbtdd.py`` path resolution.
+    run_sbtdd_path = _run_sbtdd_path()
 
     # v1.0.5 iter-1 WARNING + iter-2 race-safety: reap stale per-worker
     # sidecar/scratch files from a prior crashed run BEFORE new dispatch
