@@ -59,7 +59,13 @@ def test_auto_cmd_exit8_records_condition_counts(
     # auto-run.json with the running `tasks_completed` count; the fake
     # below mimics that behavior so the MAGIGateError handler can re-read
     # the last persisted count.
-    def fake_phase2(ns: Any, state: Any, cfg: Any, dispatch_plan: Any = None) -> Any:
+    def fake_phase2(
+        ns: Any,
+        state: Any,
+        cfg: Any,
+        dispatch_plan: Any = None,
+        task_ids_filter: Any = None,
+    ) -> Any:
         audit = auto_cmd.AutoRunAudit(
             schema_version=1,
             auto_started_at="2026-04-19T10:00:00Z",
