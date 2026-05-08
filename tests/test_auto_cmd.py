@@ -3472,3 +3472,173 @@ class TestPath3WorkerTaskIdsFilter:
         )
         parsed = json.loads(result.stdout.strip())
         assert parsed == ["1", "3"], f"child must parse --task-ids into sorted ids; got {parsed!r}"
+
+
+# ---------------------------------------------------------------------------
+# v1.0.5 Item I-1 -- per-worker sidecar audit-trail pattern (escenarios I1-1..I1-5)
+# ---------------------------------------------------------------------------
+
+
+class TestPerWorkerSidecarAudit:
+    """v1.0.5 Item I-1 escenarios I1-1 through I1-5 -- per-worker sidecar pattern."""
+
+    def test_i1_1_worker_mode_redirects_audit_to_sidecar(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """I1-1: worker mode redirects audit write to sidecar."""
+        import argparse
+
+        import auto_cmd
+
+        ns = argparse.Namespace(no_recursive=True, task_ids="1,3")
+        audit_data = {"start_time": "2026-05-08T10:00:00Z", "tasks": ["1", "3"]}
+        (tmp_path / ".claude").mkdir()
+
+        auto_cmd._write_audit(audit_data, tmp_path, ns)
+
+        sidecar = auto_cmd._audit_sidecar_path(("1", "3"), tmp_path)
+        assert sidecar.exists()
+        assert not (tmp_path / ".claude" / "auto-run.json").exists()
+        loaded = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert loaded == audit_data
+
+    def test_i1_2_orchestrator_mode_writes_canonical_audit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """I1-2: orchestrator mode writes canonical auto-run.json."""
+        import argparse
+
+        import auto_cmd
+
+        ns = argparse.Namespace(no_recursive=False, task_ids=None)
+        audit_data = {
+            "start_time": "2026-05-08T10:00:00Z",
+            "tasks": ["1", "2", "3", "4"],
+        }
+        (tmp_path / ".claude").mkdir()
+
+        auto_cmd._write_audit(audit_data, tmp_path, ns)
+
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        assert canonical.exists()
+        loaded = json.loads(canonical.read_text(encoding="utf-8"))
+        assert loaded == audit_data
+
+    def test_i1_3_parent_post_batch_merges_sidecars(self, tmp_path: Path) -> None:
+        """I1-3: parent post-batch merges sidecars + cleans up."""
+        import auto_cmd
+
+        (tmp_path / ".claude").mkdir()
+        # Pre-dispatch parent audit
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        canonical.write_text(json.dumps({"start_time": "2026-05-08T10:00:00Z"}), encoding="utf-8")
+        # Three workers wrote sidecars
+        sidecar_a = auto_cmd._audit_sidecar_path(("1", "3"), tmp_path)
+        sidecar_b = auto_cmd._audit_sidecar_path(("2",), tmp_path)
+        sidecar_c = auto_cmd._audit_sidecar_path(("4",), tmp_path)
+        sidecar_a.write_text(
+            json.dumps({"task_ids": ["1", "3"], "completed_at": "T1"}),
+            encoding="utf-8",
+        )
+        sidecar_b.write_text(
+            json.dumps({"task_ids": ["2"], "completed_at": "T2"}), encoding="utf-8"
+        )
+        sidecar_c.write_text(
+            json.dumps({"task_ids": ["4"], "completed_at": "T3"}), encoding="utf-8"
+        )
+
+        merged = auto_cmd._merge_audit_sidecars([["1", "3"], ["2"], ["4"]], tmp_path)
+
+        assert merged["start_time"] == "2026-05-08T10:00:00Z"
+        assert merged["aggregate_task_count"] == 4
+        assert len(merged["per_worker"]) == 3
+        # Sidecars cleaned up
+        assert not sidecar_a.exists()
+        assert not sidecar_b.exists()
+        assert not sidecar_c.exists()
+
+    def test_i1_4_missing_sidecar_handled_gracefully(self, tmp_path: Path) -> None:
+        """I1-4: worker terminated before sidecar write -> graceful no_audit_data entry."""
+        import auto_cmd
+
+        (tmp_path / ".claude").mkdir()
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        canonical.write_text(json.dumps({"start_time": "2026-05-08T10:00:00Z"}), encoding="utf-8")
+        # No sidecar files exist (workers crashed before write)
+
+        merged = auto_cmd._merge_audit_sidecars([["1"], ["2"]], tmp_path)
+
+        assert len(merged["per_worker"]) == 2
+        for entry in merged["per_worker"]:
+            assert entry["status"] == "no_audit_data"
+            assert "Worker terminated before sidecar write" in entry["note"]
+
+    def test_i1_5_inv26_audit_trail_integrity(self, tmp_path: Path) -> None:
+        """I1-5: INV-26 audit-trail integrity post-batch (full round-trip)."""
+        import auto_cmd
+
+        (tmp_path / ".claude").mkdir()
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        canonical.write_text(
+            json.dumps(
+                {
+                    "start_time": "2026-05-08T10:00:00Z",
+                    "planned_tasks": ["1", "2", "3", "4"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        # 2 tracks completed
+        sidecar_a = auto_cmd._audit_sidecar_path(("1", "3"), tmp_path)
+        sidecar_b = auto_cmd._audit_sidecar_path(("2", "4"), tmp_path)
+        sidecar_a.write_text(
+            json.dumps({"task_ids": ["1", "3"], "completed_at": "T1"}),
+            encoding="utf-8",
+        )
+        sidecar_b.write_text(
+            json.dumps({"task_ids": ["2", "4"], "completed_at": "T2"}),
+            encoding="utf-8",
+        )
+
+        merged = auto_cmd._merge_audit_sidecars([["1", "3"], ["2", "4"]], tmp_path)
+
+        # INV-26 verified: original start_time + aggregate_task_count + per_worker present
+        assert merged["start_time"] == "2026-05-08T10:00:00Z"  # original preserved
+        assert merged["aggregate_task_count"] == 4
+        assert len(merged["per_worker"]) == 2
+
+    def test_i1_6_reaper_only_removes_old_orphan_sidecars(self, tmp_path: Path) -> None:
+        """I1-6 (iter-1 WARNING + iter-2 race-safety): reaper only removes
+        files older than dispatch_start_epoch - 300s margin. Concurrent
+        instance sidecars (mtime within margin) preserved.
+        """
+        import os as _os
+        import time as _time
+
+        import auto_cmd
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+
+        # Old orphan: mtime well before cutoff
+        old_orphan = claude / "auto-run-track-deadbeef0001.json"
+        old_orphan.write_text("{}", encoding="utf-8")
+        old_mtime = _time.time() - 1000.0
+        _os.utime(old_orphan, (old_mtime, old_mtime))
+
+        # Recent file (concurrent instance) -- mtime within margin
+        recent = claude / "auto-run-track-deadbeef0002.json"
+        recent.write_text("{}", encoding="utf-8")
+
+        # Old plan-scratch
+        old_scratch = claude / "plan-scratch-deadbeef0003.md"
+        old_scratch.write_text("scratch", encoding="utf-8")
+        _os.utime(old_scratch, (old_mtime, old_mtime))
+
+        dispatch_start = _time.time()
+        auto_cmd._reap_orphans(tmp_path, dispatch_start_epoch=dispatch_start)
+
+        # Old orphan + old scratch removed; recent preserved
+        assert not old_orphan.exists()
+        assert not old_scratch.exists()
+        assert recent.exists()
