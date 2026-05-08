@@ -1407,7 +1407,16 @@ def _reap_orphans(project_root: Path, dispatch_start_epoch: float) -> None:
             except OSError:
                 continue
             if mtime < cutoff:
-                stale.unlink(missing_ok=True)
+                # v1.0.5 Loop 2 iter-1 caspar WARNING fix: catch
+                # PermissionError on Windows when file is held open
+                # by another process (e.g., concurrent SBTDD instance
+                # past the mtime guard, or AV scanner). Skipping
+                # stale-but-locked files is safer than crashing the
+                # dispatcher; next reaper invocation may succeed.
+                try:
+                    stale.unlink(missing_ok=True)
+                except (PermissionError, OSError):
+                    continue
 
 
 # ---------------------------------------------------------------------------
