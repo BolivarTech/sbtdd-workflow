@@ -770,6 +770,18 @@ Top-level numbering uses `## 4.` (R3 monotonic check satisfied).
 > **Then** Returns ordered list: first antichain {1, 4}; second
 > antichain {2, 3}. Tasks 2 + 3 batched after Task 1 + 4 complete.
 
+> **v1.0.4 iter-5 Loop 1 CRITICAL #2 note (Caspar)**: escenarios
+> C-5 / C-6 / C-10 below reference `partition_by_collision`, which
+> v1.0.4 Path 3 (iter-4 architectural land) DEPRECATED in favor of
+> `partition_by_tracks(graph) -> list[list[str]]`. The deprecated
+> function emits a `DeprecationWarning` on each call and will be
+> removed in v1.1.0. Production callers (`auto_cmd._build_dispatch_plan_parallel`)
+> already migrated; only regression tests still invoke it. Future
+> spec revisions will rewrite C-5 / C-6 / C-10 to reference the new
+> function; for v1.0.4 we preserve the historical Given/When/Then
+> wording so cross-artifact alignment tests (`tests/test_changelog.py`
+> HF1) keep matching.
+
 **Escenario C-5: file surface collision detection**
 
 > **Given** Antichain {Task 2, Task 3} con Task 2 modifies

@@ -16,11 +16,22 @@ import multiprocessing
 import sys
 from pathlib import Path
 
+import pytest
+
 from dag_parser import Task, TaskGraph
 from parallel_dispatcher import (
     _files_collide,
     partition_by_collision,
     partition_by_tracks,
+)
+
+# v1.0.4 iter-5 Loop 1 CRITICAL #2: ``partition_by_collision`` is
+# deprecated. Tests still exercise it for regression coverage; suppress
+# the DeprecationWarning module-wide so the legitimate coverage does not
+# pollute pytest output. Production callers (none remain) would still
+# see the warning at runtime via the default filter.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:parallel_dispatcher.partition_by_collision is deprecated:DeprecationWarning"
 )
 
 

@@ -18,8 +18,15 @@ file-disjoint AND dep-disjoint; within a track, tasks must serialize
 to dispatch one subprocess worker per track.
 
 Public API:
-    partition_by_collision(antichain, graph) -> list[set[str]]
     partition_by_tracks(graph) -> list[list[str]]
+        v1.0.4 Path 3 -- canonical track-based partitioning.
+
+Deprecated (kept for backward compatibility, no production callers
+remain after Path 3 architectural land in v1.0.4 iter-4):
+    partition_by_collision(antichain, graph) -> list[set[str]]
+        Use :func:`partition_by_tracks` instead. v1.0.4 iter-5 Loop 1
+        CRITICAL #2: emits :class:`DeprecationWarning` on each call.
+        Will be removed in v1.1.0.
 
 Note on concurrency-safety: state-file race-condition safety is
 delegated to the canonical project mechanism — ``state_file.save``
@@ -45,6 +52,8 @@ Determinism is enforced by sorting task ids ascending in tie-break.
 """
 
 from __future__ import annotations
+
+import warnings
 
 from dag_parser import Task, TaskGraph
 
@@ -72,6 +81,17 @@ def partition_by_collision(
 ) -> list[set[str]]:
     """Split a dependency-free antichain into surface-disjoint sub-batches.
 
+    .. deprecated:: 1.0.4
+        Use :func:`partition_by_tracks` instead. v1.0.4 Path 3
+        replaced antichain-based dispatch with track-based dispatch
+        (weakly-connected components in dep UNION file-conflict edges).
+        ``partition_by_collision`` has no remaining production callers
+        after the iter-4 architectural land; only its tests still
+        invoke it for regression coverage. This function will be
+        removed in v1.1.0. v1.0.4 iter-5 Loop 1 CRITICAL #2
+        (Caspar): emits :class:`DeprecationWarning` on each call so
+        downstream callers (if any) get a migration signal.
+
     Two tasks can run in the same parallel batch only if their
     ``Files:`` lists are disjoint. This function greedy-packs tasks
     into sub-batches so that every task in a sub-batch is
@@ -93,6 +113,13 @@ def partition_by_collision(
         with at least one other task in every other sub-batch and
         cannot share a batch under the greedy heuristic.
     """
+    warnings.warn(
+        "parallel_dispatcher.partition_by_collision is deprecated since "
+        "v1.0.4 (Path 3 track-based dispatch). Use partition_by_tracks "
+        "instead. Will be removed in v1.1.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not antichain:
         return []
     remaining: list[str] = sorted(antichain)  # iter 2 CRITICAL #2: deterministic
