@@ -33,6 +33,38 @@ def _walk_invoke_skill_calls(path: Path):
             yield node
 
 
+def _innermost_function_name_at_line(tree: ast.Module, target_line: int) -> str | None:
+    """Return the innermost ``FunctionDef`` / ``AsyncFunctionDef`` name whose
+    body span contains ``target_line``.
+
+    v1.0.4 Path 3 sub-issue 3 (Cas WARNING): used by the
+    ``allow_interactive_skill=True`` whitelist audit to identify the
+    enclosing function for a call site, enabling function-level rather
+    than file-level whitelisting.
+
+    Args:
+        tree: Parsed module AST.
+        target_line: 1-indexed line number of the call site.
+
+    Returns:
+        Innermost function name (deepest nesting wins by smallest span),
+        or ``None`` for module-level calls.
+    """
+    candidates: list[tuple[int, str]] = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        fn_start = fn.lineno
+        fn_end = getattr(fn, "end_lineno", fn_start) or fn_start
+        if fn_start <= target_line <= fn_end:
+            candidates.append((fn_end - fn_start, fn.name))
+    if not candidates:
+        return None
+    # Innermost = smallest span.
+    candidates.sort()
+    return candidates[0][1]
+
+
 def _check_path(path: Path) -> list[str]:
     violations = []
     for call in _walk_invoke_skill_calls(path):
@@ -182,13 +214,24 @@ class TestHeadlessGateCallsiteConsistency:
         """
         skills_dir = _REPO_ROOT / "skills" / "sbtdd" / "scripts"
 
-        # Whitelist: callsite location -> rationale.
-        # New entries require code review + matching rationale here.
-        WHITELIST = {
-            "superpowers_dispatch.py": (
-                "wrapper functions brainstorming/writing_plans/"
-                "receiving_code_review/etc. pass override internally per "
-                "v1.0.1 Pre-A2 migration baseline + v1.0.4 Item A.2 gate"
+        # v1.0.4 Path 3 sub-issue 3 (Cas WARNING): function-level whitelist.
+        # Pre-fix the whitelist was file-level (any function in
+        # superpowers_dispatch.py could pass allow_interactive_skill=True
+        # without triggering the audit). Post-fix only the explicitly
+        # listed (file, function-or-closure) pairs are exempt; any new
+        # function that needs the override must extend this map AND
+        # document rationale alongside.
+        WHITELIST_FUNCTIONS = {
+            ("superpowers_dispatch.py", "_wrapper"): (
+                "Closure inside _make_wrapper -- per-skill wrappers "
+                "(brainstorming/writing_plans/receiving_code_review) "
+                "pass override internally per v1.0.1 Pre-A2 migration "
+                "baseline + v1.0.4 Item A.2 gate"
+            ),
+            ("superpowers_dispatch.py", "_invoke_skill"): (
+                "Internal helper that wraps invoke_skill for callers "
+                "passing kwargs dict; preserves override propagation "
+                "from wrapper functions per v1.0.1 Pre-A2"
             ),
         }
 
@@ -215,19 +258,24 @@ class TestHeadlessGateCallsiteConsistency:
                     if kw.arg == "allow_interactive_skill":
                         if isinstance(kw.value, ast.Constant) and kw.value.value is True:
                             file_basename = py_file.name
-                            if file_basename not in WHITELIST:
+                            # Find enclosing function via in-file scan
+                            # (stdlib ast lacks parent links).
+                            enclosing = _innermost_function_name_at_line(tree, node.lineno)
+                            key = (file_basename, enclosing or "<module>")
+                            if key not in WHITELIST_FUNCTIONS:
                                 offenders.append(
                                     (
                                         py_file.relative_to(_REPO_ROOT).as_posix(),
                                         node.lineno,
-                                        "allow_interactive_skill=True",
+                                        f"allow_interactive_skill=True in "
+                                        f"function '{enclosing or '<module>'}'",
                                     )
                                 )
 
         assert not offenders, (
             "Found unwhitelisted callsites passing allow_interactive_skill=True:\n"
             + "\n".join(f"  {path}:{lineno} ({reason})" for path, lineno, reason in offenders)
-            + "\nAdd to WHITELIST with rationale or remove the override."
+            + "\nAdd (file, function) to WHITELIST_FUNCTIONS with rationale or remove the override."
         )
 
     def test_subprocess_dispatch_module_imports_ast_safe(self):

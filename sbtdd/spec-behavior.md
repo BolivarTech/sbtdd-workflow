@@ -94,14 +94,15 @@ Decisiones de brainstorming 2026-05-07 (Q1-Q5):
   existing `/sbtdd auto` subcommand. Default off; sequential
   preserves v1.0.3 behavior exactly. No new subcommand surface.
 
-- **Q3 — Item D Option A vs B**: Option B — mandate close-phase
-  per Red/Green/Refactor commit via doc-only enforcement. Higher
-  discipline; v1.0.3 dogfood proved subagents diverged from v1.0.2
-  Q2 Option B mandate despite documentation, but v1.0.4 elevates
-  the convention to the plan template + writing-plans extension +
-  subagent-driven-development docs (3-touchpoint enforcement vs
-  v1.0.2 single I5 process notes mention). NO `close_task_cmd`
-  modification.
+- ~~**Q3 — Item D Option A vs B**: Option B — mandate close-phase
+  per Red/Green/Refactor commit via doc-only enforcement~~ —
+  **DEFERRED to v1.0.5 LOCKED** per iter 2 scope-trim Option D.
+  v1.0.5 brainstorming will redesign Item D per Q3 OPTION A
+  code-side enforcement architecture (close-task tolerates
+  non-refactor phase when verification was the most recent
+  successful operation). The v1.0.4 cycle does NOT ship the
+  3-touchpoint mandate (no SKILL.md / CLAUDE.local.md.template /
+  writing-plans extension changes). See sec.2.4 for breadcrumb.
 
 - **Q4 — Activity E' sequencing**: Option C — both pre-Track-close
   AND post-Track-close exercises. Pre validates `--resume-from-magi`
@@ -1137,12 +1138,15 @@ python skills/magi/scripts/run_magi.py code-review \
 
 (Extends spec-base R1-R8 + R-NEW1-R-NEW3 added per design review.)
 
-- **R1** (spec-base): Item A real headless detection may be too
-  strict and reject legitimate `claude -p` uses where the
-  orchestrator IS in interactive context but isatty() returns false
-  (rare: piped script wrapping claude CLI). Mitigation:
-  `SBTDD_INTERACTIVE=1` env var override documented + tested
-  (escenario A-4).
+- **R1** (spec-base, REVISED iter 1+2): Item A real headless detection
+  REPLACED with simplified membership-based gate (no env-var/isatty
+  heuristic) per iter 1+2 triage. The original env-var concern
+  (`SBTDD_HEADLESS` / `SBTDD_INTERACTIVE`) is **OBSOLETE** — the gate
+  fires PRE-spawn unconditionally for skills in
+  `_SUBPROCESS_INCOMPATIBLE_SKILLS`, so TTY state of the caller is
+  irrelevant. Backward compat preserved via existing v1.0.1
+  `allow_interactive_skill=True` override (wrappers continue to work).
+  Mitigation NOT needed in current architecture.
 - **R2** (spec-base): Item A breaking behavior for callers that
   ignored the v1.0.1 whitelist warning. Mitigation: backward compat
   preserved (override still works); audit existing callsites via
@@ -1157,11 +1161,12 @@ python skills/magi/scripts/run_magi.py code-review \
   MAGI iter budget if cumulative diff is large vs per-task.
   Mitigation: spec sec.6.1 iter-2 CRITICAL trigger pre-stage +
   scope-trim ladder fallback.
-- **R5** (spec-base): Item D doc-only enforcement historically
-  lower compliance per v1.0.3 evidence. Mitigation: 3-touchpoint
-  enforcement (SKILL.md + CLAUDE.local.md.template + writing-plans
-  extension) vs v1.0.2 single I5 process notes; smoke test
-  asserts presence of mandate text in all three.
+- ~~**R5** (spec-base): Item D doc-only enforcement historically
+  lower compliance per v1.0.3 evidence~~ — **OBSOLETE per iter 2
+  scope-trim Option D**. Item D entirely deferred to v1.0.5 LOCKED
+  (Q3 OPTION A code-side enforcement). The 3-touchpoint mandate
+  + smoke test described here are NOT shipping in v1.0.4. See sec.2.4
+  + sec.4.4 for the deferred-state breadcrumb.
 - **R6** (spec-base): Bundle scope multi-pillar (3 pillars + 4
   methodology activities) aumenta riesgo de Loop 2 non-convergence.
   Mitigation: G2 binding scope-trim ladder defer Item D first →
@@ -1174,11 +1179,12 @@ python skills/magi/scripts/run_magi.py code-review \
   may surface edge cases not covered by tests. Mitigation: cycle
   uses sequential dispatch as fallback if parallel dogfood
   surfaces blocking issue; document as v1.0.5 refinement.
-- **R-NEW1** (design review): Item A env-var detection may break
-  legitimate test runs. Mitigation: pytest fixtures explicitly
-  set `SBTDD_HEADLESS` / `SBTDD_INTERACTIVE` env vars when invoking
-  wrapper functions; tests document the contract via escenarios
-  A-2 + A-4.
+- ~~**R-NEW1** (design review): Item A env-var detection may break
+  legitimate test runs~~ — **OBSOLETE per iter 1+2 triage**: the
+  env-var/isatty heuristic was REMOVED. Item A's simplified
+  membership-based gate has no env-var dependency, so this risk
+  class no longer applies. Pytest fixtures need no `SBTDD_HEADLESS`
+  / `SBTDD_INTERACTIVE` setup.
 - **R-NEW2** (design review): Item C parallel dispatcher
   chicken-and-egg dogfood — cycle uses dispatcher being
   implemented. Mitigation: Track Beta lands sequential `make verify`

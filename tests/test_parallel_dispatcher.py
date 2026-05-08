@@ -155,8 +155,9 @@ def _writer_for_concurrent_test(
     save(state, Path(state_path_str))
 
 
-def test_c11_synthetic_concurrent_state_file_write(tmp_path: Path) -> None:
-    """C-11 iter 1 triage: synthetic concurrent state-file write race.
+def test_c11_no_partial_writes_under_concurrent_replace(tmp_path: Path) -> None:
+    """C-11 (renamed v1.0.4 Path 3 sub-issue 1, Mel WARNING — honest naming):
+    no partial-merge JSON file under concurrent ``state_file.save`` calls.
 
     Two processes call ``state_file.save`` simultaneously against
     disjoint task IDs. Final file MUST parse as valid JSON and match
@@ -164,6 +165,12 @@ def test_c11_synthetic_concurrent_state_file_write(tmp_path: Path) -> None:
     corrupt JSON). Relies on ``state_file.save`` atomic-write semantics
     (write-temp + os.replace), which is the canonical OS-level
     serialization strategy adopted by this project.
+
+    NOTE on naming: the prior name implied this test exercises a true
+    race condition with non-trivial concurrent modification semantics.
+    In reality, the OS-level atomic-rename guarantees mean "last writer
+    wins" deterministically; this test merely validates that no
+    intermediate write is observable. Renamed for honest description.
     """
     state_path = tmp_path / "session-state.json"
     # Initialize with a baseline valid state file
