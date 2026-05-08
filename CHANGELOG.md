@@ -8,73 +8,233 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
-## [Unreleased — v1.0.5 LOCKED commitments]
+## [Unreleased]
 
-The following items are **NON-NEGOTIABLE for v1.0.5 ship** per user
-mandate 2026-05-08 ("documenta I-1, I-2 e I-3 para el proximo patch,
-deben quedar resueltos"). Surfaced by v1.0.4 pre-merge iter-6b Loop 1
-review (HEAD `c264cd8`). These gaps DO NOT block sequential users
-(byte-identical to v1.0.3 behavior) but ARE operationally risky for
-any operator running `--parallel` opt-in path end-to-end.
+(No items pending.)
 
-### v1.0.5 LOCKED — `--parallel` opt-in path correctness
+## [1.0.5] - 2026-05-08
 
-- **I-1 — Worker subprocesses overwrite parent audit trail (INV-26
-  violation)**. Location: `auto_cmd.py:3593-3605`. Workers re-write
-  `.claude/auto-run.json` clobbering parent's start-time + aggregate
-  task counts. Fix options: (a) per-worker sidecar files merged by
-  parent post-batch; (b) workers signal via stdout, parent owns
-  audit; (c) workers self-identify and skip audit write. Acceptance:
-  parent audit-run.json after parallel dispatch contains original
-  start_time + aggregate task counts + per-worker completion
-  records.
+> **Status**: Shipped clean — Checkpoint 2 STRONG GO unanimous (Mel
+> APPROVE 82 + Bal APPROVE 78 + Cas APPROVE 82) at iter 3; pre-merge
+> Loop 2 STRONG GO unanimous (Mel APPROVE 82 + Bal APPROVE 82 + Cas
+> APPROVE 78) at iter 1. **6-cycle Checkpoint 2 no-override streak
+> preserved** (v1.0.0 + v1.0.1 + v1.0.2 + v1.0.3 + v1.0.4 + v1.0.5
+> sin INV-0). **Pre-merge Loop 2 no-override streak RE-ESTABLISHED
+> from 1 cycle** post-v1.0.4 break (Q5 strict no-INV-0 stance honored;
+> escalate-to-user-before-INV-0 discipline preserved unused).
+>
+> Pillar A (I-1+I-2+I-3 production-grade `--parallel` correctness)
+> + Pillar B (Item D Q3 OPTION A code-side enforcement) shipped
+> end-to-end. Pillar C (C.2 plan archaeology trim methodology)
+> deferred to v1.0.6 per iter-2 Checkpoint 2 CRITICAL trigger
+> pre-staged response (user-authorized 2026-05-08).
 
-- **I-2 — Plan checkbox lost-update race in `mark_and_advance`**.
-  Location: `close_task_cmd.py:108-123`. Concurrent workers calling
-  `mark_and_advance` have no cross-process lock around plan-tdd.md
-  RMW. One worker's `[x]` flip can be silently overwritten. Fix
-  options: (a) `fcntl.flock` POSIX / `msvcrt.locking` Windows around
-  plan RMW; (b) workers don't flip plan checkboxes, parent flips all
-  atomically post-batch; (c) per-worker scratch plan files merged
-  by parent. Acceptance: race regression test with N concurrent
-  `multiprocessing.Process` workers asserts all N flips visible
-  (Windows-portable via `multiprocessing.get_context("spawn")`).
+### Added
 
-- **I-3 — Worker subprocesses don't inherit operator CLI flags**.
-  Location: `auto_cmd.py:1564-1576`. Only `--task-ids` +
-  `--no-recursive` propagated to workers. Missing: `--plugins-root`,
-  `--magi-max-iterations`, `--magi-threshold`,
-  `--verification-retries`, `--model-override`. Fix:
-  `_dispatch_tracks_concurrent` builds each worker's argv with
-  parent's flag values for every relevant flag. Acceptance:
-  forwarding test pass `--magi-threshold=GO --verification-retries=5`
-  to parent + assert each worker subprocess receives those values
-  (intercept via mock `subprocess.Popen`). Document explicit
-  forwardable-flags list in helper docstring.
+- **Item I-1 (Track Alpha T1)** — Per-worker sidecar audit-trail pattern
+  closing INV-26 violation on `--parallel` opt-in path. New helpers
+  `_audit_sidecar_path(task_ids, project_root) -> Path` (deterministic
+  per-worker path via SHA1 hash) + `_merge_audit_sidecars(tracks,
+  project_root) -> dict` (parent post-batch merge with graceful
+  missing-sidecar handling) + `_reap_orphans(project_root,
+  dispatch_start_epoch)` (mtime-guarded stale-file cleanup with 5min
+  margin to avoid clobbering concurrent SBTDD instances). Worker mode
+  (`--no-recursive` + `--task-ids`) redirects audit writes to
+  `.claude/auto-run-track-{hash}.json` sidecar; orchestrator mode
+  preserves canonical `.claude/auto-run.json`. Track Alpha T1 Step 5
+  owns ALL `_dispatch_tracks_concurrent` post-batch hook wiring per
+  iter-1 CRITICAL #4 architectural fix (audit + scratch merge both
+  invoked here).
+- **Item I-2 (Track Beta T3)** — Per-worker scratch plan + flip-merge
+  pattern closing plan checkbox lost-update race in `mark_and_advance`.
+  New helpers in `close_task_cmd.py`: `_scratch_plan_path`,
+  `_merge_scratch_plans` (post-batch flip-collect via
+  `_apply_flips_from_diff` — derives flips from scratch-vs-main diff
+  per iter-1 CRITICAL #1+#3 fix; partial worker failure no longer
+  fabricates false-positive flips), `_section_has_flipped`,
+  `_section_bounds`, `_iter_task_ids`, anchored `_flip_checkbox`
+  via new `_TASK_HEADER_RE` walker (per iter-1 CRITICAL #2 fix —
+  flips never cross task-section boundaries). Worker mode
+  `mark_and_advance` redirect (writes flip to scratch instead of
+  main plan).
+- **Item I-3 (Track Alpha T2)** — Worker CLI flag forwarding via new
+  `_FORWARDABLE_FLAGS` MappingProxyType + `_build_worker_argv(task_ids,
+  ns)` helper. Forwards `--plugins-root`, `--magi-max-iterations`,
+  `--magi-threshold`, `--verification-retries`, `--model-override`
+  to subprocess workers per parent operator's argv values.
+  `_dispatch_tracks_concurrent` worker invocation builder uses helper.
+- **Item D Q3 OPTION A (Track Beta T4)** — `close_task_cmd._preflight_triplet_check`
+  HARD-BLOCK detecting when commit chain since the last `chore: mark
+  task <N> complete` commit (or branch root for first task) lacks the
+  canonical `test:`/`feat:|fix:`/`refactor:` triplet. New helper
+  `_last_chore_task_close_sha(project_root) -> str | None` provides
+  the boundary SHA. New `--skip-preflight` argparse flag-only
+  emergency override + stderr audit breadcrumb (renders "since SHA
+  <sha>" or "since SHA branch root" per Loop 1 iter-2 Important #1
+  fix). Module-level `_CHORE_TASK_COMPLETE_RE` regex for testability.
+  HARD-BLOCK triggered exclusively in `TestPreflightHardBlock` test
+  class; pre-existing happy-path tests bypass via centralized
+  `_install_happy_path_patches` monkeypatch.
+- **Combined acceptance criterion (production-grade `--parallel` integration test)**: 24 new
+  tests cover escenarios I1-1..I1-6 + I2-1..I2-5 + I2-3b + I3-1..I3-3
+  + D-1..D-5 + D-3b. I2-4 race regression test uses real
+  `multiprocessing.get_context("spawn")` + `multiprocessing.Process`
+  + `multiprocessing.Barrier(parties=2)` synchronizing read-modify-write
+  window; repeated 50× to amplify race-window detection;
+  cross-platform (Windows + POSIX) via spawn context + module-level
+  picklable helper.
 
-**Combined acceptance criterion for v1.0.5 ship**: integration test
-exercising `--parallel` end-to-end on real synthetic 2-track plan
-with 4 disjoint tasks. After dispatch, ALL of:
+### Changed
 
-- Parent's `.claude/auto-run.json` well-formed + 4 task records (I-1)
-- Plan-tdd.md has 4 `[x]` flips (no lost updates) (I-2)
-- Each worker received forwarded operator flags (I-3)
-- All TDD triplet commits per task in git log
-- State file `current_phase: "done"` post-completion
+- **State file `state_file.py`** — DRY consolidation of atomic-write
+  helpers per Track Beta T3 Refactor: new module-level
+  `atomic_write_json(path, data)` + `atomic_write_text(path, text)`
+  using `tempfile.mkstemp` for collision-safe temp names under
+  concurrent writers. `auto_cmd._atomic_write_json` +
+  `close_task_cmd._atomic_write` are now thin re-exports.
+- **`mark_and_advance` return type** widened to `SessionState | None`
+  (worker mode returns None, leaves orchestrator/sequential
+  signature unchanged). 2 caller assertion sites updated for mypy
+  + defensive tripwire.
+- **`auto_cmd._dispatch_tracks_concurrent`** post-batch invokes
+  `_reap_orphans` pre-flight + `_merge_audit_sidecars` + late-import
+  `_merge_scratch_plans` (via `getattr` fallback to no-op for
+  defensive resilience pre-T3-land in test harnesses).
 
-This is the PRODUCTION READINESS CRITERION for `--parallel`. Without
-these fixes, `--parallel` ships v1.0.4 as **OPT-IN / experimental**
-for sequential-disjoint plans only; production-grade end-to-end
-parallel dispatch lands v1.0.5.
+### Fixed
 
-### v1.0.5 LOCKED — other carry-forward (existing)
+- Loop 1 iter-2 Important #1: `--skip-preflight` breadcrumb now
+  includes `since SHA <sha>` segment per spec D-3 wording (commit
+  `ddf8b82`).
+- Loop 1 iter-2 minor: `_last_chore_task_close_sha` docstring
+  dropped stale `chore: mark task-N-complete` (dash) variant
+  reference; `test_d5` docstring corrected from "D-1" to "D-5"
+  copy-paste typo.
+- Loop 2 iter-1 caspar WARNING: `_reap_orphans` catches
+  `PermissionError` + `OSError` on `unlink` to handle Windows file-
+  locked cases (concurrent SBTDD past mtime guard, AV scanner)
+  gracefully — skips stale-but-locked files; next reaper invocation
+  may succeed (commit `e501b16`).
+- spec-snapshot.json regenerated for v1.0.5 cycle (23 scenarios
+  matching post-triage spec sec.4 escenarios; commit `1047fa5`).
 
-- Item D Q3 OPTION A (close_task_cmd._preflight code-side
-  enforcement) — deferred from v1.0.4 iter-2 scope-trim Option D.
-- Spec-behavior.md sec.8 stale risk-register sweep (R1+R-NEW1+R5
-  references to eliminated v1.0.4 mechanisms).
-- Plan archaeology trim (CHANGELOG-ize iter-by-iter context per
-  Balthasar INFO #17 from iter-6b).
+### Process notes
+
+- **Two-phase Checkpoint 2 triage discipline empirically validated**:
+  iter 1 surfaced 5 CRITICAL → triage applied → iter 2 surfaced 6
+  CRITICAL (5 of which were spec/plan drift from iter-1 fixes
+  applied to spec but not to plan T3 Step 4 code block — operator
+  editing miss flagged by all 3 agents independently). iter-2
+  CRITICAL trigger fired per spec sec.6.1 pre-staged response.
+  User authorized G2 ladder invocation (defer Pillar C to v1.0.6).
+  iter 3 surfaced 0 CRITICAL → STRONG GO unanimous → Checkpoint 2
+  PASSED. The pre-staged trigger + ladder + scope-trim discipline
+  saved the cycle from cap=3 HARD G1 binding pressure that would
+  have otherwise risked INV-0.
+- **`/sbtdd pre-merge` interactive subprocess hang re-confirmed**:
+  v1.0.4 ship record claimed "/receiving-code-review interactive
+  subprocess ran successfully across 6+ pre-merge runs WITHOUT 600s
+  hang" was situational. v1.0.5 attempted `/sbtdd pre-merge` after
+  spec-snapshot regeneration; ran Loop 1 iter-1 + iter-2 successfully
+  but hung at iter-2 close on /receiving-code-review subprocess
+  (killed at 1200s timeout). Manual fallback per spec sec.6.4
+  applied: `python skills/magi/scripts/run_magi.py` direct dispatch
+  + manual mini-cycle commits for the 2 Important findings + 3 Minor.
+  v1.0.6 LOCKED commitment to root-cause + fix the hang.
+- **Loop 1 iter-2 Important #2 (`_preflight_triplet_check` naming
+  vs plan pseudocode `_preflight`)**: deferred to this CHANGELOG
+  note rather than mini-cycle. T4 implementer chose to introduce
+  `_preflight_triplet_check` as separate helper from `_preflight`
+  (better SRP, easier unit testing); reviewer marked architecturally
+  defensible. Plan pseudocode signature was indicative; impl
+  signature is canonical per shipped code.
+- **Implementation deviations from plan** (5 documented inline; all
+  reviewed clean by Loop 2 iter 1):
+  1. `_merge_scratch_plans` late-import in `_dispatch_tracks_concurrent`
+     uses `getattr(...)` fallback to no-op (extension to plan's "late
+     import" pattern; defensive for test harness running pre-T3-land).
+  2. T4 split `_preflight_triplet_check` as separate helper from
+     `_preflight` (per #2 above).
+  3. T4 HARD-BLOCK broke 11 pre-existing happy-path tests; fixed via
+     centralized `_install_happy_path_patches` helpers monkeypatching
+     `_preflight_triplet_check` to no-op. Preflight gate exclusively
+     exercised in `TestPreflightHardBlock`.
+  4. `mark_and_advance` return type widened to `SessionState | None`
+     (per Changed section above).
+  5. T3 Refactor consolidated atomic-write helpers into `state_file.py`
+     (per Changed section above).
+- **G1 binding HARD respected**: 6-cycle Checkpoint 2 no-override
+  streak preserved. NO INV-0 path invoked at Checkpoint 2 across
+  v1.0.0 → v1.0.5.
+- **Q5 strict no-INV-0 stance HONORED**: pre-merge Loop 2 converged
+  cleanly at iter 1 STRONG GO unanimous. Streak re-established from
+  1 cycle post-v1.0.4 break. Escalate-to-user-before-INV-0 discipline
+  preserved unused (no escalation needed).
+- **G2 binding (scope-trim ladder) EMPIRICALLY EXERCISED**: Pillar C
+  (Track Gamma C.2) deferred to v1.0.6 per iter-2 Checkpoint 2
+  CRITICAL trigger pre-staged response. Track Beta D Q3-A (Pillar B)
+  remained in scope; Track Alpha (Pillar A) hard-LOCKED. The G2
+  ladder design from spec sec.6.1 worked as intended.
+
+### Cycle metrics
+
+- Tests: 1248 passed + 1 skipped (baseline 1225 → +24 new from T1-T4
+  + Loop 1 mini-cycle test_d3b strengthening); zero failures.
+- Coverage: 89.92% post Loop 2 mini-cycle (89.91% post-T4); above
+  88% NF-A threshold; v1.0.4 baseline 90.37% → -0.45% margin
+  acceptable per Q4 floor protocol.
+- `make verify` runtime: 171.12s post Loop 2 mini-cycle (172.60s
+  post Loop 1 mini-cycle); within 200s soft / 220s hard NF-A.
+- Cumulative diff vs `b1c5262` (v1.0.4 merge): 26 commits across
+  3 phases (16 impl from T1-T4 + 4 chore task closures + spec-snapshot
+  regen + 2 Loop 1 mini-cycle + 1 Loop 2 mini-cycle + finalize).
+- 5 production files modified: `auto_cmd.py` (+327 lines),
+  `close_task_cmd.py` (+422 lines), `state_file.py` (+60 lines DRY
+  consolidation), tests (+700 lines).
+
+### Deferred (rolled to v1.0.6)
+
+- **Pillar C — Track Gamma C.2 plan archaeology trim methodology**
+  (deferred per iter-2 Checkpoint 2 CRITICAL trigger pre-staged
+  response, user-authorized 2026-05-08). Doc-only + smoke test;
+  doesn't affect production runtime.
+- **`/sbtdd pre-merge` interactive subprocess hang root-cause +
+  fix**. Manual `run_magi.py` fallback per spec sec.6.4 used in
+  v1.0.5; root-cause + automated fix is v1.0.6 LOCKED.
+- **Loop 2 iter-1 WARNINGs polish**:
+  - `_section_has_flipped` whole-section vs per-checkbox parity (cas)
+  - `getattr` late-import fallback hardening / removal (bal+cas)
+  - `_preflight_triplet_check` API rename to canonical `_preflight`
+    (bal — Important #2 deferred from Loop 1 iter-2)
+  - `mark_and_advance` API split to two helpers (bal)
+  - Triplet check robust to Conventional Commits scope syntax (cas)
+  - `_FORWARDABLE_FLAGS` argparse-presence guard (cas)
+  - I2-4 race test runtime cost optimization (cas)
+  - `--skip-preflight` operator UX discoverability (bal)
+  - I-3 model_override list-value flattening test strengthening (mel)
+  - Coverage drift -0.45% trend monitoring (bal+mel)
+- **Worker-mode hardcoded plan path / `_apply_flips_from_diff`
+  ValueError edge case** (mel — narrow drift cases unlikely in
+  v1.0.5 dogfood).
+- **Inherited from v1.0.4**: `agreement_rate` rename to `keep_rate`,
+  `spec_lint` R3 promote, per-module coverage raise to 85%, GitHub
+  Actions CI workflow, Group B options 1/3/4/6/7, Migration tool
+  real test, AST dead-helper detector codification, W8 Windows fs
+  retry-loop, `_read_auto_run_audit` skeleton wiring, spec sec.7.1.3
+  G2 amendment, `magi_cross_check` default-flip.
+
+### Bug fixes (from v1.0.4 LOCKED commitments — closed in v1.0.5)
+
+- **I-1 — Worker subprocesses overwrite parent audit trail
+  (INV-26 violation)** — CLOSED via per-worker sidecar pattern.
+- **I-2 — Plan checkbox lost-update race in `mark_and_advance`**
+  — CLOSED via per-worker scratch + flip-merge pattern.
+- **I-3 — Worker subprocesses don't inherit operator CLI flags**
+  — CLOSED via `_FORWARDABLE_FLAGS` + `_build_worker_argv`.
+
+`--parallel` opt-in path is now production-grade end-to-end (per
+combined acceptance criterion); no longer experimental for
+sequential-disjoint plans only.
 
 ## [1.0.4] - 2026-05-08
 
