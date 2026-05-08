@@ -25,9 +25,13 @@ as :class:`SpecReviewError` (exit 12) and leaves state untouched.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import re
+import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import _plan_ops
 import spec_review_dispatch
@@ -45,6 +49,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-spec-review",
         action="store_true",
         help="Skip spec-reviewer dispatch (INV-31 escape valve)",
+    )
+    p.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        default=False,
+        help=(
+            "v1.0.5 Item D Q3-A emergency override: bypass phase advance "
+            "gate enforcement. Audit-logged via stderr breadcrumb."
+        ),
     )
     return p
 
@@ -78,7 +91,338 @@ def _current_head_sha(root: Path) -> str:
     return r.stdout.strip()
 
 
-def mark_and_advance(state: SessionState, root: Path) -> SessionState:
+# ---------------------------------------------------------------------------
+# v1.0.5 Item I-2 -- per-worker scratch plan + flip-merge pattern
+# (escenarios I2-1..I2-5).
+#
+# Workers in the v1.0.4 ``--parallel`` opt-in path concurrently invoke
+# ``mark_and_advance`` for disjoint task IDs, but the original
+# read-modify-write of ``planning/claude-plan-tdd.md`` had no
+# cross-process serialisation -- one worker's flip could be silently
+# overwritten by another. The helpers below redirect each worker's flip
+# to a deterministic per-worker scratch plan; the parent post-batch
+# merges all scratch flips into the main plan. Disjoint task IDs (per
+# the v1.0.4 ``partition_by_tracks`` invariant) guarantee disjoint
+# checkbox flips, so the merge is a simple flip-collect (no 3-way
+# conflict). Sequential mode is unaffected.
+# ---------------------------------------------------------------------------
+
+
+# v1.0.5 iter-1 CRITICAL #2 fix: anchored regex walker; ensures flip ops
+# never cross task-section boundaries.
+_TASK_HEADER_RE = re.compile(r"^### Task ", re.MULTILINE)
+
+
+def _scratch_plan_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
+    """Per-worker scratch plan path.
+
+    v1.0.5 Item I-2: deterministic name per task-IDs hash. Each worker
+    writes flip(s) to its own scratch plan; parent post-batch merges all
+    scratch flips into main plan via :func:`_merge_scratch_plans`.
+    """
+    digest = hashlib.sha1(",".join(task_ids).encode("utf-8")).hexdigest()[:12]
+    return project_root / ".claude" / f"plan-scratch-{digest}.md"
+
+
+#: v1.0.5 T3 Refactor: re-export the consolidated ``atomic_write_text``
+#: from ``state_file`` under the legacy private name so existing call
+#: sites + the I-2 escenarios keep referencing
+#: ``close_task_cmd._atomic_write`` byte-identically. The single
+#: implementation lives in :func:`state_file.atomic_write_text` per
+#: iter-2 WARNING fix.
+from state_file import atomic_write_text as _atomic_write  # noqa: E402
+
+
+def _iter_task_ids(plan_text: str) -> list[str]:
+    """Yield task IDs in plan order.
+
+    v1.0.5 iter-1 helper: parses ``### Task <id>`` headers + extracts
+    the first whitespace-bounded token after the header. Trailing colon
+    (if present in real plans like ``### Task 1: Demo``) is stripped so
+    callers always see the bare ID.
+    """
+    ids: list[str] = []
+    for m in re.finditer(r"^### Task (\S+)", plan_text, re.MULTILINE):
+        ids.append(m.group(1).rstrip(":"))
+    return ids
+
+
+def _section_bounds(plan_text: str, task_id: str) -> tuple[int, int] | None:
+    """Return ``(section_start, section_end)`` char offsets for the task.
+
+    Section start = end of ``### Task <id>`` header line; end = start
+    of the next ``### Task `` header (or EOF). Returns ``None`` if the
+    task is not present in ``plan_text``.
+
+    v1.0.5 iter-1 CRITICAL #2 fix: bounds the search to the current
+    task's section so flips never cross task boundaries. Accepts both
+    bare ``### Task 1`` and ``### Task 1:`` header forms.
+    """
+    header_re = re.compile(rf"^### Task {re.escape(task_id)}\b", re.MULTILINE)
+    header_match = header_re.search(plan_text)
+    if header_match is None:
+        return None
+    section_start = header_match.end()
+    next_header = _TASK_HEADER_RE.search(plan_text, section_start)
+    section_end = next_header.start() if next_header else len(plan_text)
+    return section_start, section_end
+
+
+def _section_has_flipped(plan_text: str, task_id: str) -> bool:
+    """True iff the task section contains ``- [x]`` (flipped state).
+
+    v1.0.5 iter-1 helper: bounded section extraction identical to
+    :func:`_flip_checkbox` so 'has flipped' check uses the same
+    task-section window.
+    """
+    bounds = _section_bounds(plan_text, task_id)
+    if bounds is None:
+        return False
+    section_start, section_end = bounds
+    return "- [x]" in plan_text[section_start:section_end]
+
+
+def _flip_checkbox(plan_text: str, task_id: str) -> str:
+    """Flip first ``- [ ]`` checkbox in the task's section to ``- [x]``.
+
+    v1.0.5 iter-1 CRITICAL #2 fix: regex anchored to the current task's
+    section bounded by the next ``### Task `` header (or EOF). Prevents
+    the pre-fix ``(### Task {tid}.*?)(- \\[ \\])`` with ``re.DOTALL``
+    from matching a ``[ ]`` checkbox belonging to a LATER task when the
+    current task has no ``[ ]`` of its own. Idempotent: returns
+    ``plan_text`` unchanged if the section has no ``- [ ]`` (already
+    flipped or no checkbox).
+    """
+    bounds = _section_bounds(plan_text, task_id)
+    if bounds is None:
+        raise ValueError(f"Task {task_id} not found in plan")
+    section_start, section_end = bounds
+    section = plan_text[section_start:section_end]
+    flipped_section = section.replace("- [ ]", "- [x]", 1)
+    if flipped_section == section:
+        return plan_text  # idempotent: already flipped or no checkbox
+    return plan_text[:section_start] + flipped_section + plan_text[section_end:]
+
+
+def _apply_flips_from_diff(main_text: str, scratch_text: str) -> str:
+    """Apply only the ``[ ]->[x]`` transitions present in scratch vs main.
+
+    Iterates per-task-section using :func:`_iter_task_ids`; flips a
+    main checkbox only when the same task section in scratch has the
+    ``[x]`` state.
+
+    v1.0.5 iter-1 CRITICAL #1+#3 fix: replaces the prior
+    ``_apply_flips_for_task_ids(main, scratch, task_ids)`` design which
+    ignored ``scratch_text`` and unconditionally flipped every
+    ``task_id`` in main, fabricating false-positive flips when workers
+    crashed before scratch-write.
+    """
+    result = main_text
+    for task_id in _iter_task_ids(scratch_text):
+        if _section_has_flipped(scratch_text, task_id) and not _section_has_flipped(
+            result, task_id
+        ):
+            result = _flip_checkbox(result, task_id)
+    return result
+
+
+def _merge_scratch_plans(tracks: list[list[str]], project_root: Path) -> None:
+    """Parent post-batch: merge per-worker scratch plans into main.
+
+    v1.0.5 iter-1 CRITICAL #1+#3 fix: flips derived from
+    scratch-vs-main diff via :func:`_apply_flips_from_diff`, NOT from
+    the ``task_ids`` parameter. If a worker crashed before flipping its
+    task, scratch will lack the flip and main is left unchanged for
+    that task -- no fabrication of false-positive checkbox state.
+
+    Workers have disjoint task IDs (per ``partition_by_tracks``
+    invariant); therefore merge = collect flips from each scratch by
+    direct diff + apply to main. Cleans up scratch files post-merge so
+    subsequent dispatches start clean. No-op when ``tracks`` is empty
+    or when no scratch files exist (Track Beta / orchestrator startup
+    paths).
+    """
+    main_path = project_root / "planning" / "claude-plan-tdd.md"
+    if not main_path.exists():
+        return
+    main_text = main_path.read_text(encoding="utf-8")
+    changed = False
+    for task_ids in tracks:
+        scratch_path = _scratch_plan_path(tuple(sorted(task_ids)), project_root)
+        if not scratch_path.exists():
+            continue  # worker didn't write scratch (early failure)
+        scratch_text = scratch_path.read_text(encoding="utf-8")
+        new_text = _apply_flips_from_diff(main_text, scratch_text)
+        if new_text != main_text:
+            main_text = new_text
+            changed = True
+        scratch_path.unlink(missing_ok=True)
+    if changed:
+        _atomic_write(main_path, main_text)
+
+
+# ---------------------------------------------------------------------------
+# v1.0.5 Item D Q3 OPTION A -- close_task_cmd preflight HARD-BLOCK
+# (escenarios D-1..D-4).
+#
+# v1.0.5 replaces v1.0.4's scope-trimmed Q3 Option B 3-touchpoint doc-only
+# attempt with code-side enforcement. ``_preflight_triplet_check`` walks
+# the commit chain since the last ``chore: mark task <N> complete`` commit
+# (or branch root for the very first task) and asserts the canonical
+# Red/Green/Refactor commit triplet (``test:`` + ``feat:|fix:`` +
+# ``refactor:``). A missing prefix raises :class:`PreconditionError`
+# with operator-actionable recovery guidance. ``--skip-preflight`` is
+# the explicit emergency operator override (audit-logged to stderr).
+# ---------------------------------------------------------------------------
+
+
+def _git_log_between(start_sha: str | None, project_root: Path | None = None) -> list[str]:
+    """Return commit subjects between ``start_sha`` (exclusive) and HEAD.
+
+    v1.0.5 iter-1 CRITICAL #5 fix: when ``start_sha`` is ``None`` (no
+    prior chore commit on branch), returns ALL commits on the current
+    branch (boundary = branch root).
+
+    Args:
+        start_sha: Boundary SHA (exclusive) or ``None`` for branch
+            root.
+        project_root: Working directory for ``git log``.
+
+    Returns:
+        List of stripped commit subject lines (newest first per
+        ``git log`` default).
+    """
+    cwd = str(project_root) if project_root else None
+    rev_range = "HEAD" if start_sha is None else f"{start_sha}..HEAD"
+    result = subprocess_utils.run_with_timeout(
+        ["git", "log", rev_range, "--format=%s"], timeout=10, cwd=cwd
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+#: Compiled regex matching the canonical "task close" commit subject so
+#: :func:`_last_chore_task_close_sha` and any future tooling agree on the
+#: same pattern. Kept module-level for cheap reuse + easier testability.
+_CHORE_TASK_COMPLETE_RE = re.compile(r"^chore: mark task \S+ complete\b")
+
+
+def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
+    """Return SHA of the most recent ``chore: mark task <N> complete`` commit.
+
+    v1.0.5 iter-1 CRITICAL #5 fix: this is the canonical "previous task
+    close" boundary for the :func:`_preflight_triplet_check` triplet
+    sweep. Returns ``None`` if no such commit exists on the current
+    branch (first task in plan).
+
+    Rebase/squash limitation: if the operator squashed prior task-close
+    commits, this returns the most recent surviving ``chore:`` subject
+    matching the pattern; risk: false-positive triplet detection if
+    squash produced a hybrid subject. Mitigated by the
+    ``--skip-preflight`` flag for emergency operator override.
+
+    v1.0.5 T4 Refactor: subject matching moved to the module-level
+    :data:`_CHORE_TASK_COMPLETE_RE` regex so the contract surfaces in
+    one place and unit tests can target it without digging into the
+    function body.
+    """
+    cwd = str(project_root) if project_root else None
+    result = subprocess_utils.run_with_timeout(
+        ["git", "log", "HEAD", "--format=%H%x09%s"], timeout=10, cwd=cwd
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        sha, subject = line.split("\t", 1)
+        if _CHORE_TASK_COMPLETE_RE.match(subject):
+            return sha
+    return None
+
+
+def _preflight_triplet_check(
+    state: Any, project_root: Path | None = None, *, skip_preflight: bool = False
+) -> None:
+    """Hard-block when the phase advance gate has been bypassed.
+
+    v1.0.5 Item D Q3 OPTION A (iter-1 CRITICAL #5 fix): detects when the
+    commit chain since the last ``chore: mark task <N> complete`` commit
+    (or branch root if none exists) lacks the canonical TDD triplet
+    (``test:`` + ``feat:|fix:`` + ``refactor:``). Raises
+    :class:`PreconditionError` with operator-actionable guidance.
+    Operator emergency override via ``--skip-preflight`` flag
+    (audit-logged via stderr breadcrumb).
+
+    Why "since last chore commit" instead of
+    ``phase_started_at_commit`` (iter-1 CRITICAL #5 rationale):
+    ``phase_started_at_commit`` advances on every phase close within a
+    task, so when ``_preflight_triplet_check`` runs at task-close time
+    it sees only the LAST phase's commits -- never the full
+    Red+Green+Refactor triplet. Boundary "since last chore: mark task"
+    reliably brackets the entire current task's phase-close commits
+    without phase-state coupling.
+
+    Args:
+        state: SessionState dataclass or plain dict carrying at least
+            ``current_task_id``.
+        project_root: Project root.
+        skip_preflight: Operator emergency override (--skip-preflight).
+    """
+    task_id = _state_field(state, "current_task_id")
+    if skip_preflight:
+        last_chore_sha = _last_chore_task_close_sha(project_root)
+        sha_label = last_chore_sha if last_chore_sha is not None else "branch root"
+        sys.stderr.write(
+            f"[sbtdd close-task] WARNING: --skip-preflight active; "
+            f"phase advance gate enforcement BYPASSED for "
+            f"task_id={task_id} since SHA {sha_label}. Audit-logged.\n"
+        )
+        sys.stderr.flush()
+        return
+
+    last_chore_sha = _last_chore_task_close_sha(project_root)
+    boundary_label = (
+        f"last chore commit {last_chore_sha}" if last_chore_sha is not None else "branch root"
+    )
+    subjects = _git_log_between(last_chore_sha, project_root=project_root)
+    has_test = any(s.startswith("test:") for s in subjects)
+    has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
+    has_refactor = any(s.startswith("refactor:") for s in subjects)
+    if not (has_test and has_green and has_refactor):
+        raise PreconditionError(
+            f"Phase advance gate bypassed: commit chain since "
+            f"{boundary_label} lacks test:/feat:|fix:/refactor: triplet. "
+            f"Per SBTDD INV-1 + INV-5..7, each task close requires "
+            f"close-phase invocation per Red/Green/Refactor phase. "
+            f"Recovery: invoke `python skills/sbtdd/scripts/run_sbtdd.py "
+            f"close-phase` once per pending phase OR pass --skip-preflight "
+            f"if emergency operator override is appropriate (audit-logged "
+            f"via stderr breadcrumb)."
+        )
+
+
+def _state_field(state: Any, key: str) -> Any:
+    """Return ``state[key]`` (dict) or ``getattr(state, key)`` (dataclass).
+
+    v1.0.5 Item I-2 helper: ``mark_and_advance`` accepts either the
+    production :class:`SessionState` dataclass (orchestrator path) or a
+    plain dict (worker-mode test fixtures synthesise the minimum two
+    keys required for the scratch flip path). This helper keeps the
+    extraction in one place so the worker-mode branch does not sprinkle
+    ``isinstance`` checks.
+    """
+    if isinstance(state, dict):
+        return state.get(key)
+    return getattr(state, key, None)
+
+
+def mark_and_advance(
+    state: SessionState | dict[str, Any],
+    root: Path,
+    ns: argparse.Namespace | None = None,
+) -> SessionState | None:
     """Close the current task and advance state.
 
     Public helper (no leading underscore) so ``auto_cmd.py`` can reuse the
@@ -93,20 +437,75 @@ def mark_and_advance(state: SessionState, root: Path) -> SessionState:
     has no pending changes outside of the plan file edit produced here
     (enforced by the caller's drift/preflight checks).
 
+    v1.0.5 Item I-2: when ``ns`` indicates worker mode
+    (``--no-recursive`` + ``--task-ids``) the function redirects the
+    plan flip to the per-worker scratch plan (see
+    :func:`_scratch_plan_path`). The main ``planning/claude-plan-tdd.md``
+    is left UNTOUCHED in worker mode -- the parent post-batch
+    :func:`_merge_scratch_plans` collects all per-worker scratch flips
+    into the main plan with a single atomic write. Worker mode skips
+    the chore commit + state-file advance because both are owned by
+    the parent's post-batch flow. Returns ``None`` in worker mode (no
+    new SessionState to surface).
+
     Args:
-        state: Current :class:`SessionState` (must have a non-null
-            ``current_task_id`` and ``current_phase='refactor'``).
+        state: Current :class:`SessionState` (orchestrator path) OR a
+            plain dict carrying at least ``current_task_id`` (worker
+            test fixtures). Must have a non-null ``current_task_id``
+            (and, for the orchestrator path, ``current_phase='refactor'``).
         root: Project root directory.
+        ns: Optional argparse namespace; when ``no_recursive`` and
+            ``task_ids`` are both truthy the worker-mode scratch path
+            engages (v1.0.5 I-2). ``None`` (default) preserves the
+            v1.0.4 orchestrator/sequential behavior byte-identically.
 
     Returns:
         The advanced :class:`SessionState` (either pointing to the next
-        open task or marked ``done``).
+        open task or marked ``done``) for the orchestrator path; ``None``
+        in worker mode.
     """
-    if state.current_task_id is None:
+    current_task_id = _state_field(state, "current_task_id")
+    if current_task_id is None:
         raise PreconditionError("mark_and_advance requires non-null current_task_id")
+
+    # v1.0.5 Item I-2 worker-mode short-circuit: write flip to per-worker
+    # scratch plan; let the parent post-batch merge fold it into main.
+    if ns is not None and getattr(ns, "no_recursive", False) and getattr(ns, "task_ids", None):
+        task_ids_tuple = tuple(sorted(ns.task_ids.split(",")))
+        scratch_path = _scratch_plan_path(task_ids_tuple, root)
+        scratch_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path = root / "planning" / "claude-plan-tdd.md"
+        if not scratch_path.exists():
+            # First flip in this worker: seed scratch from main plan so
+            # the diff against main captures only this worker's changes.
+            shutil.copy2(plan_path, scratch_path)
+        scratch_text = scratch_path.read_text(encoding="utf-8")
+        flipped = _flip_checkbox(scratch_text, str(current_task_id))
+        if flipped != scratch_text:
+            _atomic_write(scratch_path, flipped)
+        return None
+
+    # Orchestrator / sequential path -- preserve v1.0.4 behavior exactly.
+    if not isinstance(state, SessionState):
+        # The orchestrator/cascade path always passes SessionState; dict
+        # state only reaches here from a worker test that supplied an
+        # ``ns`` lacking the worker markers. Treat as a synthetic
+        # orchestrator path: write directly to the main plan but skip
+        # the git/state-file machinery (no SessionState to advance).
+        plan_path = root / "planning" / "claude-plan-tdd.md"
+        text = plan_path.read_text(encoding="utf-8")
+        flipped = _flip_checkbox(text, str(current_task_id))
+        if flipped != text:
+            _atomic_write(plan_path, flipped)
+        return None
+
     plan_path = root / state.plan_path
     plan_text = plan_path.read_text(encoding="utf-8")
-    new_plan = _plan_ops.flip_task_checkboxes(plan_text, state.current_task_id)
+    # ``current_task_id`` was extracted + None-checked at the top of the
+    # function; re-bind to a local so mypy can narrow the type cleanly
+    # (SessionState's attribute remains ``str | None``).
+    task_id_str = str(current_task_id)
+    new_plan = _plan_ops.flip_task_checkboxes(plan_text, task_id_str)
     if new_plan != plan_text:
         # Only write + stage + commit when the flip actually changed bytes.
         # If the implementer subagent already flipped the checkboxes as
@@ -120,11 +519,11 @@ def mark_and_advance(state: SessionState, root: Path) -> SessionState:
             timeout=10,
             cwd=str(root),
         )
-        commit_create("chore", f"mark task {state.current_task_id} complete", cwd=str(root))
+        commit_create("chore", f"mark task {task_id_str} complete", cwd=str(root))
     # else: plan already reflects task completion; the state advance below
     # still runs so the session bookkeeping moves to the next open task.
     new_sha = _current_head_sha(root)
-    next_id, next_title = _plan_ops.next_task(new_plan, state.current_task_id)
+    next_id, next_title = _plan_ops.next_task(new_plan, task_id_str)
     new_state = SessionState(
         plan_path=state.plan_path,
         current_task_id=next_id,
@@ -168,9 +567,18 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = ns.project_root
     state = _preflight(root)
     closed_task_id = state.current_task_id or ""
+    # v1.0.5 Item D Q3-A: HARD-BLOCK when phase advance gate bypassed.
+    # Operator emergency override available via --skip-preflight.
+    _preflight_triplet_check(state, root, skip_preflight=getattr(ns, "skip_preflight", False))
     if not ns.skip_spec_review:
         _run_spec_review(closed_task_id, state, root)
     new_state = mark_and_advance(state, root)
+    # CLI invocation always takes the orchestrator path (no ``ns`` kwarg
+    # forwarded) so ``mark_and_advance`` returns a SessionState. The
+    # widened ``SessionState | None`` return type added by v1.0.5 I-2
+    # is purely for the worker-mode short-circuit; assert here both as
+    # mypy hint and as a defensive tripwire.
+    assert new_state is not None, "close-task CLI must receive a SessionState from mark_and_advance"
     next_msg = (
         f"Next: task {new_state.current_task_id}" if new_state.current_task_id else "Plan complete."
     )

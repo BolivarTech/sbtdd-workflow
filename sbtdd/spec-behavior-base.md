@@ -1,374 +1,499 @@
-# Especificacion base — sbtdd-workflow v1.0.4 (post-v1.0.3 ship)
+# Especificacion base — sbtdd-workflow v1.0.5 (post-v1.0.4 ship)
 
-> Raw input para `/brainstorming` (primera fase del ciclo SBTDD para v1.0.4).
+> Raw input para `/brainstorming` (primera fase del ciclo SBTDD para v1.0.5).
 > `/brainstorming` consumira este archivo y generara `sbtdd/spec-behavior.md`
 > (BDD overlay con escenarios Given/When/Then testables).
 >
-> Generado 2026-05-07 post-v1.0.3 ship (tag `v1.0.3` at commit `39a9c18`,
-> branch `feature/v1.0.4-bundle` branched off `main` HEAD `0aeff7d` =
-> v1.0.3 merge commit).
+> Generado 2026-05-08 post-v1.0.4 ship (tag `v1.0.4` at commit `87f14a3`,
+> branch `feature/v1.0.5-bundle` branched off `main` HEAD `b1c5262` =
+> v1.0.4 merge commit).
 >
-> v1.0.4 ships los items LOCKED CRITICAL para unblock automation paths
-> que v1.0.1 introduced + v1.0.3 dogfood empirically confirmed broken
-> (`/sbtdd pre-merge` + `/sbtdd spec` hang on `/receiving-code-review`,
-> `/brainstorming`, `/writing-plans` interactive subprocess).
+> v1.0.5 ships los items LOCKED documentados en CHANGELOG.md `[Unreleased]`
+> + memory `project_v105_parallel_correctness_locked.md` per user mandate
+> 2026-05-08 ("documenta I-1, I-2 e I-3 para el proximo patch, deben quedar
+> resueltos"). Items A+B+C foundation shipped en v1.0.4; v1.0.5 cierra los
+> operational hygiene gaps que bloquean production-grade `--parallel`
+> end-to-end + ships Item D Q3 OPTION A (close_task_cmd._preflight code-side
+> enforcement) + spec sec.8 stale risk-register sweep + plan archaeology
+> trim methodology.
 >
-> Per Balthasar v1.0.3 Loop 2 iter 1 INFO ("v1.0.4 carrying meaningful
-> debt"): scope-trim upfront. v1.0.4 = real headless detection + parallel
-> task dispatcher + state file phase auto-advance methodology gap fix
-> (3 pillars). Defer audit GAPs (L1.0.4-A through L1.0.4-D) + v1.0.3
-> Items C/D/E (drift line-anchored, spec-snapshot autoregen, close-task
-> convention codification) to v1.0.5 polish pillar.
+> Per Balthasar v1.0.4 iter-6b INFO: "v1.0.5 is becoming a magnet release —
+> schedule a polish-only cycle soon". Scope-trim upfront. v1.0.5 = focused
+> production-readiness pillar (3 CRITICAL `--parallel` gaps + Item D Q3-A
+> code-side) + polish-only secondary pillar (spec sweep + plan trim).
+> Defer v1.0.5+ accumulated backlog (I-4 cosmetic, I-5 CI handling,
+> partition_by_collision deletion, real-world dogfood validation, audit
+> GAPs L1.0.4-A through L1.0.4-D, make verify runtime polish, etc.) to
+> v1.0.6 polish-only cycle.
 >
-> Source of truth autoritativo para v0.1+v0.2+v0.3+v0.4+v0.5+v1.0+v1.0.1+v1.0.2+v1.0.3
-> frozen se mantiene en `sbtdd/sbtdd-workflow-plugin-spec-base.md`; este
-> documento NO lo reemplaza — agrega el delta v1.0.4 a la base.
+> Source of truth autoritativo para v0.1+v0.2+v0.3+v0.4+v0.5+v1.0+v1.0.1
+> +v1.0.2+v1.0.3+v1.0.4 frozen se mantiene en
+> `sbtdd/sbtdd-workflow-plugin-spec-base.md`; este documento NO lo reemplaza
+> — agrega el delta v1.0.5 a la base.
 >
 > Archivo cumple INV-27: cero matches uppercase placeholder word-boundary
 > verificable con `spec_cmd._INV27_RE` regex.
 >
-> v1.0.4 G1 binding HARD: cap=3 sin INV-0 path para Checkpoint 2
-> (precedente cerrado v1.0.0+v1.0.1+v1.0.2+v1.0.3 = 4-cycle no-override
-> streak). G2 binding: scope-trim default si Loop 2 iter 3 no converge
-> (defer Pillar C a v1.0.5 si necesario; Pillars A + B son hard-LOCKED).
+> v1.0.5 G1 binding HARD: cap=3 sin INV-0 path para Checkpoint 2
+> (precedente cerrado v1.0.0+v1.0.1+v1.0.2+v1.0.3+v1.0.4 = 5-cycle no-override
+> Checkpoint 2 streak; v1.0.4 broke pre-merge Loop 2 streak via INV-0 but
+> Checkpoint 2 streak preserved). G2 binding: scope-trim default si Loop 2
+> iter 3 no converge (defer Pillar B polish a v1.0.6 si necesario; Pillar A
+> CRITICAL items son hard-LOCKED).
 >
-> v1.0.3 introduced **iter-2 CRITICAL trigger** (spec sec.6.1) which
-> fired empirically for the first time during v1.0.3 own-cycle. v1.0.4
-> preserves this trigger pre-stage.
+> v1.0.4 introduced **5-cycle pre-merge no-override streak BROKEN** via INV-0
+> at iter-6b (Mel APPROVE 82%, 2 caspar CRITICALs verified false-positive).
+> v1.0.5 goal: cleanly close pre-merge gate WITHOUT INV-0 (re-establish
+> streak from 1 cycle).
 
 ---
 
 ## 1. Objetivo
 
-**v1.0.4 = "Headless automation unblock + parallel dispatcher"**:
-arregla el v1.0.4 LOCKED CRITICAL del CHANGELOG `[1.0.3]` Deferred
-section — real headless detection eliminating the
-`/receiving-code-review` interactive subprocess hang that blocked
-v1.0.3 Activity D' + Activity E' empirical validation. Plus the
-v1.0.3 LOCKED parallel task dispatcher per memory
-`project_v104_parallel_task_dispatcher.md`. Plus methodology gap fix
-(close-task phase auto-advance) surfaced empirically by both Track
-Alpha + Track Beta v1.0.3 subagents.
+**v1.0.5 = "Production-grade `--parallel` + Item D code-side enforcement"**:
+arregla los 3 LOCKED CRITICAL `--parallel` opt-in path correctness gaps
+documentados en v1.0.4 ship CHANGELOG `[Unreleased]` (I-1/I-2/I-3) + ships
+Item D Q3 OPTION A code-side enforcement architecture (replaces v1.0.4's
+attempted 3-touchpoint doc-only that was scope-trimmed) + completes spec
+sec.8 stale risk-register sweep (R1+R-NEW1+R5 references to eliminated
+v1.0.4 mechanisms) + plan archaeology trim methodology.
 
 Tres clases de items:
 
 ### Clase 1 — Pillar A PRIMARY (LOCKED CRITICAL)
 
-- **Item A — Real headless detection for subprocess-incompatible
-  skills**. Replace v1.0.1 `_SUBPROCESS_INCOMPATIBLE_SKILLS` whitelist
-  + `allow_interactive_skill: bool` override hatch with proper
-  detection via env var `SBTDD_HEADLESS=1` + `os.isatty(0)` checks.
-  When `superpowers_dispatch.invoke_skill` detects truly headless
-  context (env or non-TTY stdin) AND skill is interactive
-  (brainstorming, writing-plans, receiving-code-review), raise
-  `PreconditionError` LOUD-FAST instead of spawning subprocess that
-  hangs for 600s. v1.0.1's whitelist + override pattern was a
-  conservative baseline; v1.0.4 replaces with real detection.
+- **Item I-1 — Worker subprocesses overwrite parent audit trail (INV-26)**.
+  Location: `auto_cmd.py:3593-3605`. Workers re-write `.claude/auto-run.json`
+  clobbering parent's start-time + aggregate task counts. Fix per architectural
+  options: (a) per-worker sidecar files merged by parent post-batch; (b)
+  workers signal via stdout, parent owns audit; (c) workers self-identify
+  and skip audit write entirely. Acceptance: parent audit-run.json after
+  parallel dispatch contains original start_time + aggregate task counts +
+  per-worker completion records. INV-26 verified by integration test.
 
-  Audit + criteria for `_SUBPROCESS_INCOMPATIBLE_SKILLS` set
-  membership (folded scope per CHANGELOG `[1.0.1]` Deferred to v1.0.4
-  bundled-with-real-headless-detection): document the criteria for
-  classifying a skill as subprocess-incompatible (interactive
-  multi-turn dialogue requirement). Audit current set
-  ({brainstorming, writing-plans}) + extend to add
-  `receiving-code-review` empirically observed in v1.0.3 dogfood.
+- **Item I-2 — Plan checkbox lost-update race in `mark_and_advance`**.
+  Location: `close_task_cmd.py:108-123`. Concurrent workers calling
+  `mark_and_advance` have no cross-process lock around plan-tdd.md
+  read-modify-write. One worker's `[x]` flip can be silently overwritten.
+  Fix per architectural options: (a) `fcntl.flock` POSIX / `msvcrt.locking`
+  Windows around plan RMW; (b) workers don't flip plan checkboxes — parent
+  flips all atomically post-batch; (c) per-worker scratch plan files merged
+  by parent. Acceptance: race regression test with N concurrent
+  `multiprocessing.Process` workers asserts all N flips visible
+  (Windows-portable via `multiprocessing.get_context("spawn")` + module-level
+  helper).
 
-- **Item B — 600s subprocess hang full LOUD-FAST fix**. Tightly
-  coupled with Item A: when interactive skill dispatched in headless
-  context, raise PreconditionError IMMEDIATELY (no subprocess spawn,
-  no 600s timeout wait). Operator gets clear guidance message
-  pointing to `--resume-from-magi` recovery path (already shipped
-  v1.0.1 A3) for spec phase, OR manual `/receiving-code-review`
-  triage per spec sec.6.4 fallback for pre-merge phase.
-
-  **Empirical evidence** v1.0.3:
-  - Activity D' Loop 2: `/sbtdd pre-merge` hung after Loop 1 iter 1
-    on `/receiving-code-review` subprocess waiting interactive input.
-    Operator killed via Ctrl+C + manual fallback.
-  - Activity E' deferred entirely because same hang would block
-    `/sbtdd spec --resume-from-magi`.
+- **Item I-3 — Worker subprocesses don't inherit operator CLI flags**.
+  Location: `auto_cmd.py:1564-1576`. Only `--task-ids` + `--no-recursive`
+  propagated to workers. Missing: `--plugins-root`, `--magi-max-iterations`,
+  `--magi-threshold`, `--verification-retries`, `--model-override`. Fix:
+  `_dispatch_tracks_concurrent` builds each worker's argv with parent's flag
+  values for every relevant flag (introspect via `argparse` namespace).
+  Acceptance: forwarding test passes `--magi-threshold=GO
+  --verification-retries=5` to parent + asserts each worker subprocess
+  receives those values (intercept via mock `subprocess.Popen`). Document
+  explicit forwardable-flags list in helper docstring.
 
 ### Clase 2 — Pillar B LOCKED (HIGH VALUE)
 
-- **Item C — Parallel task dispatcher**. Per memory
-  `project_v104_parallel_task_dispatcher.md`: codify the manual
-  subagent-parallel pattern (precedent v0.4.0/v0.5.0/v1.0.0/v1.0.2/v1.0.3)
-  as a plugin feature. New subcommand or flag on existing
-  `/sbtdd auto` that:
-  1. Analyzes plan DAG via `### Task N` blocks + dependency
-     declarations (e.g. "after Task M" markers).
-  2. Identifies parallelizable task batches (no shared file surfaces).
-  3. Dispatches batch via Agent tool (multi-subagent parallel)
-     instead of sequential single-subagent.
-  4. MAGI Loop 2 fires ONCE at end on cumulative diff (vs sequential
-     per-task currently).
+- **Item D Q3 OPTION A — code-side enforcement via
+  `close_task_cmd._preflight`**. Replaces v1.0.4's attempted 3-touchpoint
+  doc-only enforcement that was scope-trimmed per iter-2 Option D. v1.0.4
+  Loop 2 iter 1 + iter 2 + iter 3 surfaced 3-agent unanimous WARNING that
+  doc-only enforcement repeats v1.0.2's failure mode + v1.0.3 dogfood
+  divergence (third consecutive cycle of doc-only attempts). Architecturally
+  preferred path per Mel + Bal + Cas iter-1 recommendations.
 
-  Reduces wall-time substantially (~40% per v0.4.0 + v0.5.0 + v1.0.0
-  empirical observation).
+  **Implementation outline**: extend `close_task_cmd._preflight` to detect
+  when commit chain since `phase_started_at_commit` lacks the
+  `test:`/`feat:|fix:`/`refactor:` triplet (i.e., subagent emitted raw
+  `git commit` per phase instead of `close-phase`). When detected, raise
+  `PreconditionError("Phase advance gate appears bypassed — close-phase
+  per phase required")` with operator-actionable guidance. NOT a
+  soft-warning (which was iter-1 fold-in attempted in v1.0.4) — this is
+  hard-block enforcement. Combined with existing v1.0.2 Q2 Option B
+  `/sbtdd close-task` automation mandate.
 
-### Clase 3 — Pillar C LOCKED defensive (methodology gap)
+  Acceptance: integration test asserting `close_task_cmd._preflight`
+  raises `PreconditionError` when commit chain since
+  `phase_started_at_commit` lacks the canonical TDD triplet. Plus
+  backward-compat test asserting normal close-phase + close-task flow
+  proceeds without trigger. Plus `--skip-preflight` flag for emergency
+  override (operator-controlled escape valve).
 
-- **Item D — State file phase auto-advance methodology gap fix**.
-  v1.0.3 dogfood empirically surfaced: Track Alpha + Track Beta both
-  had to manually advance `current_phase` from `red` → `refactor` in
-  `.claude/session-state.json` before invoking `close-task`, because
-  plan's literal `git commit` commands (used by subagents per plan
-  template) skip the `close-phase` wrapper that does phase advance.
+### Clase 3 — Pillar C LOCKED (METHODOLOGY)
 
-  Two paths:
-  - **Option A (recommended)**: extend `close-task` preflight to
-    auto-advance phase from any non-`refactor` value to `refactor` if
-    last verification was `passed`, with audit trail in state file.
-    Backward-compatible (close-phase still primary path; close-task
-    becomes more tolerant).
-  - **Option B**: update plan template to mandate close-phase per
-    Red/Green/Refactor commit (current convention is raw `git commit`).
-    Higher friction; subagents historically diverge.
+- **Spec sec.8 stale risk-register sweep**. v1.0.4 ship documented
+  iter-3 triage breadcrumb at top of spec-behavior.md noting stale Item D
+  references in sec.4.4 + sec.8 (R1/R5/R-NEW1) + sec.9.1 F4 + sec.10 Q3
+  carried forward as DEFERRED-to-v1.0.5 backlog markers but remained in
+  active spec text. v1.0.5 cycle clean-sweeps these references. Doc-only
+  scope.
 
-  Brainstorming evaluates Option A vs B based on subagent ergonomics +
-  drift detector compatibility.
+- **Plan archaeology trim methodology**. v1.0.4 plan reached ~2200 lines
+  carrying iter-by-iter triage context inline. Balthasar v1.0.4 iter-6b
+  INFO #17: "Plan size disproportionate to code delta — maintenance debt
+  accumulating". v1.0.5 establishes methodology pattern: at ship-time,
+  collapse iter-triage archaeology from plan body into CHANGELOG narrative
+  (separate the "active plan" from "iteration history"). Doc-only +
+  procedure documentation.
 
-### Out of scope v1.0.4 (rolled forward a v1.0.5)
+### Out of scope v1.0.5 (rolled forward a v1.0.6)
 
-- **Audit GAPs from v1.0.3** (L1.0.4-A through L1.0.4-D) — Trigger
-  criteria informational alignment, Carry-forward "Prior triage
-  context" block emit path, Review summary artifact auto-emission,
-  Per-project setup checklist template thinness. Defer to v1.0.5
-  polish pillar per Balthasar v1.0.3 iter 3 INFO recommendation.
-- **v1.0.3 deferred Items C/D/E** — drift detector line-anchored
-  regex, spec-snapshot auto-regeneration, close-task convention
-  codification. Defer to v1.0.5 per Balthasar v1.0.3 iter 3 INFO
-  recommendation.
+- **I-4 stale INV-22 docstring** (cosmetic) — `auto_cmd.py:18, :954-962`
+  module docstring still says "sequential only" but v1.0.4 ships parallel.
+  Defer to v1.0.6 polish-only cycle.
+- **I-5 partition_by_collision DeprecationWarning CI handling** — pytest
+  filterwarnings module-mark mitigates locally; CI elevation handling defer.
+- **`_run_single_task_isolated` removal candidate** — pending dogfood
+  confirmation (chicken-and-egg: requires v1.0.5 LOCKED items to ship before
+  real-world dogfood is feasible).
+- **`partition_by_collision` deletion** (v1.x timeline per current
+  DeprecationWarning).
+- **Real-world `--parallel` end-to-end dogfood validation** — chicken-and-egg
+  until v1.0.5 LOCKED items land.
+- **Audit GAPs L1.0.4-A through L1.0.4-D** (Trigger criteria informational,
+  Carry-forward "Prior triage context" block emit path, Review summary
+  artifact auto-emission, Per-project setup checklist template thinness) —
+  v1.0.3 audit carry-forward.
+- **`make verify` runtime polish** (151-194s vs 165s NF-A hard target) —
+  ~30-40s incremental from real `multiprocessing.Process` + cross-process
+  `subprocess.run` smoke; v1.0.6 polish.
+- **`/receiving-code-review` interactive subprocess regression test** —
+  v1.0.4 empirical observation that subprocess didn't hang across 6+
+  pre-merge runs; worth confirming in v1.0.5 with explicit regression test
+  (LOW priority since v1.0.4 Items A+B prevent the path from being exercised
+  inappropriately).
 
-### Out of scope v1.0.4+ (rolled forward a v1.0.5+)
+### Out of scope v1.0.5+ (rolled forward a v1.0.6+)
 
-- `agreement_rate` field rename to `keep_rate` (schema bump).
-- `spec_lint` R3 promote from warning to error severity.
-- Per-module coverage raise to 85% baseline for `subprocess_utils.py`
-  (74%) and `superpowers_dispatch.py` (83%).
-- `pytest-cov` proper dev dep registration.
-- INV-31 default flip dedicated cycle.
-- GitHub Actions CI workflow.
-- Group B options 1, 3, 4, 6, 7 (opt-in flags).
-- Migration tool real test (Feature I primer migration v1->v2).
-- AST-based dead-helper detector codification.
-- W8 Windows file-system retry-loop.
-- `_read_auto_run_audit` skeleton wiring.
-- Spec sec.7.1.3 G2 amendment.
-- `magi_cross_check` default-flip a `true`.
+- All items inherited from v1.0.4 carry-forward (`agreement_rate` rename to
+  `keep_rate`, `spec_lint` R3 promote, per-module coverage raise to 85%,
+  pytest-cov dev dep, INV-31 default flip cycle, GitHub Actions CI workflow,
+  Group B options 1/3/4/6/7, Migration tool real test, AST dead-helper
+  detector codification, W8 Windows fs retry-loop, `_read_auto_run_audit`
+  skeleton wiring, spec sec.7.1.3 G2 amendment, `magi_cross_check`
+  default-flip).
 
-### Criterio de exito v1.0.4
+### Criterio de exito v1.0.5
 
 - Plugin instalable desde `BolivarTech/sbtdd-workflow` (marketplace
-  `bolivartech-sbtdd`); version bumpea 1.0.3 -> 1.0.4.
-- Tests baseline 1105 + 1 skipped preservados sin regresion + ~25-40
-  nuevos (Item A headless detection: ~10-15 incl. env var + isatty
-  combinations + `_SUBPROCESS_INCOMPATIBLE_SKILLS` set extensions;
-  Item B PreconditionError messages: ~3-5; Item C parallel dispatcher:
-  ~10-15 incl. DAG analyzer + batch dispatch + cumulative-diff Loop
-  2 wiring; Item D phase auto-advance: ~3-5).
-- `make verify` runtime <= 165s (NF-A target; v1.0.3 baseline 151s;
-  expected slight increase from new tests; soft-target <= 155s).
+  `bolivartech-sbtdd`); version bumpea 1.0.4 -> 1.0.5.
+- Tests baseline 1226 + 1 skipped preservados sin regresion + ~25-40
+  nuevos (I-1 audit-trail integration: ~6-10; I-2 plan checkbox race:
+  ~5-8 incl. real multiprocessing race test; I-3 flag forwarding: ~4-6;
+  Item D Q3-A close_task_cmd._preflight: ~6-10; spec sweep: 0; plan trim
+  methodology: ~2-3 doc-coherence smoke tests).
+- `make verify` runtime <= 200s soft target / 220s hard (acknowledges
+  v1.0.4 incremental cost from real multiprocessing tests; v1.0.6 polish
+  may reduce).
 - Coverage threshold mantenido en 88% (per Q4 v1.0.2 baseline);
-  no regression below 88%.
-- **`/sbtdd spec --resume-from-magi` empirical validation
-  end-to-end** in v1.0.4 own-cycle (deferred from v1.0.3 Activity E'
-  per same hang bug; v1.0.4 fix unblocks this).
-- **`/sbtdd pre-merge` empirical validation end-to-end** in v1.0.4
-  own-cycle (deferred from v1.0.3 Activity D' partial completion;
-  v1.0.4 fix unblocks Loop 1 fix-finding triage step).
-- **Parallel task dispatcher empirical validation**: v1.0.4 own-cycle
-  Track Alpha + Track Beta dispatched VIA THE NEW DISPATCHER (not
-  manual Agent tool) to eat its own dogfood.
-- v1.0.3 LOCKED carry-forward del CHANGELOG `[1.0.3]` Deferred
-  (v1.0.4) section enteramente cerrados (real headless detection,
-  parallel dispatcher, 600s hang fix, methodology gap).
-- G1 binding respetado: cap=3 HARD para Checkpoint 2; sin INV-0.
-  5-cycle no-override streak preserved (v1.0.0+v1.0.1+v1.0.2+v1.0.3+v1.0.4).
-- G2 binding respetado: si Loop 2 iter 3 no converge clean,
-  scope-trim default — defer Pillar C (Item D methodology gap) a
-  v1.0.5; Pillar A + Pillar B son hard-LOCKED.
-- v1.0.3 spec sec.6.1 iter-2 CRITICAL trigger preserved.
+  no regression below.
+- **Production-grade `--parallel` empirical validation end-to-end**:
+  v1.0.5 own-cycle dogfood Track Alpha + Track Beta dispatched VIA THE
+  v1.0.4 `--parallel` flag (eat own dogfood). Combined acceptance criterion
+  per CHANGELOG `[Unreleased]`: integration test exercising `--parallel`
+  end-to-end on real synthetic 2-track plan with 4 disjoint tasks asserting
+  ALL 3 gaps (I-1/I-2/I-3) closed.
+- **Item D Q3 OPTION A empirical validation**: v1.0.5 own-cycle subagents
+  test the new `close_task_cmd._preflight` enforcement empirically (some
+  tasks intentionally bypass close-phase to verify hard-block fires; rest
+  follow canonical close-phase per phase to verify normal flow proceeds).
+- v1.0.4 LOCKED carry-forward del CHANGELOG `[1.0.4]` Deferred (v1.0.5)
+  section enteramente cerrados.
+- **G1 binding respetado**: cap=3 HARD para Checkpoint 2; sin INV-0.
+  6-cycle Checkpoint 2 no-override streak preserved
+  (v1.0.0+v1.0.1+v1.0.2+v1.0.3+v1.0.4+v1.0.5).
+- **Pre-merge Loop 2 streak re-establish from 1 cycle**: v1.0.4 broke
+  via INV-0 at iter-6b; v1.0.5 goal = clean convergence at GO_WITH_CAVEATS
+  full no-degraded WITHOUT INV-0 override.
+- G2 binding respetado: scope-trim default si Loop 2 iter 3 no converge —
+  defer Pillar C (spec sweep + plan trim methodology) a v1.0.6 si necesario;
+  Pillar A items son hard-LOCKED. Pillar B (Item D Q3-A) high-value
+  defer-tolerant under G2 ladder.
 
 ---
 
-## 2. Alcance v1.0.4 — items LOCKED post-v1.0.3 ship
+## 2. Alcance v1.0.5 — items LOCKED post-v1.0.4 ship
 
-### 2.1 Item A — Real headless detection (Pillar A PRIMARY CRITICAL)
+### 2.1 Item I-1 — Worker subprocesses overwrite parent audit trail (Pillar A PRIMARY CRITICAL)
 
-**Problema empirico v1.0.3**: `/sbtdd pre-merge` hung during Loop 1
-fix-finding triage step on `/receiving-code-review` subprocess waiting
-for interactive input. v1.0.1's `_SUBPROCESS_INCOMPATIBLE_SKILLS`
-whitelist `{brainstorming, writing-plans}` + `allow_interactive_skill:
-bool = False` kwarg in `invoke_skill` was conservative baseline; it
-catches subprocess attempts BEFORE spawn for the 2 known-incompatible
-skills, but `/receiving-code-review` was NOT in the set despite being
-empirically interactive. Result: subprocess spawned, hung 600s, then
-operator manual abort.
+**Track**: pending Q1 partition decision (likely Pillar A track).
 
-**Entrega v1.0.4**:
+**Archivos**:
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (lines ~3593-3605 audit-trail
+  write path + worker mode short-circuit)
+- Possibly modify: `skills/sbtdd/scripts/state_file.py` (if sidecar approach
+  chosen, add audit-sidecar helper)
+- New tests in `tests/test_auto_cmd.py` (extend) for INV-26 verification
 
-- Modify `superpowers_dispatch.invoke_skill` (or wrapper) to detect
-  headless context BEFORE subprocess spawn:
-  - `os.environ.get("SBTDD_HEADLESS") == "1"` ⇒ headless
-  - `not sys.stdin.isatty()` AND `not os.environ.get("SBTDD_INTERACTIVE")` ⇒ headless
-  - Otherwise interactive
-- Extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set to include
-  `receiving-code-review`. Document criteria in module docstring:
-  skill is incompatible iff it requires multi-turn interactive
-  dialogue (cannot complete in single non-interactive subprocess
-  invocation).
-- When headless context detected AND skill is in incompatible set,
-  raise `PreconditionError(skill, recovery_path)` LOUD-FAST. Recovery
-  path message points to:
-  - For `brainstorming`/`writing-plans`: run skill manually in
-    interactive Claude Code session, then use
-    `/sbtdd spec --resume-from-magi`.
-  - For `receiving-code-review`: run skill manually in interactive
-    session OR fall back to manual `python skills/magi/scripts/run_magi.py`
-    per spec sec.6.4 + apply mini-cycle TDD fixes manually.
+**Empirical context (v1.0.4 ship)**:
 
-- Backward compat: when `allow_interactive_skill=True` kwarg passed
-  (existing override), preserve current behavior (let subprocess
-  attempt). v1.0.1 wrappers (`brainstorming`, `writing_plans`) pass
-  this internally; they continue working.
+`auto_cmd._dispatch_tracks_concurrent` spawns N subprocess workers; each
+worker re-enters `auto_cmd.main()` with `--task-ids` filter + `--no-recursive`.
+Worker mode currently writes to `.claude/auto-run.json` clobbering parent's
+record. Post-batch, parent reloads state but parent's auto-run.json is
+either empty (clobbered last) or contains only one worker's record.
 
-- Tests: ~10-15 covering env var combinations, isatty mock, set
-  extension, recovery message correctness.
+**Architectural decision required (Q for brainstorming)**:
 
-### 2.2 Item B — 600s subprocess hang full LOUD-FAST fix (Pillar A PRIMARY CRITICAL)
+Three viable approaches:
+- **Option (a)** — **Per-worker sidecar files merged by parent post-batch**.
+  Workers write `.claude/auto-run-track-{hash(task_ids)}.json`. Parent
+  post-batch merges all sidecars into main `.claude/auto-run.json` (sorted
+  by task ID order). Pros: deterministic merge order, no race. Cons: more
+  file I/O, cleanup complexity.
+- **Option (b)** — **Workers signal via stdout, parent owns audit**.
+  Workers print structured "audit-event: {...}" lines to stdout; parent
+  collects + writes to its own audit file. Pros: single writer. Cons:
+  stdout interleaving across workers; structured format spec needed.
+- **Option (c)** — **Workers self-identify and skip audit write entirely**.
+  Add `is_worker_mode = bool(ns.no_recursive)` short-circuit in audit-write
+  helper. Parent owns ALL audit writes (including post-batch aggregation
+  via worker exit codes + post-merge state file diff). Pros: simplest
+  implementation, single writer. Cons: parent has less granular per-worker
+  visibility.
 
-**Tightly coupled with Item A**. Once Item A's headless detection
-fires `PreconditionError` BEFORE subprocess spawn, the 600s hang is
-eliminated by construction. Item B contributes the message + recovery
-guidance side.
+Brainstorming evaluates simplicity vs visibility trade-off.
 
-**Entrega v1.0.4**:
+### 2.2 Item I-2 — Plan checkbox lost-update race (Pillar A PRIMARY CRITICAL)
 
-- `PreconditionError` message format (when raised by Item A's
-  headless gate):
-  ```
-  Skill `/<skill>` cannot run via `claude -p` subprocess in headless
-  context (interactive dialogue required). Detected:
-    SBTDD_HEADLESS=<env-value> | stdin.isatty()=<bool>
-  Recovery options:
-    1. Run `/<skill>` manually in an interactive Claude Code session,
-       then [skill-specific recovery: `/sbtdd spec --resume-from-magi`
-       OR manual `run_magi.py` fallback per spec sec.6.4].
-    2. Set SBTDD_INTERACTIVE=1 if you ARE in interactive context but
-       isatty() returns false (rare; e.g., piped script).
-    3. Use the wrapper function (superpowers_dispatch.<skill>) which
-       passes allow_interactive_skill=True automatically (advanced).
-  ```
+**Track**: pending Q1 partition decision.
 
-- Tests: ~3-5 covering message format + each recovery option's
-  precondition resolution.
+**Archivos**:
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (lines ~108-123
+  `mark_and_advance` plan RMW path)
+- New tests in `tests/test_close_task_cmd.py` (extend) — real
+  `multiprocessing.Process` race test asserting all N flips visible
 
-### 2.3 Item C — Parallel task dispatcher (Pillar B LOCKED HIGH VALUE)
+**Empirical context (v1.0.4 design gap)**:
 
-**Problema**: v0.4.0 + v0.5.0 + v1.0.0 + v1.0.2 + v1.0.3 cycles
-all manually dispatched 2-track parallel subagents via the orchestrator
-Agent tool. Wall-time savings ~40% empirically observed. But the
-pattern is unautomated — every cycle the orchestrator hand-codes
-subagent prompts + tracks dispatch + coordinates state file +
-synchronizes pre-merge. Plugin should automate this.
+`close_task_cmd.mark_and_advance` reads plan-tdd.md, modifies (flip `[ ]`
+to `[x]` for current task), writes back via plain file write. No
+cross-process lock. Two concurrent workers calling `mark_and_advance` for
+disjoint task IDs can race: worker A reads plan, worker B reads plan,
+both modify, A writes (flip 1), B writes (flip 2) — A's flip lost.
 
-**Entrega v1.0.4** (per memory `project_v104_parallel_task_dispatcher.md`):
+v1.0.4 sequential default unaffected (single writer). v1.0.4 `--parallel`
+opt-in path SUSCEPTIBLE.
 
-- Plan DAG analysis: parse `planning/claude-plan-tdd.md` for
-  `### Task N` blocks + extract any `**Depends on**: Task M` declarations
-  (or similar marker). Build directed acyclic graph of task
-  dependencies. Identify maximal antichains (sets of tasks with no
-  pairwise dependencies + no shared file surfaces).
+**Architectural decision required (Q for brainstorming)**:
 
-- File surface collision detection: parse each task's `**Files:**`
-  list. Tasks share a surface if any file appears in both lists.
-  Surface-colliding tasks cannot run in same parallel batch.
+Three viable approaches:
+- **Option (a)** — **Cross-process file lock** (`fcntl.flock` POSIX /
+  `msvcrt.locking` Windows) around plan RMW. Pros: drop-in fix, minimal
+  refactor. Cons: cross-platform locking primitives differ; deadlock risk
+  if exception during locked section.
+- **Option (b)** — **Workers don't flip plan checkboxes; parent flips all
+  atomically post-batch**. `_phase2_task_loop` worker mode skips
+  `mark_and_advance` plan-write step (cursor advance only). Parent
+  post-batch loops over completed task IDs + flips checkboxes in single
+  RMW. Pros: single writer eliminates race entirely. Cons: changes
+  per-task atomicity contract (plan-flip no longer atomic with chore
+  commit per task in worker mode).
+- **Option (c)** — **Per-worker scratch plan files merged by parent**.
+  Each worker writes its own scratch plan file. Parent post-batch
+  3-way-merges all scratch plans into main plan-tdd.md. Pros: workers
+  preserve atomic-flip semantics. Cons: 3-way merge complexity; sidecar
+  cleanup; ordering ambiguity.
 
-- Batch dispatch: instead of sequential one-task-per-subagent, dispatch
-  parallel-safe batch via Agent tool with N subagents concurrently.
-  Wait for all to complete before next batch.
+Brainstorming evaluates atomicity preservation vs simplicity.
 
-- Loop 2 cumulative-diff: MAGI Loop 2 fires ONCE at end of all task
-  batches on cumulative diff (instead of per-task). Aligns with
-  current /sbtdd pre-merge semantics.
+### 2.3 Item I-3 — Worker CLI flag forwarding (Pillar A PRIMARY CRITICAL)
 
-- Backward compat: existing sequential `auto_cmd._task_loop` preserved
-  as default. New `--parallel` flag (or `parallel: true` config)
-  opts in.
+**Track**: pending Q1 partition decision.
 
-- Tests: ~10-15 covering DAG parsing, antichain identification,
-  surface collision detection, batch dispatch coordination,
-  cumulative-diff Loop 2 wiring.
+**Archivos**:
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (`_dispatch_tracks_concurrent`
+  worker invocation builder, ~line 1564-1576)
+- New tests in `tests/test_auto_cmd.py` (extend) for forwarding contract
 
-### 2.4 Item D — State file phase auto-advance (Pillar C LOCKED defensive)
+**Empirical context (v1.0.4 design gap)**:
 
-**Problema empirico v1.0.3**: both Track Alpha + Track Beta subagents
-had to manually edit `.claude/session-state.json` to advance
-`current_phase` from `red` → `refactor` before invoking `close-task`,
-because plan's literal `git commit` commands (per Q2 Option B v1.0.2
-mandate) skip the `close-phase` wrapper that does phase advance.
-Drift detector returned clean only because subagents knew about this
-and applied workaround manually. Future cycles may diverge or drift.
+`_dispatch_tracks_concurrent` builds worker argv as
+`[python, run_sbtdd.py, auto, --task-ids, T1,T3, --no-recursive]`. Operator
+flags from parent's argv NOT forwarded:
+- `--plugins-root <path>`
+- `--magi-max-iterations <N>`
+- `--magi-threshold <verdict>`
+- `--verification-retries <N>`
+- `--model-override <model>`
 
-**Entrega v1.0.4** (Option A path):
+Workers run with DEFAULT config regardless of operator flags. Operator
+sets `--magi-threshold=STRONG_GO` expecting strict gate; workers run with
+default `GO_WITH_CAVEATS`.
 
-- Modify `close_task_cmd._preflight` to allow phase auto-advance:
-  - If `current_phase == 'refactor'` ⇒ proceed normally (current
-    behavior).
-  - If `current_phase in {'red', 'green'}` AND
-    `last_verification_result == 'passed'` ⇒ auto-advance to
-    `refactor` with audit trail comment in state file
-    (`auto_advanced_from: 'red'|'green'`). Then proceed.
-  - If `current_phase` invalid (other state), raise
-    `PreconditionError` per current behavior.
+**Implementation approach (relatively unambiguous)**:
 
-- Tests: ~3-5 covering each branch (refactor passthrough, red→refactor
-  auto-advance, green→refactor auto-advance, invalid state error).
+In `_dispatch_tracks_concurrent`, when building worker argv, append the
+parent's flag values for every relevant flag (introspect via `argparse`
+namespace `ns`). Document explicit forwardable-flags list in helper
+docstring. Forwarding test: pass `--magi-threshold=GO --verification-retries=5`
+to parent + assert each worker subprocess receives those values (intercept
+via mock `subprocess.Popen` + assert args).
 
-- Document in plan template (writing-plans skill prompt extension):
-  subagents may invoke close-task directly without explicit
-  close-phase preflight; phase advance happens automatically when
-  verification was the most recent successful operation.
+Less brainstorming-debate than I-1/I-2; may merge into single Item.
+
+### 2.4 Item D Q3 OPTION A — close_task_cmd._preflight code-side enforcement (Pillar B HIGH VALUE)
+
+**Track**: pending Q1 partition decision.
+
+**Archivos**:
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (`_preflight` extension)
+- Modify: `skills/sbtdd/scripts/run_sbtdd.py` (argparse for `--skip-preflight`
+  emergency override)
+- New tests in `tests/test_close_task_cmd.py` (extend) — preflight enforcement
+  + override behavior
+
+**Empirical context (v1.0.4 iter-2 scope-trim Option D rationale)**:
+
+v1.0.4 attempted Q3 Option B (3-touchpoint doc-only enforcement: SKILL.md
++ CLAUDE.local.md.template + writing-plans extension + soft-warning
+tripwire). Loop 2 iter 1 surfaced 3-agent unanimous WARNING that doc-only
+fails (v1.0.2 single touchpoint failed; v1.0.3 dogfood divergence; v1.0.4
+multiplication doesn't address compliance). User selected Option D
+scope-trim per spec sec.6.1 G2 ladder; Item D entirely DEFERRED to v1.0.5
+LOCKED with Q3 OPTION A (code-side enforcement) commitment.
+
+**Implementation outline**:
+
+Extend `close_task_cmd._preflight` with new check:
+
+```python
+def _preflight(state: dict, project_root: Path | None = None) -> None:
+    # ... existing checks ...
+
+    # v1.0.5 Item D Q3 OPTION A: hard-block when phase advance gate bypassed
+    start_sha = state.get("phase_started_at_commit")
+    if start_sha:
+        subjects = _git_log_between(start_sha, project_root=project_root)
+        has_test = any(s.startswith("test:") for s in subjects)
+        has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
+        has_refactor = any(s.startswith("refactor:") for s in subjects)
+        if not (has_test and has_green and has_refactor):
+            raise PreconditionError(
+                f"Phase advance gate bypassed: commit chain since "
+                f"{start_sha} lacks test:/feat:|fix:/refactor: triplet. "
+                f"Per SBTDD INV-1 + INV-5..7, each task close requires "
+                f"close-phase invocation per Red/Green/Refactor phase. "
+                f"Operator emergency override: --skip-preflight (audit-logged)."
+            )
+```
+
+Plus `--skip-preflight` argparse flag for emergency operator override
+(audit-logged via stderr breadcrumb).
+
+**Acceptance criteria**:
+
+1. Integration test: synthesize plan + commit chain WITHOUT TDD triplet →
+   `close-task` raises `PreconditionError` with actionable message.
+2. Backward-compat test: synthesize plan + commit chain WITH canonical
+   triplet → `close-task` proceeds normally.
+3. Override test: `--skip-preflight` flag bypasses check + emits audit
+   breadcrumb.
+4. v1.0.5 own-cycle empirical validation: some intentional bypass tasks
+   verify hard-block fires; canonical close-phase tasks verify normal
+   flow.
+
+### 2.5 Item Pillar C.1 — Spec sec.8 stale risk-register sweep (Pillar C METHODOLOGY)
+
+**Track**: pending Q1 partition decision (likely methodology / orchestrator).
+
+**Archivos**:
+- Modify: `sbtdd/spec-behavior-base.md` (sec.8 risk register clean-sweep)
+- Modify: `sbtdd/spec-behavior.md` (post-brainstorming, normal flow updates)
+
+**Empirical context**:
+
+v1.0.4 cycle's iter-1 + iter-2 + iter-3 triage applied scope changes
+(Items A+B simplification dropped env-var/isatty heuristic; Item D
+deferred entirely; Path 3 architecture replaced Path 2). The original
+spec-behavior-base.md sec.8 risk register R1 + R-NEW1 + R5 still
+references eliminated v1.0.4 mechanisms (SBTDD_INTERACTIVE env var,
+Item D 3-touchpoint enforcement, etc.). v1.0.4 ship documented as
+"OBSOLETE" with strikethrough but text remains.
+
+**Implementation**: clean-sweep stale references in v1.0.5 spec-base
+upfront (this very document — applied during brainstorming sec.8 update).
+Document principle: when
+scope-trim or simplification eliminates a v1.0.X mechanism, the next
+cycle's spec-base sweeps the references rather than carrying strikethrough
+forward.
+
+### 2.6 Item Pillar C.2 — Plan archaeology trim methodology (Pillar C METHODOLOGY)
+
+**Track**: pending Q1 partition decision.
+
+**Archivos**:
+- Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules — add
+  archaeology trim ship-time procedure)
+- Modify: `templates/CLAUDE.local.md.template` (template guidance)
+- New tests/smoke: `tests/test_plan_archaeology_trim_pattern.py`
+
+**Empirical context (v1.0.4 ship Balthasar INFO #17)**:
+
+v1.0.4 plan reached ~2200 lines (vs ~600-800 line baseline of v1.0.3).
+Cause: iter-by-iter triage context preserved inline (iter-1 fixes,
+iter-2 surgical fixes + scope-trim, iter-3 polish, iter-5 Path 3
+re-implementation). v1.0.5 ship-time should collapse this iteration
+archaeology from plan body into CHANGELOG narrative.
+
+**Implementation outline**:
+
+Methodology pattern:
+1. At ship-time, extract iter-by-iter triage context from plan-tdd.md
+   into CHANGELOG `[N.N.N]` Process notes section.
+2. Trim plan-tdd.md to "active plan only" (current scope + tasks +
+   acceptance criteria; no iter-1/iter-2/iter-3 archaeology).
+3. Document procedure in `skills/sbtdd/SKILL.md` orchestrator rules
+   + `templates/CLAUDE.local.md.template`.
+4. Cross-artifact coherence test: plan-tdd.md byte size at ship <=
+   threshold (e.g., 1000 lines) OR plan-tdd-org.md kept as immutable
+   archaeology while plan-tdd.md = trimmed canonical.
+
+This is methodology + doc + smoke test — relatively low complexity.
+
+### 2.7 v1.0.5 own-cycle dogfood
+
+**Track**: orchestrator (post Pillar A + Pillar B + Pillar C ship).
+
+**Activities**:
+1. **Items A+B+C v1.0.5 dogfood via `--parallel`**: dispatch v1.0.5
+   own-cycle Track Alpha + Track Beta via `auto --parallel` (eats own
+   dogfood; first cycle to use `--parallel` for production work).
+2. **Item D Q3-A empirical validation**: some tasks intentionally bypass
+   close-phase to verify hard-block; rest follow canonical to verify
+   normal flow.
+3. **Pre-merge gate clean WITHOUT INV-0**: v1.0.5 goal = re-establish
+   pre-merge Loop 2 no-override streak from 1 cycle.
 
 ---
 
 ## 3. Restricciones y constraints duros
 
-Todos los invariantes INV-0 a INV-37 preservados. v1.0.4 NO propone
-nuevos invariantes (los items son additive: detection logic +
-dispatcher orchestration + state file convenience).
+Todos los invariantes INV-0 a INV-37 preservados. v1.0.5 NO propone
+nuevos invariantes (los items son mostly bug fixes + scope-trim follow-up).
 
-Critical durante implementacion v1.0.4:
+Critical durante implementacion v1.0.5:
 
 - **G1 binding HARD**: cap=3 sin INV-0 path en MAGI Checkpoint 2.
-  5-cycle no-override streak (v1.0.0+v1.0.1+v1.0.2+v1.0.3) — preserve.
+  6-cycle Checkpoint 2 no-override streak preserved. NO INV-0 override
+  in Checkpoint 2.
 - **G2 binding**: Loop 2 iter 3 verdict triggers scope-trim default.
-  v1.0.4 multi-pillar bundle (3 pillars) podria necesitar scope-trim
-  si Loop 2 hits structural findings — defer Pillar C (Item D) a
-  v1.0.5. Pillar A + Pillar B son hard-LOCKED.
-- **Iter-2 CRITICAL trigger preserved** per spec sec.6.1: if
-  Checkpoint 2 iter 2 still surfaces ANY CRITICAL, scope-trim
-  immediately (defer Pillar C first).
-- **Multi-pillar pero scope acotado** — 4 plan tasks (A+B coupled,
-  C, D) + dogfood activities. Pillar A real headless + 600s LOUD-FAST
-  is the cycle's primary CRITICAL deliverable.
-- **`/receiving-code-review` MUST be exercised end-to-end** post Item
-  A fix as empirical validation. v1.0.3 deferred this exercise; v1.0.4
-  cycle MUST exercise it during Loop 1 fix-finding triage step.
-- **Empirical validation requerida**:
-  - Activity D' v1.0.3 retry: `/sbtdd pre-merge` end-to-end
-    completion on Windows + cross-check artifacts produced + Loop 1
-    fix-finding triage doesn't hang.
-  - Activity E' v1.0.3 retry: `/sbtdd spec --resume-from-magi` true
-    end-to-end exercise.
-  - Parallel dispatcher dogfood: v1.0.4 own-cycle Track Alpha +
-    Track Beta dispatched via the new Item C dispatcher, not manual
-    Agent tool.
+  v1.0.5 multi-pillar bundle podria necesitar scope-trim si Loop 2 hits
+  structural findings — defer Pillar C (spec sweep + plan trim methodology)
+  a v1.0.6. Pillar A items son hard-LOCKED.
+- **Pre-merge Loop 2 streak re-establishment**: v1.0.4 broke via INV-0.
+  v1.0.5 goal = clean GO_WITH_CAVEATS full no-degraded WITHOUT INV-0.
+  If unable, escalate to user before applying INV-0 override (per
+  feedback memory `feedback_manual_synthesis_exceptional` discipline).
+- **`--parallel` empirical dogfood requerida** post Pillar A ship: v1.0.5
+  cycle MUST exercise own dogfood via `auto --parallel` to validate I-1+
+  I-2+I-3 fixes empirically.
 
 ### Stack y runtime
 
-Sin cambios vs v1.0.3:
+Sin cambios vs v1.0.4:
 - Python 3.9+, mypy --strict, cross-platform, stdlib-only en hot paths.
 - Dependencias externas runtime: git, tdd-guard, superpowers, magi
   (>= 2.2.x), claude CLI.
@@ -385,200 +510,180 @@ Sin cambios vs v1.0.3:
 - No force push a ramas compartidas (INV-13).
 - No commitear archivos con patrones de secretos (INV-14).
 - G1 binding cap=3 HARD para Checkpoint 2 (CHANGELOG `[1.0.0]`,
-  precedente cerrado v1.0.1+v1.0.2+v1.0.3 streak).
+  precedente cerrado v1.0.1+v1.0.2+v1.0.3+v1.0.4 streak; v1.0.5 preserves).
 
 ---
 
 ## 4. Funcionalidad requerida (SDD)
 
-(F-series continua desde F144 v1.0.3; v1.0.4 starts at F145.)
+(F-series continua desde F161 v1.0.4; v1.0.5 starts at F162.)
 
-### Item A — Real headless detection
+### Item I-1 — Worker audit-trail clobber
 
-**F145**. `superpowers_dispatch.invoke_skill` checks env var
-`SBTDD_HEADLESS=1` BEFORE subprocess spawn.
+**F162**. `auto_cmd._dispatch_tracks_concurrent` worker mode does NOT
+overwrite parent's `.claude/auto-run.json`.
 
-**F146**. `superpowers_dispatch.invoke_skill` checks
-`sys.stdin.isatty()` AND env var `SBTDD_INTERACTIVE` override BEFORE
-subprocess spawn.
+**F163**. Architectural choice (a/b/c per sec.2.1) implemented + documented.
 
-**F147**. `_SUBPROCESS_INCOMPATIBLE_SKILLS` set extended to include
-`receiving-code-review`.
+**F164**. Parent post-batch audit-run.json contains: original start_time
++ aggregate task counts + per-worker completion records.
 
-**F148**. Module docstring documents criteria: skill is incompatible
-iff requires multi-turn interactive dialogue.
+**F165**. INV-26 (audit-trail integrity) verified by integration test.
 
-**F149**. When headless detected AND skill in incompatible set, raise
-`PreconditionError` LOUD-FAST (before subprocess spawn).
+### Item I-2 — Plan checkbox lost-update race
 
-**F150**. `allow_interactive_skill=True` kwarg preserved as override
-(backward compat for v1.0.1 wrappers).
+**F166**. Concurrent workers calling `mark_and_advance` for disjoint task
+IDs produce deterministic plan state (all checkboxes flipped to `[x]`).
 
-### Item B — 600s subprocess hang LOUD-FAST fix (coupled with A)
+**F167**. Architectural choice (a/b/c per sec.2.2) implemented + documented.
 
-**F151**. PreconditionError message includes recovery options
-(`/sbtdd spec --resume-from-magi`, manual run_magi.py, SBTDD_INTERACTIVE
-env var, wrapper function override).
+**F168**. Race regression test using real `multiprocessing.Process` +
+shared barrier asserts all N flips visible (Windows-portable).
 
-**F152**. Per-skill recovery message tailored to skill class
-(spec-phase vs pre-merge-phase vs other).
+### Item I-3 — Worker CLI flag forwarding
 
-### Item C — Parallel task dispatcher
+**F169**. `_dispatch_tracks_concurrent` worker argv includes operator's
+relevant flag values: `--plugins-root`, `--magi-max-iterations`,
+`--magi-threshold`, `--verification-retries`, `--model-override`.
 
-**F153**. New module `skills/sbtdd/scripts/dag_parser.py` parses
-`### Task N` blocks from plan + extracts dependency declarations.
+**F170**. Forwardable-flags list documented in helper docstring.
 
-**F154**. New module `skills/sbtdd/scripts/parallel_dispatcher.py`
-identifies parallelizable batches via DAG antichain analysis +
-file surface collision detection.
+**F171**. Forwarding test asserts each worker subprocess receives parent's
+flag values (mock `subprocess.Popen` + assert args).
 
-**F155**. `auto_cmd` accepts `--parallel` flag (or `parallel: true`
-config); when set, dispatches batches via Agent tool concurrently.
+### Item D Q3 OPTION A — close_task_cmd._preflight enforcement
 
-**F156**. MAGI Loop 2 fires ONCE at end on cumulative diff (parallel
-mode) vs per-task (sequential mode preserved as default).
+**F172**. `close_task_cmd._preflight` raises `PreconditionError` when
+commit chain since `phase_started_at_commit` lacks test:/feat:|fix:/refactor:
+triplet.
 
-**F157**. Sequential default preserves v1.0.3 behavior exactly.
+**F173**. Error message provides operator-actionable guidance + cites
+`phase_started_at_commit` SHA + canonical recovery path (close-phase per
+phase from clean state).
 
-### Item D — State file phase auto-advance
+**F174**. `--skip-preflight` argparse flag bypasses check + emits stderr
+audit breadcrumb (operator emergency override).
 
-**F158**. `close_task_cmd._preflight` accepts `current_phase` in
-`{red, green, refactor}` when `last_verification_result == 'passed'`.
+**F175**. Backward-compat: normal close-phase + close-task flow with
+canonical TDD triplet proceeds without trigger.
 
-**F159**. Auto-advance writes `auto_advanced_from: <prior_phase>`
-field to state file for audit trail.
+### Pillar C.1 — Spec sec.8 stale risk-register sweep
 
-**F160**. Invalid `current_phase` values still raise
-`PreconditionError` per existing behavior.
+**F176**. `sbtdd/spec-behavior-base.md` sec.8 risk register sweeps
+references to eliminated v1.0.4 mechanisms (SBTDD_INTERACTIVE env var,
+Item D 3-touchpoint enforcement).
 
-**F161**. Plan template documentation updated: subagents may invoke
-close-task directly when verification passed, phase advance happens
-automatically.
+**F177**. v1.0.5 spec-behavior.md (post-brainstorming) reflects clean
+risk register without strikethrough carry-forward.
+
+### Pillar C.2 — Plan archaeology trim methodology
+
+**F178**. `skills/sbtdd/SKILL.md` documents ship-time plan archaeology
+trim procedure.
+
+**F179**. `templates/CLAUDE.local.md.template` includes archaeology trim
+guidance for destination projects.
+
+**F180**. `tests/test_plan_archaeology_trim_pattern.py` smoke test asserts
+SKILL.md + template both reference the procedure.
 
 ### Requerimientos no-funcionales (NF)
 
-**NF37**. `make verify` runtime <= 165s (v1.0.3 baseline 151s;
-v1.0.4 expected slight increase from ~25-40 nuevos tests + parallel
-dispatcher tests; soft-target <= 155s).
+**NF42**. `make verify` runtime <= 200s soft target / 220s hard
+(acknowledges v1.0.4 baseline 194s + new tests). v1.0.6 polish may reduce.
 
-**NF38**. v1.0.3 plans (with state file post-v1.0.3 schema) parse
-correctly; no migration required for v1.0.4. State file
-`auto_advanced_from` field is OPTIONAL (default None) for backward
-compat.
+**NF43**. v1.0.4 plans (with state file post-v1.0.4 schema) parse
+correctly; no migration required for v1.0.5.
 
-**NF39**. Per-module coverage threshold preserved at 88% (no
-regression below).
+**NF44**. Per-module coverage threshold preserved at 88% (no regression).
 
-**NF40**. Item A headless detection works on Windows + POSIX
-(detect via env var + isatty cross-platform).
+**NF45**. v1.0.5 own-cycle dogfood via `--parallel` empirical validation
+of I-1+I-2+I-3 fixes.
 
-**NF41**. Item C parallel dispatcher dogfood empirical validation
-during v1.0.4 own-cycle (eat own dogfood).
+**NF46**. v1.0.5 ship WITHOUT INV-0 override at pre-merge Loop 2
+(re-establish streak).
 
 ---
 
 ## 5. Scope exclusions
 
-Out-of-scope v1.0.4 (rolled forward a v1.0.5):
+Out-of-scope v1.0.5 (rolled forward a v1.0.6):
 
-- **Audit GAPs from v1.0.3** (L1.0.4-A through L1.0.4-D):
-  Trigger criteria informational, Carry-forward "Prior triage
-  context" block emit, Review summary artifact auto-emission,
-  Per-project setup checklist template thinness.
-- **v1.0.3 deferred Items C+D+E**: drift detector line-anchored
-  regex, spec-snapshot autoregen, close-task convention codification.
+- I-4 stale INV-22 docstring (cosmetic)
+- I-5 partition_by_collision DeprecationWarning CI handling
+- `_run_single_task_isolated` removal candidate
+- Real-world `--parallel` end-to-end dogfood validation (chicken-and-egg)
+- Audit GAPs L1.0.4-A through L1.0.4-D (v1.0.3 carry-forward)
+- `make verify` runtime polish below 165s NF-A target
 
-Out-of-scope v1.0.4+ (rolled forward a v1.0.5+):
+Out-of-scope v1.0.5+ (rolled forward a v1.0.6+):
 
-- `agreement_rate` field rename to `keep_rate` (schema bump).
-- `spec_lint` R3 promote to error severity.
-- Per-module coverage raise to 85% baseline for outliers.
-- `pytest-cov` proper dev dep registration.
-- INV-31 default flip dedicated cycle.
-- GitHub Actions CI workflow.
-- Group B options 1, 3, 4, 6, 7.
-- Migration tool real test (Feature I primer migration v1->v2).
-- AST-based dead-helper detector codification.
-- W8 Windows file-system retry-loop.
-- `_read_auto_run_audit` skeleton wiring.
-- Spec sec.7.1.3 G2 amendment.
-- `magi_cross_check` default-flip a `true`.
+All items inherited from v1.0.4 carry-forward (per CHANGELOG `[1.0.4]`
+Deferred sections + this document sec.1 "Out of scope v1.0.5+").
 
 ---
 
 ## 6. Criterios de aceptacion finales
 
-v1.0.4 ship-ready cuando:
+v1.0.5 ship-ready cuando:
 
-### 6.1 Functional Items A-D
+### 6.1 Functional Items I-1/I-2/I-3 + D Q3-A + C.1 + C.2
 
-- **F1**. F145-F150: real headless detection + recovery message +
-  set extension to include receiving-code-review + backward compat
-  for wrappers.
-- **F2**. F151-F152: PreconditionError messages with per-skill
-  recovery guidance.
-- **F3**. F153-F157: parallel dispatcher (DAG parser + antichain
-  identification + file surface collision detection + cumulative-diff
-  Loop 2).
-- **F4**. F158-F161: state file phase auto-advance + audit trail +
-  plan template documentation.
+- **F1**. F162-F165: I-1 worker audit-trail integrity (per architectural
+  choice) + INV-26 integration test.
+- **F2**. F166-F168: I-2 plan checkbox race (per architectural choice) +
+  multiprocessing race test.
+- **F3**. F169-F171: I-3 worker CLI flag forwarding + forwarding test.
+- **F4**. F172-F175: Item D Q3-A close_task_cmd._preflight enforcement +
+  --skip-preflight override + 4 acceptance tests.
+- **F5**. F176-F177: spec sec.8 stale risk-register clean-sweep.
+- **F6**. F178-F180: plan archaeology trim methodology documented +
+  smoke test.
 
 ### 6.2 No-functional
 
-- **NF-A**. `make verify` clean: pytest + ruff check + ruff format +
-  mypy --strict + coverage >= 88%, runtime <= 165s. Soft-target
-  <= 155s.
-- **NF-B**. Tests baseline 1105 + 1 skipped + ~25-40 nuevos =
-  ~1130-1145 final.
-- **NF-C**. Cross-platform (Windows + POSIX) — Item A headless
-  detection validated on both via env var + isatty.
-- **NF-D**. Author/Version/Date headers en archivos modificados/
-  nuevos.
-- **NF-E**. Zero modificacion a modulos frozen excepto los
-  enumerados: `superpowers_dispatch.py` (Item A+B),
-  `close_task_cmd.py` (Item D), nuevos modulos (`dag_parser.py`,
-  `parallel_dispatcher.py`), `auto_cmd.py` (Item C `--parallel`
-  flag wiring).
+- **NF-A**. `make verify` clean: pytest + ruff check + ruff format + mypy
+  --strict + coverage >= 88%, runtime <= 200s soft / 220s hard.
+- **NF-B**. Tests baseline 1226 + 1 skipped + ~25-40 nuevos =
+  ~1250-1265 final.
+- **NF-C**. Cross-platform (Windows + POSIX) — I-2 race test validated
+  on both via `multiprocessing.get_context("spawn")`.
+- **NF-D**. Author/Version/Date headers en archivos modificados/nuevos.
+- **NF-E**. Zero modificacion a modulos frozen excepto los enumerados.
 
 ### 6.3 Process
 
 - **P1**. MAGI Checkpoint 2 verdict >= `GO_WITH_CAVEATS` full per
-  INV-28. Iter cap=3 HARD per G1 binding; NO INV-0 path. 5-cycle
-  no-override streak preserved (becomes 6-cycle with v1.0.4 ship).
+  INV-28. Iter cap=3 HARD per G1 binding; NO INV-0 path. 6-cycle
+  Checkpoint 2 no-override streak preserved.
 - **P2**. Pre-merge Loop 1 clean-to-go + Loop 2 verdict >=
-  `GO_WITH_CAVEATS` full no-degraded. **`/sbtdd pre-merge`
-  end-to-end completion** without subprocess hang (Item A+B
-  validated empirically).
-- **P3**. CHANGELOG `[1.0.4]` entry written con secciones Added /
-  Changed / Process notes + Activity D' v1.0.3 retry findings +
-  Activity E' v1.0.3 retry findings + parallel dispatcher dogfood
-  observations.
-- **P4**. Version bump 1.0.3 -> 1.0.4 sync `plugin.json` +
+  `GO_WITH_CAVEATS` full no-degraded **WITHOUT INV-0 override**
+  (re-establish streak from 1 cycle post v1.0.4 break).
+- **P3**. CHANGELOG `[1.0.5]` entry written con secciones Added /
+  Changed / Process notes + Pillar A I-1+I-2+I-3 architectural choices
+  + Pillar B Item D Q3-A enforcement + Pillar C.1 sweep + Pillar C.2
+  methodology + dogfood findings.
+- **P4**. Version bump 1.0.4 -> 1.0.5 sync `plugin.json` +
   `marketplace.json`.
-- **P5**. Tag `v1.0.4` + push (con autorizacion explicita user).
-- **P6**. `/receiving-code-review` skill applied to every Loop 2
-  iter findings sin excepcion. **P6 IS POSSIBLE for the first time
-  via subprocess** post Item A+B fix.
-- **P7**. `/sbtdd spec --resume-from-magi` exercised end-to-end
-  during plan-approval phase (Activity E' retry from v1.0.3
-  deferral).
-- **P8**. `/sbtdd pre-merge` exercised end-to-end during pre-merge
-  phase (Activity D' retry from v1.0.3 partial completion).
-- **P9**. v1.0.4 own-cycle Track Alpha + Track Beta dispatched via
-  Item C parallel dispatcher (not manual Agent tool) — dogfood eat-own.
+- **P5**. Tag `v1.0.5` + push (con autorizacion explicita user).
+- **P6**. `/receiving-code-review` skill applied to every Loop 2 iter
+  findings sin excepcion.
+- **P7**. v1.0.5 own-cycle dogfood via `--parallel` empirically validates
+  I-1/I-2/I-3 fixes.
+- **P8**. Item D Q3-A empirical validation: intentional-bypass test cases
+  verify hard-block; canonical close-phase test cases verify normal flow.
 
 ### 6.4 Distribution
 
 - **D1**. Plugin instalable desde `BolivarTech/sbtdd-workflow`
   marketplace (`bolivartech-sbtdd`).
 - **D2**. Cross-artifact coherence tests actualizados (CHANGELOG,
-  CLAUDE.md, README, SKILL.md mention v1.0.4 ship + 4 plan tasks
-  across 3 pillars + dogfood activities).
-- **D3**. Nuevos modulos + flags documentados:
-  - `dag_parser.py` + `parallel_dispatcher.py` en README + SKILL.md.
-  - `--parallel` flag en `auto_cmd` documented.
-  - `SBTDD_HEADLESS` + `SBTDD_INTERACTIVE` env vars documented.
-  - Phase auto-advance behavior documented in plan template.
+  CLAUDE.md, README, SKILL.md mention v1.0.5 ship + 6 items + dogfood
+  observations).
+- **D3**. Documented:
+  - I-1/I-2/I-3 architectural choices in CHANGELOG + helper docstrings.
+  - Item D Q3-A `--skip-preflight` flag in run_sbtdd help + README.
+  - Plan archaeology trim procedure in SKILL.md + CLAUDE.local.md.template.
 
 ---
 
@@ -588,71 +693,50 @@ Runtime: ninguna nueva. Dev: ninguna nueva.
 
 ---
 
-## 8. Risk register v1.0.4
+## 8. Risk register v1.0.5
 
-- **R1**. Item A real headless detection may be too strict and reject
-  legitimate `claude -p` uses where the orchestrator IS in interactive
-  context but isatty() returns false (rare: piped script wrapping
-  claude CLI). Mitigation: `SBTDD_INTERACTIVE=1` env var override
-  documented + tested.
-- **R2**. Item A breaking behavior for callers that ignored the
-  v1.0.1 whitelist warning and used `allow_interactive_skill=True`
-  override liberally. Mitigation: backward compat preserved (override
-  still works); audit existing callsites via test_invoke_skill_callsites_audit.py
-  v1.0.2 meta-test (already enforces appropriate use).
-- **R3**. Item C parallel dispatcher DAG analysis may misclassify
-  tasks as parallel-safe when they have implicit dependencies (e.g.,
-  Task N reads file Task M creates). Mitigation: file surface
-  collision detection covers explicit `**Files:**` declarations;
-  implicit dependencies surfaced via empirical dogfood (parallel
-  dispatcher dogfood validates v1.0.4 own-cycle Track Alpha + Track
-  Beta).
-- **R4**. Item C cumulative-diff Loop 2 may consume more MAGI iter
-  budget if cumulative diff is large vs per-task. Mitigation: spec
-  sec.6.1 iter-2 CRITICAL trigger pre-stage + scope-trim ladder
-  fallback.
-- **R5**. Item D phase auto-advance may mask state file corruption
-  bugs that close-phase explicit invocation would catch. Mitigation:
-  audit trail field `auto_advanced_from` records the prior phase;
-  drift detector inspects this field and surfaces unexpected patterns
-  (e.g., red→refactor without intermediate green commit).
-- **R6**. Bundle scope multi-pillar (3 pillars + dogfood) aumenta
-  riesgo de Loop 2 non-convergence. Mitigation: G2 binding scope-trim
-  ladder defer Pillar C (Item D) a v1.0.5 si Loop 2 iter 3 no
-  converge.
-- **R7**. Item C parallel dispatcher own-cycle dogfood may surface
-  edge cases not covered by tests (concurrent state file write,
-  Agent tool race conditions). Mitigation: v1.0.4 cycle uses
-  sequential dispatch as fallback if parallel dogfood surfaces
-  blocking issue; document as v1.0.5+ refinement.
-- **R8**. Item A `_SUBPROCESS_INCOMPATIBLE_SKILLS` set extension
-  may surface MORE skills empirically incompatible (e.g.,
-  `verification-before-completion`?). Mitigation: audit doc in Item A
-  Step 1 documents criteria + current set; v1.0.4+ extends as
-  empirically observed.
+- **R1**. I-1 architectural choice (sidecar / stdout / single-writer) may
+  surface trade-offs not visible at brainstorming. Mitigation: brainstorming
+  Q1 evaluates 3 options; pick simplest correct.
+- **R2**. I-2 cross-process locking primitives differ POSIX vs Windows.
+  Mitigation: Option (b) parent-owns-flips eliminates locking entirely;
+  Option (c) per-worker scratch files cross-platform via os.replace.
+- **R3**. Item D Q3-A `_preflight` hard-block may surprise existing operators
+  in non-SBTDD workflows. Mitigation: `--skip-preflight` flag + clear error
+  message + audit breadcrumb. Defer broad rollout if v1.0.5 dogfood surfaces
+  issues.
+- **R4**. Plan archaeology trim methodology is doc + smoke; if methodology
+  pattern proves incomplete, v1.0.6 refinement.
+- **R5**. v1.0.5 own-cycle dogfood via `--parallel` may surface I-1/I-2/I-3
+  fix gaps not caught by tests. Mitigation: dogfood is non-blocking for ship
+  (acceptance via tests primarily; dogfood empirical is bonus); if dogfood
+  fails, document + roll forward to v1.0.6 patch.
+- **R6**. Pre-merge Loop 2 streak re-establish goal may not be achievable
+  if cycle surfaces fundamental architectural questions. Mitigation: G2
+  scope-trim ladder (defer Pillar C first, then Pillar B Item D); INV-0
+  remains available but escalated to user before application.
 
 ---
 
 ## 9. Referencias
 
 - Contrato autoritativo: `sbtdd/sbtdd-workflow-plugin-spec-base.md`.
-- v1.0.3 ship record: tag `v1.0.3` (commit `39a9c18`); merge
-  `0aeff7d` on `main`.
-- v1.0.2 ship record: tag `v1.0.2` (commit `80731e6`); merge
-  `3169767` on `main`.
-- v1.0.1 ship record: tag `v1.0.1` (commit `8fc0db4` on `main`).
-- v1.0.0 ship record: tag `v1.0.0` (commit `0992407` on `main`).
-- v1.0.3 LOCKED carry-forward to v1.0.4: ver CHANGELOG `[1.0.3]`
-  Process notes + Deferred (rolled to v1.0.4) section. CRITICAL
-  unblocking item: real headless detection.
-- v1.0.4 LOCKED memories:
-  - `project_v104_subprocess_headless_detection.md` (CRITICAL).
-  - `project_v104_parallel_task_dispatcher.md` (HIGH VALUE).
-- v1.0.5 deferred backlog: audit GAPs L1.0.4-A through L1.0.4-D from
-  v1.0.3 audit + Items C/D/E from v1.0.3 deferral. Bundle as v1.0.5
-  polish pillar per Balthasar v1.0.3 iter 3 INFO recommendation.
-- Branch: trabajo en `feature/v1.0.4-bundle` (branched off `main`
-  HEAD `0aeff7d` = v1.0.3 merge commit).
+- v1.0.4 ship record: tag `v1.0.4` (commit `87f14a3`); merge `b1c5262`
+  on `main`.
+- v1.0.3 ship record: tag `v1.0.3` (commit `39a9c18`); merge `0aeff7d`
+  on `main`.
+- v1.0.4 LOCKED carry-forward to v1.0.5 per CHANGELOG `[Unreleased]`
+  section (committed `6320124` + finalized in `[1.0.4]` section
+  committed `87f14a3`).
+- v1.0.5 LOCKED memories:
+  - `project_v105_parallel_correctness_locked.md` (CRITICAL —
+    I-1/I-2/I-3 details + acceptance criteria).
+  - `project_v104_shipped.md` (full v1.0.4 ship record + cycle metrics).
+- v1.0.6 deferred backlog: I-4 cosmetic + I-5 CI handling +
+  partition_by_collision deletion + real-world dogfood + audit GAPs +
+  make verify polish + all v1.0.4 carry-forward inherited items.
+- Branch: trabajo en `feature/v1.0.5-bundle` (branched off `main` HEAD
+  `b1c5262` = v1.0.4 merge commit).
 
 ---
 
@@ -662,52 +746,53 @@ Este archivo cumple INV-27 (cero matches uppercase placeholder
 word-boundary verificable con regex). Listo como input para
 `/brainstorming`.
 
-**Methodology v1.0.4 own-cycle**: per CLAUDE.local.md §1 Flujo de
-especificacion + v1.0.1+v1.0.2+v1.0.3 Process notes precedent,
-brainstorming se correra en sesion interactiva (esta sesion), NO via
-`claude -p` subprocess (consistencia con Finding A precedent — IRONIC
-since v1.0.4 ships the real headless detection that fixes this; but
-the v1.0.4 own-cycle itself ships before the fix lands so the
-workaround applies).
+**Methodology v1.0.5 own-cycle**: per CLAUDE.local.md sec.1 Flujo de
+especificacion + v1.0.4 Process notes precedent, brainstorming se correra
+en sesion interactiva (esta sesion) via Skill tool in-session. NO via
+`claude -p` subprocess (preserve consistency con v1.0.1+v1.0.2+v1.0.3
++v1.0.4 precedent — v1.0.4 Items A+B prevent subprocess-incompatible
+skills from spawning, but interactive Skill invocation in-session is the
+canonical path).
 
 **Hybrid methodology continued**: Opcion A manual `run_magi.py` for
-Checkpoint 2 dispatch per v1.0.2 + v1.0.3 precedent. Opcion B
-`/sbtdd spec --resume-from-magi` exercised AS Activity E' empirical
-validation during plan-approval phase (deferred from v1.0.3).
+Checkpoint 2 dispatch per v1.0.2+v1.0.3+v1.0.4 precedent.
+`/sbtdd spec --resume-from-magi` Activity E' validation may exercise
+v1.0.5 own-cycle (deferred from v1.0.3 + v1.0.4); chicken-and-egg now
+resolved per v1.0.4 Items A+B ship.
 
-Decisiones pendientes clave para brainstorming:
+Decisiones pendientes clave para brainstorming (Q1-Q5 estimated):
 
-1. **Subagent partition**: 4 plan items (A, B coupled with A; C; D)
-   + dogfood activities. Posibles particiones disjoint:
-   - **Single subagent sequential**: ~5-6 dias wall-time.
-   - **2-track parallel** (precedent v1.0.3): Track Alpha = A+B
-     coupled (real headless detection + LOUD-FAST messages); Track
-     Beta = C parallel dispatcher + D phase auto-advance.
-     Methodology activities orchestrator post Track-close.
-   - **3-track parallel** (riesgo overhead): Track Alpha = A+B,
-     Track Beta = C, Track Gamma = D. Higher coordination.
-   Brainstorming evalua basado en complejidad + Item C complexity
-   (parallel dispatcher likely ~2-3 days alone).
+1. **Subagent partition (Q1)**: 6 items (I-1, I-2, I-3, D Q3-A, C.1
+   sweep, C.2 methodology). Posibles particiones disjoint:
+   - **Single subagent sequential**: ~3-4 dias wall-time.
+   - **2-track parallel** (precedent v1.0.4): Track Alpha = I-1+I-2+I-3
+     coupled (worker correctness in auto_cmd.py + close_task_cmd.py);
+     Track Beta = D Q3-A + C.1 + C.2 (close_task_cmd.py preflight + spec
+     sweep + methodology). Risk: Track Alpha + Beta both touch
+     close_task_cmd.py — surface OVERLAP. Brainstorming evaluates partition.
+   - **3-track parallel**: Track Alpha = I-1+I-2+I-3 (auto_cmd.py worker
+     paths); Track Beta = D Q3-A (close_task_cmd.py preflight); Track
+     Gamma = C.1+C.2 (spec sweep + methodology docs). 100% disjoint
+     surfaces. Higher coordination overhead but safer.
+   - **`--parallel` self-dispatch dogfood**: dispatch v1.0.5 own-cycle
+     via `auto --parallel` (eats own dogfood). Requires Pillar A items
+     to land FIRST (chicken-and-egg) — methodology question.
 
-2. **Item C parallel dispatcher API surface**: subcommand vs flag.
-   `--parallel` flag on existing `/sbtdd auto` is simpler (no new
-   subcommand) but couples parallel dispatch to auto-mode. New
-   subcommand `/sbtdd parallel-dispatch` is cleaner separation but
-   adds plugin surface. Brainstorming chooses based on usage pattern.
+2. **I-1 architectural choice (Q2)**: option (a) sidecar / (b) stdout
+   signal / (c) single-writer-parent. Brainstorming evaluates.
 
-3. **Item D phase auto-advance Option A vs B**: Option A close-task
-   tolerates non-refactor phase; Option B mandate close-phase per
-   commit. Option A favored per spec-base (subagent ergonomics) but
-   Option B is more strict.
+3. **I-2 architectural choice (Q3)**: option (a) cross-process lock /
+   (b) parent-owns-flips / (c) per-worker scratch. Brainstorming
+   evaluates atomicity preservation vs simplicity.
 
-4. **Activity E' true exercise sequencing**: pre-Track-close (validate
-   --resume-from-magi works pre-impl) vs post-Track-close (validate
-   it works post-impl). v1.0.3 deferred entirely; v1.0.4 first
-   true exercise.
+4. **Item D Q3-A `--skip-preflight` flag scope (Q4)**: should override
+   bypass be (a) opt-in flag operators must pass / (b) env var
+   `SBTDD_SKIP_PREFLIGHT=1` / (c) both. Brainstorming evaluates UX.
 
-5. **MAGI Checkpoint 2 budget allocation**: bundle multi-pillar but
-   focused. Esperamos converger en 1-2 iters; iter 3 triggers G2
-   scope-trim default (defer Pillar C to v1.0.5 si needed).
+5. **MAGI Checkpoint 2 budget allocation (Q5)**: bundle multi-pillar.
+   Esperamos converger en 1-2 iters; iter 3 triggers G2 scope-trim
+   default. Defer Pillar C (sweep + methodology) a v1.0.6 first; then
+   Pillar B (Item D Q3-A); Pillar A I-1+I-2+I-3 hard-LOCKED.
 
-Brainstorming refinara estas decisiones basado en complejidad,
-risk, y empirical findings de v1.0.0+v1.0.1+v1.0.2+v1.0.3 precedents.
+Brainstorming refinara estas decisiones basado en complejidad, risk, y
+empirical findings de v1.0.0+v1.0.1+v1.0.2+v1.0.3+v1.0.4 precedents.

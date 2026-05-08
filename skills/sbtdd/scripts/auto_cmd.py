@@ -42,6 +42,7 @@ is "in resume; auto never needs it".
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import json
 import os
@@ -53,7 +54,8 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Callable, cast
+from types import MappingProxyType
+from typing import IO, Any, Callable, Mapping, cast
 
 import _plan_ops
 import close_task_cmd
@@ -1141,6 +1143,11 @@ def _build_run_sbtdd_argv(
     Centralising argv construction in a single helper means future
     callers can never forget the ``-u`` flag and break streaming.
 
+    v1.0.5 T2 Refactor: the per-script lookup now routes through the
+    shared :func:`_run_sbtdd_path` helper introduced for Item I-3 worker
+    flag forwarding so ``run_sbtdd.py`` resolution lives in exactly one
+    place.
+
     Args:
         subcommand: SBTDD subcommand name (``close-phase``, ``status``,
             etc.).
@@ -1150,7 +1157,7 @@ def _build_run_sbtdd_argv(
     Returns:
         ``[sys.executable, "-u", "<run_sbtdd.py>", subcommand, *extra_args]``.
     """
-    run_sbtdd = (Path(__file__).resolve().parent / "run_sbtdd.py").as_posix()
+    run_sbtdd = _run_sbtdd_path().as_posix()
     argv: list[str] = [sys.executable, "-u", run_sbtdd, subcommand]
     if extra_args:
         argv.extend(extra_args)
@@ -1252,6 +1259,242 @@ class AutoRunAudit:
             tasks_completed=_coerce_int(data.get("tasks_completed"), 0),
             error=(str(data["error"]) if data.get("error") is not None else None),
         )
+
+
+# ---------------------------------------------------------------------------
+# v1.0.5 Item I-1 -- per-worker sidecar audit-trail pattern (escenarios
+# I1-1..I1-6). Workers redirect their per-track audit data to deterministic
+# sidecar files; the parent merges the sidecars post-batch into the canonical
+# .claude/auto-run.json so concurrent worker writes never clobber the parent's
+# pre-dispatch record (INV-26 audit-trail integrity).
+# ---------------------------------------------------------------------------
+
+
+def _audit_sidecar_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
+    """Per-worker audit sidecar path.
+
+    v1.0.5 Item I-1: deterministic name per task-IDs hash. Each worker
+    writes its audit to its own sidecar; the parent post-batch merges all
+    sidecars into the canonical ``.claude/auto-run.json``.
+
+    Args:
+        task_ids: Sorted tuple of task IDs assigned to this worker.
+        project_root: Project root path.
+
+    Returns:
+        Path to the per-worker sidecar file.
+    """
+    digest = hashlib.sha1(",".join(task_ids).encode("utf-8")).hexdigest()[:12]
+    return project_root / ".claude" / f"auto-run-track-{digest}.json"
+
+
+#: v1.0.5 T3 Refactor: re-export the consolidated ``atomic_write_json``
+#: from ``state_file`` under the legacy private name so existing call
+#: sites + the I-1 escenarios I1-1..I1-6 keep importing
+#: ``auto_cmd._atomic_write_json`` byte-identically. The single
+#: implementation lives in :func:`state_file.atomic_write_json` per
+#: iter-2 WARNING fix.
+from state_file import atomic_write_json as _atomic_write_json  # noqa: E402
+
+
+def _write_audit(audit: dict[str, Any], project_root: Path, ns: argparse.Namespace) -> None:
+    """Write a v1.0.5-style audit record.
+
+    Worker mode (``--no-recursive`` + ``--task-ids``) redirects to a
+    per-worker sidecar (see :func:`_audit_sidecar_path`). Orchestrator
+    mode writes to the canonical ``.claude/auto-run.json`` directly.
+
+    Note: this helper is the v1.0.5 I-1 generic-dict writer used by
+    workers and the post-batch merge. It is distinct from the typed
+    :func:`_write_auto_run_audit` writer that persists
+    :class:`AutoRunAudit` instances during the orchestrator's own
+    Phase 5 audit summary.
+
+    Args:
+        audit: JSON-serialisable dict payload.
+        project_root: Project root.
+        ns: Parent or worker argparse namespace (read-only).
+    """
+    if getattr(ns, "no_recursive", False) and getattr(ns, "task_ids", None):
+        task_ids_tuple = tuple(sorted(ns.task_ids.split(",")))
+        audit_path = _audit_sidecar_path(task_ids_tuple, project_root)
+    else:
+        audit_path = project_root / ".claude" / "auto-run.json"
+    _atomic_write_json(audit_path, audit)
+
+
+def _merge_audit_sidecars(tracks: list[list[str]], project_root: Path) -> dict[str, Any]:
+    """Parent post-batch: merge per-worker sidecars into canonical audit.
+
+    v1.0.5 Item I-1: collects per-worker sidecar files (created by
+    workers during dispatch) and folds them into the canonical
+    ``.claude/auto-run.json``. Preserves the parent's pre-dispatch
+    record (e.g. ``start_time``, planned tasks) and adds:
+
+    * ``per_worker``: list of per-worker dicts (one entry per track).
+      A missing sidecar becomes a placeholder
+      ``{"status": "no_audit_data", ...}`` so the merge never fails
+      silently when a worker crashed before its sidecar write.
+    * ``aggregate_task_count``: sum of task IDs across all tracks.
+
+    Sidecar files are unlinked after their content has been folded in
+    so subsequent dispatches start clean.
+
+    Args:
+        tracks: List of dispatched track task-ID lists.
+        project_root: Project root.
+
+    Returns:
+        Merged audit dict.
+    """
+    canonical_path = project_root / ".claude" / "auto-run.json"
+    if canonical_path.exists():
+        try:
+            canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
+            if not isinstance(canonical, dict):
+                canonical = {}
+        except (OSError, json.JSONDecodeError):
+            canonical = {}
+    else:
+        canonical = {}
+
+    per_worker: list[dict[str, Any]] = []
+    for task_ids in tracks:
+        sidecar_path = _audit_sidecar_path(tuple(sorted(task_ids)), project_root)
+        if sidecar_path.exists():
+            try:
+                sidecar_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                sidecar_data = {
+                    "task_ids": list(task_ids),
+                    "status": "no_audit_data",
+                    "note": "Worker terminated before sidecar write",
+                }
+            else:
+                sidecar_path.unlink(missing_ok=True)
+            per_worker.append(sidecar_data)
+        else:
+            per_worker.append(
+                {
+                    "task_ids": list(task_ids),
+                    "status": "no_audit_data",
+                    "note": "Worker terminated before sidecar write",
+                }
+            )
+    canonical["per_worker"] = per_worker
+    canonical["aggregate_task_count"] = sum(len(tids) for tids in tracks)
+    return canonical
+
+
+def _reap_orphans(project_root: Path, dispatch_start_epoch: float) -> None:
+    """Clean stale per-worker sidecar/scratch files from a prior crashed run.
+
+    v1.0.5 iter-1 WARNING + iter-2 race-safety mtime guard: only reaps
+    files older than ``dispatch_start_epoch - 300s`` (5min margin). This
+    avoids clobbering sidecars/scratches from a CONCURRENT SBTDD instance
+    that started just before this dispatch (iter-2 caspar WARNING).
+    Concurrent instances are rare but possible (operator running parallel
+    ``--parallel`` jobs). Idempotent: safe to invoke multiple times.
+    """
+    claude_dir = project_root / ".claude"
+    if not claude_dir.exists():
+        return
+    cutoff = dispatch_start_epoch - 300.0  # 5min margin
+    for pattern in ("auto-run-track-*.json", "plan-scratch-*.md"):
+        for stale in claude_dir.glob(pattern):
+            try:
+                mtime = stale.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                # v1.0.5 Loop 2 iter-1 caspar WARNING fix: catch
+                # PermissionError on Windows when file is held open
+                # by another process (e.g., concurrent SBTDD instance
+                # past the mtime guard, or AV scanner). Skipping
+                # stale-but-locked files is safer than crashing the
+                # dispatcher; next reaper invocation may succeed.
+                try:
+                    stale.unlink(missing_ok=True)
+                except (PermissionError, OSError):
+                    continue
+
+
+# ---------------------------------------------------------------------------
+# v1.0.5 Item I-3 -- worker CLI flag forwarding (escenarios I3-1..I3-3).
+# Operator-supplied flags (--plugins-root, --magi-max-iterations,
+# --magi-threshold, --verification-retries, --model-override) propagate
+# from the parent argparse namespace to each worker subprocess argv so
+# concurrent dispatch honours operator intent end-to-end.
+# ---------------------------------------------------------------------------
+
+
+#: Maps argparse-namespace attribute names to their CLI flag names. Frozen
+#: at module load via :class:`MappingProxyType` so callers cannot mutate
+#: the forwarding contract at runtime. Keep in sync with the matching
+#: ``add_argument`` calls in :func:`_build_parser`.
+_FORWARDABLE_FLAGS: Mapping[str, str] = MappingProxyType(
+    {
+        "plugins_root": "--plugins-root",
+        "magi_max_iterations": "--magi-max-iterations",
+        "magi_threshold": "--magi-threshold",
+        "verification_retries": "--verification-retries",
+        "model_override": "--model-override",
+    }
+)
+
+
+def _run_sbtdd_path() -> Path:
+    """Return path to ``run_sbtdd.py`` entry point.
+
+    Centralises the per-script lookup so worker subprocess argv builders
+    do not duplicate the ``Path(__file__).resolve().parent`` boilerplate.
+    """
+    return Path(__file__).resolve().parent / "run_sbtdd.py"
+
+
+def _build_worker_argv(task_ids: list[str], ns: argparse.Namespace) -> list[str]:
+    """Build subprocess argv for a worker, forwarding parent's CLI flags.
+
+    v1.0.5 Item I-3: forwards :data:`_FORWARDABLE_FLAGS` values from the
+    parent's argparse namespace to the worker subprocess. Documented
+    forwardable list: ``--plugins-root``, ``--magi-max-iterations``,
+    ``--magi-threshold``, ``--verification-retries``,
+    ``--model-override``. Worker-mode markers ``--task-ids`` and
+    ``--no-recursive`` are always present so the worker stays on the
+    Path 3 worker code path (no recursive parallel dispatch).
+
+    Repeated flags (``--model-override`` is ``action='append'``) flatten
+    to one ``flag value`` pair per element in the parent list. ``None``
+    values (and empty lists) are omitted so the worker argparse parser
+    sees a clean argv.
+
+    Args:
+        task_ids: Task IDs assigned to this worker.
+        ns: Parent's argparse namespace.
+
+    Returns:
+        Worker argv list ready for :class:`subprocess.Popen`.
+    """
+    argv: list[str] = [
+        sys.executable,
+        str(_run_sbtdd_path()),
+        "auto",
+        "--task-ids",
+        ",".join(task_ids),
+        "--no-recursive",
+    ]
+    for ns_attr, cli_flag in _FORWARDABLE_FLAGS.items():
+        value = getattr(ns, ns_attr, None)
+        if value is None:
+            continue
+        # ``--model-override`` is ``action='append'``: namespace value is a
+        # list. Empty lists are equivalent to "flag never supplied" -- skip.
+        if isinstance(value, list):
+            for item in value:
+                argv.extend([cli_flag, str(item)])
+        else:
+            argv.extend([cli_flag, str(value)])
+    return argv
 
 
 # ---------------------------------------------------------------------------
@@ -1499,6 +1742,7 @@ def _dispatch_tracks_concurrent(
     tracks: list[list[str]],
     effective_workers: int,
     project_root: Path,
+    ns: argparse.Namespace | None = None,
 ) -> None:
     """Dispatch one subprocess worker per track concurrently (Path 3).
 
@@ -1533,6 +1777,11 @@ def _dispatch_tracks_concurrent(
         project_root: Project root passed to each child as
             ``--project-root``. Each child inherits the same plan +
             state-file paths.
+        ns: Parent's argparse namespace. v1.0.5 Item I-3 forwards a
+            documented set of operator flags (:data:`_FORWARDABLE_FLAGS`)
+            to every worker subprocess via :func:`_build_worker_argv`.
+            ``None`` (legacy callers / tests) preserves the v1.0.4
+            minimal-argv shape exactly.
 
     Raises:
         ConcurrentDispatchError: At least one worker exited non-zero
@@ -1544,8 +1793,17 @@ def _dispatch_tracks_concurrent(
     if effective_workers <= 0:
         # Defensive: caller already resolved; treat as serial fallback.
         effective_workers = 1
-    plugin_root = Path(__file__).resolve().parent
-    run_sbtdd_path = plugin_root / "run_sbtdd.py"
+    # v1.0.5 T2 Refactor: route through the shared helper so the legacy
+    # ``ns is None`` argv branch and ``_build_worker_argv`` agree on the
+    # same ``run_sbtdd.py`` path resolution.
+    run_sbtdd_path = _run_sbtdd_path()
+
+    # v1.0.5 iter-1 WARNING + iter-2 race-safety: reap stale per-worker
+    # sidecar/scratch files from a prior crashed run BEFORE new dispatch
+    # so workers never inherit contaminated state. mtime guard inside
+    # ``_reap_orphans`` avoids clobbering concurrent SBTDD instances.
+    dispatch_start_epoch = time.time()
+    _reap_orphans(project_root, dispatch_start_epoch=dispatch_start_epoch)
 
     # FIFO queue of tracks awaiting dispatch + collector for results.
     track_queue: queue.Queue[list[str]] = queue.Queue()
@@ -1561,17 +1819,30 @@ def _dispatch_tracks_concurrent(
             except queue.Empty:
                 return
             try:
-                task_ids_arg = ",".join(track)
-                argv = [
-                    sys.executable,
-                    str(run_sbtdd_path),
-                    "auto",
-                    "--project-root",
-                    str(project_root),
-                    "--task-ids",
-                    task_ids_arg,
-                    "--no-recursive",
-                ]
+                # v1.0.5 Item I-3: build worker argv via the shared helper
+                # so operator flags (--magi-threshold, --verification-retries,
+                # etc.) propagate from parent to worker. Legacy callers that
+                # do not supply ``ns`` get the minimal v1.0.4 argv shape
+                # extended only with --project-root.
+                if ns is not None:
+                    argv = _build_worker_argv(track, ns)
+                    # Inject --project-root so the worker keeps targeting the
+                    # parent's project (otherwise it falls back to cwd at
+                    # parse time, which Popen sets to project_root anyway,
+                    # but be explicit so worker logs / breadcrumbs name it).
+                    argv.extend(["--project-root", str(project_root)])
+                else:
+                    task_ids_arg = ",".join(track)
+                    argv = [
+                        sys.executable,
+                        str(run_sbtdd_path),
+                        "auto",
+                        "--project-root",
+                        str(project_root),
+                        "--task-ids",
+                        task_ids_arg,
+                        "--no-recursive",
+                    ]
                 proc = subprocess.Popen(
                     argv,
                     cwd=str(project_root),
@@ -1604,6 +1875,27 @@ def _dispatch_tracks_concurrent(
         th.start()
     for th in threads:
         th.join()
+
+    # v1.0.5 Item I-1: merge per-worker audit sidecars into the canonical
+    # ``.claude/auto-run.json``. Performed unconditionally (even when some
+    # workers failed) so the audit reflects whatever per-worker progress
+    # landed before the failure.
+    merged_audit = _merge_audit_sidecars(tracks, project_root)
+    _atomic_write_json(project_root / ".claude" / "auto-run.json", merged_audit)
+
+    # v1.0.5 Item I-2 (iter-1 CRITICAL #4 wiring): Track Alpha owns ALL
+    # ``_dispatch_tracks_concurrent`` post-batch hooks; Track Beta provides
+    # ``_merge_scratch_plans`` as a pure module-level function in
+    # close_task_cmd.py. Late import keeps the cross-track dependency
+    # runtime-only so module load of auto_cmd.py never depends on
+    # close_task_cmd's I-2 helper being present at the same revision.
+    # ``getattr`` fallback to a no-op preserves resilience while Track Beta
+    # T3 lands -- once Item I-2 ships the real helper is invoked.
+    import close_task_cmd as _ctc
+
+    _merge_scratch_plans = getattr(_ctc, "_merge_scratch_plans", None)
+    if _merge_scratch_plans is not None:
+        _merge_scratch_plans(tracks, project_root)
 
     if failures:
         details = "; ".join(f"track {tids} exit={rc}: {msg[:300]}" for tids, rc, msg in failures)
@@ -2929,8 +3221,17 @@ def _phase2_task_loop(
                                 spec_review_breadcrumb_emitted = True
                     # W1: delegate to public helper in close_task_cmd instead
                     # of duplicating the entire flip / commit chore / advance
-                    # sequence.
-                    current = close_task_cmd.mark_and_advance(current, root)
+                    # sequence. v1.0.5 I-2 widened the helper return type
+                    # to ``SessionState | None`` (worker mode returns None
+                    # because the parent owns post-batch advance); this
+                    # call site is the orchestrator path (no ``ns`` kwarg)
+                    # so the result is always a SessionState -- assert
+                    # for mypy + defensive tripwire.
+                    advanced = close_task_cmd.mark_and_advance(current, root)
+                    assert advanced is not None, (
+                        "orchestrator-path mark_and_advance must return SessionState"
+                    )
+                    current = advanced
                     tasks_completed += 1
                     # Feature D3 + D4: breadcrumb + progress AFTER
                     # mark_and_advance, BEFORE the first dispatch on the
@@ -3620,6 +3921,7 @@ def main(argv: list[str] | None = None) -> int:
                 tracks=tracks,
                 effective_workers=effective,
                 project_root=ns.project_root,
+                ns=ns,
             )
             # Reload state after workers mutated it; downstream phases
             # need the up-to-date view (current_phase should be "done"

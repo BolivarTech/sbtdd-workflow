@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -137,6 +138,65 @@ def load(path: Path | str) -> SessionState:
         return SessionState(**data)
     except TypeError as exc:
         raise StateFileError(f"state file schema mismatch: {exc}") from exc
+
+
+def atomic_write_json(path: Path, data: object) -> None:
+    """Atomic JSON write via ``tempfile.mkstemp`` + ``os.replace``.
+
+    v1.0.5 T3 Refactor (iter-2 WARNING fix): DRY-shared helper used by
+    ``auto_cmd._write_audit`` (per-worker sidecar pattern) and any
+    other module that needs a cross-platform atomic JSON write under
+    concurrent dispatch. ``tempfile.mkstemp`` ensures concurrent
+    writers in the same directory receive unique tmp names so they
+    never collide. ``os.replace`` is atomic on POSIX and Windows; on
+    failure the tmp file is cleaned up before re-raising so nothing
+    leaks.
+
+    Args:
+        path: Destination JSON path. Parent directory is created if
+            absent.
+        data: JSON-serialisable payload (dict, list, scalar, etc.).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_str = tempfile.mkstemp(suffix=".tmp", prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_str, path)
+    except Exception:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Atomic text write via ``tempfile.mkstemp`` + ``os.replace``.
+
+    v1.0.5 T3 Refactor (iter-2 WARNING fix): DRY-shared helper used by
+    ``close_task_cmd`` (per-worker scratch + main plan flip-merge) and
+    any other module that needs a cross-platform atomic text write.
+    Mirror of :func:`atomic_write_json` for text payloads. Same
+    collision-free tmp naming + atomic rename + tmp cleanup contract.
+
+    Args:
+        path: Destination text path. Parent directory is created if
+            absent.
+        text: UTF-8 string payload.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_str = tempfile.mkstemp(suffix=".tmp", prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_str, path)
+    except Exception:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
+        raise
 
 
 def save(state: SessionState, path: Path | str) -> None:
