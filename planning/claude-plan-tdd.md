@@ -130,7 +130,7 @@ Covers escenarios I1-1 through I1-5 from spec sec.4.1.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_auto_cmd.py`:
 
@@ -237,12 +237,12 @@ class TestPerWorkerSidecarAudit:
         assert len(merged["per_worker"]) == 2
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_auto_cmd.py::TestPerWorkerSidecarAudit -v`
 Expected: 5/5 FAIL with `AttributeError: module 'auto_cmd' has no attribute '_audit_sidecar_path'` (and same for `_merge_audit_sidecars`).
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -250,7 +250,7 @@ Expected: Red phase verify-clean confirms tests fail for the correct reason (mis
 
 #### Green Phase
 
-- [ ] **Step 4: Implement `_audit_sidecar_path` + `_write_audit` redirect + `_merge_audit_sidecars`**
+- [x] **Step 4: Implement `_audit_sidecar_path` + `_write_audit` redirect + `_merge_audit_sidecars`**
 
 Modify `skills/sbtdd/scripts/auto_cmd.py`. Add helpers:
 
@@ -342,7 +342,7 @@ def _merge_audit_sidecars(
 
 Confirm `import os`, `import json`, `import argparse`, `from pathlib import Path` are present at top of file.
 
-- [ ] **Step 5: Wire `_merge_audit_sidecars` AND `_merge_scratch_plans` into `_dispatch_tracks_concurrent` (iter-1 CRITICAL #4: Track Alpha owns ALL post-batch hooks) + `_reap_orphans` pre-flight (iter-1 WARNING fix)**
+- [x] **Step 5: Wire `_merge_audit_sidecars` AND `_merge_scratch_plans` into `_dispatch_tracks_concurrent` (iter-1 CRITICAL #4: Track Alpha owns ALL post-batch hooks) + `_reap_orphans` pre-flight (iter-1 WARNING fix)**
 
 Modify `_dispatch_tracks_concurrent` post-batch:
 
@@ -424,7 +424,7 @@ before Track Alpha T1 wiring step (within-track sequential per
 Track Alpha's I-1 sidecar-only step → I-3 forwarding → wiring
 via Step 5 final).
 
-- [ ] **Step 6: Run tests to verify PASS**
+- [x] **Step 6: Run tests to verify PASS**
 
 Run: `pytest tests/test_auto_cmd.py::TestPerWorkerSidecarAudit -v`
 Expected: 5/5 PASS + reaper test (escenario I1-6) passes.
@@ -432,7 +432,7 @@ Expected: 5/5 PASS + reaper test (escenario I1-6) passes.
 Run: `make verify`
 Expected: All checks green (pytest, ruff check, ruff format, mypy).
 
-- [ ] **Step 7: close-phase Green**
+- [x] **Step 7: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -440,22 +440,22 @@ Expected: Green phase verify-clean passes. Atomic `feat:` commit landed (e.g. `f
 
 #### Refactor Phase
 
-- [ ] **Step 8: Refactor — review for duplication / extract helpers if needed**
+- [x] **Step 8: Refactor — review for duplication / extract helpers if needed**
 
 If `_atomic_write_json` already existed in another module (e.g., `state_file.py`), import + use it instead of duplicating. Otherwise, leave the new helper in place. Document choice in commit message.
 
-- [ ] **Step 9: Run tests to verify still PASS**
+- [x] **Step 9: Run tests to verify still PASS**
 
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 10: close-phase Refactor**
+- [x] **Step 10: close-phase Refactor**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 Expected: `refactor:` commit landed (or `--allow-empty` if no actual refactor).
 
-- [ ] **Step 11: close-task**
+- [x] **Step 11: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
