@@ -45,8 +45,40 @@
 >   strengthened (real `multiprocessing.Process` + spawn context +
 >   Barrier-synchronized RMW + 50× repeat); DRY atomic-write
 >   acknowledged via Task 1 Step 8 / Task 3 Step 8 refactor pass.
+>
+> **Iter 2 Checkpoint 2 triage applied 2026-05-08** (verdict
+> GO_WITH_CAVEATS 3-0 with 6 CRITICAL — **iter-2 CRITICAL trigger
+> FIRES**; pre-staged response invoked). Plan deltas:
+> - **Pillar C (Track Gamma T5) DEFERRED to v1.0.6** per pre-staged
+>   G2 ladder. Plan now ships 4 plan tasks (T1+T2 Track Alpha,
+>   T3+T4 Track Beta) instead of 5.
+> - **Plan T3 Step 4 spec/plan drift FIXED** (iter-1 fix applied
+>   to spec but not plan code block — operator editing miss):
+>   plan T3 Step 4 implementation code rewritten verbatim from spec
+>   sec.2.2 step 3+4 with anchored `_flip_checkbox` (`_TASK_HEADER_RE`
+>   walker) + `_apply_flips_from_diff` (no `task_ids` param) +
+>   `_section_has_flipped` + `_iter_task_ids` helpers.
+> - **Track Alpha T1 → Track Beta T3 ordering hardened**: dropped
+>   "stub the import temporarily" fallback. Plan invariants block
+>   adds explicit subagent-dispatch-ordering constraint: Track Beta
+>   T3 MUST land BEFORE Track Alpha T1 Step 5 wiring step. T1
+>   Steps 1-4 + T2 can run parallel with Track Beta T3+T4.
+> - **Plan T3 Step 1 Red phase** extended with explicit test
+>   methods: `test_i2_3b_partial_worker_failure_no_fabrication` +
+>   `test_i2_5_anchored_flip_checkbox_respects_section_boundaries`.
+> - **Plan I2-4 race test**: explicit `for _ in range(50):` repeat
+>   wrapping multiprocessing barrier-synchronized RMW; assert no
+>   flip lost across all 50 iterations.
+> - **Plan T1 Step 8 + T3 Step 8** atomic-write DRY consolidation
+>   made UNCONDITIONAL: extract shared `_atomic_write_json` to
+>   `state_file.py`; both modules import from there.
+> - **`_reap_orphans` race-safety**: mtime/lock guard added — only
+>   reaps files older than dispatcher start time + 5min margin.
+> - **`_last_chore_task_close_sha` task-ID verification**: optional
+>   second-line check parses task-ID from chore subject; mismatch
+>   surfaces diagnostic info in PreconditionError.
 
-**Goal:** Ship v1.0.5 — close v1.0.4 LOCKED commitments documented in CHANGELOG `[Unreleased]` (I-1/I-2/I-3 production-grade `--parallel` correctness gaps) + ship Item D Q3 OPTION A code-side enforcement (replaces v1.0.4's scope-trimmed Q3 Option B doc-only attempt) + plan archaeology trim methodology pattern. 5 plan tasks across 3 parallel subagent tracks (cero file overlap); 3 mid-cycle methodology activities (production-grade `--parallel` integration test + Item D Q3-A empirical validation + pre-merge gate clean WITHOUT INV-0).
+**Goal:** Ship v1.0.5 — close v1.0.4 LOCKED commitments documented in CHANGELOG `[Unreleased]` (I-1/I-2/I-3 production-grade `--parallel` correctness gaps) + ship Item D Q3 OPTION A code-side enforcement (replaces v1.0.4's scope-trimmed Q3 Option B doc-only attempt). **Pillar C plan archaeology trim methodology DEFERRED to v1.0.6** per iter-2 Checkpoint 2 CRITICAL trigger (2026-05-08). **4 plan tasks across 2 parallel subagent tracks** (Alpha T1+T2; Beta T3→T4 sequential); 3 mid-cycle methodology activities (production-grade `--parallel` integration test + Item D Q3-A empirical validation + pre-merge gate clean WITHOUT INV-0).
 
 **Architecture:** 3-track parallel dispatch with disjoint surfaces. Track Alpha (auto_cmd.py only, 2 sequential tasks I-1 → I-3) implements per-worker sidecar audit-trail pattern + worker CLI flag forwarding. Track Beta (close_task_cmd.py + run_sbtdd.py argparse, 2 sequential tasks I-2 → D Q3-A) implements per-worker scratch plan flip-merge pattern + close_task_cmd._preflight HARD-BLOCK with --skip-preflight emergency override. Track Gamma (SKILL.md + template + smoke test, 1 task) implements plan archaeology trim methodology documentation (C.1 spec sweep already applied inline in spec-behavior.md sec.8). Manual orchestrator dispatch via Agent tool fan-out (NOT auto --parallel self-dispatch — chicken-and-egg avoidance per Q1 Option C).
 
@@ -62,6 +94,7 @@
 - **Phase close protocol (Q3 Option B v1.0.4 mandate, preserved + soon-to-be-enforced via Item D Q3-A)**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-phase` after each Red/Green/Refactor verify-clean. Manual `git commit` per phase BYPASSES the phase-advance + state-file update + verification gate; close-task v1.0.5 will HARD-BLOCK once Item D Q3-A lands (Track Beta Task 4).
 - **Task close protocol**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review` after Refactor close-phase. Use `--skip-spec-review` to bypass INV-31 spec-reviewer dispatch (~1-2 min/task overhead acceptable but not required for these infrastructure items).
 - **Track Beta sequential ordering MANDATORY**: Task 3 (I-2) lands FIRST. Task 4 (D Q3-A) lands AFTER Task 3 completes. Both modify `close_task_cmd.py` — within-track sequential coordination required.
+- **Cross-track dispatch-ordering invariant (iter-2 CRITICAL #4 hardening)**: Track Beta T3 MUST land in git BEFORE Track Alpha T1 Step 5 (the wiring step that imports `from close_task_cmd import _merge_scratch_plans`). Track Alpha T1 Steps 1-4 (sidecar pattern, no cross-track import) + T2 (flag forwarding) CAN run in parallel with Track Beta T3+T4. Orchestrator MUST sequence dispatch: dispatch Track Beta subagent FIRST + wait for T3 close commit → THEN dispatch Track Alpha subagent (which executes T1 Steps 1-4 → T2 → T1 Step 5 in order). The "stub temporarily and rebase" fallback is RETRACTED — too brittle, risks landing broken intermediate state.
 - INV-37 composite-signature tripwire preserved unchanged in all paths.
 - Item C v1.0.2 spec_lint gate (R1-R5) preserved unchanged.
 - v1.0.4 Items A+B membership-based subprocess gate preserved unchanged.
@@ -321,10 +354,12 @@ def _dispatch_tracks_concurrent(
     ns: argparse.Namespace,
 ) -> None:
     """... existing dispatch logic ..."""
-    # v1.0.5 iter-1 WARNING fix: reap orphan sidecar/scratch from prior
-    # crashed run BEFORE new dispatch (prevents stale data contamination
-    # of merge step). See escenario I1-6.
-    _reap_orphans(project_root)
+    # v1.0.5 iter-1 WARNING + iter-2 race-safety fix: reap orphan
+    # sidecar/scratch from prior crashed run BEFORE new dispatch
+    # (prevents stale data contamination). mtime guard avoids
+    # clobbering concurrent SBTDD instances. See escenario I1-6.
+    import time
+    _reap_orphans(project_root, dispatch_start_epoch=time.time())
 
     # ... existing thread-pool + Queue + Popen workers ...
     # ... wait all workers complete ...
@@ -340,18 +375,35 @@ def _dispatch_tracks_concurrent(
     _merge_scratch_plans(tracks, project_root)
 
 
-def _reap_orphans(project_root: Path) -> None:
-    """v1.0.5 iter-1 WARNING fix: clean stale per-worker sidecar/scratch
-    files from a prior crashed run before new dispatch. Idempotent.
+def _reap_orphans(project_root: Path, dispatch_start_epoch: float) -> None:
+    """v1.0.5 iter-1 WARNING + iter-2 race-safety fix: clean stale
+    per-worker sidecar/scratch files from a prior crashed run.
+
+    iter-2 race-safety mtime guard: only reaps files older than
+    dispatch_start_epoch - 300s (5min margin). This avoids clobbering
+    sidecars/scratches from a CONCURRENT SBTDD instance that started
+    just before this dispatch (iter-2 cas WARNING). Concurrent
+    instances are rare but possible (operator running parallel
+    `--parallel` jobs). Idempotent: safe to invoke multiple times.
     """
+    import time
+
     claude_dir = project_root / ".claude"
     if not claude_dir.exists():
         return
-    for stale in claude_dir.glob("auto-run-track-*.json"):
-        stale.unlink(missing_ok=True)
-    for stale in claude_dir.glob("plan-scratch-*.md"):
-        stale.unlink(missing_ok=True)
+    cutoff = dispatch_start_epoch - 300.0  # 5min margin
+    for pattern in ("auto-run-track-*.json", "plan-scratch-*.md"):
+        for stale in claude_dir.glob(pattern):
+            try:
+                mtime = stale.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                stale.unlink(missing_ok=True)
 ```
+
+Caller updates: `_dispatch_tracks_concurrent` invokes as
+`_reap_orphans(project_root, time.time())` at top of dispatch.
 
 **Architectural note (iter-1 CRITICAL #4 fix)**: original Q1
 "cero overlap" claim was function-level FALSE — both Track Alpha
@@ -711,9 +763,76 @@ class TestPerWorkerScratchPlan:
         assert not scratch_b.exists()
 
     def test_i2_4_real_multiprocessing_race_regression(self, tmp_path):
-        """I2-4: cross-process race regression test via multiprocessing.spawn."""
+        """I2-4: cross-process race regression test via multiprocessing.spawn.
+
+        v1.0.5 iter-2 WARNING fix: explicit `for _ in range(50):` repeat
+        loop wrapping the multiprocessing barrier-synchronized RMW.
+        Asserts no flip lost across all 50 iterations to amplify
+        race-window detection per spec sec.4.2 escenario I2-4.
+        """
         import multiprocessing
         from close_task_cmd import _scratch_plan_path, _merge_scratch_plans
+
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        main_plan_path = plan_dir / "claude-plan-tdd.md"
+        original_plan = (
+            "### Task 1\n- [ ] step\n\n### Task 2\n- [ ] step\n\n"
+            "### Task 3\n- [ ] step\n\n### Task 4\n- [ ] step\n"
+        )
+        (tmp_path / ".claude").mkdir()
+
+        ctx = multiprocessing.get_context("spawn")
+
+        for iteration in range(50):
+            # Reset main plan + cleanup any stale scratch from prior loop
+            main_plan_path.write_text(original_plan, encoding="utf-8")
+            for stale in (tmp_path / ".claude").glob("plan-scratch-*.md"):
+                stale.unlink(missing_ok=True)
+
+            barrier = ctx.Barrier(2)
+            procs = [
+                ctx.Process(
+                    target=_scratch_writer_worker,
+                    args=(str(tmp_path), ["1", "3"], barrier),
+                ),
+                ctx.Process(
+                    target=_scratch_writer_worker,
+                    args=(str(tmp_path), ["2", "4"], barrier),
+                ),
+            ]
+            for p in procs:
+                p.start()
+            for p in procs:
+                p.join(timeout=30)
+                assert p.exitcode == 0, (
+                    f"Iter {iteration}: worker exited {p.exitcode}"
+                )
+
+            _merge_scratch_plans([["1", "3"], ["2", "4"]], tmp_path)
+            merged_text = main_plan_path.read_text(encoding="utf-8")
+            # ALL 4 flips visible across all 50 iterations (no lost updates)
+            assert merged_text.count("[x]") == 4, (
+                f"Iter {iteration}: lost flip — got {merged_text.count('[x]')} "
+                f"[x] in merged plan, expected 4"
+            )
+
+    def test_i2_3b_partial_worker_failure_no_fabrication(self, tmp_path):
+        """I2-3b (iter-1 CRITICAL #1+#3 fix): worker crashes after flipping
+        T1 in scratch but BEFORE flipping T3 → main gets T1 only; T3
+        remains [ ] (no fabricated flip). Operator can resume via
+        `/sbtdd auto --task-ids T3` later.
+
+        Pre-fix behavior would have flipped both T1 AND T3 in main
+        regardless of scratch state. iter-1 CRITICAL #1+#3 fix derives
+        flips from scratch-vs-main diff.
+        """
+        from close_task_cmd import (
+            _scratch_plan_path,
+            _merge_scratch_plans,
+            _flip_checkbox,
+        )
+        import shutil
 
         plan_dir = tmp_path / "planning"
         plan_dir.mkdir()
@@ -725,30 +844,61 @@ class TestPerWorkerScratchPlan:
         )
         (tmp_path / ".claude").mkdir()
 
-        ctx = multiprocessing.get_context("spawn")
-        barrier = ctx.Barrier(2)
-        # Spawn 2 worker processes that flip disjoint task IDs concurrently
-        procs = [
-            ctx.Process(
-                target=_scratch_writer_worker,
-                args=(str(tmp_path), ["1", "3"], barrier),
-            ),
-            ctx.Process(
-                target=_scratch_writer_worker,
-                args=(str(tmp_path), ["2", "4"], barrier),
-            ),
-        ]
-        for p in procs:
-            p.start()
-        for p in procs:
-            p.join(timeout=30)
-            assert p.exitcode == 0, f"Worker exited {p.exitcode}"
+        # Simulate worker A (assigned [1, 3]) that crashed after flipping
+        # T1 in scratch but BEFORE flipping T3:
+        scratch_a = _scratch_plan_path(("1", "3"), tmp_path)
+        shutil.copy2(main_plan, scratch_a)
+        text = scratch_a.read_text(encoding="utf-8")
+        text = _flip_checkbox(text, "1")  # T1 flipped, T3 NOT flipped
+        scratch_a.write_text(text, encoding="utf-8")
 
-        # Parent post-batch merge
+        # Worker B (assigned [2, 4]) completed normally:
+        scratch_b = _scratch_plan_path(("2", "4"), tmp_path)
+        shutil.copy2(main_plan, scratch_b)
+        text = scratch_b.read_text(encoding="utf-8")
+        text = _flip_checkbox(text, "2")
+        text = _flip_checkbox(text, "4")
+        scratch_b.write_text(text, encoding="utf-8")
+
+        # Parent merge — must derive flips from scratch-vs-main diff
         _merge_scratch_plans([["1", "3"], ["2", "4"]], tmp_path)
         merged_text = main_plan.read_text(encoding="utf-8")
-        # ALL 4 flips visible (no lost updates)
-        assert merged_text.count("[x]") == 4
+        # T1 flipped (scratch_a had [x]); T3 NOT flipped (scratch_a [ ]);
+        # T2 flipped; T4 flipped → exactly 3 [x], NOT 4
+        assert merged_text.count("[x]") == 3, (
+            f"Expected 3 flips (T1+T2+T4); got {merged_text.count('[x]')}. "
+            "Pre-fix bug would fabricate T3 flip."
+        )
+        # T3 specifically must remain [ ]
+        from close_task_cmd import _section_has_flipped
+        assert not _section_has_flipped(merged_text, "3"), (
+            "T3 was fabricated as flipped — iter-1 CRITICAL #1+#3 regression"
+        )
+
+    def test_i2_5_anchored_flip_checkbox_respects_section_boundaries(self, tmp_path):
+        """I2-5 (iter-1 CRITICAL #2 fix): anchored regex bounds flips to
+        current task's section. Pre-fix unanchored regex with re.DOTALL
+        could match a [ ] from a LATER task when current task has no [ ].
+        """
+        from close_task_cmd import _flip_checkbox, _section_has_flipped
+
+        # Plan: Task 3 has NO [ ] checkbox; Task 4 has [ ]
+        plan_text = (
+            "### Task 3\nThe operator already removed the checkbox.\n\n"
+            "### Task 4\n- [ ] step\n"
+        )
+
+        # Flip T3 — pre-fix would match Task 4's [ ] across the boundary
+        result = _flip_checkbox(plan_text, "3")
+
+        # Anchored impl: T3 has no [ ] → result unchanged (idempotent guard)
+        assert result == plan_text, (
+            "Pre-fix regex would have flipped Task 4's [ ] across boundary"
+        )
+        # T4's [ ] still intact:
+        assert not _section_has_flipped(result, "4"), (
+            "T4 boundary violated — iter-1 CRITICAL #2 regression"
+        )
 
 
 def _scratch_writer_worker(project_root_str: str, task_ids: list[str], barrier) -> None:
@@ -813,43 +963,121 @@ def _atomic_write(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def _flip_checkbox(plan_text: str, task_id: str) -> str:
-    """Flip first [ ] checkbox under '### Task <id>' header to [x]."""
-    import re
-    pattern = re.compile(rf"(### Task {re.escape(task_id)}.*?)(- \[ \])", re.DOTALL)
-    return pattern.sub(r"\1- [x]", plan_text, count=1)
+import re
+
+# v1.0.5 iter-1 CRITICAL #2 fix: anchored regex walker.
+_TASK_HEADER_RE = re.compile(r"^### Task ", re.MULTILINE)
 
 
-def _apply_flips_for_task_ids(main_text: str, scratch_text: str, task_ids: list[str]) -> str:
-    """Apply scratch's flips for task_ids into main text.
+def _iter_task_ids(plan_text: str) -> list[str]:
+    """Yield task IDs in plan order.
 
-    v1.0.5 Item I-2: collects [ ] → [x] flips from scratch for the
-    specified task_ids, applies to main. Disjoint task IDs guarantee
-    no flip conflict.
+    v1.0.5 iter-1 helper: parses `### Task <id>` headers + extracts the
+    ID token (first whitespace-bounded word after "### Task ").
     """
-    for tid in task_ids:
-        # If scratch has [x] under "### Task <tid>" but main has [ ], flip in main
-        # (Simplest impl: directly flip first [ ] under header in main)
-        main_text = _flip_checkbox(main_text, tid)
-    return main_text
+    ids: list[str] = []
+    header_iter = re.finditer(r"^### Task (\S+)", plan_text, re.MULTILINE)
+    for m in header_iter:
+        ids.append(m.group(1).rstrip(":"))
+    return ids
+
+
+def _section_bounds(plan_text: str, task_id: str) -> tuple[int, int] | None:
+    """Return (section_start, section_end) char offsets for the task's
+    section. Section start = end of `### Task <id>` header line; end =
+    start of next `### Task ` header (or end-of-file). Returns None if
+    task not found.
+
+    v1.0.5 iter-1 CRITICAL #2 fix: bounds search to current task's
+    section so flips never cross task boundaries.
+    """
+    header_re = re.compile(rf"^### Task {re.escape(task_id)}\b", re.MULTILINE)
+    header_match = header_re.search(plan_text)
+    if header_match is None:
+        return None
+    section_start = header_match.end()
+    next_header = _TASK_HEADER_RE.search(plan_text, section_start)
+    section_end = next_header.start() if next_header else len(plan_text)
+    return section_start, section_end
+
+
+def _section_has_flipped(plan_text: str, task_id: str) -> bool:
+    """True iff the task section contains '- [x]' (flipped state).
+
+    v1.0.5 iter-1 helper: bounded section extraction identical to
+    `_flip_checkbox` so 'has flipped' check uses the same task-section
+    window.
+    """
+    bounds = _section_bounds(plan_text, task_id)
+    if bounds is None:
+        return False
+    section_start, section_end = bounds
+    return "- [x]" in plan_text[section_start:section_end]
+
+
+def _flip_checkbox(plan_text: str, task_id: str) -> str:
+    """Flip first `- [ ]` checkbox in task's section to `- [x]`.
+
+    v1.0.5 iter-1 CRITICAL #2 fix: regex anchored to current task's
+    section bounded by next `### Task ` header (or EOF). Prevents the
+    pre-fix `(### Task {tid}.*?)(- \\[ \\])` with `re.DOTALL` from
+    matching a `[ ]` checkbox belonging to a LATER task when the
+    current task has no `[ ]` of its own. Idempotent: returns plan_text
+    unchanged if section has no `- [ ]` (already flipped or no
+    checkbox).
+    """
+    bounds = _section_bounds(plan_text, task_id)
+    if bounds is None:
+        raise ValueError(f"Task {task_id} not found in plan")
+    section_start, section_end = bounds
+    section = plan_text[section_start:section_end]
+    flipped_section = section.replace("- [ ]", "- [x]", 1)
+    if flipped_section == section:
+        return plan_text  # idempotent: already flipped or no checkbox
+    return plan_text[:section_start] + flipped_section + plan_text[section_end:]
+
+
+def _apply_flips_from_diff(main_text: str, scratch_text: str) -> str:
+    """Apply only the `[ ]→[x]` transitions present in scratch relative
+    to main. Iterates per-task-section using `_iter_task_ids`; flips a
+    main checkbox only when the same task section in scratch has the
+    `[x]` state.
+
+    v1.0.5 iter-1 CRITICAL #1+#3 fix: replaces the prior
+    `_apply_flips_for_task_ids(main, scratch, task_ids)` design which
+    ignored `scratch_text` and unconditionally flipped every task_id
+    in main, fabricating false-positive flips when workers crashed
+    before scratch-write.
+    """
+    result = main_text
+    for task_id in _iter_task_ids(scratch_text):
+        if _section_has_flipped(scratch_text, task_id) and \
+           not _section_has_flipped(result, task_id):
+            result = _flip_checkbox(result, task_id)
+    return result
 
 
 def _merge_scratch_plans(tracks: list[list[str]], project_root: Path) -> None:
-    """Parent post-batch: merge per-worker scratch flips into main plan.
+    """Parent post-batch: merge per-worker scratch plans into main.
 
-    v1.0.5 Item I-2: each worker's scratch contains flips for ITS task IDs.
-    Workers have disjoint task IDs (per partition_by_tracks invariant).
-    Therefore merge = collect flips from each scratch + apply to main.
-    No 3-way conflict possible. Cleans up scratch files post-merge.
+    v1.0.5 iter-1 CRITICAL #1+#3 fix: flips derived from
+    scratch-vs-main diff via `_apply_flips_from_diff`, NOT from
+    `task_ids` parameter. If a worker crashed before flipping its
+    task, scratch will lack the flip and main is left unchanged for
+    that task — no fabrication of false-positive checkbox state.
+
+    Workers have disjoint task IDs (per partition_by_tracks invariant);
+    therefore merge = collect flips from each scratch by direct diff +
+    apply to main. Cleans up scratch files post-merge.
     """
     main_path = project_root / "planning" / "claude-plan-tdd.md"
     main_text = main_path.read_text(encoding="utf-8")
     for task_ids in tracks:
         scratch_path = _scratch_plan_path(tuple(sorted(task_ids)), project_root)
         if not scratch_path.exists():
-            continue  # worker didn't flip any (early failure)
+            continue  # worker didn't write scratch (early failure)
         scratch_text = scratch_path.read_text(encoding="utf-8")
-        main_text = _apply_flips_for_task_ids(main_text, scratch_text, task_ids)
+        main_text = _apply_flips_from_diff(main_text, scratch_text)
         scratch_path.unlink(missing_ok=True)
     _atomic_write(main_path, main_text)
 
@@ -922,9 +1150,63 @@ Expected: `feat:` commit landed (e.g. `feat: per-worker scratch plan flip-merge 
 
 #### Refactor Phase
 
-- [ ] **Step 8: Refactor — confirm `_atomic_write` consistent across modules**
+- [ ] **Step 8: Refactor — DRY-consolidate `_atomic_write_json` to `state_file.py` (UNCONDITIONAL per iter-2 WARNING fix)**
 
-If `_atomic_write_json` (auto_cmd) + `_atomic_write` (close_task_cmd) duplicate logic, consider extracting to shared helper. Likely YAGNI; skip if minimal duplication.
+iter-2 WARNING (mel + bal): atomic-write helpers duplicated across `auto_cmd.py` + `close_task_cmd.py` + temp-file naming collision under concurrent writers. Pre-fix design said "Likely YAGNI; skip if minimal duplication" — RETRACTED. iter-2 mandates unconditional consolidation.
+
+Modify `skills/sbtdd/scripts/state_file.py` — add module-level shared helpers (preserve existing v0.5.0 atomic-write pattern):
+
+```python
+import json
+import os
+import tempfile
+from pathlib import Path
+
+
+def atomic_write_json(path: Path, data: object) -> None:
+    """Atomic JSON write via tempfile.mkstemp + os.replace (DRY shared
+    across auto_cmd + close_task_cmd per v1.0.5 iter-2 WARNING fix).
+
+    Uses tempfile.mkstemp so concurrent writers in same directory get
+    unique temp names (no collision risk).
+    """
+    fd, tmp_str = tempfile.mkstemp(
+        suffix=".tmp", prefix=path.name + ".", dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_str, path)
+    except Exception:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Atomic text write — mirror of atomic_write_json for plan/scratch
+    files. Same temp-file collision avoidance via tempfile.mkstemp.
+    """
+    fd, tmp_str = tempfile.mkstemp(
+        suffix=".tmp", prefix=path.name + ".", dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_str, path)
+    except Exception:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
+        raise
+```
+
+Then in `close_task_cmd.py`: replace local `_atomic_write` definition with `from state_file import atomic_write_text as _atomic_write`. Track Alpha T1 Step 8 does the same for `_atomic_write_json`.
+
+Run: `make verify` — expected clean. Commit `refactor:` (e.g., `refactor: DRY-consolidate atomic_write_{json,text} to state_file per v1.0.5 iter-2`).
 
 - [ ] **Step 9: close-phase Refactor + Step 10: close-task**
 
@@ -1239,193 +1521,42 @@ If `_git_log_between` (or equivalent) already exists in another module, consolid
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
-Expected: Task 4 closed. State file advances `current_task_id: 4 → 5`.
+Expected: Task 4 closed. State file `current_phase: "done"`, `current_task_id: null` (T5 deferred to v1.0.6 per iter-2 CRITICAL trigger; T4 is now last task in v1.0.5).
 
 ---
 
-## Track Gamma — C.2 plan archaeology trim methodology (Subagent #3, single task T5)
+## Track Gamma — DEFERRED to v1.0.6
 
-**Owner**: Subagent #3 (lightweight; could be orchestrator in-session).
-**Surfaces** (cero overlap):
-- Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules — add ship-time archaeology trim procedure)
-- Modify: `templates/CLAUDE.local.md.template` (template guidance)
-- Create: `tests/test_plan_archaeology_trim_pattern.py`
+**Status**: **DEFERRED to v1.0.6** per iter-2 Checkpoint 2 CRITICAL
+trigger pre-staged response (2026-05-08, user-authorized). v1.0.5
+ships only Track Alpha + Track Beta. v1.0.6 LOCKED commitment for
+Track Gamma C.2 methodology.
 
-**Wall-time estimated**: ~0.5 day.
+**Background**: iter 2 verdict GO_WITH_CAVEATS (3-0) surfaced 6
+CRITICAL findings. All 3 agents independently recommended deferring
+Pillar C per pre-staged G2 ladder (Bal confidence drop 72→68% on
+bundle-width concern). Spec sec.6.1 iter-2 CRITICAL trigger fired;
+Pillar A (I-1+I-2+I-3) remains hard-LOCKED + Pillar B (D Q3-A)
+preserved.
 
-**Note**: C.1 (spec sec.8 stale risk-register sweep) was APPLIED INLINE in `sbtdd/spec-behavior.md` during brainstorming. No Track Gamma work needed for sweep itself.
-
-### Task 5: Item C.2 — Plan archaeology trim methodology + smoke test
-
-**Files:**
-- Create: `tests/test_plan_archaeology_trim_pattern.py`
-- Modify: `skills/sbtdd/SKILL.md`
-- Modify: `templates/CLAUDE.local.md.template`
-
-Covers escenarios C2-1 through C2-3 from spec sec.4.5.
-
-#### Red Phase
-
-- [ ] **Step 1: Write the failing smoke test**
-
-Create `tests/test_plan_archaeology_trim_pattern.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-08
-"""v1.0.5 Item C.2 — plan archaeology trim methodology doc-coherence smoke test.
-
-Covers escenarios C2-1 through C2-3 from spec sec.4.5. Pattern follows
-v1.0.4 doc-only smoke tests (e.g., callsite audit pattern).
-"""
-
-from __future__ import annotations
-
-import re
-from pathlib import Path
-
-import pytest
-
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_c2_1_skill_md_documents_ship_time_trim_procedure():
-    """C2-1: SKILL.md contains ship-time archaeology trim procedure."""
-    skill_md = _REPO_ROOT / "skills" / "sbtdd" / "SKILL.md"
-    text = skill_md.read_text(encoding="utf-8")
-    # Mandate text must reference plan archaeology trim ship-time procedure
-    assert re.search(r"plan\s+archaeology\s+trim", text, re.IGNORECASE), (
-        "SKILL.md must reference 'plan archaeology trim' methodology "
-        "(v1.0.5 Item C.2 mandate)."
-    )
-    # Procedure must mention CHANGELOG Process notes section
-    assert "CHANGELOG" in text and "Process notes" in text, (
-        "SKILL.md must document extraction of iter-by-iter triage from "
-        "plan-tdd.md into CHANGELOG Process notes section."
-    )
-
-
-def test_c2_2_template_references_archaeology_trim():
-    """C2-2: CLAUDE.local.md.template references archaeology trim procedure."""
-    template = _REPO_ROOT / "templates" / "CLAUDE.local.md.template"
-    text = template.read_text(encoding="utf-8")
-    assert re.search(r"plan\s+archaeology\s+trim", text, re.IGNORECASE), (
-        "CLAUDE.local.md.template must reference 'plan archaeology trim' "
-        "methodology + cross-link to SKILL.md authoritative version."
-    )
-
-
-def test_c2_3_cross_artifact_reference_consistency():
-    """C2-3: SKILL.md AND template both contain procedure reference."""
-    skill_md = _REPO_ROOT / "skills" / "sbtdd" / "SKILL.md"
-    template = _REPO_ROOT / "templates" / "CLAUDE.local.md.template"
-    skill_text = skill_md.read_text(encoding="utf-8").lower()
-    template_text = template.read_text(encoding="utf-8").lower()
-    assert "plan archaeology trim" in skill_text
-    assert "plan archaeology trim" in template_text
-```
-
-- [ ] **Step 2: Run tests to verify FAIL**
-
-Run: `pytest tests/test_plan_archaeology_trim_pattern.py -v`
-Expected: 3/3 FAIL — SKILL.md + template don't yet contain "plan archaeology trim" reference.
-
-- [ ] **Step 3: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Green Phase
-
-- [ ] **Step 4: Update `skills/sbtdd/SKILL.md` with archaeology trim procedure**
-
-Append (or insert into appropriate section) in `skills/sbtdd/SKILL.md`:
-
-```markdown
-### v1.0.5 plan archaeology trim methodology (Item C.2)
-
-At v1.0.X ship time, the orchestrator MUST extract iter-by-iter triage
-context from `planning/claude-plan-tdd.md` into the corresponding
-CHANGELOG `[N.N.N]` "Process notes" section. The active plan should
-be trimmed to "active plan only" — current scope + tasks +
-acceptance criteria; no iter-1/iter-2/iter-3 archaeology inline.
-
-**Procedure**:
-
-1. At ship-time, identify all iter-by-iter triage / mini-cycle context
-   embedded in `planning/claude-plan-tdd.md`.
-2. Extract this content into the CHANGELOG `[N.N.N]` Process notes
-   section (preserves history in the canonical immutable record).
-3. Trim `planning/claude-plan-tdd.md` to active plan only — scope +
-   tasks + acceptance criteria; iter archaeology removed.
-4. Optionally keep `planning/claude-plan-tdd-org.md` as immutable
-   archaeology while trimmed `planning/claude-plan-tdd.md` becomes
-   the canonical active plan (precedent already established).
-
-**Rationale (Balthasar v1.0.4 iter-6b INFO #17)**: plan size
-disproportionate to code delta accumulates maintenance debt. Iter
-archaeology in CHANGELOG provides forensics; active plan stays
-focused on what's shipping.
-```
-
-- [ ] **Step 5: Update `templates/CLAUDE.local.md.template`**
-
-Append (or insert into appropriate section) in `templates/CLAUDE.local.md.template`:
-
-```markdown
-### Plan archaeology trim ship-time procedure (v1.0.5 Item C.2)
-
-At v1.0.X ship time, extract iter-by-iter triage context from your
-project's `planning/claude-plan-tdd.md` into CHANGELOG `[N.N.N]`
-Process notes section. Trim plan-tdd.md to active plan only.
-
-See `skills/sbtdd/SKILL.md` for authoritative procedure documentation.
-```
-
-- [ ] **Step 6: Run tests to verify PASS**
-
-Run: `pytest tests/test_plan_archaeology_trim_pattern.py -v`
-Expected: 3/3 PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [ ] **Step 7: close-phase Green**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-Expected: `docs:` commit landed (e.g. `docs: plan archaeology trim methodology for v1.0.5 Item C.2`).
-
-#### Refactor Phase
-
-- [ ] **Step 8: Refactor — verify cross-artifact consistency**
-
-Re-read SKILL.md + template snippets to ensure procedure description
-is consistent. Adjust wording if needed.
-
-- [ ] **Step 9: close-phase Refactor + Step 10: close-task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: Task 5 closed. State file `current_phase: "done"`,
-`current_task_id: null`.
+**Original T5 scope (rolled to v1.0.6)**: SKILL.md + template +
+smoke test for plan archaeology trim methodology. Doc-only + low-risk
++ low-value-this-cycle/high-value-future. Will land in v1.0.6 polish
+cycle alongside other deferred items.
 
 ---
 
 ## Mid-cycle methodology activities (orchestrator)
 
-Triggered AFTER Track Alpha + Track Beta + Track Gamma all complete +
-commits land. Each is non-blocking for ship per hybrid methodology
-semantics; documented in CHANGELOG `[1.0.5]` Process notes regardless
-of outcome.
+Triggered AFTER Track Alpha + Track Beta complete + commits land
+(Track Gamma deferred to v1.0.6 per iter-2 CRITICAL trigger). Each
+activity is non-blocking for ship per hybrid methodology semantics;
+documented in CHANGELOG `[1.0.5]` Process notes regardless of outcome.
 
 ### Activity F7 — Production-grade `--parallel` integration test
 
 **Owner**: orchestrator.
-**When**: AFTER Track Alpha + Beta + Gamma close + Items I-1+I-2+I-3
-landed.
+**When**: AFTER Track Alpha + Beta close + Items I-1+I-2+I-3 landed.
 
 **Steps**:
 

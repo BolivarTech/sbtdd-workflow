@@ -60,6 +60,48 @@
 >   scope-trim discipline, not false convergence.
 > - **DEFERRED** (Bal INFO): D Q3-A timing risk acknowledged
 >   (within-track sequential I-2 → D Q3-A already orders correctly).
+>
+> **Iter 2 Checkpoint 2 triage applied 2026-05-08** (verdict
+> GO_WITH_CAVEATS 3-0 with 6 CRITICAL — **iter-2 CRITICAL trigger
+> FIRES** per spec sec.6.1; pre-staged response invoked):
+> - **Pillar C (Track Gamma C.2 plan archaeology trim methodology)
+>   DEFERRED to v1.0.6** per pre-staged G2 ladder. All 3 agents
+>   independently recommended this. Bal confidence drop 72→68%
+>   signals bundle-width concern. Pillar A hard-LOCKED + Pillar B
+>   (D Q3-A) preserved.
+> - **Plan T3 Step 4 spec/plan drift** (iter-1 fix applied to spec
+>   but not plan code block — operator editing miss): plan T3 Step
+>   4 implementation code rewritten verbatim from spec sec.2.2
+>   step 3+4 (anchored `_flip_checkbox` + `_apply_flips_from_diff`
+>   + `_section_has_flipped` + `_iter_task_ids` helpers).
+>   Re-introduces no iter-1 CRITICALs.
+> - **Track Alpha T1 → Track Beta T3 ordering hardened**: dropped
+>   "stub the import temporarily" fallback. Plan invariants block
+>   adds explicit subagent-dispatch-ordering constraint: Track Beta
+>   T3 MUST land before Track Alpha T1 Step 5 wiring. Orchestrator
+>   enforces via subagent dispatch sequencing (Track Beta T3 → T4
+>   first; Track Alpha T1 Step 5 last; T1 Steps 1-4 + T2 can run
+>   in parallel with Track Beta).
+> - **Plan T3 Step 1 Red phase** extended with explicit test
+>   methods for escenarios I2-3b (partial worker failure
+>   no-fabrication) + I2-5 (anchored regex boundary) per Cas
+>   WARNING.
+> - **Plan I2-4 race test** strengthened: explicit `for _ in
+>   range(50):` repeat loop wrapping the multiprocessing
+>   barrier-synchronized RMW + assert no flip lost across all 50
+>   iterations.
+> - **Plan T1 Step 8 + T3 Step 8** atomic-write DRY consolidation
+>   made UNCONDITIONAL (no longer "Likely YAGNI; skip if minimal
+>   duplication"): MUST extract shared `_atomic_write_json` to
+>   `state_file.py` (existing v0.5.0 pattern); both modules import
+>   from there.
+> - **`_reap_orphans` race-safety**: added mtime/lock guard — only
+>   reaps files older than dispatcher start time + 5min margin to
+>   avoid clobbering concurrent SBTDD instances per Cas WARNING.
+> - **`_last_chore_task_close_sha`**: added optional task-ID
+>   verification (parse `chore: mark task <N> complete` subject;
+>   if state file's prior task-ID doesn't match, surface as
+>   diagnostic info in PreconditionError per Cas WARNING).
 
 ---
 
@@ -76,9 +118,10 @@ D code-side enforcement. Three focused pillars:
   enforcement via `close_task_cmd._preflight` HARD-BLOCK. Replaces
   v1.0.4's attempted Q3 Option B 3-touchpoint doc-only that was
   scope-trimmed per iter-2 Option D.
-- **Pillar C LOCKED (METHODOLOGY)** — C.1 spec sec.8 stale
-  risk-register sweep (clean references to eliminated v1.0.4
-  mechanisms) + C.2 plan archaeology trim methodology pattern.
+- **Pillar C** — C.1 spec sec.8 stale risk-register sweep
+  (APPLIED INLINE during brainstorming). **C.2 plan archaeology
+  trim methodology DEFERRED to v1.0.6** per iter-2 CRITICAL trigger
+  pre-staged response (2026-05-08).
 
 Decisiones de brainstorming 2026-05-08 (Q1-Q5):
 
@@ -95,7 +138,10 @@ Decisiones de brainstorming 2026-05-08 (Q1-Q5):
   - Track Beta (`close_task_cmd.py` + `run_sbtdd.py` argparse +
     tests): I-2 helpers (no auto_cmd.py wiring) + D Q3-A
     (within-track sequential: I-2 first, then D Q3-A)
-  - Track Gamma (spec/SKILL.md/template/smoke): C.1 + C.2
+  - Track Gamma (spec/SKILL.md/template/smoke): **DEFERRED to
+    v1.0.6** per iter-2 CRITICAL trigger pre-staged response
+    (2026-05-08). C.1 sweep already applied inline; C.2 methodology
+    deferred.
   - Manual orchestrator dispatch via Agent tool fan-out (NOT `auto
     --parallel` self-dispatch — chicken-and-egg avoidance; v1.0.5
     uses external Agent tool dispatch, deferring `--parallel`
@@ -653,9 +699,15 @@ eliminated v1.0.4 mechanisms (SBTDD_INTERACTIVE env var, Item D
 3-touchpoint enforcement, etc.). No strikethrough carry-forward;
 risk register reflects current v1.0.5 architectural state cleanly.
 
-### 2.6 Item C.2 — Plan archaeology trim methodology (Pillar C METHODOLOGY, Track Gamma)
+### 2.6 Item C.2 — Plan archaeology trim methodology (Pillar C METHODOLOGY, Track Gamma) — DEFERRED to v1.0.6
 
-**Track**: Gamma.
+**Status**: **DEFERRED to v1.0.6** per iter-2 CRITICAL trigger
+pre-staged response (spec sec.6.1 G2 ladder). Iter-2 surfaced 6
+CRITICAL findings; all 3 agents recommended deferral; user
+authorized 2026-05-08. v1.0.5 ships Pillar A (I-1+I-2+I-3) +
+Pillar B (D Q3-A) only. v1.0.6 LOCKED commitment for C.2.
+
+**Track**: Gamma — **DEFERRED**.
 
 **Archivos**:
 - Modify: `skills/sbtdd/SKILL.md` (orchestrator skill rules — add
@@ -1078,45 +1130,46 @@ Sin dependencias inter-track (Track Alpha imports Track Beta's
 helpers; Track Alpha must merge AFTER Track Beta's commits land,
 which the orchestrator enforces via subagent dispatch ordering).
 
-### 5.3 Track Gamma (subagent #3, sequential C.1 → C.2)
+### 5.3 Track Gamma — DEFERRED to v1.0.6
 
-**Owner**: orchestrator (in-session) OR lightweight subagent.
-**Scope**: C.1 spec sweep (already applied inline in this document) +
-C.2 plan archaeology trim methodology + smoke test.
-**Wall-time estimado**: ~0.5 dia.
+**Status**: DEFERRED per iter-2 CRITICAL trigger pre-staged response.
+v1.0.5 ships only Track Alpha + Track Beta. C.1 sweep already
+applied inline; no Track Gamma work for v1.0.5.
 
-Sequential ordering:
-1. **C.1**: applied inline in this document (sec.8 risk register
-   reflects current v1.0.5 state cleanly; no Track Gamma work needed
-   for sweep itself).
-2. **C.2** (~0.5 dia): SKILL.md + template + smoke test.
+### 5.4 True parallelism observado (iter-1 CRITICAL #4 fix + iter-2 Pillar C deferral)
 
-### 5.4 True parallelism observado (iter-1 CRITICAL #4 fix applied)
+Surfaces Track Alpha vs Track Beta — **truly disjoint at file level
+after iter-1 CRITICAL #4 architectural fix; Track Gamma deferred to
+v1.0.6 per iter-2 trigger**:
 
-Surfaces Track Alpha vs Track Beta vs Track Gamma — **truly disjoint
-at file level after iter-1 CRITICAL #4 architectural fix**:
+| Surface | Alpha | Beta |
+|---------|-------|------|
+| `skills/sbtdd/scripts/auto_cmd.py` | yes (I-1+I-3 + post-batch wiring for I-2 helpers + `_reap_orphans`) | — |
+| `tests/test_auto_cmd.py` | yes (extend) | — |
+| `skills/sbtdd/scripts/close_task_cmd.py` | — | yes (I-2 helpers + D Q3-A + anchored `_flip_checkbox` + `_last_chore_task_close_sha`) |
+| `skills/sbtdd/scripts/run_sbtdd.py` | — | yes (--skip-preflight argparse) |
+| `tests/test_close_task_cmd.py` | — | yes (extend) |
+| `skills/sbtdd/scripts/state_file.py` | yes (DRY consolidation: shared `_atomic_write_json`) | yes (import shared helper) |
 
-| Surface | Alpha | Beta | Gamma |
-|---------|-------|------|-------|
-| `skills/sbtdd/scripts/auto_cmd.py` | yes (I-1+I-3 + post-batch wiring for I-2 helpers) | — | — |
-| `tests/test_auto_cmd.py` | yes (extend) | — | — |
-| `skills/sbtdd/scripts/close_task_cmd.py` | — | yes (I-2 helpers + D Q3-A + anchored `_flip_checkbox` + `_last_chore_task_close_sha`) | — |
-| `skills/sbtdd/scripts/run_sbtdd.py` | — | yes (--skip-preflight argparse) | — |
-| `tests/test_close_task_cmd.py` | — | yes (extend) | — |
-| `skills/sbtdd/SKILL.md` | — | — | yes (C.2) |
-| `templates/CLAUDE.local.md.template` | — | — | yes (C.2) |
-| `tests/test_plan_archaeology_trim_pattern.py` (new) | — | — | yes (C.2 smoke) |
+**Disjoint at file level for production code**. Track Alpha imports
+Track Beta's helpers (`from close_task_cmd import _merge_scratch_plans`).
+Per iter-2 hardening: this is a **HARD subagent-dispatch-ordering
+constraint**, not a soft dependency. Orchestrator MUST dispatch Track
+Beta T3 → T4 BEFORE Track Alpha T1 Step 5 (the wiring step). Track
+Alpha T1 Steps 1-4 (sidecar pattern) + T2 (flag forwarding) can run
+in parallel with Track Beta T3+T4. Only T1 Step 5 has the import
+dependency. The "stub the import temporarily and rebase" fallback
+mentioned in earlier drafts is RETRACTED — too brittle, error-prone,
+risks landing broken intermediate state. `state_file.py` shared by
+both tracks for DRY atomic-write consolidation: Track Alpha lands
+the consolidation; Track Beta imports the consolidated helper.
 
-**Disjoint at file level**. Track Alpha imports Track Beta's helpers
-(`from close_task_cmd import _merge_scratch_plans`); the import is a
-soft dependency requiring Track Beta T3 commits to land before Track
-Alpha T1's wiring step. Orchestrator handles this via subagent
-dispatch ordering (Track Beta T3 → Track Alpha T1 wiring step) OR by
-Track Alpha T1 stubbing the import temporarily and rebasing once
-Track Beta's helper lands. **No file-level merge conflicts** between
-tracks. Original Q1 "cero overlap" claim refined: was false at the
-function-modification level (both touched `_dispatch_tracks_concurrent`),
-fixed by consolidating wiring into Track Alpha T1 only.
+Original Q1 "cero overlap" claim refined per iter-1+iter-2 audits:
+was function-modification-level FALSE (iter-1, both touched
+`_dispatch_tracks_concurrent`); fixed by consolidating wiring into
+Track Alpha T1 only. iter-2 surfaced cross-module-import
+architectural concern resolved via explicit subagent-dispatch
+ordering invariant (above).
 
 ### 5.5 Mid-cycle methodology (orchestrator)
 
@@ -1317,8 +1370,8 @@ v1.0.5 ship-ready cuando:
 - **F5**. F176-F177 (Item C.1): spec sec.8 stale risk-register
   clean-sweep applied (this very document — RISK REGISTER reflects
   current v1.0.5 state cleanly).
-- **F6**. F178-F180 (Item C.2): plan archaeology trim methodology
-  documented in SKILL.md + template + smoke test.
+- **F6** (Item C.2): **DEFERRED to v1.0.6** per iter-2 CRITICAL
+  trigger pre-staged response. F178-F180 not applicable to v1.0.5.
 - **F7** (own-cycle integration test): production-grade `--parallel`
   integration test acceptance per CHANGELOG `[Unreleased]` (synthetic
   2-track plan + 4 disjoint tasks + ALL 3 gaps closed).
