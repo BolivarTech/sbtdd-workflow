@@ -12,7 +12,7 @@
   "C-1: dag_parser parses Task blocks (post iter 1 triage code-fence-aware)": "8709ba9115e05714c070f93fae9050310eda9c281e8d10c8b8074d212aced60a",
   "C-2: dag_parser extracts addBlockedBy dependencies": "4499c1334d2ed85e1613e30fbc2f6bf4e23a66c814047a845fafb47e642a74c2",
   "C-3: dag_parser detects cycles (post iter 1 triage iterative)": "6b373ef322acb6e5d2bfb0657fc9272efb3ba3db035e78666863a7601efb4efe",
-  "C-4: antichain identification": "39885714d7a6c8a0379d18dd819874ea5d2d8b55211f59e48b0d058014875791",
+  "C-4: antichain identification": "bb6bdda8f8f97d2e56874eb7fe6422fbaa9c5bf3b4f46f6b9f5effda23e235be",
   "C-5: file surface collision detection": "54c2e7bf2d815d17b96b7c5d993903f048406404e0511b922ef9fc6747684cd3",
   "C-6: file surface disjoint passthrough": "cd9b3d31d7dc0248fe0de070c497eb02dfca35a28a11e9c7f052b860c20843cc",
   "C-7: --parallel flag opt-in": "814fd0affbf89b74c5935e9743b24515476371048ab1866380946a521f5e272d",
