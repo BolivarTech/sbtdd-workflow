@@ -13,6 +13,38 @@
 >   in spec) + C.2 plan archaeology trim methodology
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax (open + closed bracket forms) for tracking.
+>
+> **Iter 1 Checkpoint 2 triage applied 2026-05-08** (verdict
+> GO_WITH_CAVEATS 3-0, 5 CRITICAL + 12 WARNING; full triage
+> rationale in spec-behavior.md header). Plan deltas applied:
+> - **CRITICAL #1+#3** (mel+cas, fabricated flips): Task 3 Step 4
+>   `_apply_flips_for_task_ids` rewritten as `_apply_flips_from_diff`
+>   (derives flips from scratch-vs-main diff; no longer takes
+>   `task_ids` param; partial worker failure no longer fabricates).
+>   Added escenario I2-3b regression test.
+> - **CRITICAL #2** (mel, regex cross-boundary): Task 3 Step 4
+>   `_flip_checkbox` regex anchored to next `### Task` header (or
+>   EOF) using `_TASK_HEADER_RE` walker. Added escenario I2-5
+>   regression test.
+> - **CRITICAL #4** (cas, architectural): Track Alpha + Track Beta
+>   "cero overlap" Q1 claim was function-level FALSE — both wired
+>   into `_dispatch_tracks_concurrent`. Resolved by **Track Alpha
+>   T1 Step 5 owns ALL `_dispatch_tracks_concurrent` post-batch
+>   wiring** (audit-merge + scratch-merge + reaper); Track Beta T3
+>   Step 5 = NO `auto_cmd.py` modification (helper-only). Surfaces
+>   become file-level disjoint.
+> - **CRITICAL #5** (cas, wrong commit-window): Task 4 Step 4
+>   `_preflight` triplet check scoped to "since last `chore: mark
+>   task` commit" (not `phase_started_at_commit`). Added
+>   `_last_chore_task_close_sha` helper. Updated escenarios D-1+D-2;
+>   added D-2b first-task branch-root case.
+> - **WARNINGs** addressed: duplicate `test_d4` renamed (now
+>   `test_d4_no_chore_commit_first_task_branch_root_boundary` +
+>   `test_d5_partial_triplet_raises`); orphan reaper added to
+>   Task 1 Step 5 (escenario I1-6); race regression test
+>   strengthened (real `multiprocessing.Process` + spawn context +
+>   Barrier-synchronized RMW + 50× repeat); DRY atomic-write
+>   acknowledged via Task 1 Step 8 / Task 3 Step 8 refactor pass.
 
 **Goal:** Ship v1.0.5 — close v1.0.4 LOCKED commitments documented in CHANGELOG `[Unreleased]` (I-1/I-2/I-3 production-grade `--parallel` correctness gaps) + ship Item D Q3 OPTION A code-side enforcement (replaces v1.0.4's scope-trimmed Q3 Option B doc-only attempt) + plan archaeology trim methodology pattern. 5 plan tasks across 3 parallel subagent tracks (cero file overlap); 3 mid-cycle methodology activities (production-grade `--parallel` integration test + Item D Q3-A empirical validation + pre-merge gate clean WITHOUT INV-0).
 
@@ -277,7 +309,7 @@ def _merge_audit_sidecars(
 
 Confirm `import os`, `import json`, `import argparse`, `from pathlib import Path` are present at top of file.
 
-- [ ] **Step 5: Wire `_merge_audit_sidecars` into `_dispatch_tracks_concurrent`**
+- [ ] **Step 5: Wire `_merge_audit_sidecars` AND `_merge_scratch_plans` into `_dispatch_tracks_concurrent` (iter-1 CRITICAL #4: Track Alpha owns ALL post-batch hooks) + `_reap_orphans` pre-flight (iter-1 WARNING fix)**
 
 Modify `_dispatch_tracks_concurrent` post-batch:
 
@@ -289,18 +321,61 @@ def _dispatch_tracks_concurrent(
     ns: argparse.Namespace,
 ) -> None:
     """... existing dispatch logic ..."""
+    # v1.0.5 iter-1 WARNING fix: reap orphan sidecar/scratch from prior
+    # crashed run BEFORE new dispatch (prevents stale data contamination
+    # of merge step). See escenario I1-6.
+    _reap_orphans(project_root)
+
     # ... existing thread-pool + Queue + Popen workers ...
     # ... wait all workers complete ...
 
     # v1.0.5 Item I-1: merge per-worker audit sidecars into canonical
     merged_audit = _merge_audit_sidecars(tracks, project_root)
     _atomic_write_json(project_root / ".claude" / "auto-run.json", merged_audit)
+
+    # v1.0.5 Item I-2 (iter-1 CRITICAL #4: wired here per architectural fix —
+    # Track Alpha owns ALL _dispatch_tracks_concurrent post-batch hooks;
+    # Track Beta provides the helper in close_task_cmd.py only):
+    from close_task_cmd import _merge_scratch_plans
+    _merge_scratch_plans(tracks, project_root)
+
+
+def _reap_orphans(project_root: Path) -> None:
+    """v1.0.5 iter-1 WARNING fix: clean stale per-worker sidecar/scratch
+    files from a prior crashed run before new dispatch. Idempotent.
+    """
+    claude_dir = project_root / ".claude"
+    if not claude_dir.exists():
+        return
+    for stale in claude_dir.glob("auto-run-track-*.json"):
+        stale.unlink(missing_ok=True)
+    for stale in claude_dir.glob("plan-scratch-*.md"):
+        stale.unlink(missing_ok=True)
 ```
+
+**Architectural note (iter-1 CRITICAL #4 fix)**: original Q1
+"cero overlap" claim was function-level FALSE — both Track Alpha
+and Track Beta needed wiring into `_dispatch_tracks_concurrent`.
+Resolved by **consolidating ALL post-batch hook wiring into Track
+Alpha T1** (this step). Track Beta T3 provides
+`_merge_scratch_plans` as a pure helper in `close_task_cmd.py`
+(see Task 3 Step 4 + Step 5 helper-only note). Result:
+file-level disjoint surfaces (Track Alpha touches only
+`auto_cmd.py`; Track Beta touches only `close_task_cmd.py` +
+`run_sbtdd.py` argparse).
+
+**Coordination**: Track Alpha T1 imports
+`close_task_cmd._merge_scratch_plans` — soft dependency requiring
+Track Beta T3 commits to land first OR Track Alpha T1 stubs
+the import temporarily. Orchestrator dispatches Track Beta T3
+before Track Alpha T1 wiring step (within-track sequential per
+Track Alpha's I-1 sidecar-only step → I-3 forwarding → wiring
+via Step 5 final).
 
 - [ ] **Step 6: Run tests to verify PASS**
 
 Run: `pytest tests/test_auto_cmd.py::TestPerWorkerSidecarAudit -v`
-Expected: 5/5 PASS.
+Expected: 5/5 PASS + reaper test (escenario I1-6) passes.
 
 Run: `make verify`
 Expected: All checks green (pytest, ruff check, ruff format, mypy).
@@ -808,21 +883,28 @@ def mark_and_advance(state: dict, project_root: Path, ns: argparse.Namespace = N
 
 Confirm `import os`, `import argparse`, `from pathlib import Path` are present.
 
-- [ ] **Step 5: Wire `_merge_scratch_plans` into `auto_cmd._dispatch_tracks_concurrent` post-batch**
+- [ ] **Step 5: NO `auto_cmd.py` modification (iter-1 CRITICAL #4 architectural fix — Track Beta is helper-only)**
 
-Modify `skills/sbtdd/scripts/auto_cmd.py` `_dispatch_tracks_concurrent`:
+Per iter-1 CRITICAL #4 fix: Track Beta provides the
+`_merge_scratch_plans` helper as a pure function in
+`close_task_cmd.py` only. **Wiring** of `_merge_scratch_plans` into
+`_dispatch_tracks_concurrent` post-batch lives in Task 1 (Track
+Alpha) — see Task 1 Step 5 which now invokes BOTH
+`_merge_audit_sidecars` AND `_merge_scratch_plans` post-batch.
 
-```python
-def _dispatch_tracks_concurrent(...) -> None:
-    # ... existing dispatch + wait ...
-    # v1.0.5 Item I-1: merge per-worker audit sidecars (already added Task 1)
-    merged_audit = _merge_audit_sidecars(tracks, project_root)
-    _atomic_write_json(project_root / ".claude" / "auto-run.json", merged_audit)
+Track Beta's only obligation here: ensure `_merge_scratch_plans` is
+importable from `close_task_cmd` (module-level definition; Step 4
+already provides this).
 
-    # v1.0.5 Item I-2: merge per-worker scratch plans
-    from close_task_cmd import _merge_scratch_plans
-    _merge_scratch_plans(tracks, project_root)
+Validation step: confirm helper signature matches Task 1 Step 5
+import expectation (`from close_task_cmd import _merge_scratch_plans`):
+
+```bash
+python -c "from close_task_cmd import _merge_scratch_plans; print(_merge_scratch_plans.__name__)"
+# Expected: _merge_scratch_plans
 ```
+
+No git commit produced by this step (no auto_cmd.py modification).
 
 - [ ] **Step 6: Run tests to verify PASS**
 
@@ -933,20 +1015,40 @@ class TestPreflightHardBlock:
         assert "abc123" in captured.err
         assert "Audit-logged" in captured.err
 
-    def test_d4_no_phase_started_at_commit_no_op(self, tmp_path):
-        """D-4: state without phase_started_at_commit → no-op (first task)."""
+    def test_d4_no_chore_commit_first_task_branch_root_boundary(self, tmp_path, monkeypatch):
+        """D-2b (iter-1 CRITICAL #5 fix): no prior `chore: mark task` commit
+        → boundary is branch root + canonical triplet OK → no raise."""
         from close_task_cmd import _preflight
 
-        state = {"current_task_id": "1"}  # no phase_started_at_commit
+        # Simulate: first task in plan, no prior chore commit exists
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: None,
+        )
+        # Branch root → HEAD contains canonical triplet
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",
+                "feat: implement",
+                "refactor: extract helper",
+            ],
+        )
+        state = {"current_task_id": "1"}
 
-        # Should NOT raise (first task, no chain to check)
+        # Should NOT raise (first task, branch-root boundary, full triplet)
         _preflight(state, tmp_path)
 
-    def test_d4_partial_triplet_raises(self, tmp_path, monkeypatch):
-        """D-4: commit chain with only 2 of 3 triplet prefixes → still raises."""
+    def test_d5_partial_triplet_raises(self, tmp_path, monkeypatch):
+        """D-1 (iter-1 CRITICAL #5 fix): commit chain since last chore: mark
+        task with only 2 of 3 triplet prefixes → still raises."""
         from close_task_cmd import _preflight
         from errors import PreconditionError
 
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc123",
+        )
         monkeypatch.setattr(
             "close_task_cmd._git_log_between",
             lambda start_sha, project_root=None: [
@@ -955,10 +1057,14 @@ class TestPreflightHardBlock:
                 # missing refactor
             ],
         )
-        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+        state = {"current_task_id": "3"}
 
-        with pytest.raises(PreconditionError):
+        with pytest.raises(PreconditionError) as excinfo:
             _preflight(state, tmp_path)
+        # iter-1 CRITICAL #5: error message references "since last chore commit"
+        # boundary (or "branch root") — NOT phase_started_at_commit
+        assert "since" in str(excinfo.value)
+        assert "abc123" in str(excinfo.value) or "chore" in str(excinfo.value)
 ```
 
 - [ ] **Step 2: Run tests to verify FAIL**
@@ -972,7 +1078,7 @@ Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: Extend `_preflight` with TDD triplet check + `skip_preflight` parameter**
+- [ ] **Step 4: Extend `_preflight` with TDD triplet check + `skip_preflight` parameter (iter-1 CRITICAL #5: commit-window scope = "since last `chore: mark task` commit")**
 
 Modify `skills/sbtdd/scripts/close_task_cmd.py`. Add or extend `_preflight`:
 
@@ -981,11 +1087,21 @@ import sys
 import subprocess
 
 
-def _git_log_between(start_sha: str, project_root: Path | None = None) -> list[str]:
-    """Return commit subjects between start_sha (exclusive) and HEAD (inclusive)."""
+def _git_log_between(start_sha: str | None, project_root: Path | None = None) -> list[str]:
+    """Return commit subjects between start_sha (exclusive) and HEAD (inclusive).
+
+    iter-1 CRITICAL #5 fix: when start_sha is None (no prior chore commit
+    on branch), returns ALL commits on current branch (boundary = branch
+    root).
+    """
     cwd = str(project_root) if project_root else None
+    if start_sha is None:
+        # Boundary = branch root → all commits on HEAD
+        rev_range = "HEAD"
+    else:
+        rev_range = f"{start_sha}..HEAD"
     result = subprocess.run(
-        ["git", "log", f"{start_sha}..HEAD", "--format=%s"],
+        ["git", "log", rev_range, "--format=%s"],
         capture_output=True, text=True, check=False, cwd=cwd,
     )
     if result.returncode != 0:
@@ -993,16 +1109,55 @@ def _git_log_between(start_sha: str, project_root: Path | None = None) -> list[s
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
+    """Return SHA of most recent `chore: mark task <N> complete` commit.
+
+    iter-1 CRITICAL #5 fix: this is the canonical "previous task close"
+    boundary for the `_preflight` triplet check. Returns None if no such
+    commit exists on current branch (first task in plan).
+
+    Rebase/squash limitation: if operator squashed prior task-close
+    commits, this returns the most recent surviving `chore:` subject
+    matching the pattern; risk: false-positive triplet detection if
+    squash produced a hybrid subject. Mitigated by `--skip-preflight`
+    flag for emergency operator override.
+    """
+    cwd = str(project_root) if project_root else None
+    result = subprocess.run(
+        ["git", "log", "HEAD", "--format=%H%x09%s"],
+        capture_output=True, text=True, check=False, cwd=cwd,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        sha, subject = line.split("\t", 1)
+        # Match: "chore: mark task <N> complete" (allow trailing variants)
+        if subject.startswith("chore: mark task ") and " complete" in subject:
+            return sha
+    return None
+
+
 def _preflight(state: dict, project_root: Path | None = None,
                skip_preflight: bool = False) -> None:
     """Preflight checks before task close.
 
-    v1.0.5 Item D Q3 OPTION A: hard-block when phase advance gate is
-    bypassed. Detects when commit chain since `phase_started_at_commit`
-    lacks the canonical TDD triplet (test:/feat:|fix:/refactor:). Raises
-    `PreconditionError` with operator-actionable guidance. Operator
-    emergency override via `--skip-preflight` flag (audit-logged via
-    stderr breadcrumb).
+    v1.0.5 Item D Q3 OPTION A (iter-1 CRITICAL #5 fix): hard-block when
+    phase advance gate is bypassed. Detects when commit chain since the
+    last `chore: mark task <N> complete` commit (or branch root if none
+    exists) lacks the canonical TDD triplet (test:/feat:|fix:/refactor:).
+    Raises `PreconditionError` with operator-actionable guidance.
+    Operator emergency override via `--skip-preflight` flag (audit-logged
+    via stderr breadcrumb).
+
+    Why "since last chore commit" instead of `phase_started_at_commit`
+    (iter-1 CRITICAL #5 rationale): `phase_started_at_commit` advances on
+    every phase close within a task, so when `_preflight` runs at
+    task-close time it sees only the LAST phase's commits — never the
+    full Red+Green+Refactor triplet. Boundary "since last chore: mark
+    task" reliably brackets the entire current task's phase-close
+    commits without phase-state coupling.
 
     Args:
         state: SessionState dict.
@@ -1013,30 +1168,30 @@ def _preflight(state: dict, project_root: Path | None = None,
         sys.stderr.write(
             f"[sbtdd close-task] WARNING: --skip-preflight active; "
             f"phase advance gate enforcement BYPASSED for "
-            f"task_id={state.get('current_task_id')} since SHA "
-            f"{state.get('phase_started_at_commit')}. Audit-logged.\n"
+            f"task_id={state.get('current_task_id')}. Audit-logged.\n"
         )
         return
 
-    start_sha = state.get("phase_started_at_commit")
-    if not start_sha:
-        return  # No phase_started_at_commit → first-task no-op
-
-    subjects = _git_log_between(start_sha, project_root=project_root)
+    last_chore_sha = _last_chore_task_close_sha(project_root)
+    boundary_label = (
+        f"last chore commit {last_chore_sha}"
+        if last_chore_sha is not None else "branch root"
+    )
+    subjects = _git_log_between(last_chore_sha, project_root=project_root)
     has_test = any(s.startswith("test:") for s in subjects)
     has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
     has_refactor = any(s.startswith("refactor:") for s in subjects)
     if not (has_test and has_green and has_refactor):
         from errors import PreconditionError
         raise PreconditionError(
-            f"Phase advance gate bypassed: commit chain since {start_sha} "
-            f"lacks test:/feat:|fix:/refactor: triplet. Per SBTDD "
-            f"INV-1 + INV-5..7, each task close requires close-phase "
-            f"invocation per Red/Green/Refactor phase. Recovery: invoke "
-            f"`python skills/sbtdd/scripts/run_sbtdd.py close-phase` once "
-            f"per pending phase OR pass --skip-preflight if emergency "
-            f"operator override is appropriate (audit-logged via stderr "
-            f"breadcrumb)."
+            f"Phase advance gate bypassed: commit chain since "
+            f"{boundary_label} lacks test:/feat:|fix:/refactor: triplet. "
+            f"Per SBTDD INV-1 + INV-5..7, each task close requires "
+            f"close-phase invocation per Red/Green/Refactor phase. "
+            f"Recovery: invoke `python skills/sbtdd/scripts/run_sbtdd.py "
+            f"close-phase` once per pending phase OR pass --skip-preflight "
+            f"if emergency operator override is appropriate (audit-logged "
+            f"via stderr breadcrumb)."
         )
 ```
 
