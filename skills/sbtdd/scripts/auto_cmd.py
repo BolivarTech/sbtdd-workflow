@@ -49,7 +49,6 @@ import os
 import queue
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -1289,32 +1288,13 @@ def _audit_sidecar_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
     return project_root / ".claude" / f"auto-run-track-{digest}.json"
 
 
-def _atomic_write_json(path: Path, data: object) -> None:
-    """Atomic JSON write via tempfile.mkstemp + os.replace (cross-platform).
-
-    Uses ``tempfile.mkstemp`` so concurrent writers in the same directory
-    receive unique tmp names (no collision risk under parallel dispatch
-    per v1.0.5 iter-2 WARNING). The destination ``os.replace`` is atomic
-    on POSIX and Windows; on failure the tmp file is cleaned up so
-    nothing leaks.
-
-    v1.0.5 T1 Refactor: ``import hashlib`` and ``import tempfile`` were
-    promoted to module-level top imports for consistency with the rest of
-    the stdlib import block; T3 Refactor will further consolidate the
-    atomic-write helpers into ``state_file`` per iter-2 WARNING fix.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_str = tempfile.mkstemp(suffix=".tmp", prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_str, path)
-    except Exception:
-        try:
-            os.unlink(tmp_str)
-        except OSError:
-            pass
-        raise
+#: v1.0.5 T3 Refactor: re-export the consolidated ``atomic_write_json``
+#: from ``state_file`` under the legacy private name so existing call
+#: sites + the I-1 escenarios I1-1..I1-6 keep importing
+#: ``auto_cmd._atomic_write_json`` byte-identically. The single
+#: implementation lives in :func:`state_file.atomic_write_json` per
+#: iter-2 WARNING fix.
+from state_file import atomic_write_json as _atomic_write_json  # noqa: E402
 
 
 def _write_audit(audit: dict[str, Any], project_root: Path, ns: argparse.Namespace) -> None:

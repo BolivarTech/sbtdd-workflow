@@ -30,7 +30,6 @@ import os
 import re
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -116,28 +115,13 @@ def _scratch_plan_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
     return project_root / ".claude" / f"plan-scratch-{digest}.md"
 
 
-def _atomic_write(path: Path, text: str) -> None:
-    """Atomic text write via ``tempfile.mkstemp`` + ``os.replace``.
-
-    Mirrors :func:`auto_cmd._atomic_write_json` (T1) for plan / scratch
-    files. Concurrent writers in the same directory get unique tmp
-    names via :func:`tempfile.mkstemp`, eliminating collision risk
-    documented in v1.0.5 iter-2 WARNING. T3 Refactor consolidates this
-    helper into ``state_file`` so both modules import a shared
-    implementation.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_str = tempfile.mkstemp(suffix=".tmp", prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.replace(tmp_str, path)
-    except Exception:
-        try:
-            os.unlink(tmp_str)
-        except OSError:
-            pass
-        raise
+#: v1.0.5 T3 Refactor: re-export the consolidated ``atomic_write_text``
+#: from ``state_file`` under the legacy private name so existing call
+#: sites + the I-2 escenarios keep referencing
+#: ``close_task_cmd._atomic_write`` byte-identically. The single
+#: implementation lives in :func:`state_file.atomic_write_text` per
+#: iter-2 WARNING fix.
+from state_file import atomic_write_text as _atomic_write  # noqa: E402
 
 
 def _iter_task_ids(plan_text: str) -> list[str]:
