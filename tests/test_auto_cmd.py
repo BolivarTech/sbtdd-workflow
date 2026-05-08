@@ -2233,15 +2233,19 @@ class TestPhase2ConsumesDispatchPlan:
     def test_phase2_concurrent_subprocess_error_aborts_batch(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Sub-issue 1: when a Popen subprocess in concurrent batch exits
-        non-zero, the helper raises and the loop aborts (does not silently
-        proceed to next batch).
+        """Sub-issue 1 (updated iter-3 IMPORTANT #3): when the parallel
+        pre-verification gate raises ``ConcurrentDispatchError`` (exit 2),
+        the loop aborts (does not silently proceed to next batch). The
+        error class changed from ``VerificationIrremediableError`` (exit
+        6, iter-2) to ``ConcurrentDispatchError`` (exit 2, iter-3) per
+        Path 2 architectural pivot -- pre-verification gate failure is
+        precondition-class, not phase-budget exhaustion.
         """
         import auto_cmd
         import close_task_cmd
         import superpowers_dispatch
         from config import load_plugin_local
-        from errors import VerificationIrremediableError
+        from errors import ConcurrentDispatchError
         from state_file import load as load_state
 
         _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
@@ -2262,14 +2266,14 @@ class TestPhase2ConsumesDispatchPlan:
         monkeypatch.setattr(close_task_cmd, "commit_create", lambda *a, **kw: "ok")
 
         def failing_concurrent(batch: set[str], project_root: Path) -> None:
-            raise VerificationIrremediableError(f"concurrent dispatch failed for batch {batch}")
+            raise ConcurrentDispatchError(f"concurrent pre-verification failed for batch {batch}")
 
         monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", failing_concurrent)
 
         ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
         state = load_state(tmp_path / ".claude" / "session-state.json")
 
-        with pytest.raises(VerificationIrremediableError, match="concurrent dispatch failed"):
+        with pytest.raises(ConcurrentDispatchError, match="concurrent pre-verification failed"):
             auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}])
 
 
@@ -2340,10 +2344,14 @@ class TestDispatchBatchConcurrent:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Any Popen returning non-zero must surface as
-        VerificationIrremediableError with the offending task id.
+        ``ConcurrentDispatchError`` (exit 2, PRECONDITION_FAILED). The
+        error class changed from ``VerificationIrremediableError`` (exit
+        6, iter-2) to ``ConcurrentDispatchError`` (exit 2, iter-3) per
+        Path 2 architectural pivot -- pre-verification gate failure is
+        precondition-class, not phase-budget exhaustion.
         """
         import auto_cmd
-        from errors import VerificationIrremediableError
+        from errors import ConcurrentDispatchError
 
         class FailingPopen:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
@@ -2364,7 +2372,7 @@ class TestDispatchBatchConcurrent:
 
         monkeypatch.setattr(subprocess, "Popen", FailingPopen)
 
-        with pytest.raises(VerificationIrremediableError):
+        with pytest.raises(ConcurrentDispatchError):
             auto_cmd._dispatch_batch_concurrent({"1", "2"}, tmp_path)
 
 
@@ -2548,16 +2556,12 @@ class TestPhase2MultiTaskBatchClosesCorrectTasks:
         # Stub the concurrent dispatch helper to a no-op (Path 2: pre-verify
         # gate only; the per-task TDD work happens in the inline body
         # afterwards).
-        monkeypatch.setattr(
-            auto_cmd, "_dispatch_batch_concurrent", lambda batch, root: None
-        )
+        monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", lambda batch, root: None)
 
         ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
         state = load_state(tmp_path / ".claude" / "session-state.json")
 
-        final = auto_cmd._phase2_task_loop(
-            ns, state, cfg, dispatch_plan=[{"1"}, {"2", "3"}]
-        )
+        final = auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1"}, {"2", "3"}])
 
         # All 3 tasks closed; plan done.
         assert final.current_phase == "done"
@@ -2628,16 +2632,12 @@ class TestPhase2MultiTaskBatchClosesCorrectTasks:
 
         monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
         monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
-        monkeypatch.setattr(
-            auto_cmd, "_dispatch_batch_concurrent", lambda batch, root: None
-        )
+        monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", lambda batch, root: None)
 
         ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
         state = load_state(tmp_path / ".claude" / "session-state.json")
 
-        final = auto_cmd._phase2_task_loop(
-            ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
-        )
+        final = auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}])
 
         assert final.current_phase == "done"
         assert final.current_task_id is None
@@ -2758,15 +2758,12 @@ class TestPhase2MultiTaskBatchClosesCorrectTasks:
         state = load_state(state_path)
 
         with pytest.raises(ConcurrentDispatchError, match="pre-verify failed"):
-            auto_cmd._phase2_task_loop(
-                ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
-            )
+            auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}])
 
         # State file MUST be byte-identical to pre-failure: no partial advance.
         after = state_path.read_text(encoding="utf-8")
         assert after == before, (
-            "state file must NOT advance on concurrent dispatch failure "
-            "(transactional contract)"
+            "state file must NOT advance on concurrent dispatch failure (transactional contract)"
         )
 
 

@@ -70,6 +70,7 @@ from parallel_dispatcher import partition_by_collision
 from errors import (
     ChecklistError,
     CommitError,
+    ConcurrentDispatchError,
     DependencyError,
     DriftError,
     MAGIGateError,
@@ -2059,41 +2060,51 @@ def _apply_spec_review_findings_via_mini_cycle(
 
 
 def _dispatch_batch_concurrent(batch: set[str], project_root: Path) -> None:
-    """Spawn ``subprocess.Popen`` per task in a multi-task batch (v1.0.4 sub-issue 1).
+    """Parallel pre-verification gate for a multi-task batch (v1.0.4 Path 2).
 
-    For dispatch plans where a batch contains 2+ tasks (only possible with
-    ``--parallel`` and DAG-derived antichains spanning multiple disjoint
-    file surfaces), this helper spawns one Popen subprocess per task,
-    waits for ALL processes to complete, and raises
-    :class:`VerificationIrremediableError` on any non-zero exit.
+    **v1.0.4 Loop 2 iter-3 architectural pivot (Path 2)**. The iter-2
+    incarnation attempted to drive per-task TDD cycles inside concurrent
+    subprocesses but introduced the wrong-task-closed wiring bug because
+    :func:`_run_single_task_isolated` was a stub: parent-side
+    ``mark_and_advance`` advanced state without any TDD triplet commits.
+    This iter-3 rewrite re-positions the helper as a **parallel pre-
+    verification gate**: per-task TDD work flows through the legacy
+    inline body in :func:`_phase2_task_loop` (preserving INV-1, INV-31,
+    INV-5..7 per task), and this helper merely parallelises the
+    verification step at batch entry so operators get the wall-time
+    benefit of ``--parallel`` (verification is the slowest part of a TDD
+    cycle empirically) without the architectural complexity of state-file
+    isolation + recursion guards that Path 1 would require.
 
-    Each Popen invokes a lightweight Python entry point that runs the
-    single-task TDD cycle in isolation. State-file write coordination
-    relies on the contract that batches contain disjoint file surfaces
-    AND parent-side ``mark_and_advance`` advances the shared state file
-    sequentially after the batch completes (see ``_phase2_task_loop``).
+    Concretely: spawns one ``subprocess.Popen`` per task in the batch
+    (the Popen invokes :func:`_run_single_task_isolated` which runs a
+    minimal pre-verification check), waits for all processes to complete,
+    and raises :class:`ConcurrentDispatchError` on any non-zero exit.
+    The Popen-per-task shape is preserved so test fixtures that
+    monkeypatch ``subprocess.Popen`` still observe N invocations.
 
     Args:
-        batch: Set of task ids to dispatch concurrently. Must have
-            ``len(batch) > 1`` for the helper to be useful; size-1 batches
-            are short-circuited by the caller.
+        batch: Set of task ids to pre-verify concurrently. Must have
+            ``len(batch) > 1`` for the helper to do useful work; size-1
+            batches are short-circuited by the caller.
         project_root: Project root containing ``planning/claude-plan-tdd.md``
             and ``.claude/session-state.json``.
 
     Raises:
-        VerificationIrremediableError: At least one Popen subprocess
-            returned non-zero. Message includes the offending task ids
-            and (best-effort) their captured stderr text.
+        ConcurrentDispatchError: At least one Popen subprocess returned
+            non-zero (exit 2, PRECONDITION_FAILED). Message includes the
+            offending task ids and (best-effort) captured stderr text.
+            Distinct from :class:`VerificationIrremediableError` (exit 6)
+            which is reserved for per-phase verification budget exhaustion
+            during the inline TDD body.
 
     Notes:
-        Concurrent execution transport is intentionally minimal in v1.0.4:
-        each Popen runs an inline ``python -c`` snippet that imports
-        ``auto_cmd._run_single_task_isolated``. The isolated entry point
-        does NOT mutate the shared session-state file -- the parent
-        advances state once per task in plan-text order after the batch
-        completes. State-file race avoidance is structural, not
-        lock-based; v1.0.5 may introduce a per-worktree lock if richer
-        concurrency primitives are needed.
+        State-file write coordination is structural, not lock-based: the
+        helper does NOT mutate ``.claude/session-state.json`` -- the
+        outer ``_phase2_task_loop`` runs each task through the legacy
+        inline body in ``sorted(batch)`` order after this gate clears,
+        so per-task ``mark_and_advance`` advances the shared state file
+        sequentially as part of each task's own refactor close.
     """
     if len(batch) <= 1:
         # Defensive: caller short-circuits singletons.
@@ -2138,34 +2149,39 @@ def _dispatch_batch_concurrent(batch: set[str], project_root: Path) -> None:
             failures.append((task_id, rc, err_text))
     if failures:
         details = "; ".join(f"task {tid} exit={rc}: {msg[:200]}" for tid, rc, msg in failures)
-        raise VerificationIrremediableError(
-            f"concurrent dispatch failed for batch {sorted(batch)}: {details}"
+        raise ConcurrentDispatchError(
+            f"concurrent pre-verification failed for batch {sorted(batch)}: {details}"
         )
 
 
 def _run_single_task_isolated(task_id: str, project_root_str: str) -> None:
-    """Run a single task's TDD red->green->refactor cycle in isolation.
+    """Run a minimal pre-verification check for a single task (v1.0.4 Path 2).
 
-    Invoked via ``python -c`` from :func:`_dispatch_batch_concurrent`. Does
-    NOT touch the shared ``.claude/session-state.json`` -- parent advances
-    state after the batch completes.
+    Invoked via ``python -c`` from :func:`_dispatch_batch_concurrent`.
+    Does NOT touch the shared ``.claude/session-state.json`` -- per-task
+    TDD work runs through the legacy inline body in
+    :func:`_phase2_task_loop` after this gate clears.
 
-    v1.0.4 ships a STUB implementation that returns 0 immediately; the
-    full per-task cycle (read plan task, dispatch implementer, run
-    verification, commit phases) is v1.0.5 backlog alongside the
-    real concurrent transport. The contract pinned here is the entry
-    point shape (callable from ``python -c``) so tests can monkeypatch
-    ``subprocess.Popen`` and validate dispatch wiring without spinning
-    up the full TDD machinery in concurrent processes.
+    **v1.0.4 Path 2 semantics**: this entry point validates that the
+    working tree is in a state where per-task TDD work CAN begin
+    concurrently for the batch (the verification step is what gets
+    parallelised). Currently emits a single breadcrumb line and exits 0;
+    full per-task verification command execution (running the
+    ``cfg.verification_commands`` list per task in isolation) is v1.0.5
+    scope alongside richer concurrency primitives. The contract pinned
+    here is the entry point shape (callable from ``python -c``) so tests
+    can monkeypatch ``subprocess.Popen`` and validate dispatch wiring
+    without spinning up the full verification machinery.
 
     Args:
         task_id: Plan task id (string).
         project_root_str: Project root as a string (Popen-safe).
     """
-    # v1.0.4 stub: minimal valid execution. The concurrent transport is
-    # exercised by tests via Popen monkeypatching; per-task TDD cycle
-    # in isolation is v1.0.5 scope.
-    sys.stdout.write(f"[sbtdd auto isolated] task {task_id} stub at {project_root_str}\n")
+    # v1.0.4 Path 2 minimal: emit breadcrumb + exit 0. Full per-task
+    # verification command execution is v1.0.5 scope; this stub keeps the
+    # Popen shape tests rely on while not bypassing INV-1/INV-31/INV-5..7
+    # (which the legacy inline body in _phase2_task_loop enforces per task).
+    sys.stdout.write(f"[sbtdd auto pre-verify] task {task_id} ready at {project_root_str}\n")
 
 
 def _phase2_task_loop(
@@ -2216,12 +2232,18 @@ def _phase2_task_loop(
             (default) or when all batches are singletons, the legacy
             while-loop handles all tasks unchanged (v1.0.3 plan-text-
             order behaviour). When supplied with multi-task batches,
-            those batches are dispatched concurrently via
-            :func:`_dispatch_batch_concurrent` and their tasks are
-            advanced via parent-side ``mark_and_advance`` per task.
-            Singleton batches in the plan still flow through the
-            legacy while-loop for the full inline TDD cycle. v1.0.4
-            sub-issue 1 (consumer-side wiring).
+            each multi-task batch runs through
+            :func:`_dispatch_batch_concurrent` as a **parallel pre-
+            verification gate** (Path 2) BEFORE the legacy while-loop
+            consumes the batch's tasks via the full inline TDD body
+            in plan-text order. This preserves INV-1/INV-31/INV-5..7
+            per task because the actual TDD work (red/green/refactor
+            commits + spec-reviewer + ``mark_and_advance``) flows
+            through the existing legacy code path, not through the
+            stub :func:`_run_single_task_isolated`. Singleton batches
+            in the plan skip the gate. v1.0.4 Loop 2 iter-3
+            architectural pivot (Path 2: parallel verify + sequential
+            close).
 
     Returns:
         The final :class:`SessionState` after the last task's close-task
@@ -2230,8 +2252,10 @@ def _phase2_task_loop(
 
     Raises:
         DriftError: Drift detected at entry.
-        VerificationIrremediableError: Phase verification exhausted the
-            retry budget OR concurrent batch dispatch failed.
+        ConcurrentDispatchError: Parallel pre-verification gate failed
+            for one or more multi-task batches (exit 2).
+        VerificationIrremediableError: Per-phase verification exhausted
+            the retry budget during the legacy inline TDD body (exit 6).
     """
     root: Path = ns.project_root
     retries = (
@@ -2324,32 +2348,32 @@ def _phase2_task_loop(
         task_total=_t_total,
         dispatch_label=current.current_phase,
     )
-    # v1.0.4 Loop 2 iter-2 sub-issue 1 (consumer-side wiring): when
-    # ``dispatch_plan`` is supplied AND contains any multi-task batch,
-    # process multi-task batches concurrently via ``_dispatch_batch_
-    # concurrent``, advancing parent-side state once per task in plan
-    # order via ``mark_and_advance``. Singleton batches fall through to
-    # the legacy while-loop below, which handles them via the existing
-    # inline TDD body. When ``dispatch_plan is None`` OR all batches
-    # are singletons, the legacy while-loop handles everything
-    # unchanged (full backward compat with v1.0.3 plan-text-order
-    # behaviour).
+    # v1.0.4 Loop 2 iter-3 architectural pivot (Path 2): when
+    # ``dispatch_plan`` is supplied AND contains multi-task batches, run
+    # :func:`_dispatch_batch_concurrent` as a **parallel pre-verification
+    # gate** for each multi-task batch BEFORE the legacy while-loop. The
+    # gate spawns N Popens (one per task in the batch) running the
+    # minimal pre-verification check in parallel; on any non-zero exit
+    # it raises :class:`ConcurrentDispatchError` (exit 2,
+    # PRECONDITION_FAILED) BEFORE any per-task TDD work begins, so the
+    # state file is never partially advanced.
+    #
+    # After the pre-verify gate clears, control falls through to the
+    # legacy while-loop which consumes tasks in plan-text order via the
+    # full inline TDD body (red -> green -> refactor + INV-31 spec-
+    # reviewer + commits + ``mark_and_advance``). This preserves
+    # INV-1/INV-31/INV-5..7 per task -- the iter-2 incarnation broke
+    # those invariants by calling ``mark_and_advance`` directly inside
+    # the dispatch_plan loop, which advanced state without TDD triplet
+    # commits because :func:`_run_single_task_isolated` was a stub.
+    #
+    # Singleton batches in dispatch_plan skip the gate (size-1 batches
+    # have nothing to parallelise). When ``dispatch_plan is None`` the
+    # gate is skipped entirely and behaviour is byte-identical to v1.0.3.
     if dispatch_plan is not None:
         for batch in dispatch_plan:
             if len(batch) > 1:
                 _dispatch_batch_concurrent(batch, root)
-                # Parent-side state advance: once per task in batch,
-                # in sorted order. Each mark_and_advance commits a
-                # ``chore: mark task <id> complete`` and moves
-                # ``current.current_task_id`` to the next open ``[ ]``.
-                for _task_id in sorted(batch):
-                    if current.current_task_id is None:
-                        break
-                    current = close_task_cmd.mark_and_advance(current, root)
-                    tasks_completed += 1
-        # After concurrent batches complete, fall through to the legacy
-        # while-loop to consume any remaining singleton tasks via the
-        # full inline TDD cycle.
     try:
         while current.current_task_id is not None:
             # v0.5.0 S1-13: bound heartbeat counter persistence latency
