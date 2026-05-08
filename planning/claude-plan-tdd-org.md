@@ -82,7 +82,7 @@
 
 **Architecture:** 3-track parallel dispatch with disjoint surfaces. Track Alpha (auto_cmd.py only, 2 sequential tasks I-1 → I-3) implements per-worker sidecar audit-trail pattern + worker CLI flag forwarding. Track Beta (close_task_cmd.py + run_sbtdd.py argparse, 2 sequential tasks I-2 → D Q3-A) implements per-worker scratch plan flip-merge pattern + close_task_cmd._preflight HARD-BLOCK with --skip-preflight emergency override. Track Gamma (SKILL.md + template + smoke test, 1 task) implements plan archaeology trim methodology documentation (C.1 spec sweep already applied inline in spec-behavior.md sec.8). Manual orchestrator dispatch via Agent tool fan-out (NOT auto --parallel self-dispatch — chicken-and-egg avoidance per Q1 Option C).
 
-**State file write serialization**: Track Alpha owns Tasks 1-2 (sequential close). Track Beta owns Tasks 3-4 (sequential close). Track Gamma owns Task 5 (single close). State file `current_task_id` advances 1 → 2 → 3 → 4 → 5 → done. `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Tracks have disjoint task IDs and disjoint file surfaces; concurrent close-task invocations are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3+v1.0.4 precedent.
+**State file write serialization**: Track Alpha owns Tasks 1-2 (sequential close). Track Beta owns Tasks 3-4 (sequential close). State file `current_task_id` advances 1 → 2 → 3 → 4 → done. `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Tracks have disjoint task IDs and disjoint file surfaces (Track Gamma deferred to v1.0.6); concurrent close-task invocations are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3+v1.0.4 precedent.
 
 **Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active in same worktree (parallel-safe per spec sec.3 since Tracks have disjoint surfaces). Brainstorming refinements 2026-05-08: Q1 = 3-track parallel disjoint (Alpha I-1+I-3, Beta I-2+D Q3-A, Gamma C.2); Q2 = per-worker sidecar I-1; Q3 = per-worker scratch I-2; Q4 = `--skip-preflight` flag-only emergency override; Q5 = strict no-INV-0 stance.
 
@@ -114,7 +114,7 @@
 ## Track Alpha — I-1 worker audit-trail sidecar + I-3 CLI flag forwarding (Subagent #1, sequential T1 → T2)
 
 **Owner**: Subagent #1 dispatched from orchestrator.
-**Surfaces** (cero overlap with Track Beta + Track Gamma):
+**Surfaces** (file-disjoint with Track Beta post iter-2 CRITICAL #4 architectural fix; Track Gamma deferred to v1.0.6):
 - Modify: `skills/sbtdd/scripts/auto_cmd.py`
 - Extend: `tests/test_auto_cmd.py`
 
@@ -650,7 +650,7 @@ Expected: Task 2 closed. State file advances `current_task_id: 2 → 3`.
 ## Track Beta — I-2 plan checkbox scratch + D Q3-A preflight enforcement (Subagent #2, sequential T3 → T4)
 
 **Owner**: Subagent #2 dispatched from orchestrator.
-**Surfaces** (cero overlap with Track Alpha + Track Gamma):
+**Surfaces** (file-disjoint with Track Alpha; Track Gamma deferred to v1.0.6):
 - Modify: `skills/sbtdd/scripts/close_task_cmd.py`
 - Modify: `skills/sbtdd/scripts/run_sbtdd.py` (argparse `--skip-preflight`)
 - Extend: `tests/test_close_task_cmd.py`
@@ -1670,19 +1670,28 @@ override.
 
 ## Plan invariants summary
 
-- **5 active plan tasks** distributed across 3 parallel subagent
+- **4 active plan tasks** distributed across 2 parallel subagent
   tracks (Track Alpha 2 tasks T1+T2; Track Beta 2 tasks T3+T4
-  sequential; Track Gamma 1 task T5).
+  sequential). Track Gamma DEFERRED to v1.0.6 per iter-2 CRITICAL
+  trigger (2026-05-08).
 - **3 methodology activities** executed by orchestrator (F7 production-
   grade integration test + F8 Item D Q3-A empirical validation + P2
   pre-merge gate clean WITHOUT INV-0).
-- **Per-phase close-phase mandate** applied to ALL 5 tasks per Q3
+- **Per-phase close-phase mandate** applied to ALL 4 tasks per Q3
   Option B v1.0.4 mandate (preserved + soon-enforced via Item D Q3-A
   hard-block from Task 4 onwards).
-- **Cero file overlap** between Track Alpha + Track Beta + Track Gamma
-  surfaces (verified in spec sec.5.4).
+- **Cero file overlap** between Track Alpha + Track Beta surfaces
+  (verified in spec sec.5.4 post iter-2 CRITICAL #4 architectural
+  fix; `state_file.py` shared by both for DRY atomic-write
+  consolidation, with Track Alpha landing the consolidation).
 - **Within-track sequential ordering**: Track Beta MUST land Task 3
   (I-2) before Task 4 (D Q3-A). Both modify `close_task_cmd.py`.
+- **Cross-track dispatch-ordering invariant**: Track Beta T3 MUST
+  land BEFORE Track Alpha T1 Step 5 (the wiring step importing
+  `_merge_scratch_plans` from `close_task_cmd`). T1 Steps 1-4 + T2
+  CAN run parallel with Track Beta T3+T4. Orchestrator sequences:
+  dispatch Beta first → wait for T3 close → dispatch Alpha (which
+  executes T1 Steps 1-4 → T2 → T1 Step 5 in order).
 - **Tests baseline**: 1226 + 1 skipped → ~1250-1265 final.
 - **Coverage threshold**: >= 88% (per Q4 v1.0.2 baseline).
 - **`make verify` runtime**: <= 200s soft / 220s hard NF-A (acknowledges

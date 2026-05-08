@@ -1,59 +1,104 @@
-# v1.0.4 Real Headless Detection + Parallel Dispatcher + Close-phase Mandate Implementation Plan
+# v1.0.5 Production-grade `--parallel` + Item D Q3-A code-side enforcement Implementation Plan
 
-> Generado 2026-05-07 a partir de sbtdd/spec-behavior.md v1.0.4 via
+> Generado 2026-05-08 a partir de sbtdd/spec-behavior.md v1.0.5 via
 > superpowers:writing-plans skill (interactive session, brainstorming
-> Q1+Q2+Q3+Q4+Q5 resolved). Frontmatter required by spec_lint R5
-> (Item C v1.0.2 enforcement).
+> Q1+Q2+Q3+Q4+Q5 resolved). Frontmatter required by spec_lint R5.
 >
-> v1.0.4 ships 2 pillars (post iter 2 scope-trim Option D 2026-05-07):
-> Pillar A (Items A+B coupled subprocess-incompatible gate + 600s
-> LOUD-FAST fix); Pillar B (Item C parallel task dispatcher with
-> --parallel flag). **Pillar C (Item D) DEFERRED ENTIRELY to v1.0.5
-> LOCKED** per spec sec.6.1 G2 ladder firing on iter 2 CRITICAL #3.
->
-> **iter 1 triage applied 2026-05-07** (post Checkpoint 2 iter 1
-> verdict GO_WITH_CAVEATS 3-0; 2 CRITICAL + 14 WARNING + 5 INFO):
-> Task 2 ABSORBED into Task 1 (single set extension + tests after
-> CRITICAL #1 simplification dropped helper). Task 3 simplified
-> (membership + override gate; no env-var detection). Task 4
-> recovery message simplified (no env-var formatting). Task 6
-> dag_parser + code-fence-aware regex + iterative cycle detection
-> (WARNING melchior + caspar). Task 7 deterministic sort + synthetic
-> concurrent state-file write test (WARNING melchior + balthasar).
->
-> **iter 2 surgical fixes + scope-trim applied 2026-05-07** (post
-> Checkpoint 2 iter 2 verdict GO_WITH_CAVEATS 3-0; 3 CRITICAL + 11
-> WARNING + 6 INFO; iter-2 CRITICAL trigger fired): Task 6
-> _detect_cycle converted recursive DFS → iterative Kahn's (CRITICAL
-> #1 surgical fix). Task 7 partition_by_collision sorts task IDs
-> ascending before greedy packing (CRITICAL #2 surgical fix).
-> **Task 9 DEFERRED ENTIRELY** per Option D (CRITICAL #3 + 3-agent
-> WARNING about doc-only insufficiency). Activity D' retry drops
-> SBTDD_INTERACTIVE=1 step.
->
-> Effective task layout post-iter-2-trim: 7 active tasks (4 Alpha +
-> 3 Beta). Task numbering preserved 1-9 with T2 ABSORBED + T9
-> DEFERRED.
+> v1.0.5 ships 3 focused pillars:
+> - Pillar A PRIMARY (LOCKED CRITICAL): I-1 + I-2 + I-3 production-grade
+>   `--parallel` correctness gaps closure
+> - Pillar B LOCKED (HIGH VALUE): Item D Q3 OPTION A code-side
+>   enforcement via `close_task_cmd._preflight` HARD-BLOCK
+> - Pillar C LOCKED (METHODOLOGY): C.1 spec sec.8 sweep (APPLIED INLINE
+>   in spec) + C.2 plan archaeology trim methodology
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax (open + closed bracket forms) for tracking.
+>
+> **Iter 1 Checkpoint 2 triage applied 2026-05-08** (verdict
+> GO_WITH_CAVEATS 3-0, 5 CRITICAL + 12 WARNING; full triage
+> rationale in spec-behavior.md header). Plan deltas applied:
+> - **CRITICAL #1+#3** (mel+cas, fabricated flips): Task 3 Step 4
+>   `_apply_flips_for_task_ids` rewritten as `_apply_flips_from_diff`
+>   (derives flips from scratch-vs-main diff; no longer takes
+>   `task_ids` param; partial worker failure no longer fabricates).
+>   Added escenario I2-3b regression test.
+> - **CRITICAL #2** (mel, regex cross-boundary): Task 3 Step 4
+>   `_flip_checkbox` regex anchored to next `### Task` header (or
+>   EOF) using `_TASK_HEADER_RE` walker. Added escenario I2-5
+>   regression test.
+> - **CRITICAL #4** (cas, architectural): Track Alpha + Track Beta
+>   "cero overlap" Q1 claim was function-level FALSE — both wired
+>   into `_dispatch_tracks_concurrent`. Resolved by **Track Alpha
+>   T1 Step 5 owns ALL `_dispatch_tracks_concurrent` post-batch
+>   wiring** (audit-merge + scratch-merge + reaper); Track Beta T3
+>   Step 5 = NO `auto_cmd.py` modification (helper-only). Surfaces
+>   become file-level disjoint.
+> - **CRITICAL #5** (cas, wrong commit-window): Task 4 Step 4
+>   `_preflight` triplet check scoped to "since last `chore: mark
+>   task` commit" (not `phase_started_at_commit`). Added
+>   `_last_chore_task_close_sha` helper. Updated escenarios D-1+D-2;
+>   added D-2b first-task branch-root case.
+> - **WARNINGs** addressed: duplicate `test_d4` renamed (now
+>   `test_d4_no_chore_commit_first_task_branch_root_boundary` +
+>   `test_d5_partial_triplet_raises`); orphan reaper added to
+>   Task 1 Step 5 (escenario I1-6); race regression test
+>   strengthened (real `multiprocessing.Process` + spawn context +
+>   Barrier-synchronized RMW + 50× repeat); DRY atomic-write
+>   acknowledged via Task 1 Step 8 / Task 3 Step 8 refactor pass.
+>
+> **Iter 2 Checkpoint 2 triage applied 2026-05-08** (verdict
+> GO_WITH_CAVEATS 3-0 with 6 CRITICAL — **iter-2 CRITICAL trigger
+> FIRES**; pre-staged response invoked). Plan deltas:
+> - **Pillar C (Track Gamma T5) DEFERRED to v1.0.6** per pre-staged
+>   G2 ladder. Plan now ships 4 plan tasks (T1+T2 Track Alpha,
+>   T3+T4 Track Beta) instead of 5.
+> - **Plan T3 Step 4 spec/plan drift FIXED** (iter-1 fix applied
+>   to spec but not plan code block — operator editing miss):
+>   plan T3 Step 4 implementation code rewritten verbatim from spec
+>   sec.2.2 step 3+4 with anchored `_flip_checkbox` (`_TASK_HEADER_RE`
+>   walker) + `_apply_flips_from_diff` (no `task_ids` param) +
+>   `_section_has_flipped` + `_iter_task_ids` helpers.
+> - **Track Alpha T1 → Track Beta T3 ordering hardened**: dropped
+>   "stub the import temporarily" fallback. Plan invariants block
+>   adds explicit subagent-dispatch-ordering constraint: Track Beta
+>   T3 MUST land BEFORE Track Alpha T1 Step 5 wiring step. T1
+>   Steps 1-4 + T2 can run parallel with Track Beta T3+T4.
+> - **Plan T3 Step 1 Red phase** extended with explicit test
+>   methods: `test_i2_3b_partial_worker_failure_no_fabrication` +
+>   `test_i2_5_anchored_flip_checkbox_respects_section_boundaries`.
+> - **Plan I2-4 race test**: explicit `for _ in range(50):` repeat
+>   wrapping multiprocessing barrier-synchronized RMW; assert no
+>   flip lost across all 50 iterations.
+> - **Plan T1 Step 8 + T3 Step 8** atomic-write DRY consolidation
+>   made UNCONDITIONAL: extract shared `_atomic_write_json` to
+>   `state_file.py`; both modules import from there.
+> - **`_reap_orphans` race-safety**: mtime/lock guard added — only
+>   reaps files older than dispatcher start time + 5min margin.
+> - **`_last_chore_task_close_sha` task-ID verification**: optional
+>   second-line check parses task-ID from chore subject; mismatch
+>   surfaces diagnostic info in PreconditionError.
 
-**Goal:** Ship v1.0.4 — eliminate `/receiving-code-review` interactive subprocess hang via subprocess-incompatible gate (membership + override semantics; pre-spawn block) coupled with 600s LOUD-FAST PreconditionError fix; codify multi-track parallel subagent pattern as plugin feature via `--parallel` flag on `/sbtdd auto`. **Item D (per-phase close-phase mandate + tripwire) DEFERRED ENTIRELY to v1.0.5 LOCKED** per iter 2 scope-trim Option D — v1.0.5 will ship Q3 OPTION A code-side enforcement architecture instead. 7 active plan tasks (T2 ABSORBED, T9 DEFERRED) across 2 parallel subagent tracks; 4 methodology activities (Activity E'-pre + Activity D' retry + Activity E'-post + parallel dispatcher dogfood) executed by orchestrator (last 2 demoted to BEST-EFFORT non-gating per iter 2 scope-trim).
+**Goal:** Ship v1.0.5 — close v1.0.4 LOCKED commitments documented in CHANGELOG `[Unreleased]` (I-1/I-2/I-3 production-grade `--parallel` correctness gaps) + ship Item D Q3 OPTION A code-side enforcement (replaces v1.0.4's scope-trimmed Q3 Option B doc-only attempt). **Pillar C plan archaeology trim methodology DEFERRED to v1.0.6** per iter-2 Checkpoint 2 CRITICAL trigger (2026-05-08). **4 plan tasks across 2 parallel subagent tracks** (Alpha T1+T2; Beta T3→T4 sequential); 3 mid-cycle methodology activities (production-grade `--parallel` integration test + Item D Q3-A empirical validation + pre-merge gate clean WITHOUT INV-0).
 
-**Architecture:** 2-track parallel dispatch with disjoint surfaces. Track Alpha (Items A+B coupled, 4 sequential tasks post-triage; T2 ABSORBED into T1) modifies `skills/sbtdd/scripts/superpowers_dispatch.py` + extends `tests/test_superpowers_dispatch.py` + `tests/test_invoke_skill_callsites_audit.py`. Track Beta (Item C only post iter 2 scope-trim, 3 tasks T6+T7+T8; T9 DEFERRED) creates `skills/sbtdd/scripts/dag_parser.py` + `skills/sbtdd/scripts/parallel_dispatcher.py` (NEW modules), modifies `skills/sbtdd/scripts/auto_cmd.py` + tests. **No Item D doc-only or tripwire modifications in v1.0.4** (deferred). Cero file overlap. Activities mid-cycle (E'-pre before Track dispatch; D' retry after Track close; E'-post + parallel dogfood best-effort) run in orchestrator session before pre-merge gate.
+**Architecture:** 3-track parallel dispatch with disjoint surfaces. Track Alpha (auto_cmd.py only, 2 sequential tasks I-1 → I-3) implements per-worker sidecar audit-trail pattern + worker CLI flag forwarding. Track Beta (close_task_cmd.py + run_sbtdd.py argparse, 2 sequential tasks I-2 → D Q3-A) implements per-worker scratch plan flip-merge pattern + close_task_cmd._preflight HARD-BLOCK with --skip-preflight emergency override. Track Gamma (SKILL.md + template + smoke test, 1 task) implements plan archaeology trim methodology documentation (C.1 spec sweep already applied inline in spec-behavior.md sec.8). Manual orchestrator dispatch via Agent tool fan-out (NOT auto --parallel self-dispatch — chicken-and-egg avoidance per Q1 Option C).
 
-**State file write serialization**: Track Alpha owns Tasks 1-5 (sequential close, T2 ABSORBED no-op). Track Beta owns Tasks 6-8 (sequential close, T9 DEFERRED no-op). State file `current_task_id` advances 1 → 3 → 4 → 5 → 6 → 7 → 8 → done (skipping 2 ABSORBED + 9 DEFERRED). `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Concurrent close-task invocations against disjoint task IDs are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3 precedent + v1.0.4 Task 7 synthetic concurrent test (iter 1 triage W6 fold-in).
+**State file write serialization**: Track Alpha owns Tasks 1-2 (sequential close). Track Beta owns Tasks 3-4 (sequential close). State file `current_task_id` advances 1 → 2 → 3 → 4 → done. `state_file.save()` atomic `os.replace` (existing v0.5.0 pattern) ensures no partial writes. Tracks have disjoint task IDs and disjoint file surfaces (Track Gamma deferred to v1.0.6); concurrent close-task invocations are safe per v0.4.0+v0.5.0+v1.0.0+v1.0.2+v1.0.3+v1.0.4 precedent.
 
-**Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active in same worktree (parallel-safe per spec sec.3 since Tracks have disjoint surfaces). Brainstorming refinements 2026-05-07: Q1 = 2-track parallel (Alpha A+B coupled, Beta C+D sequential); Q2 = Item C `--parallel` flag on `/sbtdd auto` (no new subcommand); Q3 = Item D Option B mandate close-phase per phase commit via 3-touchpoint doc-only; Q4 = Activity E' Option C both pre + post Track-close exercises; Q5 auto-resolved cap=3 HARD G1, iter-2 CRITICAL trigger pre-staged.
+**Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active in same worktree (parallel-safe per spec sec.3 since Tracks have disjoint surfaces). Brainstorming refinements 2026-05-08: Q1 = 3-track parallel disjoint (Alpha I-1+I-3, Beta I-2+D Q3-A, Gamma C.2); Q2 = per-worker sidecar I-1; Q3 = per-worker scratch I-2; Q4 = `--skip-preflight` flag-only emergency override; Q5 = strict no-INV-0 stance.
 
 **Plan invariants** (cross-task contracts):
 
 - Every commit follows `~/.claude/CLAUDE.md` Git rules: English only, no AI references, no `Co-Authored-By` lines, atomic, prefix from sec.5 of `CLAUDE.local.md` (`test:` / `feat:` / `fix:` / `refactor:` / `chore:`).
 - Every phase close runs `/verification-before-completion` (sec.0.1: `pytest`, `ruff check .`, `ruff format --check .`, `mypy .`) before the commit.
-- Every new `.py` file starts with the 4-line header: `#!/usr/bin/env python3` (executables only), `# Author: Julian Bolivar`, `# Version: 1.0.0`, `# Date: 2026-05-07`.
-- **Phase close protocol (Q3 Option B mandate, this cycle ships it)**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-phase` after each Red/Green/Refactor verify-clean. Manual `git commit` per phase BYPASSES the phase-advance + state-file update + verification gate; treated as NON-CONFORMING and triggers drift detection on next `close-task`. v1.0.4 cycle is the FIRST to enforce this via plan template — own-cycle dogfood.
-- **Task close protocol (Q2 Option B v1.0.2 mandate, preserved)**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review` after Refactor close-phase. Use `--skip-spec-review` to bypass INV-31 spec-reviewer dispatch (~1-2 min/task overhead acceptable but not required for these infrastructure items).
+- Every new `.py` file starts with the 4-line header: `#!/usr/bin/env python3` (executables only), `# Author: Julian Bolivar`, `# Version: 1.0.0`, `# Date: 2026-05-08`.
+- **Phase close protocol (Q3 Option B v1.0.4 mandate, preserved + soon-to-be-enforced via Item D Q3-A)**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-phase` after each Red/Green/Refactor verify-clean. Manual `git commit` per phase BYPASSES the phase-advance + state-file update + verification gate; close-task v1.0.5 will HARD-BLOCK once Item D Q3-A lands (Track Beta Task 4).
+- **Task close protocol**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review` after Refactor close-phase. Use `--skip-spec-review` to bypass INV-31 spec-reviewer dispatch (~1-2 min/task overhead acceptable but not required for these infrastructure items).
+- **Track Beta sequential ordering MANDATORY**: Task 3 (I-2) lands FIRST. Task 4 (D Q3-A) lands AFTER Task 3 completes. Both modify `close_task_cmd.py` — within-track sequential coordination required.
+- **Cross-track dispatch-ordering invariant (iter-2 CRITICAL #4 hardening)**: Track Beta T3 MUST land in git BEFORE Track Alpha T1 Step 5 (the wiring step that imports `from close_task_cmd import _merge_scratch_plans`). Track Alpha T1 Steps 1-4 (sidecar pattern, no cross-track import) + T2 (flag forwarding) CAN run in parallel with Track Beta T3+T4. Orchestrator MUST sequence dispatch: dispatch Track Beta subagent FIRST + wait for T3 close commit → THEN dispatch Track Alpha subagent (which executes T1 Steps 1-4 → T2 → T1 Step 5 in order). The "stub temporarily and rebase" fallback is RETRACTED — too brittle, risks landing broken intermediate state.
 - INV-37 composite-signature tripwire preserved unchanged in all paths.
 - Item C v1.0.2 spec_lint gate (R1-R5) preserved unchanged.
+- v1.0.4 Items A+B membership-based subprocess gate preserved unchanged.
+- v1.0.4 Path 3 `--parallel` architecture (`partition_by_tracks` + `_dispatch_tracks_concurrent` + `--task-ids` + `--no-recursive`) preserved unchanged. v1.0.5 EXTENDS via Track Alpha (I-1+I-3) + Track Beta (I-2) post-batch merge helpers.
 
 **Commit prefix map per phase** (from `CLAUDE.local.md` §5):
 
@@ -66,275 +111,449 @@
 
 ---
 
-## Track Alpha — Items A+B coupled real headless detection (Subagent #1, sequential A1 → A2 → A3 → A4 → A5)
+## Track Alpha — I-1 worker audit-trail sidecar + I-3 CLI flag forwarding (Subagent #1, sequential T1 → T2)
 
 **Owner**: Subagent #1 dispatched from orchestrator.
-**Surfaces** (cero overlap with Track Beta):
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py`
-- Extend: `tests/test_superpowers_dispatch.py`
-- Extend: `tests/test_invoke_skill_callsites_audit.py`
+**Surfaces** (file-disjoint with Track Beta post iter-2 CRITICAL #4 architectural fix; Track Gamma deferred to v1.0.6):
+- Modify: `skills/sbtdd/scripts/auto_cmd.py`
+- Extend: `tests/test_auto_cmd.py`
 
 **Wall-time estimated**: ~1 day.
 
-### Task 1: Item A.1 — Extend `_SUBPROCESS_INCOMPATIBLE_SKILLS` set + module docstring (iter 1 triage: ABSORBS T2)
+### Task 1: Item I-1 — Per-worker sidecar audit-trail pattern
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (extend frozenset + update module docstring with v1.0.4 audit history entry)
-- Test: `tests/test_superpowers_dispatch.py` (extend with `class TestSubprocessIncompatibleSkillsExtended`)
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add `_audit_sidecar_path` helper + worker-mode `_write_audit` redirect + `_merge_audit_sidecars` post-batch helper + `_dispatch_tracks_concurrent` post-batch hook)
+- Test: `tests/test_auto_cmd.py` (extend with `class TestPerWorkerSidecarAudit`)
 
-Covers escenarios A-2, A-5 from spec sec.4.1 (post triage: A-3 + A-4 env-var escenarios DROPPED per CRITICAL #1+#2 simplification).
+Covers escenarios I1-1 through I1-5 from spec sec.4.1.
 
 #### Red Phase
 
-- [x] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_superpowers_dispatch.py`:
+Append to `tests/test_auto_cmd.py`:
 
 ```python
-class TestSubprocessIncompatibleSkillsExtended:
-    """v1.0.4 Item A.1 escenarios A-2 + A-5 — set extension + docstring audit history (post iter 1 triage)."""
+class TestPerWorkerSidecarAudit:
+    """v1.0.5 Item I-1 escenarios I1-1 through I1-5 — per-worker sidecar pattern."""
 
-    def test_a5_receiving_code_review_in_incompatible_set(self):
-        """A-5: receiving-code-review extended in v1.0.4."""
-        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
+    def test_i1_1_worker_mode_redirects_audit_to_sidecar(self, tmp_path, monkeypatch):
+        """I1-1: worker mode redirects audit write to sidecar."""
+        from auto_cmd import _write_audit, _audit_sidecar_path
+        import argparse
 
-        assert "receiving-code-review" in _SUBPROCESS_INCOMPATIBLE_SKILLS
+        ns = argparse.Namespace(no_recursive=True, task_ids="1,3")
+        audit_data = {"start_time": "2026-05-08T10:00:00Z", "tasks": ["1", "3"]}
+        (tmp_path / ".claude").mkdir()
 
-    def test_a5_brainstorming_writing_plans_preserved_v101(self):
-        """A-5: v1.0.1 baseline (brainstorming, writing-plans) preserved."""
-        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
+        _write_audit(audit_data, tmp_path, ns)
 
-        assert "brainstorming" in _SUBPROCESS_INCOMPATIBLE_SKILLS
-        assert "writing-plans" in _SUBPROCESS_INCOMPATIBLE_SKILLS
+        sidecar = _audit_sidecar_path(("1", "3"), tmp_path)
+        assert sidecar.exists()
+        assert not (tmp_path / ".claude" / "auto-run.json").exists()
+        loaded = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert loaded == audit_data
 
-    def test_a2_set_is_frozenset_immutable(self):
-        """A-2: set is frozenset to prevent runtime mutation."""
-        from superpowers_dispatch import _SUBPROCESS_INCOMPATIBLE_SKILLS
+    def test_i1_2_orchestrator_mode_writes_canonical_audit(self, tmp_path, monkeypatch):
+        """I1-2: orchestrator mode writes canonical audit-run.json."""
+        from auto_cmd import _write_audit
+        import argparse
 
-        assert isinstance(_SUBPROCESS_INCOMPATIBLE_SKILLS, frozenset)
+        ns = argparse.Namespace(no_recursive=False, task_ids=None)
+        audit_data = {"start_time": "2026-05-08T10:00:00Z", "tasks": ["1", "2", "3", "4"]}
+        (tmp_path / ".claude").mkdir()
 
-    def test_a5_module_docstring_documents_audit_history(self):
-        """A-5 doc-coherence: module docstring records v1.0.1 + v1.0.4 additions."""
-        import superpowers_dispatch
+        _write_audit(audit_data, tmp_path, ns)
 
-        docstring = superpowers_dispatch.__doc__ or ""
-        assert "v1.0.1" in docstring
-        assert "brainstorming" in docstring
-        assert "writing-plans" in docstring
-        assert "v1.0.4" in docstring
-        assert "receiving-code-review" in docstring
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        assert canonical.exists()
+        loaded = json.loads(canonical.read_text(encoding="utf-8"))
+        assert loaded == audit_data
 
-    def test_a5_module_docstring_documents_gate_semantics(self):
-        """A-5 doc-coherence (post iter 1 triage): module docstring documents
-        membership-based gate semantics (NOT env-var/isatty heuristic)."""
-        import superpowers_dispatch
+    def test_i1_3_parent_post_batch_merges_sidecars(self, tmp_path):
+        """I1-3: parent post-batch merges sidecars + cleans up."""
+        from auto_cmd import _audit_sidecar_path, _merge_audit_sidecars
 
-        docstring = superpowers_dispatch.__doc__ or ""
-        assert "BLOCKED UNCONDITIONALLY" in docstring
-        assert "allow_interactive_skill=True" in docstring
-        assert "NO env-var/isatty heuristic" in docstring
+        (tmp_path / ".claude").mkdir()
+        # Pre-dispatch parent audit
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        canonical.write_text(json.dumps({"start_time": "2026-05-08T10:00:00Z"}), encoding="utf-8")
+        # Three workers wrote sidecars
+        sidecar_a = _audit_sidecar_path(("1", "3"), tmp_path)
+        sidecar_b = _audit_sidecar_path(("2",), tmp_path)
+        sidecar_c = _audit_sidecar_path(("4",), tmp_path)
+        sidecar_a.write_text(json.dumps({"task_ids": ["1", "3"], "completed_at": "T1"}), encoding="utf-8")
+        sidecar_b.write_text(json.dumps({"task_ids": ["2"], "completed_at": "T2"}), encoding="utf-8")
+        sidecar_c.write_text(json.dumps({"task_ids": ["4"], "completed_at": "T3"}), encoding="utf-8")
+
+        merged = _merge_audit_sidecars([["1", "3"], ["2"], ["4"]], tmp_path)
+
+        assert merged["start_time"] == "2026-05-08T10:00:00Z"
+        assert merged["aggregate_task_count"] == 4
+        assert len(merged["per_worker"]) == 3
+        # Sidecars cleaned up
+        assert not sidecar_a.exists()
+        assert not sidecar_b.exists()
+        assert not sidecar_c.exists()
+
+    def test_i1_4_missing_sidecar_handled_gracefully(self, tmp_path):
+        """I1-4: worker terminated before sidecar write → graceful no_audit_data entry."""
+        from auto_cmd import _merge_audit_sidecars
+
+        (tmp_path / ".claude").mkdir()
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        canonical.write_text(json.dumps({"start_time": "2026-05-08T10:00:00Z"}), encoding="utf-8")
+        # No sidecar files exist (workers crashed before write)
+
+        merged = _merge_audit_sidecars([["1"], ["2"]], tmp_path)
+
+        assert len(merged["per_worker"]) == 2
+        for entry in merged["per_worker"]:
+            assert entry["status"] == "no_audit_data"
+            assert "Worker terminated before sidecar write" in entry["note"]
+
+    def test_i1_5_inv26_audit_trail_integrity(self, tmp_path):
+        """I1-5: INV-26 audit-trail integrity post-batch (full round-trip)."""
+        from auto_cmd import _audit_sidecar_path, _merge_audit_sidecars
+
+        (tmp_path / ".claude").mkdir()
+        canonical = tmp_path / ".claude" / "auto-run.json"
+        canonical.write_text(
+            json.dumps({"start_time": "2026-05-08T10:00:00Z", "planned_tasks": ["1", "2", "3", "4"]}),
+            encoding="utf-8",
+        )
+        # 2 tracks completed
+        sidecar_a = _audit_sidecar_path(("1", "3"), tmp_path)
+        sidecar_b = _audit_sidecar_path(("2", "4"), tmp_path)
+        sidecar_a.write_text(json.dumps({"task_ids": ["1", "3"], "completed_at": "T1"}), encoding="utf-8")
+        sidecar_b.write_text(json.dumps({"task_ids": ["2", "4"], "completed_at": "T2"}), encoding="utf-8")
+
+        merged = _merge_audit_sidecars([["1", "3"], ["2", "4"]], tmp_path)
+
+        # INV-26 verified: original start_time + aggregate_task_count + per_worker present
+        assert merged["start_time"] == "2026-05-08T10:00:00Z"  # original preserved
+        assert merged["aggregate_task_count"] == 4
+        assert len(merged["per_worker"]) == 2
 ```
 
-- [x] **Step 2: Run tests to verify FAIL**
+- [ ] **Step 2: Run tests to verify FAIL**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestSubprocessIncompatibleSkillsExtended -v`
-Expected: receiving-code-review check FAILs (set not extended), docstring checks FAIL (module docstring doesn't yet have v1.0.4 entry or gate semantics block).
+Run: `pytest tests/test_auto_cmd.py::TestPerWorkerSidecarAudit -v`
+Expected: 5/5 FAIL with `AttributeError: module 'auto_cmd' has no attribute '_audit_sidecar_path'` (and same for `_merge_audit_sidecars`).
 
-- [x] **Step 3: close-phase Red**
+- [ ] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-Expected: Red phase verify-clean confirms tests fail for the correct reason. Atomic `test:` commit landed. State file advances `current_phase: red → green`.
+Expected: Red phase verify-clean confirms tests fail for the correct reason (missing implementation, not import error). Atomic `test:` commit landed. State file advances `current_phase: red → green`.
 
 #### Green Phase
 
-- [x] **Step 4: Extend the set + update module docstring**
+- [ ] **Step 4: Implement `_audit_sidecar_path` + `_write_audit` redirect + `_merge_audit_sidecars`**
 
-Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
+Modify `skills/sbtdd/scripts/auto_cmd.py`. Add helpers:
 
 ```python
-"""Dispatcher for invoking superpowers skills via claude -p subprocess.
+import hashlib
 
-...
+def _audit_sidecar_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
+    """Per-worker audit sidecar path.
 
-Subprocess-incompatible skill audit history:
-- v1.0.1 (Finding A discovery): brainstorming, writing-plans.
-  Manifestation: silent no-op (subprocess returns without producing
-  skill output). Caught post-spawn via INV-37 composite-signature
-  check (v1.0.1 Item A0).
-- v1.0.4 (v1.0.3 Activity D' empirical hang during Loop 1 fix-finding
-  triage step): receiving-code-review. Manifestation: 600s subprocess
-  hang waiting interactive input. Cannot be caught post-spawn
-  (operator-blocking); requires pre-spawn gate.
+    v1.0.5 Item I-1: deterministic name per task-IDs hash. Each worker
+    writes its audit to its own sidecar; parent post-batch merges all
+    sidecars into canonical auto-run.json.
 
-A skill is subprocess-incompatible iff it requires multi-turn
-interactive dialogue with the operator. Adding a new entry to the
-set without empirical evidence (subprocess hang or silent-no-op
-observed) is forbidden -- operators must run the skill manually in
-interactive session and document the failure mode in CHANGELOG
-before promoting.
+    Args:
+        task_ids: Sorted tuple of task IDs assigned to this worker.
+        project_root: Project root path.
 
-Gate semantics (v1.0.4 post iter 1 triage): subprocess spawn for
-incompatible skills is BLOCKED UNCONDITIONALLY unless caller passes
-allow_interactive_skill=True. The override is the explicit opt-in
-for known-safe wrappers that have arranged for subprocess success
-(silent-no-op tolerated by v1.0.1 wrappers via INV-37 post-detection;
-or operator-controlled interactive callsites). NO env-var/isatty
-heuristic -- caspar Checkpoint 2 iter 1 CRITICAL verified the
-heuristic does not fix the v1.0.3 bug in operator main sessions.
-"""
+    Returns:
+        Path to sidecar file.
+    """
+    digest = hashlib.sha1(",".join(task_ids).encode("utf-8")).hexdigest()[:12]
+    return project_root / ".claude" / f"auto-run-track-{digest}.json"
 
-_SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset({
-    "brainstorming",
-    "writing-plans",
-    "receiving-code-review",  # v1.0.4 added per v1.0.3 Activity D' dogfood
-})
+
+def _write_audit(audit: dict, project_root: Path, ns: argparse.Namespace) -> None:
+    """Write audit record. v1.0.5 Item I-1: workers redirect to sidecar.
+
+    Worker mode (--no-recursive + --task-ids) → writes per-worker sidecar.
+    Orchestrator mode → writes canonical .claude/auto-run.json.
+    """
+    if getattr(ns, "no_recursive", False) and getattr(ns, "task_ids", None):
+        task_ids_tuple = tuple(sorted(ns.task_ids.split(",")))
+        audit_path = _audit_sidecar_path(task_ids_tuple, project_root)
+    else:
+        audit_path = project_root / ".claude" / "auto-run.json"
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(audit_path, audit)
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Atomic JSON write via write-temp + os.replace (cross-platform)."""
+    import json
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _merge_audit_sidecars(
+    tracks: list[list[str]], project_root: Path
+) -> dict:
+    """Parent post-batch: merge per-worker sidecars into canonical audit.
+
+    v1.0.5 Item I-1: collects per-worker sidecar files (created by workers
+    during dispatch) into the canonical auto-run.json. Preserves parent's
+    pre-dispatch record + adds per-worker completion info + aggregate
+    task count. Cleans up sidecar files post-merge.
+
+    Args:
+        tracks: List of dispatched track task-ID lists.
+        project_root: Project root.
+
+    Returns:
+        Merged audit dict.
+    """
+    import json
+    canonical_path = project_root / ".claude" / "auto-run.json"
+    canonical = (
+        json.loads(canonical_path.read_text(encoding="utf-8"))
+        if canonical_path.exists()
+        else {}
+    )
+    per_worker: list[dict] = []
+    for task_ids in tracks:
+        sidecar_path = _audit_sidecar_path(tuple(sorted(task_ids)), project_root)
+        if sidecar_path.exists():
+            sidecar_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            per_worker.append(sidecar_data)
+            sidecar_path.unlink(missing_ok=True)
+        else:
+            per_worker.append({
+                "task_ids": list(task_ids),
+                "status": "no_audit_data",
+                "note": "Worker terminated before sidecar write",
+            })
+    canonical["per_worker"] = per_worker
+    canonical["aggregate_task_count"] = sum(len(tids) for tids in tracks)
+    return canonical
 ```
 
-- [x] **Step 5: Run tests to verify PASS**
+Confirm `import os`, `import json`, `import argparse`, `from pathlib import Path` are present at top of file.
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestSubprocessIncompatibleSkillsExtended -v`
-Expected: 5/5 PASS.
+- [ ] **Step 5: Wire `_merge_audit_sidecars` AND `_merge_scratch_plans` into `_dispatch_tracks_concurrent` (iter-1 CRITICAL #4: Track Alpha owns ALL post-batch hooks) + `_reap_orphans` pre-flight (iter-1 WARNING fix)**
+
+Modify `_dispatch_tracks_concurrent` post-batch:
+
+```python
+def _dispatch_tracks_concurrent(
+    tracks: list[list[str]],
+    effective_workers: int,
+    project_root: Path,
+    ns: argparse.Namespace,
+) -> None:
+    """... existing dispatch logic ..."""
+    # v1.0.5 iter-1 WARNING + iter-2 race-safety fix: reap orphan
+    # sidecar/scratch from prior crashed run BEFORE new dispatch
+    # (prevents stale data contamination). mtime guard avoids
+    # clobbering concurrent SBTDD instances. See escenario I1-6.
+    import time
+    _reap_orphans(project_root, dispatch_start_epoch=time.time())
+
+    # ... existing thread-pool + Queue + Popen workers ...
+    # ... wait all workers complete ...
+
+    # v1.0.5 Item I-1: merge per-worker audit sidecars into canonical
+    merged_audit = _merge_audit_sidecars(tracks, project_root)
+    _atomic_write_json(project_root / ".claude" / "auto-run.json", merged_audit)
+
+    # v1.0.5 Item I-2 (iter-1 CRITICAL #4: wired here per architectural fix —
+    # Track Alpha owns ALL _dispatch_tracks_concurrent post-batch hooks;
+    # Track Beta provides the helper in close_task_cmd.py only):
+    from close_task_cmd import _merge_scratch_plans
+    _merge_scratch_plans(tracks, project_root)
+
+
+def _reap_orphans(project_root: Path, dispatch_start_epoch: float) -> None:
+    """v1.0.5 iter-1 WARNING + iter-2 race-safety fix: clean stale
+    per-worker sidecar/scratch files from a prior crashed run.
+
+    iter-2 race-safety mtime guard: only reaps files older than
+    dispatch_start_epoch - 300s (5min margin). This avoids clobbering
+    sidecars/scratches from a CONCURRENT SBTDD instance that started
+    just before this dispatch (iter-2 cas WARNING). Concurrent
+    instances are rare but possible (operator running parallel
+    `--parallel` jobs). Idempotent: safe to invoke multiple times.
+    """
+    import time
+
+    claude_dir = project_root / ".claude"
+    if not claude_dir.exists():
+        return
+    cutoff = dispatch_start_epoch - 300.0  # 5min margin
+    for pattern in ("auto-run-track-*.json", "plan-scratch-*.md"):
+        for stale in claude_dir.glob(pattern):
+            try:
+                mtime = stale.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < cutoff:
+                stale.unlink(missing_ok=True)
+```
+
+Caller updates: `_dispatch_tracks_concurrent` invokes as
+`_reap_orphans(project_root, time.time())` at top of dispatch.
+
+**Architectural note (iter-1 CRITICAL #4 fix)**: original Q1
+"cero overlap" claim was function-level FALSE — both Track Alpha
+and Track Beta needed wiring into `_dispatch_tracks_concurrent`.
+Resolved by **consolidating ALL post-batch hook wiring into Track
+Alpha T1** (this step). Track Beta T3 provides
+`_merge_scratch_plans` as a pure helper in `close_task_cmd.py`
+(see Task 3 Step 4 + Step 5 helper-only note). Result:
+file-level disjoint surfaces (Track Alpha touches only
+`auto_cmd.py`; Track Beta touches only `close_task_cmd.py` +
+`run_sbtdd.py` argparse).
+
+**Coordination**: Track Alpha T1 imports
+`close_task_cmd._merge_scratch_plans` — soft dependency requiring
+Track Beta T3 commits to land first OR Track Alpha T1 stubs
+the import temporarily. Orchestrator dispatches Track Beta T3
+before Track Alpha T1 wiring step (within-track sequential per
+Track Alpha's I-1 sidecar-only step → I-3 forwarding → wiring
+via Step 5 final).
+
+- [ ] **Step 6: Run tests to verify PASS**
+
+Run: `pytest tests/test_auto_cmd.py::TestPerWorkerSidecarAudit -v`
+Expected: 5/5 PASS + reaper test (escenario I1-6) passes.
+
+Run: `make verify`
+Expected: All checks green (pytest, ruff check, ruff format, mypy).
+
+- [ ] **Step 7: close-phase Green**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+
+Expected: Green phase verify-clean passes. Atomic `feat:` commit landed (e.g. `feat: per-worker sidecar audit-trail pattern for v1.0.5 Item I-1`).
+
+#### Refactor Phase
+
+- [ ] **Step 8: Refactor — review for duplication / extract helpers if needed**
+
+If `_atomic_write_json` already existed in another module (e.g., `state_file.py`), import + use it instead of duplicating. Otherwise, leave the new helper in place. Document choice in commit message.
+
+- [ ] **Step 9: Run tests to verify still PASS**
 
 Run: `make verify`
 Expected: Clean.
 
-- [x] **Step 6: close-phase Green**
+- [ ] **Step 10: close-phase Refactor**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-Expected: Atomic `feat:` commit (e.g. `feat: extend _SUBPROCESS_INCOMPATIBLE_SKILLS for receiving-code-review (v1.0.4 Item A.1, T2 absorbed)`).
+Expected: `refactor:` commit landed (or `--allow-empty` if no actual refactor).
 
-#### Refactor Phase
-
-- [x] **Step 7: Refactor — no changes expected**
-
-Set extension is minimal. Docstring documents audit history. Skip refactor.
-
-- [x] **Step 8: close-phase Refactor (no-op or empty diff)**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-- [x] **Step 9: close-task**
+- [ ] **Step 11: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
-Expected: Task 1 checkboxes flipped, `chore:` commit, state file advances `current_task_id: 1 → 3` (skipping ABSORBED Task 2).
+Expected: Task 1 checkboxes flipped to `[x]`. Atomic `chore: mark task 1 complete` commit. State file advances `current_task_id: 1 → 2`.
 
 ---
 
-## Task 2 (ABSORBED into Task 1) — iter 1 triage CRITICAL #1+#2; iter 2 confirmed
-
-**Status**: ABSORBED — no implementation work required. Header
-collapsed from h3 to h2 (v1.0.4 Loop 2 iter-1 CRITICAL #2 Option b)
-so drift detector's section walker (`_ANY_TASK_HEADER` pinned to h3)
-does not visit this stub.
-
-iter 1 triage SIMPLIFIED Item A. Set extension that was Task 2's
-scope is part of Task 1 Step 4. Subagents skip this section
-entirely; orchestrator advances state file from `current_task_id:
-1 → 3` upon Task 1 close. No commits, no tests, no execution work
-for T2.
-
----
-
-### Task 3: Item A.2 — Wire membership-based gate into `invoke_skill` + escenarios A-1 + A-3 + A-4 + A-5 (post iter 1 triage SIMPLIFIED)
+### Task 2: Item I-3 — Worker CLI flag forwarding via `_FORWARDABLE_FLAGS` + `_build_worker_argv`
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (`invoke_skill` function — add membership + override gate, NO env-var detection)
-- Test: `tests/test_superpowers_dispatch.py` (add A-1, A-3, A-4, A-5 tests)
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add `_FORWARDABLE_FLAGS` MappingProxyType + `_build_worker_argv` helper + `_dispatch_tracks_concurrent` argv builder integration)
+- Test: `tests/test_auto_cmd.py` (extend with `class TestWorkerFlagForwarding`)
 
-Covers escenarios A-1, A-3, A-4, A-5 from spec sec.4.1 (post triage: NO `_is_headless_context()` helper; gate is membership-based with `allow_interactive_skill` override).
+Covers escenarios I3-1 through I3-3 from spec sec.4.3.
 
 #### Red Phase
 
-- [x] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_superpowers_dispatch.py`:
+Append to `tests/test_auto_cmd.py`:
 
 ```python
-class TestInvokeSkillMembershipGate:
-    """v1.0.4 Item A.2 escenarios A-1, A-3, A-4, A-5 — invoke_skill gate (post iter 1 triage)."""
+class TestWorkerFlagForwarding:
+    """v1.0.5 Item I-3 escenarios I3-1 through I3-3 — worker CLI flag forwarding."""
 
-    def test_a1_receiving_code_review_raises_unconditionally(self):
-        """A-1: invoke_skill('receiving-code-review', ...) raises without override (any context)."""
-        from superpowers_dispatch import invoke_skill
-        from errors import PreconditionError
+    def test_i3_1_forwardable_flags_propagate_to_worker_argv(self):
+        """I3-1: forwardable flags propagate to worker argv with non-None values."""
+        from auto_cmd import _build_worker_argv
+        import argparse
 
-        with pytest.raises(PreconditionError) as exc_info:
-            invoke_skill("receiving-code-review", "any prompt")
-        assert "Skill `/receiving-code-review` cannot run via `claude -p` subprocess" in str(exc_info.value)
-        assert "empirically incompatible" in str(exc_info.value)
+        ns = argparse.Namespace(
+            plugins_root=None,
+            magi_max_iterations=None,
+            magi_threshold="GO",
+            verification_retries=5,
+            model_override=None,
+        )
+        argv = _build_worker_argv(["1", "3"], ns)
 
-    def test_a1_no_subprocess_spawned_when_blocked(self):
-        """A-1: PreconditionError raised BEFORE subprocess spawn (no Popen call)."""
-        from superpowers_dispatch import invoke_skill
-        from errors import PreconditionError
+        assert "--task-ids" in argv
+        assert "1,3" in argv
+        assert "--no-recursive" in argv
+        assert "--magi-threshold" in argv
+        assert "GO" in argv
+        assert "--verification-retries" in argv
+        assert "5" in argv
+        # Non-None flags propagated; None flags omitted
+        assert "--plugins-root" not in argv
+        assert "--magi-max-iterations" not in argv
+        assert "--model-override" not in argv
 
-        with patch("subprocess.run") as mock_run:
-            with pytest.raises(PreconditionError):
-                invoke_skill("receiving-code-review", "any prompt")
-            mock_run.assert_not_called()
+    def test_i3_2_missing_flags_omit_from_worker_argv(self):
+        """I3-2: all-None flags produce minimal argv (no empty/None flags)."""
+        from auto_cmd import _build_worker_argv
+        import argparse
 
-    def test_a3_allow_interactive_skill_bypasses_gate(self):
-        """A-3: allow_interactive_skill=True bypasses gate (override active)."""
-        from superpowers_dispatch import invoke_skill
+        ns = argparse.Namespace(
+            plugins_root=None,
+            magi_max_iterations=None,
+            magi_threshold=None,
+            verification_retries=None,
+            model_override=None,
+        )
+        argv = _build_worker_argv(["1", "3"], ns)
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-            result = invoke_skill(
-                "receiving-code-review",
-                "any prompt",
-                allow_interactive_skill=True,
-            )
-            mock_run.assert_called_once()
+        # Only the minimal set: python, run_sbtdd.py, auto, --task-ids, IDs, --no-recursive
+        assert "--task-ids" in argv
+        assert "--no-recursive" in argv
+        for flag_name in ("--plugins-root", "--magi-max-iterations", "--magi-threshold",
+                           "--verification-retries", "--model-override"):
+            assert flag_name not in argv
 
-    def test_a4_brainstorming_wrapper_backward_compat(self):
-        """A-4: existing brainstorming wrapper preserves v1.0.1 behavior."""
-        from superpowers_dispatch import brainstorming
+    def test_i3_3_documented_forwardable_list_matches(self):
+        """I3-3: _FORWARDABLE_FLAGS matches documented helper docstring."""
+        from auto_cmd import _FORWARDABLE_FLAGS, _build_worker_argv
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-            result = brainstorming("any prompt")
-            mock_run.assert_called_once()
+        # Documented forwardable list (per spec sec.2.3)
+        expected_keys = {
+            "plugins_root",
+            "magi_max_iterations",
+            "magi_threshold",
+            "verification_retries",
+            "model_override",
+        }
+        assert set(_FORWARDABLE_FLAGS.keys()) == expected_keys
 
-    def test_a4_writing_plans_wrapper_backward_compat(self):
-        """A-4: existing writing_plans wrapper preserves v1.0.1 behavior."""
-        from superpowers_dispatch import writing_plans
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-            result = writing_plans("any prompt")
-            mock_run.assert_called_once()
-
-    def test_a5_skills_not_in_set_pass_through(self):
-        """A-5: skills NOT in _SUBPROCESS_INCOMPATIBLE_SKILLS pass through."""
-        from superpowers_dispatch import invoke_skill
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-            result = invoke_skill("systematic-debugging", "any prompt")
-            mock_run.assert_called_once()
-
-    def test_a1_gate_fires_in_tty_session(self):
-        """A-1 (post iter 1 triage CRITICAL #1+#2): gate fires regardless of TTY state.
-        This is the key fix vs caspar's CRITICAL — operator main session has TTY=True
-        but gate must STILL fire to prevent v1.0.3 hang."""
-        from superpowers_dispatch import invoke_skill
-        from errors import PreconditionError
-
-        with patch("sys.stdin") as mock_stdin:
-            mock_stdin.isatty.return_value = True  # operator main session
-            with pytest.raises(PreconditionError):
-                invoke_skill("receiving-code-review", "any prompt")
+        # Helper docstring mentions all forwardable flag names
+        docstring = _build_worker_argv.__doc__ or ""
+        for flag_value in _FORWARDABLE_FLAGS.values():
+            assert flag_value in docstring, f"Helper docstring missing: {flag_value}"
 ```
 
-- [x] **Step 2: Run tests to verify FAIL**
+- [ ] **Step 2: Run tests to verify FAIL**
 
-Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillMembershipGate -v`
-Expected: 7/7 FAIL — invoke_skill currently does not check `_SUBPROCESS_INCOMPATIBLE_SKILLS` membership; PreconditionError not raised.
+Run: `pytest tests/test_auto_cmd.py::TestWorkerFlagForwarding -v`
+Expected: 3/3 FAIL with `ImportError` (helpers don't exist yet).
 
-- [x] **Step 3: close-phase Red**
+- [ ] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -342,1776 +561,1065 @@ Expected: `test:` commit landed.
 
 #### Green Phase
 
-- [x] **Step 4: Wire membership gate into `invoke_skill`**
-
-Modify `skills/sbtdd/scripts/superpowers_dispatch.py` `invoke_skill` function:
-
-```python
-def invoke_skill(
-    skill: str,
-    prompt: str,
-    *,
-    allow_interactive_skill: bool = False,
-    timeout: int = 600,
-    output_dir: Path | None = None,
-    model: str | None = None,
-) -> str:
-    """Invoke a superpowers skill via `claude -p` subprocess.
-
-    v1.0.4 Item A (post iter 1 triage SIMPLIFIED): pre-spawn
-    membership gate. Subprocess-incompatible skills (in
-    `_SUBPROCESS_INCOMPATIBLE_SKILLS`) are BLOCKED UNCONDITIONALLY
-    unless caller passes `allow_interactive_skill=True`. When
-    blocked, raises `PreconditionError` BEFORE subprocess.run is
-    called, eliminating the v1.0.3 600s subprocess hang
-    manifestation by construction.
-
-    NO env-var/isatty heuristic per caspar Checkpoint 2 iter 1
-    CRITICAL verification: TTY-based detection does NOT fix the
-    v1.0.3 bug because operator main sessions have TTY=True (gate
-    would not fire, subprocess would spawn, hang persists).
-
-    Override hatch: `allow_interactive_skill=True` is the explicit
-    opt-in for known-safe wrappers that have arranged for
-    subprocess success (silent-no-op tolerated by v1.0.1 wrappers
-    via INV-37 post-detection; or operator-controlled interactive
-    callsites with inline rationale comment).
-
-    Args:
-        skill: Slash-command name (e.g., "receiving-code-review").
-        prompt: Skill input.
-        allow_interactive_skill: Bypass membership gate (default False).
-        timeout: Subprocess timeout in seconds (default 600).
-        output_dir: Optional directory for skill output artifacts.
-        model: Optional model override (opus/sonnet/haiku).
-
-    Returns:
-        Subprocess stdout.
-
-    Raises:
-        PreconditionError: If skill is in incompatible set AND
-            `allow_interactive_skill` is False.
-        ...
-    """
-    if (
-        skill in _SUBPROCESS_INCOMPATIBLE_SKILLS
-        and not allow_interactive_skill
-    ):
-        raise PreconditionError(_build_recovery_message(skill))
-
-    # ... existing subprocess.run path unchanged ...
-```
-
-For Task 3 implementation, `_build_recovery_message` will be a placeholder helper that returns a minimal string. Task 4 builds out the full per-skill recovery dictionary. Add the placeholder:
-
-```python
-def _build_recovery_message(skill: str) -> str:
-    """Placeholder; full implementation in Task 4."""
-    return (
-        f"Skill `/{skill}` cannot run via `claude -p` subprocess "
-        f"(empirically incompatible)."
-    )
-```
-
-Also confirm wrappers `brainstorming` + `writing_plans` already pass `allow_interactive_skill=True` (they did in v1.0.1; if not, add):
-
-```python
-def brainstorming(prompt: str, ...) -> str:
-    return invoke_skill("brainstorming", prompt, ..., allow_interactive_skill=True)
-
-
-def writing_plans(prompt: str, ...) -> str:
-    return invoke_skill("writing-plans", prompt, ..., allow_interactive_skill=True)
-```
-
-- [x] **Step 5: Run tests to verify PASS**
-
-Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillMembershipGate -v`
-Expected: 7/7 PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [x] **Step 6: close-phase Green**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-Expected: `feat:` commit landed (e.g. `feat: wire membership gate into invoke_skill (v1.0.4 Item A.2 post iter 1 triage)`).
-
-#### Refactor Phase
-
-- [x] **Step 7: Refactor — confirm wrappers + extract gate logic if duplicated**
-
-If multiple wrappers will need `allow_interactive_skill=True`, no further refactor needed — kwarg already in place. If gate logic appears in 2+ places, extract to private helper. Likely YAGNI; skip.
-
-- [x] **Step 8: Run tests to verify still PASS**
-
-Run: `make verify`
-Expected: Clean.
-
-- [x] **Step 9: close-phase Refactor**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-- [x] **Step 10: close-task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
----
-
-### Task 4: Item B — Build `_build_recovery_message` + `_PER_SKILL_RECOVERY` + escenarios B-1 + B-2 + B-3 (post iter 1 triage SIMPLIFIED)
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (replace placeholder + add `_PER_SKILL_RECOVERY` dict + `_GENERIC_RECOVERY` constant; helper renamed `_build_headless_recovery_message` → `_build_recovery_message` per iter 1 triage simplification)
-- Test: `tests/test_superpowers_dispatch.py` (add B-1, B-2, B-3 tests)
-
-Covers escenarios B-1, B-2, B-3 from spec sec.4.2 (post triage: env-var formatting tests B-1-env-var + B-1-isatty DROPPED per CRITICAL #1+#2 simplification).
-
-#### Red Phase
-
-- [x] **Step 1: Write the failing tests**
-
-Append to `tests/test_superpowers_dispatch.py`:
-
-```python
-class TestBuildRecoveryMessage:
-    """v1.0.4 Item B escenarios B-1, B-2, B-3 — recovery message (post iter 1 triage simplified)."""
-
-    def test_b1_message_includes_recovery_options(self):
-        """B-1: PreconditionError message includes recovery options."""
-        from superpowers_dispatch import _build_recovery_message
-
-        msg = _build_recovery_message("receiving-code-review")
-        assert "Skill `/receiving-code-review` cannot run via `claude -p` subprocess" in msg
-        assert "empirically incompatible" in msg
-        assert "Run `/receiving-code-review` manually" in msg
-        assert "python skills/magi/scripts/run_magi.py" in msg
-        assert "spec sec.6.4" in msg
-        assert "allow_interactive_skill=True" in msg
-
-    def test_b2_per_skill_recovery_brainstorming(self):
-        """B-2: brainstorming recovery references --resume-from-magi."""
-        from superpowers_dispatch import _build_recovery_message
-
-        msg = _build_recovery_message("brainstorming")
-        assert "Run `/brainstorming` manually in interactive Claude Code session" in msg
-        assert "/sbtdd spec --resume-from-magi" in msg
-
-    def test_b2_per_skill_recovery_writing_plans(self):
-        """B-2: writing-plans recovery references --resume-from-magi."""
-        from superpowers_dispatch import _build_recovery_message
-
-        msg = _build_recovery_message("writing-plans")
-        assert "Run `/writing-plans` manually in interactive Claude Code session" in msg
-        assert "/sbtdd spec --resume-from-magi" in msg
-
-    def test_b2_per_skill_recovery_receiving_code_review(self):
-        """B-2: receiving-code-review recovery references run_magi.py + sec.6.4."""
-        from superpowers_dispatch import _build_recovery_message
-
-        msg = _build_recovery_message("receiving-code-review")
-        assert "Run `/receiving-code-review` manually in interactive session" in msg
-        assert "skills/magi/scripts/run_magi.py code-review" in msg
-        assert "spec sec.6.4" in msg
-
-    def test_b2_unknown_skill_uses_generic_recovery(self):
-        """B-2: unknown skill name falls back to generic recovery message."""
-        from superpowers_dispatch import _build_recovery_message, _GENERIC_RECOVERY
-
-        msg = _build_recovery_message("never-shipped-skill")
-        for line in _GENERIC_RECOVERY.splitlines():
-            line = line.strip()
-            if line:
-                assert line in msg, f"Generic recovery line missing: {line!r}"
-
-    def test_b3_no_subprocess_when_blocked_under_one_second(self):
-        """B-3: PreconditionError raised within 1 second (NOT 600s hang)."""
-        import time
-        from superpowers_dispatch import invoke_skill
-        from errors import PreconditionError
-
-        start = time.monotonic()
-        with patch("subprocess.run") as mock_run:
-            with pytest.raises(PreconditionError):
-                invoke_skill("receiving-code-review", "any prompt")
-            mock_run.assert_not_called()
-        elapsed = time.monotonic() - start
-        assert elapsed < 1.0, f"Expected <1s; took {elapsed:.2f}s"
-```
-
-- [x] **Step 2: Run tests to verify FAIL**
-
-Run: `pytest tests/test_superpowers_dispatch.py::TestBuildRecoveryMessage -v`
-Expected: 6/6 FAIL — placeholder from Task 3 returns minimal string; per-skill dictionary not implemented.
-
-- [x] **Step 3: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Green Phase
-
-- [x] **Step 4: Replace placeholder with full implementation (post iter 1 triage simplified, no env-var formatting)**
-
-Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
-
-```python
-_PER_SKILL_RECOVERY: Mapping[str, str] = MappingProxyType({
-    "brainstorming": (
-        "  1. Run `/brainstorming` manually in interactive Claude Code session,\n"
-        "     then use `/sbtdd spec --resume-from-magi`."
-    ),
-    "writing-plans": (
-        "  1. Run `/writing-plans` manually in interactive Claude Code session,\n"
-        "     then use `/sbtdd spec --resume-from-magi`."
-    ),
-    "receiving-code-review": (
-        "  1. Run `/receiving-code-review` manually in interactive session, OR\n"
-        "  2. Fall back to manual `python skills/magi/scripts/run_magi.py code-review <payload>`\n"
-        "     per spec sec.6.4 + apply mini-cycle TDD fixes manually."
-    ),
-})
-
-_GENERIC_RECOVERY = (
-    "  1. Run the skill manually in interactive session,\n"
-    "     then resume the SBTDD workflow."
-)
-
-
-def _build_recovery_message(skill: str) -> str:
-    """Construct the operator-facing recovery message for a blocked skill.
-
-    v1.0.4 post iter 1 triage SIMPLIFIED: no env-var formatting
-    (gate is membership-based, not heuristic-based — no env state
-    to report).
-
-    Args:
-        skill: Slash-command name (e.g., "receiving-code-review").
-
-    Returns:
-        Multi-line operator-facing message including:
-        - Reason (skill empirically incompatible)
-        - Per-skill recovery options (or generic if skill unknown)
-        - Override hint (allow_interactive_skill=True for known-safe
-          callers).
-    """
-    per_skill = _PER_SKILL_RECOVERY.get(skill, _GENERIC_RECOVERY)
-    return (
-        f"Skill `/{skill}` cannot run via `claude -p` subprocess "
-        f"(empirically incompatible: requires multi-turn interactive "
-        f"dialogue or hangs > 600s). Recovery options:\n"
-        f"{per_skill}\n"
-        f"To override (only when caller has arranged interactive "
-        f"completion path), pass `allow_interactive_skill=True` to "
-        f"`invoke_skill(...)`."
-    )
-```
-
-Confirm `from types import MappingProxyType` and `from typing import Mapping` are imported.
-
-- [x] **Step 5: Run tests to verify PASS**
-
-Run: `pytest tests/test_superpowers_dispatch.py::TestBuildRecoveryMessage -v`
-Expected: 6/6 PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [x] **Step 6: close-phase Green**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-Expected: `feat:` commit landed (e.g. `feat: build per-skill headless recovery messages for v1.0.4 Item B`).
-
-#### Refactor Phase
-
-- [x] **Step 7: Refactor — extract message format string if reusable**
-
-If recovery message format becomes verbose, extract template. Likely YAGNI; skip.
-
-- [x] **Step 8: close-phase Refactor + Step 9: close-task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
----
-
-### Task 5: Audit existing callsites — extend `test_invoke_skill_callsites_audit.py`
-
-**Files:**
-- Modify: `tests/test_invoke_skill_callsites_audit.py` (extend AST-based audit to cover new headless gate)
-
-#### Red Phase
-
-- [x] **Step 1: Write the failing test**
-
-Append to `tests/test_invoke_skill_callsites_audit.py`:
-
-```python
-class TestHeadlessGateCallsiteConsistency:
-    """v1.0.4 Item A.5 — audit no callsite bypasses headless gate inappropriately."""
-
-    def test_no_invoke_skill_call_with_allow_interactive_skill_true_outside_known_safe(self):
-        """Audit: allow_interactive_skill=True only at known-safe callsites.
-
-        Known-safe callsites (v1.0.4 baseline):
-        - skills/sbtdd/scripts/superpowers_dispatch.py: brainstorming + writing_plans wrappers
-        - tests/* (all test files allowed; pytest fixture context)
-
-        Any new callsite passing allow_interactive_skill=True OUTSIDE these
-        locations is a regression — must be removed or whitelisted with
-        rationale comment.
-        """
-        repo_root = Path(__file__).resolve().parents[1]
-        skills_dir = repo_root / "skills" / "sbtdd" / "scripts"
-
-        # Whitelist: callsite location → reason
-        # Permite tracking explicito de excepciones; cualquier nueva entrada
-        # require code review + ratio en este test.
-        WHITELIST = {
-            "superpowers_dispatch.py": "wrapper functions brainstorming/writing_plans pass override internally per v1.0.1 baseline",
-            # Add new entries with explicit rationale in code review
-        }
-
-        offenders: list[tuple[str, int, str]] = []
-        for py_file in skills_dir.rglob("*.py"):
-            try:
-                tree = ast.parse(py_file.read_text(encoding="utf-8"))
-            except SyntaxError:
-                continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                # Match invoke_skill(...) or *_dispatch.invoke_skill(...)
-                func = node.func
-                func_name = None
-                if isinstance(func, ast.Name):
-                    func_name = func.id
-                elif isinstance(func, ast.Attribute):
-                    func_name = func.attr
-                if func_name != "invoke_skill":
-                    continue
-                # Look for allow_interactive_skill=True keyword
-                for kw in node.keywords:
-                    if kw.arg == "allow_interactive_skill":
-                        if isinstance(kw.value, ast.Constant) and kw.value.value is True:
-                            file_basename = py_file.name
-                            if file_basename not in WHITELIST:
-                                offenders.append((str(py_file.relative_to(repo_root)), node.lineno, "allow_interactive_skill=True"))
-
-        assert not offenders, (
-            "Found unwhitelisted callsites passing allow_interactive_skill=True:\n"
-            + "\n".join(f"  {path}:{lineno} ({reason})" for path, lineno, reason in offenders)
-            + "\nAdd to WHITELIST with rationale or remove the override."
-        )
-
-    def test_subprocess_dispatch_module_imports_ast_safe(self):
-        """Defensive: AST audit can parse superpowers_dispatch.py without error."""
-        repo_root = Path(__file__).resolve().parents[1]
-        path = repo_root / "skills" / "sbtdd" / "scripts" / "superpowers_dispatch.py"
-        # Must parse without SyntaxError
-        ast.parse(path.read_text(encoding="utf-8"))
-```
-
-- [x] **Step 2: Run tests to verify either PASS (if no offenders) OR FAIL (if surfaced)**
-
-Run: `pytest tests/test_invoke_skill_callsites_audit.py::TestHeadlessGateCallsiteConsistency -v`
-Expected: 2/2 PASS (whitelisted brainstorming + writing_plans wrappers; no other callsites pass override). If FAIL, investigate offenders + decide whitelist or remove.
-
-- [x] **Step 3: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-(If tests already PASS, the `test:` commit captures the regression-guard; this is a defensive test that may not have a Red phase if the codebase is clean. If genuine Red, fix offenders before commit.)
-
-#### Green Phase
-
-- [x] **Step 4: No production code changes expected**
-
-The test is purely a regression guard. Production code is correct as of Task 4 close.
-
-If Step 2 surfaced offenders, fix each by either: (a) removing the override (preferred), OR (b) adding to WHITELIST with rationale (only if subagent has explicit reason e.g. interactive Loop 1 triage callsite).
-
-- [x] **Step 5: Run tests to verify PASS**
-
-Run: `pytest tests/test_invoke_skill_callsites_audit.py -v`
-Expected: All audit tests PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [x] **Step 6: close-phase Green (no-op or fix commit)**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Refactor Phase
-
-- [x] **Step 7: Skip refactor (audit test is canonical form)**
-- [x] **Step 8: close-phase Refactor + Step 9: close-task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
----
-
-## Track Beta — Item C parallel dispatcher only (T9 DEFERRED) (Subagent #2, sequential T6 → T7 → T8)
-
-**Owner**: Subagent #2 dispatched from orchestrator.
-**Surfaces** (cero overlap with Track Alpha; Item D surfaces removed
-per iter 2 scope-trim Option D, T9 DEFERRED to v1.0.5):
-- Create: `skills/sbtdd/scripts/dag_parser.py` (NEW)
-- Create: `skills/sbtdd/scripts/parallel_dispatcher.py` (NEW)
-- Modify: `skills/sbtdd/scripts/auto_cmd.py`
-- Create: `tests/test_dag_parser.py` (NEW)
-- Create: `tests/test_parallel_dispatcher.py` (NEW)
-- Modify: `tests/test_auto_cmd.py`
-
-**Wall-time estimated**: ~1.5 days.
-
-### Task 6: Item C.1 — `dag_parser.py` module + escenarios C-1 + C-2 + C-3 + C-4 (iter 1 triage: code-fence-aware + iterative cycle detection)
-
-**Files:**
-- Create: `skills/sbtdd/scripts/dag_parser.py`
-- Create: `tests/test_dag_parser.py`
-
-Covers escenarios C-1, C-2, C-3, C-4 from spec sec.4.3.
-
-**iter 1 triage fold-ins** (WARNING melchior #3 + caspar #5 + caspar #6):
-- C-1: `_split_task_blocks` strips markdown code-fenced regions (delimited by triple backtick) BEFORE applying `_TASK_HEADER_RE`. Phantom task headers inside code fences (e.g., writing-plans extension template's literal `### Task N:` examples) MUST NOT be added to graph.
-- C-3: cycle detection uses ITERATIVE Kahn's algorithm (or Tarjan with explicit stack) instead of recursive DFS. Eliminates Python recursion limit failure mode for plans with > 1000 dependency depth.
-- New regression test: `parse_plan(planning/claude-plan-tdd.md)` returns exactly 8 tasks (T1..T9 minus ABSORBED T2), NOT 8 + phantoms-from-fences.
-
-#### Red Phase
-
-- [x] **Step 1: Write failing tests**
-
-Create `tests/test_dag_parser.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-07
-"""v1.0.4 Item C.1 — dag_parser module tests.
-
-Covers escenarios C-1 (Task block parsing), C-2 (addBlockedBy
-extraction), C-3 (cycle detection), C-4 (antichain identification)
-from spec sec.4.3.
-"""
-
-from __future__ import annotations
-
-from pathlib import Path
-import textwrap
-
-import pytest
-
-from dag_parser import parse_plan, Task, TaskGraph
-from errors import ValidationError
-
-
-@pytest.fixture
-def simple_plan(tmp_path: Path) -> Path:
-    plan = tmp_path / "plan.md"
-    plan.write_text(textwrap.dedent("""\
-        # Plan
-
-        ### Task 1: Foo
-
-        **Files:**
-        - Modify: `src/foo.py`
-
-        ### Task 2: Bar
-
-        **Files:**
-        - Modify: `src/bar.py`
-
-        **Depends on**: Task 1
-
-        ### Task 3: Baz
-
-        **Files:**
-        - Modify: `src/baz.py`
-        """))
-    return plan
-
-
-@pytest.fixture
-def cyclic_plan(tmp_path: Path) -> Path:
-    plan = tmp_path / "cyclic.md"
-    plan.write_text(textwrap.dedent("""\
-        # Plan
-
-        ### Task 1: Foo
-
-        **Files:**
-        - Modify: `src/foo.py`
-
-        **Depends on**: Task 2
-
-        ### Task 2: Bar
-
-        **Files:**
-        - Modify: `src/bar.py`
-
-        **Depends on**: Task 1
-        """))
-    return plan
-
-
-def test_c1_parses_task_blocks(simple_plan: Path):
-    """C-1: dag_parser parses ### Task N: blocks into TaskGraph."""
-    graph = parse_plan(simple_plan)
-    assert isinstance(graph, TaskGraph)
-    assert set(graph.tasks.keys()) == {"1", "2", "3"}
-    assert graph.tasks["1"].title == "Foo"
-    assert graph.tasks["2"].title == "Bar"
-    assert graph.tasks["3"].title == "Baz"
-
-
-def test_c1_extracts_files_lists(simple_plan: Path):
-    """C-1: each Task has Files list extracted."""
-    graph = parse_plan(simple_plan)
-    assert "src/foo.py" in graph.tasks["1"].files
-    assert "src/bar.py" in graph.tasks["2"].files
-    assert "src/baz.py" in graph.tasks["3"].files
-
-
-def test_c2_extracts_depends_on_dependencies(simple_plan: Path):
-    """C-2: 'Depends on: Task M' extracted as edge."""
-    graph = parse_plan(simple_plan)
-    assert graph.edges.get("2", set()) == {"1"}
-    assert graph.edges.get("1", set()) == set()
-    assert graph.edges.get("3", set()) == set()
-
-
-def test_c2_extracts_addblockedby_dependencies(tmp_path: Path):
-    """C-2: 'addBlockedBy: [Task M, Task K]' extracted as edges."""
-    plan = tmp_path / "plan.md"
-    plan.write_text(textwrap.dedent("""\
-        ### Task 1: A
-
-        **Files:**
-        - Modify: `a.py`
-
-        ### Task 2: B
-
-        **Files:**
-        - Modify: `b.py`
-
-        **addBlockedBy**: [Task 1]
-
-        ### Task 3: C
-
-        **Files:**
-        - Modify: `c.py`
-
-        **addBlockedBy**: [Task 1, Task 2]
-        """))
-    graph = parse_plan(plan)
-    assert graph.edges["2"] == {"1"}
-    assert graph.edges["3"] == {"1", "2"}
-
-
-def test_c3_detects_cycle(cyclic_plan: Path):
-    """C-3: cyclic dependencies raise ValidationError."""
-    with pytest.raises(ValidationError) as exc_info:
-        parse_plan(cyclic_plan)
-    msg = str(exc_info.value).lower()
-    assert "cycle" in msg or "cyclic" in msg
-
-
-def test_c4_antichain_identification(simple_plan: Path):
-    """C-4: antichains() returns ordered list of parallelizable batches."""
-    graph = parse_plan(simple_plan)
-    chains = graph.antichains()
-    assert len(chains) == 2
-    # First antichain: tasks with no dependencies (1 + 3)
-    assert chains[0] == {"1", "3"}
-    # Second antichain: tasks unblocked after first batch (2)
-    assert chains[1] == {"2"}
-
-
-def test_c4_antichain_single_task_per_batch_when_chain(tmp_path: Path):
-    """C-4: linear chain produces single-task antichains."""
-    plan = tmp_path / "plan.md"
-    plan.write_text(textwrap.dedent("""\
-        ### Task 1: A
-
-        **Files:**
-        - Modify: `a.py`
-
-        ### Task 2: B
-
-        **Files:**
-        - Modify: `b.py`
-
-        **Depends on**: Task 1
-
-        ### Task 3: C
-
-        **Files:**
-        - Modify: `c.py`
-
-        **Depends on**: Task 2
-        """))
-    graph = parse_plan(plan)
-    chains = graph.antichains()
-    assert chains == [{"1"}, {"2"}, {"3"}]
-
-
-def test_c4_antichain_all_independent_single_batch(tmp_path: Path):
-    """C-4: fully independent tasks produce single antichain."""
-    plan = tmp_path / "plan.md"
-    plan.write_text(textwrap.dedent("""\
-        ### Task 1: A
-
-        **Files:**
-        - Modify: `a.py`
-
-        ### Task 2: B
-
-        **Files:**
-        - Modify: `b.py`
-
-        ### Task 3: C
-
-        **Files:**
-        - Modify: `c.py`
-        """))
-    graph = parse_plan(plan)
-    chains = graph.antichains()
-    assert chains == [{"1", "2", "3"}]
-
-
-def test_c1_empty_plan_returns_empty_graph(tmp_path: Path):
-    """Defensive: plan with no Task blocks returns empty graph."""
-    plan = tmp_path / "empty.md"
-    plan.write_text("# Plan\n\nNo tasks here.\n")
-    graph = parse_plan(plan)
-    assert graph.tasks == {}
-    assert graph.antichains() == []
-
-
-def test_c1_task_without_files_section_parses(tmp_path: Path):
-    """Defensive: task without Files: section parses with empty files set."""
-    plan = tmp_path / "plan.md"
-    plan.write_text(textwrap.dedent("""\
-        ### Task 1: Doc-only
-
-        Some description without Files block.
-        """))
-    graph = parse_plan(plan)
-    assert "1" in graph.tasks
-    assert graph.tasks["1"].files == set()
-
-
-def test_c2_unknown_dependency_target_raises(tmp_path: Path):
-    """Defensive: dependency on non-existent task raises ValidationError."""
-    plan = tmp_path / "plan.md"
-    plan.write_text(textwrap.dedent("""\
-        ### Task 1: A
-
-        **Files:**
-        - Modify: `a.py`
-
-        **Depends on**: Task 999
-        """))
-    with pytest.raises(ValidationError) as exc_info:
-        parse_plan(plan)
-    msg = str(exc_info.value).lower()
-    assert "999" in msg or "unknown" in msg
-
-
-def test_c1_code_fence_aware_skips_phantom_headers(tmp_path: Path):
-    """C-1 iter 1 triage WARNING (melchior + caspar): code-fenced ### Task N:
-    examples MUST NOT pollute graph as phantom tasks."""
-    plan = tmp_path / "plan.md"
-    plan.write_text(textwrap.dedent("""\
-        ### Task 1: Real
-
-        **Files:**
-        - Modify: `real.py`
-
-        Example template embedded in plan:
-
-        ```markdown
-        ### Task 99: Phantom
-
-        **Files:**
-        - Modify: `phantom.py`
-        ```
-
-        ### Task 2: AlsoReal
-
-        **Files:**
-        - Modify: `also_real.py`
-        """))
-    graph = parse_plan(plan)
-    # Only T1 + T2 — phantom T99 inside fence MUST be skipped
-    assert set(graph.tasks.keys()) == {"1", "2"}
-    assert "99" not in graph.tasks
-
-
-def test_c3_iterative_cycle_detection_no_recursion_limit(tmp_path: Path):
-    """C-3 iter 1 triage WARNING (caspar): cycle detection iterative — no
-    recursion limit failure for deep dependency chains."""
-    plan_lines = ["# Deep chain plan"]
-    # 1500 sequential tasks: each depends on the previous
-    for i in range(1, 1501):
-        plan_lines.append(f"\n### Task {i}: T{i}")
-        plan_lines.append("\n**Files:**")
-        plan_lines.append(f"- Modify: `t{i}.py`")
-        if i > 1:
-            plan_lines.append(f"\n**Depends on**: Task {i - 1}")
-    plan = tmp_path / "deep.md"
-    plan.write_text("\n".join(plan_lines))
-    # Recursive DFS would hit Python recursion limit (default 1000).
-    # Iterative algorithm must succeed without RecursionError.
-    graph = parse_plan(plan)
-    assert len(graph.tasks) == 1500
-    chains = graph.antichains()
-    # Linear chain: 1500 antichains, one task each
-    assert len(chains) == 1500
-
-
-def test_c3_iterative_cycle_detection_self_loop(tmp_path: Path):
-    """C-3 iter 1 triage: self-loop is a cycle — iterative algorithm detects."""
-    plan = tmp_path / "self.md"
-    plan.write_text(textwrap.dedent("""\
-        ### Task 1: SelfLoop
-
-        **Files:**
-        - Modify: `self.py`
-
-        **Depends on**: Task 1
-        """))
-    with pytest.raises(ValidationError) as exc_info:
-        parse_plan(plan)
-    msg = str(exc_info.value).lower()
-    assert "cycle" in msg or "cyclic" in msg
-```
-
-- [x] **Step 2: Run tests to verify FAIL**
-
-Run: `pytest tests/test_dag_parser.py -v`
-Expected: All FAIL — `dag_parser` module does not exist.
-
-- [x] **Step 3: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Green Phase
-
-- [x] **Step 4: Implement `dag_parser.py`**
-
-Create `skills/sbtdd/scripts/dag_parser.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-07
-"""v1.0.4 Item C.1 — DAG parser for plan-tdd.md.
-
-Parses planning/claude-plan-tdd.md task blocks + dependency markers
-to build a directed acyclic graph used by `parallel_dispatcher.py`
-for batch dispatch.
-
-Public API:
-    parse_plan(plan_path: Path) -> TaskGraph
-    class Task (dataclass)
-    class TaskGraph (with .tasks, .edges, .antichains())
-"""
-
-from __future__ import annotations
-
-import re
-from dataclasses import dataclass, field
-from pathlib import Path
-
-from errors import ValidationError
-
-
-_TASK_HEADER_RE = re.compile(r"^### Task (\d+)(?::|\s)\s*(.*)$", re.MULTILINE)
-_FILES_BLOCK_RE = re.compile(
-    r"^\*\*Files:\*\*\s*\n((?:^\s*-\s+(?:Create|Modify|Test)\s*:\s*[`\S].+\n?)+)",
-    re.MULTILINE,
-)
-_FILE_LINE_RE = re.compile(
-    r"^\s*-\s+(?:Create|Modify|Test)\s*:\s*`?([^`\s]+)`?",
-    re.MULTILINE,
-)
-_DEPENDS_ON_RE = re.compile(
-    r"^\*\*Depends on\*\*\s*:\s*Task\s+(\d+)\s*$", re.MULTILINE
-)
-_ADD_BLOCKED_BY_RE = re.compile(
-    r"^\*\*addBlockedBy\*\*\s*:\s*\[(.+?)\]\s*$", re.MULTILINE
-)
-_TASK_REF_RE = re.compile(r"Task\s+(\d+)")
-
-
-@dataclass(frozen=True)
-class Task:
-    """One task entry from the plan."""
-
-    id: str
-    title: str
-    files: frozenset[str] = field(default_factory=frozenset)
-
-
-@dataclass
-class TaskGraph:
-    """Directed acyclic graph of plan tasks.
-
-    Attributes:
-        tasks: Mapping of task_id -> Task dataclass.
-        edges: Mapping of task_id -> set of task_ids it depends on
-            (predecessors). edges[X] = {A, B} means X depends on A AND B,
-            so A + B must complete before X.
-    """
-
-    tasks: dict[str, Task] = field(default_factory=dict)
-    edges: dict[str, set[str]] = field(default_factory=dict)
-
-    def antichains(self) -> list[set[str]]:
-        """Return ordered list of maximal antichains (parallel batches).
-
-        First antichain contains tasks with no dependencies. Subsequent
-        antichains contain tasks whose dependencies all appear in
-        prior antichains. Output respects ONLY explicit dependencies;
-        file-surface collision detection is a separate step in
-        `parallel_dispatcher.partition_by_collision`.
-
-        Returns:
-            List of sets; each set is a parallel batch (in plan order).
-        """
-        result: list[set[str]] = []
-        completed: set[str] = set()
-        remaining = set(self.tasks.keys())
-        while remaining:
-            batch = {
-                tid for tid in remaining
-                if self.edges.get(tid, set()) <= completed
-            }
-            if not batch:
-                # Should not happen if cycle check passed; defensive
-                raise ValidationError(
-                    f"Antichain partition stalled; possible cycle in remaining: {remaining}"
-                )
-            result.append(batch)
-            completed |= batch
-            remaining -= batch
-        return result
-
-
-def _extract_files(task_text: str) -> frozenset[str]:
-    """Extract Files: list from a task body."""
-    match = _FILES_BLOCK_RE.search(task_text)
-    if not match:
-        return frozenset()
-    block = match.group(0)
-    return frozenset(_FILE_LINE_RE.findall(block))
-
-
-def _extract_dependencies(task_text: str) -> set[str]:
-    """Extract Depends on: + addBlockedBy: dependencies as task IDs."""
-    deps: set[str] = set()
-    for m in _DEPENDS_ON_RE.finditer(task_text):
-        deps.add(m.group(1))
-    abb_match = _ADD_BLOCKED_BY_RE.search(task_text)
-    if abb_match:
-        for ref_match in _TASK_REF_RE.finditer(abb_match.group(1)):
-            deps.add(ref_match.group(1))
-    return deps
-
-
-_CODE_FENCE_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
-
-
-def _strip_code_fences(plan_text: str) -> str:
-    """Replace markdown code-fenced regions with blank lines preserving line numbers.
-
-    Per iter 1 triage WARNING #3+#15 + iter 2 verification: ### Task N:
-    headers inside code fences are EXAMPLES (e.g., writing-plans extension
-    template) and MUST NOT pollute the graph as phantom tasks. Replace
-    fenced regions with same number of blank lines so byte offsets used
-    by downstream regexes remain stable.
-    """
-    def _replace(match: re.Match[str]) -> str:
-        return "\n" * match.group(0).count("\n")
-    return _CODE_FENCE_RE.sub(_replace, plan_text)
-
-
-def _split_task_blocks(plan_text: str) -> list[tuple[str, str, str]]:
-    """Split plan text into (task_id, title, body) tuples.
-
-    Returns one entry per ### Task N: block, with body containing
-    everything from the header up to (but not including) the next
-    ### Task N: header or end-of-file. Code-fenced regions are
-    stripped before regex application (iter 1 triage WARNING #3+#15).
-    """
-    cleaned = _strip_code_fences(plan_text)
-    headers = list(_TASK_HEADER_RE.finditer(cleaned))
-    if not headers:
-        return []
-    blocks: list[tuple[str, str, str]] = []
-    for i, m in enumerate(headers):
-        start = m.end()
-        end = headers[i + 1].start() if i + 1 < len(headers) else len(cleaned)
-        body = cleaned[start:end]
-        blocks.append((m.group(1), m.group(2).strip(), body))
-    return blocks
-
-
-def _detect_cycle(edges: dict[str, set[str]]) -> list[str] | None:
-    """Return cycle path if found, else None.
-
-    iter 1 triage WARNING #16 + iter 2 CRITICAL #1 fix: ITERATIVE
-    Kahn's algorithm. Nodes whose dependencies are all completed get
-    removed from the graph progressively; any node never removed
-    participates in a cycle. Eliminates Python recursion limit failure
-    mode for plans with > 1000 dependency depth.
-    """
-    in_degree: dict[str, int] = {node: 0 for node in edges}
-    for node, deps in edges.items():
-        for dep in deps:
-            in_degree.setdefault(dep, 0)
-    for node, deps in edges.items():
-        for _ in deps:
-            in_degree[node] = in_degree.get(node, 0) + 1
-
-    queue = [node for node, deg in in_degree.items() if deg == 0]
-    completed: set[str] = set()
-    while queue:
-        node = queue.pop(0)
-        completed.add(node)
-        # When `node` completes, every dependent of `node` (i.e., every
-        # X where `node` in edges[X]) loses one inbound edge.
-        for x, deps in edges.items():
-            if node in deps and x not in completed and x not in queue:
-                in_degree[x] -= 1
-                if in_degree[x] == 0:
-                    queue.append(x)
-
-    leftover = set(in_degree.keys()) - completed
-    if not leftover:
-        return None
-    # Reconstruct cycle path by following edges from any leftover node.
-    start = sorted(leftover)[0]
-    path: list[str] = [start]
-    seen: set[str] = {start}
-    current = start
-    while True:
-        next_nodes = [d for d in edges.get(current, set()) if d in leftover]
-        if not next_nodes:
-            return path
-        nxt = sorted(next_nodes)[0]
-        if nxt in seen:
-            cycle_start = path.index(nxt)
-            return path[cycle_start:] + [nxt]
-        path.append(nxt)
-        seen.add(nxt)
-        current = nxt
-
-
-def parse_plan(plan_path: Path) -> TaskGraph:
-    """Parse plan file into TaskGraph.
-
-    Args:
-        plan_path: Path to planning/claude-plan-tdd.md.
-
-    Returns:
-        TaskGraph with tasks + edges populated.
-
-    Raises:
-        ValidationError: If plan contains a dependency cycle OR
-            references a non-existent task.
-    """
-    plan_text = plan_path.read_text(encoding="utf-8")
-    blocks = _split_task_blocks(plan_text)
-    tasks: dict[str, Task] = {}
-    edges: dict[str, set[str]] = {}
-    for tid, title, body in blocks:
-        tasks[tid] = Task(id=tid, title=title, files=_extract_files(body))
-        edges[tid] = _extract_dependencies(body)
-
-    # Validate dependency targets exist
-    all_ids = set(tasks.keys())
-    for tid, deps in edges.items():
-        unknown = deps - all_ids
-        if unknown:
-            raise ValidationError(
-                f"Task {tid} depends on unknown task(s): {sorted(unknown)}"
-            )
-
-    # Cycle detection
-    cycle = _detect_cycle(edges)
-    if cycle is not None:
-        raise ValidationError(
-            f"Cyclic dependency detected: {' -> '.join(cycle)}"
-        )
-
-    return TaskGraph(tasks=tasks, edges=edges)
-```
-
-- [x] **Step 5: Run tests to verify PASS**
-
-Run: `pytest tests/test_dag_parser.py -v`
-Expected: 12/12 PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [x] **Step 6: close-phase Green**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-Expected: `feat:` commit landed (e.g. `feat: add dag_parser module for v1.0.4 Item C`).
-
-#### Refactor Phase
-
-- [x] **Step 7: Refactor — extract helper functions if needed**
-
-Module already structured by responsibility (split, extract files, extract deps, cycle detect, parse). Skip refactor.
-
-- [x] **Step 8: close-phase Refactor + Step 9: close-task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
----
-
-### Task 7: Item C.2 — `parallel_dispatcher.py` module + escenarios C-5 + C-6 + C-10 + C-11 (iter 1 triage: deterministic sort + concurrent test)
-
-**Files:**
-- Create: `skills/sbtdd/scripts/parallel_dispatcher.py`
-- Create: `tests/test_parallel_dispatcher.py`
-
-Covers escenarios C-5, C-6, C-10, C-11 from spec sec.4.3.
-
-**iter 1 triage fold-ins** (WARNING melchior #4 + melchior #7 + balthasar #4):
-- C-10: `partition_by_collision` SORTS task IDs ascending before greedy first-fit packing — deterministic output regardless of Python set iteration order.
-- C-11: synthetic concurrent state-file write race test using `multiprocessing.Process` with shared barrier; asserts final state file is consistent (one of expected states, never partial-merge nor corrupt JSON). State-file serialization via `parallel_dispatcher` queueing OR `fcntl.flock` (POSIX) / `msvcrt.locking` (Windows) wrapper.
-
-#### Red Phase
-
-- [x] **Step 1: Write failing tests**
-
-Create `tests/test_parallel_dispatcher.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-07
-"""v1.0.4 Item C.2 — parallel_dispatcher module tests.
-
-Covers escenarios C-5 (file collision detection) + C-6 (disjoint
-passthrough) from spec sec.4.3.
-"""
-
-from __future__ import annotations
-
-from pathlib import Path
-
-import pytest
-
-from dag_parser import Task, TaskGraph
-from parallel_dispatcher import partition_by_collision, _files_collide
-
-
-def _make_graph(tasks_with_files: dict[str, set[str]]) -> TaskGraph:
-    tasks = {
-        tid: Task(id=tid, title=f"Task {tid}", files=frozenset(files))
-        for tid, files in tasks_with_files.items()
-    }
-    return TaskGraph(tasks=tasks, edges={tid: set() for tid in tasks})
-
-
-def test_c5_collision_detection_shared_file():
-    """C-5: tasks sharing a file collide."""
-    graph = _make_graph({"1": {"a.py"}, "2": {"a.py"}})
-    assert _files_collide(graph.tasks["1"], graph.tasks["2"]) is True
-
-
-def test_c5_partition_collision_splits_batch():
-    """C-5: collision-detected antichain splits into 2 sub-batches."""
-    graph = _make_graph({"1": {"auto_cmd.py"}, "2": {"auto_cmd.py"}})
-    batches = partition_by_collision({"1", "2"}, graph)
-    # Two single-task batches (cannot run parallel)
-    assert len(batches) == 2
-    assert {"1"} in batches
-    assert {"2"} in batches
-
-
-def test_c6_disjoint_files_pass_through():
-    """C-6: tasks with disjoint files yield single batch."""
-    graph = _make_graph({"1": {"a.py"}, "2": {"b.py"}})
-    batches = partition_by_collision({"1", "2"}, graph)
-    assert batches == [{"1", "2"}]
-
-
-def test_c6_no_files_pass_through():
-    """C-6: tasks without files (doc-only) pass through as single batch."""
-    graph = _make_graph({"1": set(), "2": set()})
-    batches = partition_by_collision({"1", "2"}, graph)
-    assert batches == [{"1", "2"}]
-
-
-def test_c5_three_way_collision():
-    """C-5: three tasks pairwise-colliding split fully."""
-    graph = _make_graph({
-        "1": {"a.py"},
-        "2": {"a.py"},
-        "3": {"a.py"},
-    })
-    batches = partition_by_collision({"1", "2", "3"}, graph)
-    assert len(batches) == 3
-    assert all(len(b) == 1 for b in batches)
-
-
-def test_c6_partial_collision_groups_deterministic():
-    """C-6 + C-10 (iter 1 triage): 1+2 collide on a.py; 3 disjoint.
-    Ascending-id sort + greedy first-fit → exact batches [{1, 3}, {2}]."""
-    graph = _make_graph({
-        "1": {"a.py"},
-        "2": {"a.py"},
-        "3": {"b.py"},
-    })
-    batches = partition_by_collision({"1", "2", "3"}, graph)
-    # Deterministic: sorted ids → "1" packed first with disjoint "3";
-    # "2" left over (collides with "1" on a.py).
-    assert batches == [{"1", "3"}, {"2"}]
-
-
-def test_c10_partition_deterministic_across_invocations():
-    """C-10 iter 1 triage: same input MUST produce same output across calls
-    (eliminates Python set iteration order dependency)."""
-    graph = _make_graph({
-        "1": {"x.py"},
-        "2": {"y.py"},
-        "3": {"x.py"},
-        "4": {"z.py"},
-    })
-    # Run twice; results must be byte-identical
-    batches_1 = partition_by_collision({"1", "2", "3", "4"}, graph)
-    batches_2 = partition_by_collision({"1", "2", "3", "4"}, graph)
-    assert batches_1 == batches_2
-    # Pin canonical ordering: ascending-id greedy fit
-    assert batches_1 == [{"1", "2", "4"}, {"3"}]
-
-
-def test_c11_synthetic_concurrent_state_file_write(tmp_path):
-    """C-11 iter 1 triage: synthetic concurrent state-file write race.
-
-    Two processes call state_file.save() simultaneously against
-    disjoint task IDs. Final file must parse as valid JSON and
-    match one of the expected states (never partial-merge).
-    """
-    import json
-    import multiprocessing
-    from state_file import save, SessionState  # adjust import path as needed
-
-    state_path = tmp_path / "session-state.json"
-    state_path.write_text(json.dumps({"current_task_id": "0", "current_phase": "red"}))
-
-    def writer(task_id: str, barrier: multiprocessing.Barrier) -> None:
-        barrier.wait()  # synchronize start
-        new_state = SessionState(current_task_id=task_id, current_phase="green")
-        save(state_path, new_state)
-
-    barrier = multiprocessing.Barrier(2)
-    procs = [
-        multiprocessing.Process(target=writer, args=(tid, barrier))
-        for tid in ("5", "6")
-    ]
-    for p in procs:
-        p.start()
-    for p in procs:
-        p.join()
-
-    # File must exist and parse cleanly
-    text = state_path.read_text()
-    parsed = json.loads(text)  # must NOT raise
-    # Final state must be one of the writers' states (never partial-merge)
-    assert parsed.get("current_task_id") in {"5", "6"}
-    assert parsed.get("current_phase") == "green"
-
-
-def test_c5_singleton_passthrough():
-    """C-5/C-6: singleton antichain returns single-task batch."""
-    graph = _make_graph({"1": {"a.py"}})
-    batches = partition_by_collision({"1"}, graph)
-    assert batches == [{"1"}]
-
-
-def test_c5_files_collide_helper_disjoint():
-    """C-5: _files_collide returns False for disjoint sets."""
-    graph = _make_graph({"1": {"a.py"}, "2": {"b.py"}})
-    assert _files_collide(graph.tasks["1"], graph.tasks["2"]) is False
-
-
-def test_c5_files_collide_helper_empty():
-    """C-5: _files_collide returns False for empty file sets."""
-    graph = _make_graph({"1": set(), "2": set()})
-    assert _files_collide(graph.tasks["1"], graph.tasks["2"]) is False
-```
-
-- [x] **Step 2: Run tests to verify FAIL**
-
-Run: `pytest tests/test_parallel_dispatcher.py -v`
-Expected: All FAIL — module does not exist.
-
-- [x] **Step 3: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Green Phase
-
-- [x] **Step 4: Implement `parallel_dispatcher.py`**
-
-Create `skills/sbtdd/scripts/parallel_dispatcher.py`:
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-07
-"""v1.0.4 Item C.2 — Parallel task dispatcher.
-
-Coordinates concurrent task execution within an antichain
-(dependency-free batch from `dag_parser.TaskGraph.antichains()`),
-splitting the antichain into file-surface-disjoint sub-batches
-to avoid same-worktree write conflicts.
-
-Public API:
-    partition_by_collision(antichain, graph) -> list[set[str]]
-    dispatch_batch(batch, graph, ...) — opt-in concurrent dispatch
-"""
-
-from __future__ import annotations
-
-from dag_parser import Task, TaskGraph
-
-
-def _files_collide(task_a: Task, task_b: Task) -> bool:
-    """Return True if two tasks share at least one file surface."""
-    if not task_a.files or not task_b.files:
-        return False
-    return bool(task_a.files & task_b.files)
-
-
-def partition_by_collision(
-    antichain: set[str],
-    graph: TaskGraph,
-) -> list[set[str]]:
-    """Split a dependency-free antichain into surface-disjoint sub-batches.
-
-    Two tasks can run in the same parallel batch only if their
-    `Files:` lists are disjoint. This function greedy-packs tasks
-    into sub-batches so that every task in a sub-batch is
-    pairwise-disjoint with every other task in the same sub-batch.
-
-    iter 1 triage WARNING #7 + iter 2 CRITICAL #2 fix: input task IDs
-    are SORTED ASCENDING before greedy first-fit packing -- output is
-    deterministic regardless of Python set iteration order.
-
-    Args:
-        antichain: Set of task IDs (output of TaskGraph.antichains()).
-        graph: The TaskGraph (for Task lookup).
-
-    Returns:
-        List of sets; each set is a sub-batch where all tasks have
-        disjoint file surfaces. Single-task sub-batches indicate the
-        task collides with every other task in the antichain.
-    """
-    if not antichain:
-        return []
-    remaining = sorted(antichain)  # iter 2 CRITICAL #2 fix: deterministic order
-    sub_batches: list[set[str]] = []
-    while remaining:
-        head = remaining.pop(0)
-        batch = {head}
-        head_files = graph.tasks[head].files
-        merged_files = set(head_files)
-        leftover: list[str] = []
-        for tid in remaining:
-            tid_files = graph.tasks[tid].files
-            if not (tid_files & merged_files):
-                batch.add(tid)
-                merged_files |= tid_files
-            else:
-                leftover.append(tid)
-        sub_batches.append(batch)
-        remaining = leftover
-    return sub_batches
-```
-
-Note: `dispatch_batch` (concurrent process spawn) is NOT implemented in Task 7 — exact transport (Agent tool fan-out vs subprocess.Popen) deferred to Task 8 wiring. Task 7 ships partition logic only.
-
-- [x] **Step 5: Run tests to verify PASS**
-
-Run: `pytest tests/test_parallel_dispatcher.py -v`
-Expected: 9/9 PASS.
-
-Run: `make verify`
-Expected: Clean.
-
-- [x] **Step 6: close-phase Green**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-Expected: `feat:` commit landed (e.g. `feat: add parallel_dispatcher partition logic for v1.0.4 Item C`).
-
-#### Refactor Phase
-
-- [x] **Step 7: Refactor — confirm greedy packing optimal for typical cases**
-
-Greedy packing is O(n^2) but n is small (typical antichain ≤ 10 tasks). Optimal partition is NP-hard (graph coloring); greedy is acceptable. Document decision in commit message OR module docstring.
-
-- [x] **Step 8: close-phase Refactor + Step 9: close-task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
----
-
-### Task 8: Item C.3 — `auto_cmd.py` `--parallel` flag wiring + escenarios C-7 + C-8 + C-9
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add `--parallel` flag + branching logic + TDD-Guard warning)
-- Modify: `tests/test_auto_cmd.py` (add C-7, C-8, C-9 tests)
-
-Covers escenarios C-7, C-8, C-9 from spec sec.4.3.
-
-#### Red Phase
-
-- [x] **Step 1: Write failing tests**
-
-Append to `tests/test_auto_cmd.py`:
-
-```python
-class TestAutoCmdParallelFlag:
-    """v1.0.4 Item C.3 escenarios C-7, C-8, C-9 — --parallel flag wiring."""
-
-    def test_c7_parallel_flag_dispatches_batches(self, tmp_path: Path, monkeypatch):
-        """C-7: --parallel flag dispatches parallelizable tasks in batches."""
-        # Setup synthetic plan with 2 disjoint tasks
-        plan = tmp_path / "plan.md"
-        plan.write_text(textwrap.dedent("""\
-            ### Task 1: A
-
-            **Files:**
-            - Modify: `a.py`
-
-            ### Task 2: B
-
-            **Files:**
-            - Modify: `b.py`
-            """))
-
-        from auto_cmd import _build_dispatch_plan_parallel
-
-        dispatch_plan = _build_dispatch_plan_parallel(plan)
-        # Expect single batch with both tasks
-        assert len(dispatch_plan) == 1
-        assert dispatch_plan[0] == {"1", "2"}
-
-    def test_c8_sequential_default_preserves_order(self, tmp_path: Path):
-        """C-8: --parallel NOT specified preserves v1.0.3 sequential order."""
-        from auto_cmd import _build_dispatch_plan_sequential
-
-        plan = tmp_path / "plan.md"
-        plan.write_text(textwrap.dedent("""\
-            ### Task 1: A
-
-            **Files:**
-            - Modify: `a.py`
-
-            ### Task 2: B
-
-            **Files:**
-            - Modify: `b.py`
-            """))
-
-        dispatch_plan = _build_dispatch_plan_sequential(plan)
-        # Sequential: each batch is single-task in plan order
-        assert dispatch_plan == [{"1"}, {"2"}]
-
-    def test_c8_collision_forces_sequential_in_parallel_mode(self, tmp_path: Path):
-        """C-8: file-colliding tasks split into sub-batches even under --parallel."""
-        from auto_cmd import _build_dispatch_plan_parallel
-
-        plan = tmp_path / "plan.md"
-        plan.write_text(textwrap.dedent("""\
-            ### Task 1: A
-
-            **Files:**
-            - Modify: `shared.py`
-
-            ### Task 2: B
-
-            **Files:**
-            - Modify: `shared.py`
-            """))
-
-        dispatch_plan = _build_dispatch_plan_parallel(plan)
-        # Both tasks modify shared.py → 2 sub-batches
-        assert len(dispatch_plan) == 2
-        sizes = sorted(len(b) for b in dispatch_plan)
-        assert sizes == [1, 1]
-
-    def test_c9_tdd_guard_warning_in_parallel_mode(self, tmp_path: Path, capsys):
-        """C-9: --parallel emits warning when TDD-Guard hooks detected."""
-        from auto_cmd import _check_tdd_guard_warning
-
-        # Synthesize .claude/settings.json with TDD-Guard hook
-        settings_dir = tmp_path / ".claude"
-        settings_dir.mkdir()
-        settings_file = settings_dir / "settings.json"
-        settings_file.write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "Write|Edit",
-                    "hooks": [{"type": "command", "command": "tdd-guard"}],
-                }]
-            }
-        }))
-
-        _check_tdd_guard_warning(parallel=True, project_root=tmp_path)
-        captured = capsys.readouterr()
-        assert "Parallel mode" in captured.err
-        assert "TDD-Guard" in captured.err
-        assert "tdd-guard off" in captured.err
-        assert "/using-git-worktrees" in captured.err
-
-    def test_c9_no_warning_in_sequential_mode(self, tmp_path: Path, capsys):
-        """C-9: sequential mode (no --parallel) emits no TDD-Guard warning."""
-        from auto_cmd import _check_tdd_guard_warning
-
-        settings_dir = tmp_path / ".claude"
-        settings_dir.mkdir()
-        settings_file = settings_dir / "settings.json"
-        settings_file.write_text(json.dumps({
-            "hooks": {"PreToolUse": [{"matcher": "Write", "hooks": [{"type": "command", "command": "tdd-guard"}]}]}
-        }))
-
-        _check_tdd_guard_warning(parallel=False, project_root=tmp_path)
-        captured = capsys.readouterr()
-        assert "Parallel mode" not in captured.err
-
-    def test_c9_no_warning_when_tdd_guard_absent(self, tmp_path: Path, capsys):
-        """C-9: --parallel without TDD-Guard hooks emits no warning."""
-        from auto_cmd import _check_tdd_guard_warning
-
-        # No .claude/settings.json
-        _check_tdd_guard_warning(parallel=True, project_root=tmp_path)
-        captured = capsys.readouterr()
-        assert "TDD-Guard" not in captured.err
-
-    def test_c7_run_sbtdd_auto_accepts_parallel_flag(self):
-        """C-7: argparse accepts --parallel flag."""
-        from run_sbtdd import _build_arg_parser
-
-        parser = _build_arg_parser()
-        ns = parser.parse_args(["auto", "--parallel"])
-        assert ns.parallel is True
-
-    def test_c7_run_sbtdd_auto_default_parallel_false(self):
-        """C-7/C-8: default value of --parallel is False (preserves sequential)."""
-        from run_sbtdd import _build_arg_parser
-
-        parser = _build_arg_parser()
-        ns = parser.parse_args(["auto"])
-        assert ns.parallel is False
-```
-
-- [x] **Step 2: Run tests to verify FAIL**
-
-Run: `pytest tests/test_auto_cmd.py::TestAutoCmdParallelFlag -v`
-Expected: All FAIL — `--parallel` flag not in argparse, helper functions absent.
-
-- [x] **Step 3: close-phase Red**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
-
-#### Green Phase
-
-- [x] **Step 4: Wire `--parallel` flag into auto_cmd**
+- [ ] **Step 4: Implement `_FORWARDABLE_FLAGS` + `_build_worker_argv`**
 
 Modify `skills/sbtdd/scripts/auto_cmd.py`:
 
 ```python
-# Add imports at top
-from dag_parser import parse_plan, TaskGraph
-from parallel_dispatcher import partition_by_collision
+from types import MappingProxyType
+from typing import Mapping
+
+_FORWARDABLE_FLAGS: Mapping[str, str] = MappingProxyType({
+    # argparse-namespace-attr → CLI-flag-name
+    "plugins_root": "--plugins-root",
+    "magi_max_iterations": "--magi-max-iterations",
+    "magi_threshold": "--magi-threshold",
+    "verification_retries": "--verification-retries",
+    "model_override": "--model-override",
+})
 
 
-def _build_dispatch_plan_sequential(plan_path: Path) -> list[set[str]]:
-    """Sequential dispatch plan — each task in its own batch in plan order.
+def _build_worker_argv(task_ids: list[str], ns: argparse.Namespace) -> list[str]:
+    """Build subprocess argv for a worker, forwarding parent's CLI flags.
 
-    Preserves v1.0.3 behavior exactly. Default when --parallel NOT
-    specified.
+    v1.0.5 Item I-3: forwards _FORWARDABLE_FLAGS values from parent's
+    argparse namespace to worker subprocess. Documented forwardable list:
+    --plugins-root, --magi-max-iterations, --magi-threshold,
+    --verification-retries, --model-override.
+
+    Args:
+        task_ids: Task IDs assigned to this worker.
+        ns: Parent's argparse namespace.
+
+    Returns:
+        Worker argv list ready for subprocess.Popen.
     """
-    graph = parse_plan(plan_path)
-    return [{tid} for tid in graph.tasks.keys()]
+    import sys
+    argv = [
+        sys.executable,
+        str(_run_sbtdd_path()),
+        "auto",
+        "--task-ids", ",".join(task_ids),
+        "--no-recursive",
+    ]
+    for ns_attr, cli_flag in _FORWARDABLE_FLAGS.items():
+        value = getattr(ns, ns_attr, None)
+        if value is not None:
+            argv.extend([cli_flag, str(value)])
+    return argv
 
 
-def _build_dispatch_plan_parallel(plan_path: Path) -> list[set[str]]:
-    """Parallel dispatch plan — antichains partitioned by file collisions.
-
-    v1.0.4 Item C: opt-in via --parallel flag. DAG analysis +
-    file-surface collision detection produce parallel-safe batches.
-    """
-    graph = parse_plan(plan_path)
-    chains = graph.antichains()
-    flat: list[set[str]] = []
-    for chain in chains:
-        flat.extend(partition_by_collision(chain, graph))
-    return flat
-
-
-def _check_tdd_guard_warning(parallel: bool, project_root: Path) -> None:
-    """Emit stderr warning when --parallel + TDD-Guard hooks detected.
-
-    Per spec sec.3 multi-agent rules: parallel mode in same worktree
-    with TDD-Guard ON produces false bloqueos. Document escape via
-    `tdd-guard off` toggle OR per-subagent worktree.
-    """
-    if not parallel:
-        return
-    settings_path = project_root / ".claude" / "settings.json"
-    if not settings_path.exists():
-        return
-    try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return
-    hooks = settings.get("hooks", {})
-    has_tdd_guard = False
-    for hook_list in hooks.values():
-        if not isinstance(hook_list, list):
-            continue
-        for entry in hook_list:
-            if not isinstance(entry, dict):
-                continue
-            for h in entry.get("hooks", []):
-                if isinstance(h, dict) and "tdd-guard" in str(h.get("command", "")).lower():
-                    has_tdd_guard = True
-                    break
-    if has_tdd_guard:
-        sys.stderr.write(
-            "[sbtdd auto] WARNING: Parallel mode in same worktree with "
-            "TDD-Guard ON may produce false bloqueos. Toggle off with "
-            "`tdd-guard off` per spec sec.3 multi-agent rules, OR use "
-            "`/using-git-worktrees` for per-subagent worktree.\n"
-        )
-
-
-# Modify run() / cmd() entry point to branch on parallel flag:
-def cmd(args: argparse.Namespace) -> int:
-    ...
-    _check_tdd_guard_warning(parallel=args.parallel, project_root=Path.cwd())
-    if args.parallel:
-        dispatch_plan = _build_dispatch_plan_parallel(plan_path)
-        # Concurrent dispatch via Agent tool / subprocess Popen
-        # (exact transport is orchestrator-side; Track Beta documents
-        # it as INFO finding for v1.0.5+ refinement)
-    else:
-        dispatch_plan = _build_dispatch_plan_sequential(plan_path)
-    ...
+def _run_sbtdd_path() -> Path:
+    """Return path to run_sbtdd.py entry point."""
+    return Path(__file__).resolve().parent / "run_sbtdd.py"
 ```
 
-Modify `skills/sbtdd/scripts/run_sbtdd.py` `_build_arg_parser`:
+- [ ] **Step 5: Wire `_build_worker_argv` into `_dispatch_tracks_concurrent`**
 
-```python
-def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(...)
-    sub = parser.add_subparsers(dest="cmd", required=True)
-    ...
-    auto_p = sub.add_parser("auto", help="...")
-    ...
-    auto_p.add_argument(
-        "--parallel",
-        action="store_true",
-        default=False,
-        help="v1.0.4 Item C: dispatch parallelizable task batches "
-             "concurrently. Requires TDD-Guard OFF in same worktree, "
-             "OR per-subagent worktree (see spec sec.3).",
-    )
-    ...
-```
+Replace inline argv build in `_dispatch_tracks_concurrent` with `_build_worker_argv(task_ids, ns)` call. Pass `ns` parameter through the call chain if not already present.
 
-- [x] **Step 5: Run tests to verify PASS**
+- [ ] **Step 6: Run tests to verify PASS**
 
-Run: `pytest tests/test_auto_cmd.py::TestAutoCmdParallelFlag -v`
-Expected: 8/8 PASS.
+Run: `pytest tests/test_auto_cmd.py::TestWorkerFlagForwarding -v`
+Expected: 3/3 PASS.
 
 Run: `make verify`
 Expected: Clean.
 
-- [x] **Step 6: close-phase Green**
+- [ ] **Step 7: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
-Expected: `feat:` commit landed (e.g. `feat: wire --parallel flag into auto_cmd for v1.0.4 Item C`).
+Expected: `feat:` commit landed (e.g. `feat: worker CLI flag forwarding for v1.0.5 Item I-3`).
 
 #### Refactor Phase
 
-- [x] **Step 7: Refactor — extract dispatch-plan-building if helpers grow**
+- [ ] **Step 8: Refactor — confirm `_run_sbtdd_path` not duplicated**
 
-Two helpers `_build_dispatch_plan_sequential` and
-`_build_dispatch_plan_parallel` are minimal and have clear separation.
-Skip refactor.
+If `_run_sbtdd_path` (or equivalent) already exists in another module, import + use. Otherwise leave as-is.
 
-- [x] **Step 8: close-phase Refactor + Step 9: close-task**
+- [ ] **Step 9: close-phase Refactor + Step 10: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
 
----
-
-## Task 9 (DEFERRED to v1.0.5) — Item D iter 2 scope-trim Option D
-
-**Status**: DEFERRED — no v1.0.4 implementation work. Header
-collapsed from h3 to h2 (v1.0.4 Loop 2 iter-1 CRITICAL #2 Option b)
-so drift detector's section walker (`_ANY_TASK_HEADER` pinned to h3)
-does not visit this stub. Subagents skip this section entirely;
-orchestrator advances state file from `current_task_id: 8 → done`
-upon Task 8 close (no T9 work to perform).
-
-**Rationale (iter 2 Checkpoint 2 scope-trim per spec sec.6.1 G2 ladder)**: iter 2 surfaced 3 CRITICAL findings; caspar CRITICAL #3 ("§3 cross-module contract contradicts §2.4 + plan T9") + persistent 3-agent WARNING (melchior + balthasar + caspar) about Item D 3-touchpoint doc-only enforcement INSUFFICIENCY (third consecutive cycle of doc-only convention attempts: v1.0.2 Q2 Option B I5 process notes; v1.0.3 dogfood demonstrated divergence; v1.0.4 attempted 3-touchpoint multiplication + tripwire fold-in). Per spec sec.6.1 iter-2 CRITICAL trigger pre-stage: scope-trim ladder defers Item D first. User selected Option D (hybrid: surgical fixes for #1+#2 + scope-trim Item D for #3) on 2026-05-07.
-
-**v1.0.5 LOCKED commitment**: Item D ships as **Q3 OPTION A** — code-side enforcement via `close_task_cmd._preflight` modification. Architectural preference confirmed by 3-agent unanimous flag in v1.0.4 iter 1 + iter 2. NOT doc-only multiplication. Specifics deferred to v1.0.5 brainstorming + plan.
-
-**v1.0.4 surfaces NOT touched in this cycle**:
-- `skills/sbtdd/SKILL.md` — unchanged in v1.0.4.
-- `templates/CLAUDE.local.md.template` — unchanged in v1.0.4.
-- writing-plans skill prompt extension — unchanged / NOT created in v1.0.4.
-- `skills/sbtdd/scripts/close_task_cmd.py` — unchanged in v1.0.4.
-- `tests/test_close_phase_subagent_pattern.py` — NOT created in v1.0.4.
-- `tests/test_close_task_cmd.py` — no D-4 tripwire test in v1.0.4.
-
-The Q2 v1.0.2 Option B `/sbtdd close-task` automation mandate (single I5 touchpoint) remains in force unchanged. v1.0.5 will replace this with code-side enforcement.
+Expected: Task 2 closed. State file advances `current_task_id: 2 → 3`.
 
 ---
 
+## Track Beta — I-2 plan checkbox scratch + D Q3-A preflight enforcement (Subagent #2, sequential T3 → T4)
+
+**Owner**: Subagent #2 dispatched from orchestrator.
+**Surfaces** (file-disjoint with Track Alpha; Track Gamma deferred to v1.0.6):
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py`
+- Modify: `skills/sbtdd/scripts/run_sbtdd.py` (argparse `--skip-preflight`)
+- Extend: `tests/test_close_task_cmd.py`
+
+**Wall-time estimated**: ~1 day.
+
+**CRITICAL — within-track sequential ordering**: Task 3 (I-2) lands FIRST. Task 4 (D Q3-A) lands AFTER Task 3 completes. Both modify `close_task_cmd.py`. Task 4's `_preflight` extension is independent of Task 3's `mark_and_advance` redirect, but Task 3 must commit first to avoid merge conflicts within the worker.
+
+### Task 3: Item I-2 — Per-worker scratch plan + flip-merge pattern
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (add `_scratch_plan_path` + `_apply_flips_for_task_ids` + `_merge_scratch_plans` helpers + `mark_and_advance` worker-mode redirect)
+- Test: `tests/test_close_task_cmd.py` (extend with `class TestPerWorkerScratchPlan`)
+
+Covers escenarios I2-1 through I2-4 from spec sec.4.2.
+
+#### Red Phase
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_close_task_cmd.py`:
+
+```python
+class TestPerWorkerScratchPlan:
+    """v1.0.5 Item I-2 escenarios I2-1 through I2-4 — per-worker scratch + flip-merge."""
+
+    def test_i2_1_worker_mode_writes_flip_to_scratch(self, tmp_path):
+        """I2-1: worker mode redirects flip to per-worker scratch."""
+        from close_task_cmd import _scratch_plan_path, mark_and_advance
+        import argparse
+
+        # Synthesize main plan
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        main_plan = plan_dir / "claude-plan-tdd.md"
+        main_plan.write_text(
+            "### Task 3: Demo\n\n- [ ] **Step 1**\n- [ ] **Step 2**\n",
+            encoding="utf-8",
+        )
+        (tmp_path / ".claude").mkdir()
+
+        ns = argparse.Namespace(no_recursive=True, task_ids="3")
+        state = {"current_task_id": "3", "current_phase": "refactor"}
+        mark_and_advance(state, tmp_path, ns)
+
+        scratch = _scratch_plan_path(("3",), tmp_path)
+        assert scratch.exists()
+        scratch_text = scratch.read_text(encoding="utf-8")
+        assert "[x]" in scratch_text  # flip applied to scratch
+        # Main plan UNCHANGED in worker mode
+        main_text = main_plan.read_text(encoding="utf-8")
+        assert "[x]" not in main_text
+
+    def test_i2_2_orchestrator_mode_writes_to_main_plan(self, tmp_path):
+        """I2-2: orchestrator mode writes flip directly to main plan (v1.0.4 behavior)."""
+        from close_task_cmd import mark_and_advance
+        import argparse
+
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        main_plan = plan_dir / "claude-plan-tdd.md"
+        main_plan.write_text(
+            "### Task 3: Demo\n\n- [ ] **Step 1**\n",
+            encoding="utf-8",
+        )
+
+        ns = argparse.Namespace(no_recursive=False, task_ids=None)
+        state = {"current_task_id": "3", "current_phase": "refactor"}
+        mark_and_advance(state, tmp_path, ns)
+
+        main_text = main_plan.read_text(encoding="utf-8")
+        assert "[x]" in main_text  # flip applied directly to main
+
+    def test_i2_3_parent_post_batch_merges_scratch_flips(self, tmp_path):
+        """I2-3: parent post-batch merges scratch flips into main."""
+        from close_task_cmd import _scratch_plan_path, _merge_scratch_plans
+
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        main_plan = plan_dir / "claude-plan-tdd.md"
+        main_plan.write_text(
+            "### Task 1\n- [ ] T1 step\n\n### Task 2\n- [ ] T2 step\n\n"
+            "### Task 3\n- [ ] T3 step\n\n### Task 4\n- [ ] T4 step\n",
+            encoding="utf-8",
+        )
+        (tmp_path / ".claude").mkdir()
+
+        # Worker A scratch (T1 + T3 flipped)
+        scratch_a = _scratch_plan_path(("1", "3"), tmp_path)
+        scratch_a.write_text(
+            "### Task 1\n- [x] T1 step\n\n### Task 2\n- [ ] T2 step\n\n"
+            "### Task 3\n- [x] T3 step\n\n### Task 4\n- [ ] T4 step\n",
+            encoding="utf-8",
+        )
+        # Worker B scratch (T2 + T4 flipped)
+        scratch_b = _scratch_plan_path(("2", "4"), tmp_path)
+        scratch_b.write_text(
+            "### Task 1\n- [ ] T1 step\n\n### Task 2\n- [x] T2 step\n\n"
+            "### Task 3\n- [ ] T3 step\n\n### Task 4\n- [x] T4 step\n",
+            encoding="utf-8",
+        )
+
+        _merge_scratch_plans([["1", "3"], ["2", "4"]], tmp_path)
+
+        merged_text = main_plan.read_text(encoding="utf-8")
+        # ALL 4 flips visible in main
+        assert merged_text.count("[x]") == 4
+        # Scratch files cleaned up
+        assert not scratch_a.exists()
+        assert not scratch_b.exists()
+
+    def test_i2_4_real_multiprocessing_race_regression(self, tmp_path):
+        """I2-4: cross-process race regression test via multiprocessing.spawn.
+
+        v1.0.5 iter-2 WARNING fix: explicit `for _ in range(50):` repeat
+        loop wrapping the multiprocessing barrier-synchronized RMW.
+        Asserts no flip lost across all 50 iterations to amplify
+        race-window detection per spec sec.4.2 escenario I2-4.
+        """
+        import multiprocessing
+        from close_task_cmd import _scratch_plan_path, _merge_scratch_plans
+
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        main_plan_path = plan_dir / "claude-plan-tdd.md"
+        original_plan = (
+            "### Task 1\n- [ ] step\n\n### Task 2\n- [ ] step\n\n"
+            "### Task 3\n- [ ] step\n\n### Task 4\n- [ ] step\n"
+        )
+        (tmp_path / ".claude").mkdir()
+
+        ctx = multiprocessing.get_context("spawn")
+
+        for iteration in range(50):
+            # Reset main plan + cleanup any stale scratch from prior loop
+            main_plan_path.write_text(original_plan, encoding="utf-8")
+            for stale in (tmp_path / ".claude").glob("plan-scratch-*.md"):
+                stale.unlink(missing_ok=True)
+
+            barrier = ctx.Barrier(2)
+            procs = [
+                ctx.Process(
+                    target=_scratch_writer_worker,
+                    args=(str(tmp_path), ["1", "3"], barrier),
+                ),
+                ctx.Process(
+                    target=_scratch_writer_worker,
+                    args=(str(tmp_path), ["2", "4"], barrier),
+                ),
+            ]
+            for p in procs:
+                p.start()
+            for p in procs:
+                p.join(timeout=30)
+                assert p.exitcode == 0, (
+                    f"Iter {iteration}: worker exited {p.exitcode}"
+                )
+
+            _merge_scratch_plans([["1", "3"], ["2", "4"]], tmp_path)
+            merged_text = main_plan_path.read_text(encoding="utf-8")
+            # ALL 4 flips visible across all 50 iterations (no lost updates)
+            assert merged_text.count("[x]") == 4, (
+                f"Iter {iteration}: lost flip — got {merged_text.count('[x]')} "
+                f"[x] in merged plan, expected 4"
+            )
+
+    def test_i2_3b_partial_worker_failure_no_fabrication(self, tmp_path):
+        """I2-3b (iter-1 CRITICAL #1+#3 fix): worker crashes after flipping
+        T1 in scratch but BEFORE flipping T3 → main gets T1 only; T3
+        remains [ ] (no fabricated flip). Operator can resume via
+        `/sbtdd auto --task-ids T3` later.
+
+        Pre-fix behavior would have flipped both T1 AND T3 in main
+        regardless of scratch state. iter-1 CRITICAL #1+#3 fix derives
+        flips from scratch-vs-main diff.
+        """
+        from close_task_cmd import (
+            _scratch_plan_path,
+            _merge_scratch_plans,
+            _flip_checkbox,
+        )
+        import shutil
+
+        plan_dir = tmp_path / "planning"
+        plan_dir.mkdir()
+        main_plan = plan_dir / "claude-plan-tdd.md"
+        main_plan.write_text(
+            "### Task 1\n- [ ] step\n\n### Task 2\n- [ ] step\n\n"
+            "### Task 3\n- [ ] step\n\n### Task 4\n- [ ] step\n",
+            encoding="utf-8",
+        )
+        (tmp_path / ".claude").mkdir()
+
+        # Simulate worker A (assigned [1, 3]) that crashed after flipping
+        # T1 in scratch but BEFORE flipping T3:
+        scratch_a = _scratch_plan_path(("1", "3"), tmp_path)
+        shutil.copy2(main_plan, scratch_a)
+        text = scratch_a.read_text(encoding="utf-8")
+        text = _flip_checkbox(text, "1")  # T1 flipped, T3 NOT flipped
+        scratch_a.write_text(text, encoding="utf-8")
+
+        # Worker B (assigned [2, 4]) completed normally:
+        scratch_b = _scratch_plan_path(("2", "4"), tmp_path)
+        shutil.copy2(main_plan, scratch_b)
+        text = scratch_b.read_text(encoding="utf-8")
+        text = _flip_checkbox(text, "2")
+        text = _flip_checkbox(text, "4")
+        scratch_b.write_text(text, encoding="utf-8")
+
+        # Parent merge — must derive flips from scratch-vs-main diff
+        _merge_scratch_plans([["1", "3"], ["2", "4"]], tmp_path)
+        merged_text = main_plan.read_text(encoding="utf-8")
+        # T1 flipped (scratch_a had [x]); T3 NOT flipped (scratch_a [ ]);
+        # T2 flipped; T4 flipped → exactly 3 [x], NOT 4
+        assert merged_text.count("[x]") == 3, (
+            f"Expected 3 flips (T1+T2+T4); got {merged_text.count('[x]')}. "
+            "Pre-fix bug would fabricate T3 flip."
+        )
+        # T3 specifically must remain [ ]
+        from close_task_cmd import _section_has_flipped
+        assert not _section_has_flipped(merged_text, "3"), (
+            "T3 was fabricated as flipped — iter-1 CRITICAL #1+#3 regression"
+        )
+
+    def test_i2_5_anchored_flip_checkbox_respects_section_boundaries(self, tmp_path):
+        """I2-5 (iter-1 CRITICAL #2 fix): anchored regex bounds flips to
+        current task's section. Pre-fix unanchored regex with re.DOTALL
+        could match a [ ] from a LATER task when current task has no [ ].
+        """
+        from close_task_cmd import _flip_checkbox, _section_has_flipped
+
+        # Plan: Task 3 has NO [ ] checkbox; Task 4 has [ ]
+        plan_text = (
+            "### Task 3\nThe operator already removed the checkbox.\n\n"
+            "### Task 4\n- [ ] step\n"
+        )
+
+        # Flip T3 — pre-fix would match Task 4's [ ] across the boundary
+        result = _flip_checkbox(plan_text, "3")
+
+        # Anchored impl: T3 has no [ ] → result unchanged (idempotent guard)
+        assert result == plan_text, (
+            "Pre-fix regex would have flipped Task 4's [ ] across boundary"
+        )
+        # T4's [ ] still intact:
+        assert not _section_has_flipped(result, "4"), (
+            "T4 boundary violated — iter-1 CRITICAL #2 regression"
+        )
+
+
+def _scratch_writer_worker(project_root_str: str, task_ids: list[str], barrier) -> None:
+    """Top-level helper for multiprocessing.Process spawn (must be picklable)."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+    from close_task_cmd import _scratch_plan_path
+    import shutil
+
+    project_root = Path(project_root_str)
+    barrier.wait()
+    scratch = _scratch_plan_path(tuple(sorted(task_ids)), project_root)
+    if not scratch.exists():
+        shutil.copy2(project_root / "planning" / "claude-plan-tdd.md", scratch)
+    text = scratch.read_text(encoding="utf-8")
+    for tid in task_ids:
+        # Flip the [ ] checkbox under "### Task N" header
+        text = text.replace(
+            f"### Task {tid}\n- [ ] step",
+            f"### Task {tid}\n- [x] step",
+            1,
+        )
+    scratch.write_text(text, encoding="utf-8")
+```
+
+- [ ] **Step 2: Run tests to verify FAIL**
+
+Run: `pytest tests/test_close_task_cmd.py::TestPerWorkerScratchPlan -v`
+Expected: 4/4 FAIL (helpers don't exist yet).
+
+- [ ] **Step 3: close-phase Red**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+
+#### Green Phase
+
+- [ ] **Step 4: Implement `_scratch_plan_path` + `mark_and_advance` redirect + `_merge_scratch_plans`**
+
+Modify `skills/sbtdd/scripts/close_task_cmd.py`:
+
+```python
+import hashlib
+import shutil
+
+
+def _scratch_plan_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
+    """Per-worker scratch plan path.
+
+    v1.0.5 Item I-2: deterministic name per task-IDs hash. Each worker
+    writes flip(s) to its own scratch plan; parent post-batch merges
+    all scratch flips into main plan.
+    """
+    digest = hashlib.sha1(",".join(task_ids).encode("utf-8")).hexdigest()[:12]
+    return project_root / ".claude" / f"plan-scratch-{digest}.md"
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Atomic text write via write-temp + os.replace."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+import re
+
+# v1.0.5 iter-1 CRITICAL #2 fix: anchored regex walker.
+_TASK_HEADER_RE = re.compile(r"^### Task ", re.MULTILINE)
+
+
+def _iter_task_ids(plan_text: str) -> list[str]:
+    """Yield task IDs in plan order.
+
+    v1.0.5 iter-1 helper: parses `### Task <id>` headers + extracts the
+    ID token (first whitespace-bounded word after "### Task ").
+    """
+    ids: list[str] = []
+    header_iter = re.finditer(r"^### Task (\S+)", plan_text, re.MULTILINE)
+    for m in header_iter:
+        ids.append(m.group(1).rstrip(":"))
+    return ids
+
+
+def _section_bounds(plan_text: str, task_id: str) -> tuple[int, int] | None:
+    """Return (section_start, section_end) char offsets for the task's
+    section. Section start = end of `### Task <id>` header line; end =
+    start of next `### Task ` header (or end-of-file). Returns None if
+    task not found.
+
+    v1.0.5 iter-1 CRITICAL #2 fix: bounds search to current task's
+    section so flips never cross task boundaries.
+    """
+    header_re = re.compile(rf"^### Task {re.escape(task_id)}\b", re.MULTILINE)
+    header_match = header_re.search(plan_text)
+    if header_match is None:
+        return None
+    section_start = header_match.end()
+    next_header = _TASK_HEADER_RE.search(plan_text, section_start)
+    section_end = next_header.start() if next_header else len(plan_text)
+    return section_start, section_end
+
+
+def _section_has_flipped(plan_text: str, task_id: str) -> bool:
+    """True iff the task section contains '- [x]' (flipped state).
+
+    v1.0.5 iter-1 helper: bounded section extraction identical to
+    `_flip_checkbox` so 'has flipped' check uses the same task-section
+    window.
+    """
+    bounds = _section_bounds(plan_text, task_id)
+    if bounds is None:
+        return False
+    section_start, section_end = bounds
+    return "- [x]" in plan_text[section_start:section_end]
+
+
+def _flip_checkbox(plan_text: str, task_id: str) -> str:
+    """Flip first `- [ ]` checkbox in task's section to `- [x]`.
+
+    v1.0.5 iter-1 CRITICAL #2 fix: regex anchored to current task's
+    section bounded by next `### Task ` header (or EOF). Prevents the
+    pre-fix `(### Task {tid}.*?)(- \\[ \\])` with `re.DOTALL` from
+    matching a `[ ]` checkbox belonging to a LATER task when the
+    current task has no `[ ]` of its own. Idempotent: returns plan_text
+    unchanged if section has no `- [ ]` (already flipped or no
+    checkbox).
+    """
+    bounds = _section_bounds(plan_text, task_id)
+    if bounds is None:
+        raise ValueError(f"Task {task_id} not found in plan")
+    section_start, section_end = bounds
+    section = plan_text[section_start:section_end]
+    flipped_section = section.replace("- [ ]", "- [x]", 1)
+    if flipped_section == section:
+        return plan_text  # idempotent: already flipped or no checkbox
+    return plan_text[:section_start] + flipped_section + plan_text[section_end:]
+
+
+def _apply_flips_from_diff(main_text: str, scratch_text: str) -> str:
+    """Apply only the `[ ]→[x]` transitions present in scratch relative
+    to main. Iterates per-task-section using `_iter_task_ids`; flips a
+    main checkbox only when the same task section in scratch has the
+    `[x]` state.
+
+    v1.0.5 iter-1 CRITICAL #1+#3 fix: replaces the prior
+    `_apply_flips_for_task_ids(main, scratch, task_ids)` design which
+    ignored `scratch_text` and unconditionally flipped every task_id
+    in main, fabricating false-positive flips when workers crashed
+    before scratch-write.
+    """
+    result = main_text
+    for task_id in _iter_task_ids(scratch_text):
+        if _section_has_flipped(scratch_text, task_id) and \
+           not _section_has_flipped(result, task_id):
+            result = _flip_checkbox(result, task_id)
+    return result
+
+
+def _merge_scratch_plans(tracks: list[list[str]], project_root: Path) -> None:
+    """Parent post-batch: merge per-worker scratch plans into main.
+
+    v1.0.5 iter-1 CRITICAL #1+#3 fix: flips derived from
+    scratch-vs-main diff via `_apply_flips_from_diff`, NOT from
+    `task_ids` parameter. If a worker crashed before flipping its
+    task, scratch will lack the flip and main is left unchanged for
+    that task — no fabrication of false-positive checkbox state.
+
+    Workers have disjoint task IDs (per partition_by_tracks invariant);
+    therefore merge = collect flips from each scratch by direct diff +
+    apply to main. Cleans up scratch files post-merge.
+    """
+    main_path = project_root / "planning" / "claude-plan-tdd.md"
+    main_text = main_path.read_text(encoding="utf-8")
+    for task_ids in tracks:
+        scratch_path = _scratch_plan_path(tuple(sorted(task_ids)), project_root)
+        if not scratch_path.exists():
+            continue  # worker didn't write scratch (early failure)
+        scratch_text = scratch_path.read_text(encoding="utf-8")
+        main_text = _apply_flips_from_diff(main_text, scratch_text)
+        scratch_path.unlink(missing_ok=True)
+    _atomic_write(main_path, main_text)
+
+
+def mark_and_advance(state: dict, project_root: Path, ns: argparse.Namespace = None) -> None:
+    """Flip current task checkbox + advance state file.
+
+    v1.0.5 Item I-2: in worker mode (--no-recursive + --task-ids),
+    writes flip to per-worker scratch plan instead of main. Parent
+    post-batch merges all scratch plans.
+    """
+    plan_path = project_root / "planning" / "claude-plan-tdd.md"
+
+    if ns and getattr(ns, "no_recursive", False) and getattr(ns, "task_ids", None):
+        # Worker mode: write flip to scratch (parent merges later)
+        task_ids_tuple = tuple(sorted(ns.task_ids.split(",")))
+        scratch_path = _scratch_plan_path(task_ids_tuple, project_root)
+        scratch_path.parent.mkdir(parents=True, exist_ok=True)
+        if not scratch_path.exists():
+            shutil.copy2(plan_path, scratch_path)
+        text = scratch_path.read_text(encoding="utf-8")
+        flipped = _flip_checkbox(text, state["current_task_id"])
+        _atomic_write(scratch_path, flipped)
+    else:
+        # Orchestrator/sequential mode: write directly to main plan
+        text = plan_path.read_text(encoding="utf-8")
+        flipped = _flip_checkbox(text, state["current_task_id"])
+        _atomic_write(plan_path, flipped)
+    # ... existing state file advance ... (preserved unchanged)
+```
+
+Confirm `import os`, `import argparse`, `from pathlib import Path` are present.
+
+- [ ] **Step 5: NO `auto_cmd.py` modification (iter-1 CRITICAL #4 architectural fix — Track Beta is helper-only)**
+
+Per iter-1 CRITICAL #4 fix: Track Beta provides the
+`_merge_scratch_plans` helper as a pure function in
+`close_task_cmd.py` only. **Wiring** of `_merge_scratch_plans` into
+`_dispatch_tracks_concurrent` post-batch lives in Task 1 (Track
+Alpha) — see Task 1 Step 5 which now invokes BOTH
+`_merge_audit_sidecars` AND `_merge_scratch_plans` post-batch.
+
+Track Beta's only obligation here: ensure `_merge_scratch_plans` is
+importable from `close_task_cmd` (module-level definition; Step 4
+already provides this).
+
+Validation step: confirm helper signature matches Task 1 Step 5
+import expectation (`from close_task_cmd import _merge_scratch_plans`):
+
+```bash
+python -c "from close_task_cmd import _merge_scratch_plans; print(_merge_scratch_plans.__name__)"
+# Expected: _merge_scratch_plans
+```
+
+No git commit produced by this step (no auto_cmd.py modification).
+
+- [ ] **Step 6: Run tests to verify PASS**
+
+Run: `pytest tests/test_close_task_cmd.py::TestPerWorkerScratchPlan -v`
+Expected: 4/4 PASS.
+
+Run: `make verify`
+Expected: Clean.
+
+- [ ] **Step 7: close-phase Green**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+
+Expected: `feat:` commit landed (e.g. `feat: per-worker scratch plan flip-merge for v1.0.5 Item I-2`).
+
+#### Refactor Phase
+
+- [ ] **Step 8: Refactor — DRY-consolidate `_atomic_write_json` to `state_file.py` (UNCONDITIONAL per iter-2 WARNING fix)**
+
+iter-2 WARNING (mel + bal): atomic-write helpers duplicated across `auto_cmd.py` + `close_task_cmd.py` + temp-file naming collision under concurrent writers. Pre-fix design said "Likely YAGNI; skip if minimal duplication" — RETRACTED. iter-2 mandates unconditional consolidation.
+
+Modify `skills/sbtdd/scripts/state_file.py` — add module-level shared helpers (preserve existing v0.5.0 atomic-write pattern):
+
+```python
+import json
+import os
+import tempfile
+from pathlib import Path
+
+
+def atomic_write_json(path: Path, data: object) -> None:
+    """Atomic JSON write via tempfile.mkstemp + os.replace (DRY shared
+    across auto_cmd + close_task_cmd per v1.0.5 iter-2 WARNING fix).
+
+    Uses tempfile.mkstemp so concurrent writers in same directory get
+    unique temp names (no collision risk).
+    """
+    fd, tmp_str = tempfile.mkstemp(
+        suffix=".tmp", prefix=path.name + ".", dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_str, path)
+    except Exception:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Atomic text write — mirror of atomic_write_json for plan/scratch
+    files. Same temp-file collision avoidance via tempfile.mkstemp.
+    """
+    fd, tmp_str = tempfile.mkstemp(
+        suffix=".tmp", prefix=path.name + ".", dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_str, path)
+    except Exception:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
+        raise
+```
+
+Then in `close_task_cmd.py`: replace local `_atomic_write` definition with `from state_file import atomic_write_text as _atomic_write`. Track Alpha T1 Step 8 does the same for `_atomic_write_json`.
+
+Run: `make verify` — expected clean. Commit `refactor:` (e.g., `refactor: DRY-consolidate atomic_write_{json,text} to state_file per v1.0.5 iter-2`).
+
+- [ ] **Step 9: close-phase Refactor + Step 10: close-task**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
+
+Expected: Task 3 closed. State file advances `current_task_id: 3 → 4`.
+
+---
+
+### Task 4: Item D Q3 OPTION A — `close_task_cmd._preflight` HARD-BLOCK + `--skip-preflight` flag
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (extend `_preflight` with TDD triplet check + `skip_preflight` parameter)
+- Modify: `skills/sbtdd/scripts/run_sbtdd.py` (argparse `--skip-preflight` on `close-task` subparser)
+- Test: `tests/test_close_task_cmd.py` (extend with `class TestPreflightHardBlock`)
+
+Covers escenarios D-1 through D-4 from spec sec.4.4.
+
+**REQUIRES Task 3 to land FIRST** (within-track sequential ordering — both modify `close_task_cmd.py`).
+
+#### Red Phase
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_close_task_cmd.py`:
+
+```python
+class TestPreflightHardBlock:
+    """v1.0.5 Item D Q3-A escenarios D-1 through D-4 — preflight enforcement."""
+
+    def test_d1_bypass_detected_raises_precondition(self, tmp_path, monkeypatch):
+        """D-1: commit chain without TDD triplet → PreconditionError."""
+        from close_task_cmd import _preflight
+        from errors import PreconditionError
+
+        # Mock _git_log_between to return chain without triplet
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "raw commit 1",
+                "another raw commit",
+            ],
+        )
+        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+
+        with pytest.raises(PreconditionError) as exc_info:
+            _preflight(state, tmp_path)
+
+        msg = str(exc_info.value)
+        assert "Phase advance gate bypassed" in msg
+        assert "test:/feat:|fix:/refactor: triplet" in msg
+        assert "INV-1" in msg
+        assert "close-phase" in msg
+        assert "--skip-preflight" in msg
+
+    def test_d2_canonical_triplet_no_trigger(self, tmp_path, monkeypatch):
+        """D-2: canonical TDD triplet in commit chain → no PreconditionError."""
+        from close_task_cmd import _preflight
+
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",
+                "feat: implement minimum",
+                "refactor: clean up",
+            ],
+        )
+        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+
+        # Should NOT raise
+        _preflight(state, tmp_path)
+
+    def test_d3_skip_preflight_bypasses_with_breadcrumb(self, tmp_path, capsys):
+        """D-3: --skip-preflight bypasses + emits stderr breadcrumb."""
+        from close_task_cmd import _preflight
+
+        # Bypass scenario: no triplet, but skip_preflight=True
+        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+
+        # Should NOT raise (override active)
+        _preflight(state, tmp_path, skip_preflight=True)
+
+        captured = capsys.readouterr()
+        assert "[sbtdd close-task] WARNING" in captured.err
+        assert "--skip-preflight active" in captured.err
+        assert "task_id=3" in captured.err
+        assert "abc123" in captured.err
+        assert "Audit-logged" in captured.err
+
+    def test_d4_no_chore_commit_first_task_branch_root_boundary(self, tmp_path, monkeypatch):
+        """D-2b (iter-1 CRITICAL #5 fix): no prior `chore: mark task` commit
+        → boundary is branch root + canonical triplet OK → no raise."""
+        from close_task_cmd import _preflight
+
+        # Simulate: first task in plan, no prior chore commit exists
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: None,
+        )
+        # Branch root → HEAD contains canonical triplet
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",
+                "feat: implement",
+                "refactor: extract helper",
+            ],
+        )
+        state = {"current_task_id": "1"}
+
+        # Should NOT raise (first task, branch-root boundary, full triplet)
+        _preflight(state, tmp_path)
+
+    def test_d5_partial_triplet_raises(self, tmp_path, monkeypatch):
+        """D-1 (iter-1 CRITICAL #5 fix): commit chain since last chore: mark
+        task with only 2 of 3 triplet prefixes → still raises."""
+        from close_task_cmd import _preflight
+        from errors import PreconditionError
+
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc123",
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",
+                "feat: implement",
+                # missing refactor
+            ],
+        )
+        state = {"current_task_id": "3"}
+
+        with pytest.raises(PreconditionError) as excinfo:
+            _preflight(state, tmp_path)
+        # iter-1 CRITICAL #5: error message references "since last chore commit"
+        # boundary (or "branch root") — NOT phase_started_at_commit
+        assert "since" in str(excinfo.value)
+        assert "abc123" in str(excinfo.value) or "chore" in str(excinfo.value)
+```
+
+- [ ] **Step 2: Run tests to verify FAIL**
+
+Run: `pytest tests/test_close_task_cmd.py::TestPreflightHardBlock -v`
+Expected: 5/5 FAIL — `_preflight` doesn't yet have `skip_preflight` parameter or triplet check.
+
+- [ ] **Step 3: close-phase Red**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+
+#### Green Phase
+
+- [ ] **Step 4: Extend `_preflight` with TDD triplet check + `skip_preflight` parameter (iter-1 CRITICAL #5: commit-window scope = "since last `chore: mark task` commit")**
+
+Modify `skills/sbtdd/scripts/close_task_cmd.py`. Add or extend `_preflight`:
+
+```python
+import sys
+import subprocess
+
+
+def _git_log_between(start_sha: str | None, project_root: Path | None = None) -> list[str]:
+    """Return commit subjects between start_sha (exclusive) and HEAD (inclusive).
+
+    iter-1 CRITICAL #5 fix: when start_sha is None (no prior chore commit
+    on branch), returns ALL commits on current branch (boundary = branch
+    root).
+    """
+    cwd = str(project_root) if project_root else None
+    if start_sha is None:
+        # Boundary = branch root → all commits on HEAD
+        rev_range = "HEAD"
+    else:
+        rev_range = f"{start_sha}..HEAD"
+    result = subprocess.run(
+        ["git", "log", rev_range, "--format=%s"],
+        capture_output=True, text=True, check=False, cwd=cwd,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
+    """Return SHA of most recent `chore: mark task <N> complete` commit.
+
+    iter-1 CRITICAL #5 fix: this is the canonical "previous task close"
+    boundary for the `_preflight` triplet check. Returns None if no such
+    commit exists on current branch (first task in plan).
+
+    Rebase/squash limitation: if operator squashed prior task-close
+    commits, this returns the most recent surviving `chore:` subject
+    matching the pattern; risk: false-positive triplet detection if
+    squash produced a hybrid subject. Mitigated by `--skip-preflight`
+    flag for emergency operator override.
+    """
+    cwd = str(project_root) if project_root else None
+    result = subprocess.run(
+        ["git", "log", "HEAD", "--format=%H%x09%s"],
+        capture_output=True, text=True, check=False, cwd=cwd,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        sha, subject = line.split("\t", 1)
+        # Match: "chore: mark task <N> complete" (allow trailing variants)
+        if subject.startswith("chore: mark task ") and " complete" in subject:
+            return sha
+    return None
+
+
+def _preflight(state: dict, project_root: Path | None = None,
+               skip_preflight: bool = False) -> None:
+    """Preflight checks before task close.
+
+    v1.0.5 Item D Q3 OPTION A (iter-1 CRITICAL #5 fix): hard-block when
+    phase advance gate is bypassed. Detects when commit chain since the
+    last `chore: mark task <N> complete` commit (or branch root if none
+    exists) lacks the canonical TDD triplet (test:/feat:|fix:/refactor:).
+    Raises `PreconditionError` with operator-actionable guidance.
+    Operator emergency override via `--skip-preflight` flag (audit-logged
+    via stderr breadcrumb).
+
+    Why "since last chore commit" instead of `phase_started_at_commit`
+    (iter-1 CRITICAL #5 rationale): `phase_started_at_commit` advances on
+    every phase close within a task, so when `_preflight` runs at
+    task-close time it sees only the LAST phase's commits — never the
+    full Red+Green+Refactor triplet. Boundary "since last chore: mark
+    task" reliably brackets the entire current task's phase-close
+    commits without phase-state coupling.
+
+    Args:
+        state: SessionState dict.
+        project_root: Project root.
+        skip_preflight: Operator emergency override (--skip-preflight flag).
+    """
+    if skip_preflight:
+        sys.stderr.write(
+            f"[sbtdd close-task] WARNING: --skip-preflight active; "
+            f"phase advance gate enforcement BYPASSED for "
+            f"task_id={state.get('current_task_id')}. Audit-logged.\n"
+        )
+        return
+
+    last_chore_sha = _last_chore_task_close_sha(project_root)
+    boundary_label = (
+        f"last chore commit {last_chore_sha}"
+        if last_chore_sha is not None else "branch root"
+    )
+    subjects = _git_log_between(last_chore_sha, project_root=project_root)
+    has_test = any(s.startswith("test:") for s in subjects)
+    has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
+    has_refactor = any(s.startswith("refactor:") for s in subjects)
+    if not (has_test and has_green and has_refactor):
+        from errors import PreconditionError
+        raise PreconditionError(
+            f"Phase advance gate bypassed: commit chain since "
+            f"{boundary_label} lacks test:/feat:|fix:/refactor: triplet. "
+            f"Per SBTDD INV-1 + INV-5..7, each task close requires "
+            f"close-phase invocation per Red/Green/Refactor phase. "
+            f"Recovery: invoke `python skills/sbtdd/scripts/run_sbtdd.py "
+            f"close-phase` once per pending phase OR pass --skip-preflight "
+            f"if emergency operator override is appropriate (audit-logged "
+            f"via stderr breadcrumb)."
+        )
+```
+
+- [ ] **Step 5: Add `--skip-preflight` argparse flag to `close-task` subparser**
+
+Modify `skills/sbtdd/scripts/run_sbtdd.py` (or wherever `close-task` subparser is built):
+
+```python
+close_task_p.add_argument(
+    "--skip-preflight",
+    action="store_true",
+    default=False,
+    help="v1.0.5 Item D Q3-A emergency override: bypass phase advance "
+         "gate enforcement. Audit-logged via stderr breadcrumb.",
+)
+```
+
+- [ ] **Step 6: Wire `ns.skip_preflight` through to `_preflight` in `close_task_cmd.cmd`**
+
+Modify `close_task_cmd.cmd` (the subcommand entry point) to pass
+`skip_preflight=getattr(ns, "skip_preflight", False)` to `_preflight`.
+
+- [ ] **Step 7: Run tests to verify PASS**
+
+Run: `pytest tests/test_close_task_cmd.py::TestPreflightHardBlock -v`
+Expected: 5/5 PASS.
+
+Run: `make verify`
+Expected: Clean.
+
+- [ ] **Step 8: close-phase Green**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+
+Expected: `feat:` commit landed (e.g. `feat: close-task preflight HARD-BLOCK for v1.0.5 Item D Q3 OPTION A`).
+
+#### Refactor Phase
+
+- [ ] **Step 9: Refactor — confirm `_git_log_between` consistent if duplicated elsewhere**
+
+If `_git_log_between` (or equivalent) already exists in another module, consolidate. Otherwise leave.
+
+- [ ] **Step 10: close-phase Refactor + Step 11: close-task**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
+
+Expected: Task 4 closed. State file `current_phase: "done"`, `current_task_id: null` (T5 deferred to v1.0.6 per iter-2 CRITICAL trigger; T4 is now last task in v1.0.5).
+
+---
+
+## Track Gamma — DEFERRED to v1.0.6
+
+**Status**: **DEFERRED to v1.0.6** per iter-2 Checkpoint 2 CRITICAL
+trigger pre-staged response (2026-05-08, user-authorized). v1.0.5
+ships only Track Alpha + Track Beta. v1.0.6 LOCKED commitment for
+Track Gamma C.2 methodology.
+
+**Background**: iter 2 verdict GO_WITH_CAVEATS (3-0) surfaced 6
+CRITICAL findings. All 3 agents independently recommended deferring
+Pillar C per pre-staged G2 ladder (Bal confidence drop 72→68% on
+bundle-width concern). Spec sec.6.1 iter-2 CRITICAL trigger fired;
+Pillar A (I-1+I-2+I-3) remains hard-LOCKED + Pillar B (D Q3-A)
+preserved.
+
+**Original T5 scope (rolled to v1.0.6)**: SKILL.md + template +
+smoke test for plan archaeology trim methodology. Doc-only + low-risk
++ low-value-this-cycle/high-value-future. Will land in v1.0.6 polish
+cycle alongside other deferred items.
+
+---
 
 ## Mid-cycle methodology activities (orchestrator)
 
-These activities are NOT executed by Track Alpha or Track Beta
-subagents. The orchestrator runs them sequentially as part of the
-v1.0.4 own-cycle dogfood. Each is non-gating for ship per hybrid
-methodology semantics.
+Triggered AFTER Track Alpha + Track Beta complete + commits land
+(Track Gamma deferred to v1.0.6 per iter-2 CRITICAL trigger). Each
+activity is non-blocking for ship per hybrid methodology semantics;
+documented in CHANGELOG `[1.0.5]` Process notes regardless of outcome.
 
-### Activity E'-pre — `--resume-from-magi` happy path on hand-crafted artifacts (BEFORE Track dispatch)
+### Activity F7 — Production-grade `--parallel` integration test
 
-**When**: After spec-behavior.md + plan-tdd-org.md committed
-(this commit chain) and BEFORE dispatching Track Alpha + Track Beta
-subagents.
-
-**Steps**:
-
-1. Pre-flight spec_lint dry-run:
-   ```bash
-   python skills/sbtdd/scripts/spec_lint.py sbtdd/spec-behavior.md
-   python skills/sbtdd/scripts/spec_lint.py planning/claude-plan-tdd-org.md
-   ```
-2. Invoke `/sbtdd spec --resume-from-magi`:
-   ```bash
-   python skills/sbtdd/scripts/run_sbtdd.py spec --resume-from-magi
-   ```
-3. Observe:
-   - Brainstorming/writing-plans subprocess NOT spawned.
-   - MAGI Checkpoint 2 dispatched on hand-crafted artifacts.
-   - INV-37 composite-signature check fires correctly.
-   - Plan approval state file written on convergence.
-4. Document in CHANGELOG `[1.0.4]` Process notes:
-   - Wall-clock end-to-end.
-   - INV-37 tripwire behavior.
-   - Any unexpected interactions.
-
-**Failure mode**: If `--resume-from-magi` fails on hand-crafted
-artifacts (unexpected since artifacts pass spec_lint), fall back
-to manual `run_magi.py` Checkpoint 2 dispatch per v1.0.2+v1.0.3
-precedent. Document failure in CHANGELOG as v1.0.5 backlog.
-
-### Activity D' retry — `/sbtdd pre-merge` end-to-end (AFTER Track close, post iter 1+2 triage)
-
-**When**: AFTER Track Alpha + Track Beta close + Items A+B fix
-landed in working tree.
-
-**Steps (post iter 1 triage CRITICAL #2 fix — drop SBTDD_INTERACTIVE step)**:
-
-1. Verify Items A+B fix landed:
-   ```bash
-   grep -n "_SUBPROCESS_INCOMPATIBLE_SKILLS" skills/sbtdd/scripts/superpowers_dispatch.py
-   grep -n "receiving-code-review" skills/sbtdd/scripts/superpowers_dispatch.py
-   ```
-   Expected: set membership extended to include `receiving-code-review`.
-   NO `_is_headless_context` helper present (iter 1 simplification).
-2. Run `/sbtdd pre-merge` end-to-end (NO env var setup; gate fires
-   unconditionally for incompatible skills):
-   ```bash
-   python skills/sbtdd/scripts/run_sbtdd.py pre-merge
-   ```
-3. Verify `/receiving-code-review` subprocess invocation by
-   `pre_merge_cmd` raises `PreconditionError` PRE-spawn (Items A+B
-   fix validates here — gate fires by construction).
-4. Operator manually runs `/receiving-code-review` skill via
-   interactive Claude Code session per the recovery message
-   guidance, applies findings + mini-cycle TDD fixes, then resumes
-   `/sbtdd pre-merge` (re-invoke).
-5. Verify Loop 1 fix-finding triage step completes WITHOUT 600s
-   hang (PreconditionError raised in <1s + manual recovery).
-6. Capture cross-check artifacts:
-   ```bash
-   ls .claude/magi-cross-check/iter*-*.json
-   ```
-7. Document findings in CHANGELOG `[1.0.4]` Process notes.
-
-**Failure mode**: If Items A+B fix incomplete, document + retry.
-Manual fallback `run_magi.py` direct dispatch + manual mini-cycle
-commits preserves ship viability.
-
-### Activity E'-post — `--resume-from-magi` post-impl smoke test (AFTER Activity D')
-
-**When**: AFTER Activity D' retry.
+**Owner**: orchestrator.
+**When**: AFTER Track Alpha + Beta close + Items I-1+I-2+I-3 landed.
 
 **Steps**:
 
-1. Pre-flight spec_lint dry-run (committed artifacts).
-2. Invoke `/sbtdd spec --resume-from-magi` (post-impl).
-3. Observe R10 commit-conflict + R4 autoregen interaction (likely
-   N/A until v1.0.5).
-4. Document observable gaps in CHANGELOG `[1.0.4]` Process notes.
+1. Synthesize 2-track plan with 4 disjoint tasks in tmp directory.
+2. Run `python skills/sbtdd/scripts/run_sbtdd.py auto --parallel` from
+   the synthetic plan directory.
+3. Assert combined acceptance criterion per CHANGELOG `[Unreleased]`:
+   - Parent's `.claude/auto-run.json` contains `start_time` + 4 task
+     records (I-1)
+   - Plan-tdd.md has 4 `[x]` checkbox flips, no lost updates (I-2)
+   - Each worker subprocess received forwarded operator flags (I-3)
+   - All TDD triplet commits per task in git log
+   - State file `current_phase: "done"` post-completion
+4. REPORT findings in CHANGELOG `[1.0.5]` Process notes.
 
-**Failure mode**: Non-gating; document + roll forward to v1.0.5.
+**Failure mode**: if integration test surfaces gaps, document + roll
+forward to v1.0.6 patch (per R6 mitigation).
 
-### Parallel dispatcher dogfood (chicken-and-egg, AFTER Track Beta close)
+### Activity F8 — Item D Q3-A empirical validation
 
-**When**: AFTER Track Beta lands Item C tests + impl + sequential
-`make verify` clean.
+**Owner**: orchestrator.
+**When**: AFTER Track Beta close + Item D Q3-A landed.
 
 **Steps**:
 
-1. Confirm `dag_parser` + `parallel_dispatcher` ship tests green.
-2. Identify v1.0.4 cycle's NEXT batch (e.g., CHANGELOG write +
-   README update + version bump). If multi-task batch
-   parallel-safe, dispatch via `--parallel`.
-3. Document outcome in CHANGELOG `[1.0.4]` Process notes:
-   - Wall-clock comparison vs sequential estimate.
-   - Race conditions or state-file conflicts observed.
-   - DAG parser correctness.
+1. Synthesize task with intentional bypass (raw `git commit` only) →
+   assert `close-task` raises `PreconditionError` with actionable
+   message.
+2. Synthesize task with canonical close-phase per phase → assert
+   `close-task` proceeds normally.
+3. Synthesize task with bypass + `--skip-preflight` → assert
+   `close-task` proceeds + stderr breadcrumb emitted.
+4. REPORT findings in CHANGELOG `[1.0.5]` Process notes.
 
-**Failure mode**: If dogfood surfaces blocking issue, fall back
-to sequential dispatch + document as v1.0.5 refinement.
+### Activity P2 — Pre-merge gate clean WITHOUT INV-0
+
+**Owner**: orchestrator.
+**When**: AFTER all tracks + F7 + F8 complete.
+
+**Steps**:
+
+1. Verify all 5 active tasks `[x]` in plan-tdd.md.
+2. Verify state file `current_phase: "done"`, `last_verification_result:
+   "passed"`.
+3. Run `python skills/sbtdd/scripts/run_sbtdd.py pre-merge`.
+4. Loop 1 iterates until clean-to-go.
+5. Loop 2 iterates until verdict >= GO_WITH_CAVEATS full no-degraded.
+6. Per Q5 strict no-INV-0 stance: if Loop 2 doesn't converge cleanly
+   within cap=5, **ESCALATE TO USER BEFORE applying INV-0 override**
+   (per memory `feedback_manual_synthesis_exceptional`). Apply G2
+   scope-trim ladder first (defer Track Gamma → defer Track Beta D
+   Q3-A → Pillar A hard-LOCKED).
+
+If Loop 2 fails / hangs: fall back to manual `python
+skills/magi/scripts/run_magi.py code-review <payload>` per spec
+sec.6.4 (precedent v1.0.0 through v1.0.4).
 
 ---
 
 ## Pre-merge gate (Loop 1 + Loop 2)
 
-After all 7 active plan tasks (T2 ABSORBED, T9 DEFERRED post iter 2 scope-trim) closed + 4 methodology activities executed (last 2 best-effort non-gating):
+After all 5 plan tasks closed + 3 methodology activities executed
+(F7 + F8 + P2 above):
 
 1. Verify all checkboxes flipped:
    ```bash
@@ -2120,7 +1628,7 @@ After all 7 active plan tasks (T2 ABSORBED, T9 DEFERRED post iter 2 scope-trim) 
    Expected: empty output.
 2. Verify state file `current_phase: "done"`.
 3. Verify `make verify` clean (pytest, ruff check, ruff format, mypy
-   --strict, coverage >= 88%).
+   --strict, coverage >= 88%, runtime <= 220s NF-A hard).
 4. Run `/sbtdd pre-merge`:
    ```bash
    python skills/sbtdd/scripts/run_sbtdd.py pre-merge
@@ -2132,53 +1640,66 @@ After all 7 active plan tasks (T2 ABSORBED, T9 DEFERRED post iter 2 scope-trim) 
    `.claude/magi-cross-check/`.
 
 If Loop 2 iter 3 fails to converge, scope-trim per G2 binding
-ladder (defer Item D first → Item C second → Items A+B hard-LOCKED).
+ladder (defer Track Gamma first → defer Track Beta D Q3-A second
+→ Track Alpha I-1+I-2+I-3 hard-LOCKED).
+
+**Strict no-INV-0 stance per Q5**: do NOT apply INV-0 override
+without explicit user authorization. Escalate to user BEFORE
+override.
 
 ---
 
 ## Finalization (post pre-merge gate clean)
 
-1. Bump `plugin.json` + `marketplace.json` version 1.0.3 → 1.0.4.
-2. Finalize CHANGELOG `[1.0.4]` with full ship record.
-3. Update README + SKILL.md + CLAUDE.md with v1.0.4 release notes.
-4. Run `make verify` final check.
-5. Commit version bump as `chore: bump to 1.0.4 + finalize CHANGELOG`.
-6. Tag `v1.0.4` (with explicit user authorization).
-7. Merge `feature/v1.0.4-bundle` into `main` (with explicit user
+1. Bump `plugin.json` + `marketplace.json` version 1.0.4 → 1.0.5.
+2. Finalize CHANGELOG `[1.0.5]` with full ship record.
+3. **Apply plan archaeology trim methodology (v1.0.5 Item C.2 dogfood)**:
+   extract iter-by-iter triage from this plan into CHANGELOG `[1.0.5]`
+   Process notes; trim `planning/claude-plan-tdd.md` to active plan
+   only.
+4. Update README + SKILL.md + CLAUDE.md (project root, gitignored)
+   with v1.0.5 release notes.
+5. Run `make verify` final check.
+6. Commit version bump as `chore: bump to 1.0.5 + finalize CHANGELOG`.
+7. Tag `v1.0.5` (with explicit user authorization).
+8. Merge `feature/v1.0.5-bundle` into `main` (with explicit user
    authorization).
-8. Push tag + main to origin (with explicit user authorization).
+9. Push tag + main to origin (with explicit user authorization).
 
 ---
 
 ## Plan invariants summary
 
-- **7 active plan tasks** (post iter 2 scope-trim Option D): T2
-  ABSORBED into T1 (iter 1 triage); T9 DEFERRED entirely to v1.0.5
-  (iter 2 scope-trim). Track Alpha 4 active tasks (T1, T3, T4, T5);
-  Track Beta 3 active tasks (T6, T7, T8).
-- **4 methodology activities** executed by orchestrator (E'-pre +
-  D' retry + E'-post + parallel dogfood); last 2 demoted to
-  BEST-EFFORT non-gating per iter 2 scope-trim.
-- **Per-phase close-phase mandate** (Q3 Option B) applied to all
-  7 active tasks via plan template (own-cycle dogfood). Note: Q3
-  Option B's broader doc-only enforcement scope (Item D in SKILL.md
-  + template + extension) is DEFERRED to v1.0.5; v1.0.4 cycle just
-  uses close-phase per-phase locally without shipping the convention
-  enforcement to destination projects.
-- **Cero file overlap** between Track Alpha and Track Beta surfaces
-  (verified in spec sec.5.4).
-- **Tests baseline**: 1105 + 1 skipped → ~1140-1155 final.
+- **4 active plan tasks** distributed across 2 parallel subagent
+  tracks (Track Alpha 2 tasks T1+T2; Track Beta 2 tasks T3+T4
+  sequential). Track Gamma DEFERRED to v1.0.6 per iter-2 CRITICAL
+  trigger (2026-05-08).
+- **3 methodology activities** executed by orchestrator (F7 production-
+  grade integration test + F8 Item D Q3-A empirical validation + P2
+  pre-merge gate clean WITHOUT INV-0).
+- **Per-phase close-phase mandate** applied to ALL 4 tasks per Q3
+  Option B v1.0.4 mandate (preserved + soon-enforced via Item D Q3-A
+  hard-block from Task 4 onwards).
+- **Cero file overlap** between Track Alpha + Track Beta surfaces
+  (verified in spec sec.5.4 post iter-2 CRITICAL #4 architectural
+  fix; `state_file.py` shared by both for DRY atomic-write
+  consolidation, with Track Alpha landing the consolidation).
+- **Within-track sequential ordering**: Track Beta MUST land Task 3
+  (I-2) before Task 4 (D Q3-A). Both modify `close_task_cmd.py`.
+- **Cross-track dispatch-ordering invariant**: Track Beta T3 MUST
+  land BEFORE Track Alpha T1 Step 5 (the wiring step importing
+  `_merge_scratch_plans` from `close_task_cmd`). T1 Steps 1-4 + T2
+  CAN run parallel with Track Beta T3+T4. Orchestrator sequences:
+  dispatch Beta first → wait for T3 close → dispatch Alpha (which
+  executes T1 Steps 1-4 → T2 → T1 Step 5 in order).
+- **Tests baseline**: 1226 + 1 skipped → ~1250-1265 final.
 - **Coverage threshold**: >= 88% (per Q4 v1.0.2 baseline).
-- **`make verify` runtime**: <= 165s (NF-A); soft-target <= 155s.
+- **`make verify` runtime**: <= 200s soft / 220s hard NF-A (acknowledges
+  v1.0.4 baseline 195s + new tests).
 - **MAGI Checkpoint 2**: cap=3 HARD G1 binding; iter-2 CRITICAL
-  trigger preserved; G2 scope-trim ladder defers Item D first →
-  Item C second; Items A+B hard-LOCKED.
-- **No `Co-Authored-By`, no AI references, English commits, no
-  force push** per `~/.claude/CLAUDE.md` Git rules.
-
-
-## MAGI Conditions for Approval
-
-- Spec+plan are technically sound post-iter-2 scope-trim, but residual Item-D references and an outdated risk register create ship-time confusion that warrants surgical fixes before iter-3 lock-in.
-- Pragmatic GO_WITH_CAVEATS — scope-trim correctly applied, Items A+B+C deliverable, but plan has stale Track Beta scope text and dogfood methodology has chicken-and-egg risks worth flagging.
-- Task 2 phantom checkboxes will fork subagent execution; Track Beta scope + risk register stale post iter-2 trim — surgical fixes required pre-dispatch
+  trigger preserved; G2 scope-trim ladder defers Track Gamma first
+  → Track Beta D Q3-A second; Track Alpha I-1+I-2+I-3 hard-LOCKED.
+- **Pre-merge Loop 2**: cap=5 with strict no-INV-0 stance per Q5;
+  escalate to user BEFORE applying INV-0 override.
+- **No `Co-Authored-By`, no AI references, English commits, no force
+  push** per `~/.claude/CLAUDE.md` Git rules.
