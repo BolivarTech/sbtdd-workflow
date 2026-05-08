@@ -42,12 +42,14 @@ is "in resume; auto never needs it".
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import json
 import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -1263,9 +1265,6 @@ class AutoRunAudit:
 # ---------------------------------------------------------------------------
 
 
-import hashlib  # noqa: E402  (ordered with the I-1 helpers for locality)
-
-
 def _audit_sidecar_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
     """Per-worker audit sidecar path.
 
@@ -1292,9 +1291,12 @@ def _atomic_write_json(path: Path, data: object) -> None:
     per v1.0.5 iter-2 WARNING). The destination ``os.replace`` is atomic
     on POSIX and Windows; on failure the tmp file is cleaned up so
     nothing leaks.
-    """
-    import tempfile
 
+    v1.0.5 T1 Refactor: ``import hashlib`` and ``import tempfile`` were
+    promoted to module-level top imports for consistency with the rest of
+    the stdlib import block; T3 Refactor will further consolidate the
+    atomic-write helpers into ``state_file`` per iter-2 WARNING fix.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_str = tempfile.mkstemp(suffix=".tmp", prefix=path.name + ".", dir=str(path.parent))
     try:
