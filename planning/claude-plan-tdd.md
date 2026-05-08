@@ -1230,7 +1230,7 @@ Covers escenarios D-1 through D-4 from spec sec.4.4.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_close_task_cmd.py`:
 
@@ -1349,18 +1349,18 @@ class TestPreflightHardBlock:
         assert "abc123" in str(excinfo.value) or "chore" in str(excinfo.value)
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_close_task_cmd.py::TestPreflightHardBlock -v`
 Expected: 5/5 FAIL — `_preflight` doesn't yet have `skip_preflight` parameter or triplet check.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
 #### Green Phase
 
-- [ ] **Step 4: Extend `_preflight` with TDD triplet check + `skip_preflight` parameter (iter-1 CRITICAL #5: commit-window scope = "since last `chore: mark task` commit")**
+- [x] **Step 4: Extend `_preflight` with TDD triplet check + `skip_preflight` parameter (iter-1 CRITICAL #5: commit-window scope = "since last `chore: mark task` commit")**
 
 Modify `skills/sbtdd/scripts/close_task_cmd.py`. Add or extend `_preflight`:
 
@@ -1477,7 +1477,7 @@ def _preflight(state: dict, project_root: Path | None = None,
         )
 ```
 
-- [ ] **Step 5: Add `--skip-preflight` argparse flag to `close-task` subparser**
+- [x] **Step 5: Add `--skip-preflight` argparse flag to `close-task` subparser**
 
 Modify `skills/sbtdd/scripts/run_sbtdd.py` (or wherever `close-task` subparser is built):
 
@@ -1491,12 +1491,12 @@ close_task_p.add_argument(
 )
 ```
 
-- [ ] **Step 6: Wire `ns.skip_preflight` through to `_preflight` in `close_task_cmd.cmd`**
+- [x] **Step 6: Wire `ns.skip_preflight` through to `_preflight` in `close_task_cmd.cmd`**
 
 Modify `close_task_cmd.cmd` (the subcommand entry point) to pass
 `skip_preflight=getattr(ns, "skip_preflight", False)` to `_preflight`.
 
-- [ ] **Step 7: Run tests to verify PASS**
+- [x] **Step 7: Run tests to verify PASS**
 
 Run: `pytest tests/test_close_task_cmd.py::TestPreflightHardBlock -v`
 Expected: 5/5 PASS.
@@ -1504,7 +1504,7 @@ Expected: 5/5 PASS.
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 8: close-phase Green**
+- [x] **Step 8: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1512,11 +1512,11 @@ Expected: `feat:` commit landed (e.g. `feat: close-task preflight HARD-BLOCK for
 
 #### Refactor Phase
 
-- [ ] **Step 9: Refactor — confirm `_git_log_between` consistent if duplicated elsewhere**
+- [x] **Step 9: Refactor — confirm `_git_log_between` consistent if duplicated elsewhere**
 
 If `_git_log_between` (or equivalent) already exists in another module, consolidate. Otherwise leave.
 
-- [ ] **Step 10: close-phase Refactor + Step 11: close-task**
+- [x] **Step 10: close-phase Refactor + Step 11: close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
