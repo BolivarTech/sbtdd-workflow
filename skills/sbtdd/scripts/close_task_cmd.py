@@ -302,6 +302,12 @@ def _git_log_between(start_sha: str | None, project_root: Path | None = None) ->
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+#: Compiled regex matching the canonical "task close" commit subject so
+#: :func:`_last_chore_task_close_sha` and any future tooling agree on the
+#: same pattern. Kept module-level for cheap reuse + easier testability.
+_CHORE_TASK_COMPLETE_RE = re.compile(r"^chore: mark task \S+ complete\b")
+
+
 def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
     """Return SHA of the most recent ``chore: mark task <N> complete`` commit.
 
@@ -315,6 +321,11 @@ def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
     matching the pattern; risk: false-positive triplet detection if
     squash produced a hybrid subject. Mitigated by the
     ``--skip-preflight`` flag for emergency operator override.
+
+    v1.0.5 T4 Refactor: subject matching moved to the module-level
+    :data:`_CHORE_TASK_COMPLETE_RE` regex so the contract surfaces in
+    one place and unit tests can target it without digging into the
+    function body.
     """
     cwd = str(project_root) if project_root else None
     result = subprocess_utils.run_with_timeout(
@@ -326,8 +337,7 @@ def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
         if "\t" not in line:
             continue
         sha, subject = line.split("\t", 1)
-        # Match: "chore: mark task <N> complete" (allow trailing variants)
-        if subject.startswith("chore: mark task ") and " complete" in subject:
+        if _CHORE_TASK_COMPLETE_RE.match(subject):
             return sha
     return None
 
