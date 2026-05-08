@@ -705,13 +705,24 @@ class TestPreflightHardBlock:
         _preflight_triplet_check(state, tmp_path)
 
     def test_d3_skip_preflight_bypasses_with_breadcrumb(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """D-3: --skip-preflight bypasses + emits stderr breadcrumb."""
+        """D-3: --skip-preflight bypasses + emits stderr breadcrumb.
+
+        Loop 1 iter-2 Important #1 fix: breadcrumb MUST include
+        `since SHA <sha>` segment per spec D-3 wording.
+        """
         from close_task_cmd import _preflight_triplet_check
 
-        # Bypass scenario: no triplet, but skip_preflight=True
-        state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
+        # Stub _last_chore_task_close_sha so the bypass path produces a
+        # deterministic SHA in the breadcrumb (no real git dependency).
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc1234",
+        )
+        # Bypass scenario: skip_preflight=True
+        state = {"current_task_id": "3", "phase_started_at_commit": "doesntmatter"}
 
         # Should NOT raise (override active)
         _preflight_triplet_check(state, tmp_path, skip_preflight=True)
@@ -720,7 +731,28 @@ class TestPreflightHardBlock:
         assert "[sbtdd close-task] WARNING" in captured.err
         assert "--skip-preflight active" in captured.err
         assert "task_id=3" in captured.err
+        # Loop 1 iter-2 Important #1: breadcrumb MUST cite SHA boundary
+        assert "since SHA abc1234" in captured.err
         assert "Audit-logged" in captured.err
+
+    def test_d3b_skip_preflight_bypasses_first_task_branch_root_in_breadcrumb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """D-3 (Loop 1 iter-2 fix): first-task case (no prior chore commit)
+        renders 'since SHA branch root' in the bypass breadcrumb."""
+        from close_task_cmd import _preflight_triplet_check
+
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: None,
+        )
+        state = {"current_task_id": "1"}
+
+        _preflight_triplet_check(state, tmp_path, skip_preflight=True)
+
+        captured = capsys.readouterr()
+        assert "since SHA branch root" in captured.err
 
     def test_d4_no_chore_commit_first_task_branch_root_boundary(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -751,8 +783,11 @@ class TestPreflightHardBlock:
     def test_d5_partial_triplet_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """D-1 (iter-1 CRITICAL #5 fix): commit chain since last chore: mark
-        task with only 2 of 3 triplet prefixes -> still raises."""
+        """D-5 (iter-1 CRITICAL #5 fix): commit chain since last chore: mark
+        task with only 2 of 3 triplet prefixes -> still raises.
+
+        (Loop 1 iter-2 minor fix: docstring previously said "D-1" — copy-
+        paste typo from D-1 case; corrected to D-5 to match test name.)"""
         from close_task_cmd import _preflight_triplet_check
         from errors import PreconditionError
 
