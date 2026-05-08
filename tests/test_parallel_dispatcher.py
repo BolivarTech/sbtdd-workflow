@@ -17,7 +17,11 @@ import sys
 from pathlib import Path
 
 from dag_parser import Task, TaskGraph
-from parallel_dispatcher import _files_collide, partition_by_collision
+from parallel_dispatcher import (
+    _files_collide,
+    partition_by_collision,
+    partition_by_tracks,
+)
 
 
 def _make_graph(tasks_with_files: dict[str, set[str]]) -> TaskGraph:
@@ -26,6 +30,19 @@ def _make_graph(tasks_with_files: dict[str, set[str]]) -> TaskGraph:
         for tid, files in tasks_with_files.items()
     }
     return TaskGraph(tasks=tasks, edges={tid: set() for tid in tasks})
+
+
+def _make_graph_with_edges(
+    tasks_with_files: dict[str, set[str]],
+    edges: dict[str, set[str]],
+) -> TaskGraph:
+    """Helper: construct a TaskGraph with explicit edges."""
+    tasks = {
+        tid: Task(id=tid, title=f"Task {tid}", files=frozenset(files))
+        for tid, files in tasks_with_files.items()
+    }
+    full_edges = {tid: edges.get(tid, set()) for tid in tasks}
+    return TaskGraph(tasks=tasks, edges=full_edges)
 
 
 def test_c5_collision_detection_shared_file() -> None:
@@ -210,3 +227,174 @@ def test_partition_empty_antichain_returns_empty_list() -> None:
     graph = _make_graph({"1": {"a.py"}})
     batches = partition_by_collision(set(), graph)
     assert batches == []
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Path 3 -- partition_by_tracks: track-based weakly-connected
+# components in (dep edges UNION file-conflict edges) graph. Each track is
+# an ordered list of task IDs that must serialize within the track; tracks
+# between each other are file-disjoint AND dep-disjoint, so they may be
+# dispatched in parallel as N concurrent subprocess workers.
+# ---------------------------------------------------------------------------
+
+
+def test_path3_partition_by_tracks_two_disjoint_tracks() -> None:
+    """Path 3: two file-disjoint, dep-disjoint groups produce 2 tracks.
+
+    Tasks 1+2 share file a.py (collide → same track).
+    Tasks 3+4 share file b.py (collide → same track).
+    No cross-track files or deps → 2 separate tracks.
+    """
+    graph = _make_graph(
+        {
+            "1": {"a.py"},
+            "2": {"a.py"},
+            "3": {"b.py"},
+            "4": {"b.py"},
+        }
+    )
+    tracks = partition_by_tracks(graph)
+    assert len(tracks) == 2
+    track_sets = [set(t) for t in tracks]
+    assert {"1", "2"} in track_sets
+    assert {"3", "4"} in track_sets
+
+
+def test_path3_partition_by_tracks_dependency_creates_track() -> None:
+    """Path 3: dep edge alone (no shared file) puts tasks in same track.
+
+    Track partition uses (deps UNION file-conflicts) graph. Two tasks
+    sharing a dep-edge are weakly connected → same track.
+    """
+    graph = _make_graph_with_edges(
+        tasks_with_files={
+            "1": {"x.py"},
+            "2": {"y.py"},  # different file
+        },
+        edges={"2": {"1"}},  # 2 depends on 1
+    )
+    tracks = partition_by_tracks(graph)
+    assert len(tracks) == 1
+    assert set(tracks[0]) == {"1", "2"}
+
+
+def test_path3_partition_by_tracks_topo_order_within_track() -> None:
+    """Path 3: tasks within a track sorted topologically (deps first)."""
+    graph = _make_graph_with_edges(
+        tasks_with_files={
+            "A": {"a.py"},
+            "B": {"b.py"},
+            "C": {"c.py"},
+        },
+        edges={"B": {"A"}, "C": {"B"}},  # A < B < C
+    )
+    tracks = partition_by_tracks(graph)
+    assert len(tracks) == 1
+    # Topological order: A before B before C
+    assert tracks[0] == ["A", "B", "C"]
+
+
+def test_path3_partition_by_tracks_v104_plan_shape() -> None:
+    """Path 3: example matching v1.0.4 plan -- 2 tracks of 4+3 tasks.
+
+    T1+T3+T4+T5 share superpowers_dispatch.py (Track Alpha analog).
+    T6+T7+T8 share dag_parser/parallel_dispatcher/auto_cmd (Track Beta
+    analog with sequential deps T6 < T7 < T8).
+    """
+    graph = _make_graph_with_edges(
+        tasks_with_files={
+            "T1": {"superpowers_dispatch.py"},
+            "T3": {"superpowers_dispatch.py"},
+            "T4": {"superpowers_dispatch.py"},
+            "T5": {"superpowers_dispatch.py"},
+            "T6": {"dag_parser.py"},
+            "T7": {"parallel_dispatcher.py"},
+            "T8": {"auto_cmd.py"},
+        },
+        edges={"T7": {"T6"}, "T8": {"T7"}},
+    )
+    tracks = partition_by_tracks(graph)
+    assert len(tracks) == 2
+    track_sets = [set(t) for t in tracks]
+    assert {"T1", "T3", "T4", "T5"} in track_sets
+    assert {"T6", "T7", "T8"} in track_sets
+    # Track Beta must be topologically ordered T6 < T7 < T8
+    beta = next(t for t in tracks if "T6" in t)
+    assert beta == ["T6", "T7", "T8"]
+
+
+def test_path3_partition_by_tracks_all_independent_n_tracks() -> None:
+    """Path 3: N file-disjoint, dep-disjoint tasks → N single-task tracks."""
+    graph = _make_graph(
+        {
+            "1": {"a.py"},
+            "2": {"b.py"},
+            "3": {"c.py"},
+        }
+    )
+    tracks = partition_by_tracks(graph)
+    assert len(tracks) == 3
+    assert all(len(t) == 1 for t in tracks)
+    track_sets = [set(t) for t in tracks]
+    assert {"1"} in track_sets
+    assert {"2"} in track_sets
+    assert {"3"} in track_sets
+
+
+def test_path3_partition_by_tracks_empty_graph_returns_empty() -> None:
+    """Defensive: empty graph → no tracks."""
+    graph = _make_graph({})
+    tracks = partition_by_tracks(graph)
+    assert tracks == []
+
+
+def test_path3_partition_by_tracks_deterministic_across_invocations() -> None:
+    """Path 3: same graph → byte-identical partition across calls."""
+    graph = _make_graph(
+        {
+            "1": {"a.py"},
+            "2": {"b.py"},
+            "3": {"a.py"},
+            "4": {"c.py"},
+        }
+    )
+    t1 = partition_by_tracks(graph)
+    t2 = partition_by_tracks(graph)
+    assert t1 == t2
+
+
+def test_path3_partition_by_tracks_singleton_no_files_no_deps() -> None:
+    """Defensive: single doc-only task → 1 track with 1 task."""
+    graph = _make_graph({"1": set()})
+    tracks = partition_by_tracks(graph)
+    assert tracks == [["1"]]
+
+
+def test_path3_partition_by_tracks_chain_creates_single_track() -> None:
+    """Path 3: linear dependency chain → single track in topo order."""
+    graph = _make_graph_with_edges(
+        tasks_with_files={
+            "1": {"a.py"},
+            "2": {"b.py"},
+            "3": {"c.py"},
+            "4": {"d.py"},
+        },
+        edges={"2": {"1"}, "3": {"2"}, "4": {"3"}},
+    )
+    tracks = partition_by_tracks(graph)
+    assert len(tracks) == 1
+    assert tracks[0] == ["1", "2", "3", "4"]
+
+
+def test_path3_partition_by_tracks_file_conflict_unifies_unrelated_tasks() -> None:
+    """Path 3: tasks with no deps but shared file → same track (file conflict
+    forces serialization)."""
+    graph = _make_graph(
+        {
+            "X": {"shared.py"},
+            "Y": {"shared.py"},  # file conflict with X
+        }
+    )
+    tracks = partition_by_tracks(graph)
+    assert len(tracks) == 1
+    assert set(tracks[0]) == {"X", "Y"}
