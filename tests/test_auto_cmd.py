@@ -2465,3 +2465,386 @@ class TestPreflightOrdering:
         assert order == ["preflight"], (
             f"preflight must run BEFORE dispatch plan build; got order={order}"
         )
+
+
+# ---------------------------------------------------------------------------
+# v1.0.4 Loop 2 iter-3 sub-issue 1 -- correct multi-task batch wiring.
+#
+# Path 2 architecture: parallel pre-verification + sequential per-task TDD.
+# `_dispatch_batch_concurrent` is a pre-verification gate (parallelizes the
+# verification step which is the wall-time bottleneck in TDD cycles); the
+# actual per-task work then flows through the legacy inline TDD body in
+# sorted task-id order, ensuring INV-1/INV-31/INV-5..7 are honoured per task.
+# ---------------------------------------------------------------------------
+
+
+class TestPhase2MultiTaskBatchClosesCorrectTasks:
+    """v1.0.4 Loop 2 iter-3 IMPORTANT #1 + #4 -- regression guard for the
+    wrong-task-closed wiring bug surfaced in iter-2.
+
+    Pre-fix `_phase2_task_loop` advanced parent state via
+    `mark_and_advance` `len(batch)` times after `_dispatch_batch_concurrent`
+    returned, but `mark_and_advance` closes whichever task
+    `state.current_task_id` points at -- NOT the dispatched batch's task ids.
+    Because `_run_single_task_isolated` was a stub that did nothing real,
+    the state advanced without any TDD triplet commits being created.
+
+    Post-fix (Path 2): the dispatch loop runs `_dispatch_batch_concurrent`
+    as a parallel pre-verification gate; per-task TDD work flows through the
+    legacy inline body in sorted task-id order, producing the correct test:/
+    feat:/refactor: triplet + chore: close per task.
+    """
+
+    def test_dag_singleton_then_batch_closes_in_correct_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DAG `[{"1"}, {"2","3"}]` from current_task_id="1" must close
+        tasks 1, 2, 3 in that order with proper TDD triplet commits + chore
+        close per task. This is the exact bug-fix scenario the iter-3
+        mini-cycle was raised against.
+        """
+        import auto_cmd
+        import close_task_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+
+        # Capture every chore commit so we can verify which tasks closed
+        # in which order.
+        commit_order: list[tuple[str, str]] = []
+        counter = {"n": 0}
+
+        def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+            counter["n"] += 1
+            commit_order.append((prefix, message))
+            (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"{prefix}: {message}"],
+                cwd=str(tmp_path),
+                check=True,
+                capture_output=True,
+            )
+            return "ok"
+
+        monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+        monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+        # Stub the concurrent dispatch helper to a no-op (Path 2: pre-verify
+        # gate only; the per-task TDD work happens in the inline body
+        # afterwards).
+        monkeypatch.setattr(
+            auto_cmd, "_dispatch_batch_concurrent", lambda batch, root: None
+        )
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(tmp_path / ".claude" / "session-state.json")
+
+        final = auto_cmd._phase2_task_loop(
+            ns, state, cfg, dispatch_plan=[{"1"}, {"2", "3"}]
+        )
+
+        # All 3 tasks closed; plan done.
+        assert final.current_phase == "done"
+        assert final.current_task_id is None
+
+        # Each task got a full TDD triplet (test/feat/refactor) + chore close.
+        # Total chore commits = 3 (one per task).
+        chore_msgs = [m for p, m in commit_order if p == "chore"]
+        assert len(chore_msgs) == 3, (
+            f"expected 3 chore commits (one per task); got {len(chore_msgs)}: {chore_msgs}"
+        )
+        # Chore messages must reference task ids 1, 2, 3 in that order.
+        assert chore_msgs == [
+            "mark task 1 complete",
+            "mark task 2 complete",
+            "mark task 3 complete",
+        ], f"chore commits closed wrong tasks or out of order: {chore_msgs}"
+
+        # Each task got at least the canonical TDD triplet (test:, feat:,
+        # refactor:). Count distinct prefixes.
+        prefixes = [p for p, _ in commit_order]
+        assert prefixes.count("test") == 3, f"expected 3 test: commits, got {prefixes}"
+        assert prefixes.count("feat") == 3, f"expected 3 feat: commits, got {prefixes}"
+        assert prefixes.count("refactor") == 3, f"expected 3 refactor: commits, got {prefixes}"
+
+    def test_hybrid_dispatch_plan_multi_task_then_singleton(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Loop 1 IMPORTANT #4: hybrid `[{"1","2"}, {"3"}]` closes all 3
+        tasks correctly. Multi-task batch first, singleton second.
+        """
+        import auto_cmd
+        import close_task_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+
+        commit_order: list[tuple[str, str]] = []
+        counter = {"n": 0}
+
+        def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+            counter["n"] += 1
+            commit_order.append((prefix, message))
+            (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"{prefix}: {message}"],
+                cwd=str(tmp_path),
+                check=True,
+                capture_output=True,
+            )
+            return "ok"
+
+        monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+        monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+        monkeypatch.setattr(
+            auto_cmd, "_dispatch_batch_concurrent", lambda batch, root: None
+        )
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(tmp_path / ".claude" / "session-state.json")
+
+        final = auto_cmd._phase2_task_loop(
+            ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
+        )
+
+        assert final.current_phase == "done"
+        assert final.current_task_id is None
+
+        chore_msgs = [m for p, m in commit_order if p == "chore"]
+        assert chore_msgs == [
+            "mark task 1 complete",
+            "mark task 2 complete",
+            "mark task 3 complete",
+        ], f"hybrid plan closed wrong tasks or out of order: {chore_msgs}"
+
+    def test_concurrent_pre_verify_invoked_for_multi_task_batches_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Path 2 contract: `_dispatch_batch_concurrent` runs once per
+        multi-task batch (parallel pre-verification gate); singleton batches
+        skip it.
+        """
+        import auto_cmd
+        import close_task_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+
+        counter = {"n": 0}
+
+        def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+            counter["n"] += 1
+            (tmp_path / f"f-{counter['n']}.txt").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"{prefix}: {message}"],
+                cwd=str(tmp_path),
+                check=True,
+                capture_output=True,
+            )
+            return "ok"
+
+        monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+        monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+        captured_batches: list[set[str]] = []
+
+        def spy_concurrent(batch: set[str], project_root: Path) -> None:
+            captured_batches.append(set(batch))
+
+        monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", spy_concurrent)
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(tmp_path / ".claude" / "session-state.json")
+
+        # `[{"1","2"}, {"3"}]`: helper invoked exactly once on the size-2
+        # batch; singleton {"3"} skips it.
+        auto_cmd._phase2_task_loop(ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}])
+
+        assert len(captured_batches) == 1, (
+            f"_dispatch_batch_concurrent must run exactly once for the "
+            f"size-2 batch; got {len(captured_batches)} invocations: "
+            f"{captured_batches}"
+        )
+        assert captured_batches[0] == {"1", "2"}
+
+    def test_state_file_not_advanced_on_concurrent_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Loop 1 IMPORTANT #5: when `_dispatch_batch_concurrent` raises,
+        state file is NOT advanced (no partial commit; transactional).
+        """
+        import auto_cmd
+        import close_task_cmd
+        import superpowers_dispatch
+        from config import load_plugin_local
+        from errors import ConcurrentDispatchError
+        from state_file import load as load_state
+
+        _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+        cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+        monkeypatch.setattr(
+            superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+        )
+        monkeypatch.setattr(
+            superpowers_dispatch,
+            "verification_before_completion",
+            lambda **kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+        _stub_reviewer_approve(monkeypatch)
+        monkeypatch.setattr(auto_cmd, "commit_create", lambda *a, **kw: "ok", raising=False)
+        monkeypatch.setattr(close_task_cmd, "commit_create", lambda *a, **kw: "ok")
+
+        def failing_concurrent(batch: set[str], project_root: Path) -> None:
+            raise ConcurrentDispatchError(f"pre-verify failed for batch {batch}")
+
+        monkeypatch.setattr(auto_cmd, "_dispatch_batch_concurrent", failing_concurrent)
+
+        # Snapshot state file BEFORE the failure.
+        state_path = tmp_path / ".claude" / "session-state.json"
+        before = state_path.read_text(encoding="utf-8")
+
+        ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+        state = load_state(state_path)
+
+        with pytest.raises(ConcurrentDispatchError, match="pre-verify failed"):
+            auto_cmd._phase2_task_loop(
+                ns, state, cfg, dispatch_plan=[{"1", "2"}, {"3"}]
+            )
+
+        # State file MUST be byte-identical to pre-failure: no partial advance.
+        after = state_path.read_text(encoding="utf-8")
+        assert after == before, (
+            "state file must NOT advance on concurrent dispatch failure "
+            "(transactional contract)"
+        )
+
+
+class TestConcurrentDispatchError:
+    """v1.0.4 Loop 2 iter-3 IMPORTANT #3 -- new error class with correct
+    semantics (exit 2, precondition-class) instead of misusing
+    VerificationIrremediableError (exit 6, phase-verification budget
+    exhaustion).
+    """
+
+    def test_error_class_exists_in_errors_module(self) -> None:
+        from errors import ConcurrentDispatchError, SBTDDError
+
+        assert issubclass(ConcurrentDispatchError, SBTDDError)
+
+    def test_error_class_has_exit_code_2(self) -> None:
+        from errors import EXIT_CODES, ConcurrentDispatchError
+
+        assert EXIT_CODES[ConcurrentDispatchError] == 2, (
+            "ConcurrentDispatchError is precondition-class (exit 2); "
+            "exit 6 is reserved for VerificationIrremediableError"
+        )
+
+    def test_dispatch_batch_concurrent_raises_concurrent_dispatch_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-zero subprocess exit must surface as ConcurrentDispatchError
+        (not VerificationIrremediableError as in iter-2)."""
+        import auto_cmd
+        from errors import ConcurrentDispatchError
+
+        class FailingPopen:
+            def __init__(self, cmd: list[str], **kwargs: object) -> None:
+                self._cmd = cmd
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 1
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                return (b"", b"failure")
+
+            @property
+            def returncode(self) -> int:
+                return 1
+
+            def poll(self) -> int | None:
+                return 1
+
+        monkeypatch.setattr(subprocess, "Popen", FailingPopen)
+
+        with pytest.raises(ConcurrentDispatchError):
+            auto_cmd._dispatch_batch_concurrent({"1", "2"}, tmp_path)
+
+
+class TestPhase2DispatchLoopVariableRemoved:
+    """v1.0.4 Loop 2 iter-3 IMPORTANT #2 -- the cosmetic loop variable
+    `for _task_id in sorted(batch):` no longer exists post-fix because the
+    parent-side `mark_and_advance` calls inside the dispatch_plan loop are
+    eliminated (iter-2 wiring bug fix).
+    """
+
+    def test_phase2_no_unused_loop_var_after_fix(self) -> None:
+        """Source of `_phase2_task_loop` must not contain the iter-2 pattern
+        `for _task_id in sorted(batch):` followed immediately by
+        `mark_and_advance` -- that pattern was the wrong-task-closed bug.
+        Post-fix the multi-task batch path delegates to the legacy inline
+        body via `sorted(batch)` task-id ordering at the OUTER while-loop
+        level (see _phase2_task_loop architecture).
+        """
+        import inspect
+
+        import auto_cmd
+
+        src = inspect.getsource(auto_cmd._phase2_task_loop)
+        # Pattern that IS the iter-2 bug: looping batch task ids then
+        # calling mark_and_advance directly within the dispatch_plan branch.
+        assert "for _task_id in sorted(batch):" not in src, (
+            "iter-2 wiring bug pattern still present: "
+            "`for _task_id in sorted(batch):` directly invokes "
+            "mark_and_advance which closes wrong task ids"
+        )
