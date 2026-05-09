@@ -20,6 +20,60 @@
 > INV-27 compliant: cero matches uppercase placeholder word-boundary
 > verificable con `spec_cmd._INV27_RE` regex. R5 compliant: frontmatter
 > docstring above.
+>
+> **Iter 1 Checkpoint 2 triage applied 2026-05-09** (verdict
+> GO_WITH_CAVEATS 3-0, 0 CRITICAL + 14 WARNING + 6 INFO; all 3 agents
+> CONDITIONAL, all recommended NO scope-trim). Spec deltas:
+>
+> - **K-1 line-anchored regex** (mel WARNING): `_section_has_flipped`
+>   uses multiline regex `re.search(r"^- \[x\]", ..., re.MULTILINE)` +
+>   analogous for `- [ ]`, NOT unanchored `"- [x]" in text` substring.
+>   Robust against `[x]` appearing inside code blocks or descriptive
+>   prose.
+> - **K-1 race regression coverage** (bal WARNING): plan T3 Step 1
+>   adds 2 regression tests asserting per-checkbox parity preserves
+>   v1.0.5 I-2 race contract (no fabricated flips on partial worker
+>   failure).
+> - **K-4 loud-fast guard** (mel+bal+cas TRIPLE WARNING): module-import
+>   guard removes try/except wrap; `ValidationError` is unconditionally
+>   fatal at import time. Drift surfaces immediately. The
+>   `SBTDD_STRICT_K4_GUARD` env var is RETRACTED.
+> - **K-4 private-attribute acknowledgment** (mel WARNING):
+>   `_validate_forwardable_flags_against_argparse` documents reliance
+>   on argparse `_actions` + `_subparsers.choices` private attrs as
+>   known fragility; acceptable trade-off given coverage value.
+> - **K-5 regex robustness** (mel+cas WARNING): regex extended to
+>   `^([a-z]+)(?:\([^()]+\))?!?:(?:\s|$)` — supports CC breaking-change
+>   marker (`feat!:`, `feat(scope)!:`) + colon-without-trailing-space.
+> - **K-5 docstring tightening** (bal+cas WARNING):
+>   `extract_prefix_from_subject` docstring explicitly states "prefix
+>   extraction is NOT validation; downstream validates separately."
+>   Returned prefix not validated against `_ALLOWED_PREFIXES`.
+> - **T4 cross-track ordering relaxation** (bal WARNING): late-import
+>   inside `_dispatch_tracks_concurrent` resolves at call-time, NOT
+>   module-load-time. T4 K-2 can run truly parallel with Track B
+>   since `_merge_scratch_plans` already ships in v1.0.5.
+>   Plan invariants block updated to remove the unnecessary ordering
+>   constraint.
+> - **K-3 alias identity test relaxation** (cas WARNING): test
+>   asserts module-load-time identity only; documents that monkeypatch
+>   of one name does NOT propagate to alias.
+> - **F-A2 dogfood abort criteria** (bal INFO→KEEP): spec sec.2.6 +
+>   plan F-A2 add explicit abort criteria — fall back to manual
+>   2-track Q1' option b if (a) `partition_by_tracks` raises, (b) any
+>   worker subprocess crashes on import, (c) post-batch merge
+>   sidecar/scratch validation fails, OR (d) operator interrupts mid-
+>   dispatch.
+> - **F-A2 worker headless audit** (cas WARNING): document that
+>   `auto --parallel` workers DO inherit `SBTDD_HEADLESS` from parent
+>   env (subprocess inheritance) but workers do NOT dispatch
+>   interactive skills (close-phase + close-task only); J-3 guard
+>   should not fire in worker context. Spec sec.2.6 documents this
+>   audit.
+> - **R1 CI pseudo-TTY documentation** (cas WARNING): README v1.0.6
+>   common-flags section will document `SBTDD_HEADLESS=1` env var as
+>   the operator escape hatch for CI environments with pseudo-TTY
+>   where automatic isatty detection would false-negative.
 
 ---
 
@@ -217,13 +271,23 @@ substring match).
 
 ### 2.3 Items K-1..K-5 — Polish (Pillar B)
 
-**K-1 (T3) — `_section_has_flipped` per-checkbox parity**:
+**K-1 (T3) — `_section_has_flipped` per-checkbox parity (iter-1 mel WARNING line-anchored regex fix)**:
 
-- Modify: `close_task_cmd.py:_section_has_flipped`
+- Modify: `close_task_cmd.py:_section_has_flipped` to use line-anchored
+  multiline regex `re.search(r"^- \[x\]", section, re.MULTILINE)` +
+  analogous for `- [ ]`. Pre-fix unanchored substring `"- [x]" in section_text`
+  could match `[x]` appearing inside code blocks or descriptive prose.
+  Post-fix: only `- [x]` at line start counts.
 - Tests: extend `tests/test_close_task_cmd.py` race scenarios with
   mixed-checkbox section (some `[x]`, some `[ ]`) →
   `_apply_flips_from_diff` must not assume already-flipped just
-  because section contains one `[x]`.
+  because section contains one `[x]`. **Add 2 race regression tests
+  (iter-1 bal WARNING) asserting per-checkbox parity preserves v1.0.5
+  I-2 race contract**: (a) worker A scratch shows partial T1+T3 flips
+  but T1 section has mixed `[x]`+`[ ]` checkboxes — main plan should
+  NOT fabricate full-task `[x]` for T1; (b) post-merge: only fully-
+  flipped sections (per K-1 semantic) count as "flipped" in
+  `_apply_flips_from_diff` walk.
 
 **K-2 (T4) — `getattr` late-import fallback removal**:
 

@@ -20,6 +20,15 @@
 
 **Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict, stdlib-only on hot paths. TDD-Guard active. Brainstorming Q-decisions: Q1=B operational unblock + polish; Q2=a real headless detection; Q3=a strict no-INV-0; Q1'=c auto --parallel self-dispatch; Q2'=a env var truthy exact list 1/true/yes; Q3'=a K-3 1-cycle deprecation alias; Q4'=b liberal CC scope regex; Q5'=a default G2 ladder.
 
+**Iter 1 Checkpoint 2 triage applied 2026-05-09** (verdict GO_WITH_CAVEATS 3-0, 0 CRITICAL + 14 WARNING + 6 INFO; no scope-trim required). Plan deltas inlined per task; full triage rationale in `sbtdd/spec-behavior.md` header:
+- T1: K-4 loud-fast guard (mel+bal+cas TRIPLE) — remove try/except wrap; ValidationError unconditionally fatal at module import. NOTE: K-4 is in T6, not T1; reference here for cross-cuts.
+- T3 (K-1): line-anchored regex `^- \[x\]` / `^- \[ \]` (mel WARNING) + 2 race regression tests (bal WARNING).
+- T6 (K-4): loud-fast guard + private-attribute documentation acknowledgment.
+- T7 (K-5): regex extended to `^([a-z]+)(?:\([^()]+\))?!?:(?:\s|$)` for CC `!` breaking-marker + colon-without-trailing-space (mel+cas WARNING). Docstring tightened "extraction is NOT validation" (bal+cas).
+- T4 cross-track ordering RELAXED (bal WARNING): late-import resolves at call-time; T4 can run truly parallel with Track B. Plan invariants block updated.
+- T5 (K-3): alias identity test relaxed to module-load-time only (cas WARNING).
+- F-A2 dogfood: explicit abort criteria + worker headless audit documented (bal INFO + cas WARNING).
+
 **Plan invariants** (cross-task contracts):
 
 - Every commit follows `~/.claude/CLAUDE.md` Git rules: English only, no AI references, no `Co-Authored-By` lines, atomic, prefix from sec.5 of `CLAUDE.local.md` (`test:` / `feat:` / `fix:` / `refactor:` / `chore:`).
@@ -28,7 +37,7 @@
 - **Phase close protocol (Q3 Option B v1.0.4 mandate + v1.0.5 Item D Q3-A HARD-BLOCK enforced)**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-phase` after each Red/Green/Refactor verify-clean. Manual `git commit` per phase BYPASSES the phase-advance + state-file update + verification gate; **close-task HARD-BLOCKS via `_preflight_triplet_check` (renamed to `_preflight` post-K-3) when commit chain since last `chore: mark task` lacks the canonical TDD triplet**. Override available via `--skip-preflight` (audit-logged to stderr; emergency only).
 - **Task close protocol**: subagents MUST invoke `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review` after Refactor close-phase. Use `--skip-spec-review` to bypass INV-31 spec-reviewer dispatch (~1-2 min/task overhead acceptable but not required for these infrastructure items).
 - **Within-track sequential ordering**: Track B (T3 → T5 → T7 sequential, all touch `close_task_cmd.py`); Track C (T4 → T6 sequential, both touch `auto_cmd.py`). Tracks A + D run independently (file-disjoint with all others).
-- **Cross-track import dependency (v1.0.5 carry-forward)**: T4 (K-2 in `auto_cmd.py:_dispatch_tracks_concurrent`) imports `_merge_scratch_plans` from `close_task_cmd` via late-import inside function body. After K-2 lands, the v1.0.5 `getattr` noop fallback is removed. T4 MUST land AFTER any close_task_cmd.py changes (T3, T5, T7) to avoid inadvertent regression.
+- **Cross-track import dependency (v1.0.5 carry-forward, iter-1 bal WARNING relaxation)**: T4 (K-2 in `auto_cmd.py:_dispatch_tracks_concurrent`) imports `_merge_scratch_plans` from `close_task_cmd` via late-import inside function body. After K-2 lands, the v1.0.5 `getattr` noop fallback is removed. **T4 can run truly parallel with Track B (T3+T5+T7)** because the import resolves at CALL-TIME (when `_dispatch_tracks_concurrent` is invoked), NOT at module-load-time. `_merge_scratch_plans` already ships in v1.0.5 — no missing-helper risk during impl. (Pre-iter-1 plan over-stated this dependency; relaxed per bal WARNING #6.)
 - INV-37 composite-signature tripwire preserved unchanged.
 - Item C v1.0.2 spec_lint gate (R1-R5) preserved unchanged.
 - v1.0.4 Items A+B membership-based subprocess gate preserved + EXTENDED with v1.0.6 J-3 headless guard.
@@ -480,6 +489,88 @@ class TestSectionHasFlippedPerCheckbox:
             "- [ ] Step 1\n"
         )
         assert _section_has_flipped(plan_text, "1") is True
+
+    def test_k1f_codeblock_x_inside_section_does_not_count(self) -> None:
+        """K-1f (iter-1 mel WARNING): line-anchored regex ignores `[x]` inside code blocks."""
+        from close_task_cmd import _section_has_flipped
+
+        # `[x]` appears inside a code block (not at line start) -- should NOT count
+        plan_text = (
+            "### Task 1\n"
+            "Example code: `if x is None:` shows `[x]` syntax\n"
+            "- [ ] Step 1\n"  # actual checkbox open
+            "\n### Task 2\n"
+            "- [ ] Step 1\n"
+        )
+        # has_x=False (no `^- [x]`), has_open=True → False
+        assert _section_has_flipped(plan_text, "1") is False, (
+            "Pre-fix substring check would have returned True (matched `[x]` in prose); "
+            "post-fix line-anchored regex returns False"
+        )
+
+    def test_k1g_v105_i2_race_partial_worker_failure_no_fabrication(
+        self, tmp_path: Path
+    ) -> None:
+        """K-1g (iter-1 bal WARNING): per-checkbox parity preserves v1.0.5 I-2 race contract.
+
+        Worker A scratch shows partial T1 flips (1 of 2 steps `[x]`, 1 still `[ ]`);
+        `_apply_flips_from_diff` MUST NOT fabricate full-task `[x]` for T1
+        in main plan based on the partial scratch state.
+        """
+        from close_task_cmd import _apply_flips_from_diff
+
+        main_plan = (
+            "### Task 1\n"
+            "- [ ] Step A\n"
+            "- [ ] Step B\n"
+            "\n### Task 2\n"
+            "- [ ] Step 1\n"
+        )
+        # Worker A scratch: T1 partially flipped (Step A done, Step B not done)
+        scratch_a = (
+            "### Task 1\n"
+            "- [x] Step A\n"
+            "- [ ] Step B\n"  # NOT flipped
+            "\n### Task 2\n"
+            "- [ ] Step 1\n"
+        )
+
+        merged = _apply_flips_from_diff(main_plan, scratch_a)
+        # Per K-1 line-anchored + per-checkbox parity: T1 section in scratch
+        # is NOT fully flipped (has both [x] and [ ]) → main plan T1 unchanged
+        # NO fabrication of full-task `[x]` flip
+        assert "- [ ] Step B" in merged, (
+            "T1 Step B remained unflipped in main plan (no fabrication)"
+        )
+
+    def test_k1h_v105_i2_race_full_worker_completion_flips_correctly(
+        self, tmp_path: Path
+    ) -> None:
+        """K-1h (iter-1 bal WARNING): fully-flipped scratch correctly propagates to main."""
+        from close_task_cmd import _apply_flips_from_diff
+
+        main_plan = (
+            "### Task 1\n"
+            "- [ ] Step A\n"
+            "- [ ] Step B\n"
+            "\n### Task 2\n"
+            "- [ ] Step 1\n"
+        )
+        # Worker A scratch: T1 FULLY flipped
+        scratch_a = (
+            "### Task 1\n"
+            "- [x] Step A\n"
+            "- [x] Step B\n"
+            "\n### Task 2\n"
+            "- [ ] Step 1\n"
+        )
+
+        merged = _apply_flips_from_diff(main_plan, scratch_a)
+        # T1 fully flipped in scratch (per K-1 semantic) → propagates to main
+        assert "- [x] Step A" in merged
+        assert "- [x] Step B" in merged
+        # T2 untouched
+        assert "- [ ] Step 1" in merged
 ```
 
 - [ ] **Step 2: Run tests to verify FAIL**
@@ -495,20 +586,32 @@ Expected: Atomic `test:` commit (e.g. `test: v1.0.6 T3 K-1 _section_has_flipped 
 
 #### Green Phase
 
-- [ ] **Step 4: Implement per-checkbox parity in `_section_has_flipped`**
+- [ ] **Step 4: Implement per-checkbox parity in `_section_has_flipped` (iter-1 mel WARNING line-anchored regex)**
 
-Modify `skills/sbtdd/scripts/close_task_cmd.py:_section_has_flipped`. Pre-fix likely uses `"- [x]" in section_text` (returns True on any `[x]`). Post-fix: section is "flipped" iff there exists at least one `[x]` AND no `[ ]` in the section:
+Modify `skills/sbtdd/scripts/close_task_cmd.py:_section_has_flipped`. Pre-fix likely uses `"- [x]" in section_text` (returns True on any `[x]`). Post-fix: section is "flipped" iff there exists at least one `[x]` AND no `[ ]` in the section, **using line-anchored multiline regex** to avoid false-positives from `[x]` appearing inside code blocks or descriptive prose (iter-1 mel WARNING):
 
 ```python
+# v1.0.6 K-1: line-anchored checkbox patterns. Only `- [x]` / `- [ ]`
+# at line start counts. Defends against `[x]` appearing in code blocks
+# or descriptive prose (iter-1 mel WARNING — line-anchor robustness).
+_CHECKBOX_FLIPPED_RE = re.compile(r"^- \[x\]", re.MULTILINE)
+_CHECKBOX_OPEN_RE = re.compile(r"^- \[ \]", re.MULTILINE)
+
+
 def _section_has_flipped(plan_text: str, task_id: str) -> bool:
     """Return True iff the task section is fully flipped to [x].
 
-    v1.0.6 K-1 (per-checkbox parity fix): section is "flipped" only when
-    it contains at least one ``- [x]`` AND zero ``- [ ]`` checkboxes.
-    Pre-fix returned True on any ``- [x]`` even with remaining ``- [ ]``;
-    that semantic broke ``_apply_flips_from_diff`` correctness in the
-    partial-worker-failure edge case (cas WARNING from Loop 2 v1.0.5
-    iter-1).
+    v1.0.6 K-1 (per-checkbox parity fix + line-anchored regex):
+    section is "flipped" only when it contains at least one ``- [x]``
+    line AND zero ``- [ ]`` lines. Both checks use line-anchored
+    multiline regex (`^- \\[x\\]` and `^- \\[ \\]`) to avoid false-
+    positives from checkbox-like substrings appearing inside code
+    blocks or descriptive prose.
+
+    Pre-fix returned True on any ``- [x]`` substring even with
+    remaining ``- [ ]``; that semantic broke ``_apply_flips_from_diff``
+    correctness in the partial-worker-failure edge case (cas WARNING
+    from Loop 2 v1.0.5 iter-1).
 
     Vacuously False when section has no checkboxes (descriptive only).
     """
@@ -517,10 +620,12 @@ def _section_has_flipped(plan_text: str, task_id: str) -> bool:
         return False
     section_start, section_end = bounds
     section_text = plan_text[section_start:section_end]
-    has_x = "- [x]" in section_text
-    has_open = "- [ ]" in section_text
+    has_x = bool(_CHECKBOX_FLIPPED_RE.search(section_text))
+    has_open = bool(_CHECKBOX_OPEN_RE.search(section_text))
     return has_x and not has_open
 ```
+
+Confirm `import re` present at module top (likely already; v1.0.5 uses it for `_TASK_HEADER_RE`).
 
 - [ ] **Step 5: Run K-1 tests to verify PASS**
 
@@ -583,15 +688,26 @@ class TestPreflightRenameAndAlias:
         assert callable(close_task_cmd._preflight), "_preflight must be callable"
 
     def test_k3b_legacy_alias_still_callable(self, tmp_path: Path) -> None:
-        """K-3b: close_task_cmd._preflight_triplet_check alias resolves to _preflight."""
+        """K-3b: close_task_cmd._preflight_triplet_check alias resolves to _preflight.
+
+        iter-1 cas WARNING relaxation: assert module-load-time identity ONLY.
+        Monkeypatch of one name does NOT propagate to the alias (Python
+        attribute semantics). Callers monkeypatching tests should target
+        the canonical name (`_preflight`) per v1.0.6 K-3 migration guidance.
+        """
         import close_task_cmd
+        import importlib
+
+        # Re-import to ensure clean module-load-time state (no prior monkeypatch leakage)
+        importlib.reload(close_task_cmd)
 
         assert hasattr(close_task_cmd, "_preflight_triplet_check"), (
             "1-cycle deprecation alias must exist (removed in v1.0.7)"
         )
-        # Alias must be the same callable object as canonical
+        # At module-load time (no monkeypatch), alias IS the canonical
         assert close_task_cmd._preflight_triplet_check is close_task_cmd._preflight, (
-            "Alias must be `_preflight_triplet_check = _preflight` (identity)"
+            "Alias must be `_preflight_triplet_check = _preflight` at module-load time. "
+            "Note: post-monkeypatch identity may diverge (Python attribute semantics)."
         )
 
     def test_k3c_deprecation_marker_in_source(self) -> None:
@@ -757,13 +873,43 @@ class TestValidatePrefixFromSubjectCCScope:
         # Mixed
         assert extract_prefix_from_subject("feat(My-Scope_v2): X") == "feat"
 
-    def test_k5_unknown_prefix_returns_none(self) -> None:
-        """K-5: unknown prefix returns None (not a TDD-triplet prefix)."""
+    def test_k5e_cc_breaking_change_marker_supported(self) -> None:
+        """K-5e (iter-1 cas WARNING): CC spec `!` breaking-change marker matches."""
         from commits import extract_prefix_from_subject
 
-        assert extract_prefix_from_subject("docs: update README") == "docs"  # docs IS in COMMIT_PREFIX_MAP
+        # Bare with breaking marker
+        assert extract_prefix_from_subject("feat!: drop legacy API") == "feat"
+        assert extract_prefix_from_subject("fix!: backwards-incompatible bug fix") == "fix"
+        # Scoped with breaking marker
+        assert extract_prefix_from_subject("feat(api)!: drop legacy") == "feat"
+        assert extract_prefix_from_subject("refactor(close-task)!: rename helper") == "refactor"
+
+    def test_k5f_colon_without_trailing_space_supported(self) -> None:
+        """K-5f (iter-1 mel WARNING): colon without trailing whitespace matches."""
+        from commits import extract_prefix_from_subject
+
+        # No space after colon
+        assert extract_prefix_from_subject("feat:Implementation") == "feat"
+        assert extract_prefix_from_subject("test(scope):add tests") == "test"
+        # Colon at end of line (just prefix, empty body — uncommon but valid syntax)
+        assert extract_prefix_from_subject("feat:") == "feat"
+
+    def test_k5_extraction_is_liberal_validation_is_separate(self) -> None:
+        """K-5 (Q4'=b + iter-1 bal+cas WARNING): extraction is liberal; validation is downstream.
+
+        Returned prefix is NOT validated against `_ALLOWED_PREFIXES`.
+        Caller (e.g., _preflight triplet check) validates separately.
+        """
+        from commits import extract_prefix_from_subject
+
+        # Known prefixes extract correctly
+        assert extract_prefix_from_subject("docs: update README") == "docs"
+        # Unknown lowercase prefix extracts (extraction is liberal)
+        assert extract_prefix_from_subject("madeup: subject") == "madeup"
+        # No-colon subject returns None
         assert extract_prefix_from_subject("noprefix subject only") is None
-        assert extract_prefix_from_subject("malformed:") is None  # empty body
+        # Non-alphabetic prefix returns None (regex requires `[a-z]+`)
+        assert extract_prefix_from_subject("123: numeric prefix") is None
 
     def test_k5_subject_with_no_colon_returns_none(self) -> None:
         """K-5: subject without colon doesn't match prefix syntax."""
@@ -847,37 +993,50 @@ Expected: Atomic `test:` commit.
 Add to `skills/sbtdd/scripts/commits.py` after existing `validate_prefix`:
 
 ```python
-# v1.0.6 K-5 (Q4'=b liberal regex): extract TDD prefix from a commit
-# subject. Matches both bare (`test:`) and Conventional Commits scoped
-# (`test(scope):`) forms. Liberal scope content `[^()]+` per Q4'=b
-# operator UX rationale (false-positives just mean triplet check passes;
-# false-negatives cause HARD-BLOCK to fire incorrectly).
-_PREFIX_FROM_SUBJECT_RE = re.compile(r"^([a-z]+)(?:\([^()]+\))?:\s")
+# v1.0.6 K-5 (Q4'=b liberal regex + iter-1 mel+cas WARNING extensions):
+# extract TDD prefix from a commit subject. Matches:
+#  * Bare: `test:`, `test: msg`, `test:msg` (no trailing space required)
+#  * Scoped: `test(scope):`, `test(scope): msg`
+#  * Breaking-change marker: `feat!:`, `feat(scope)!:` (CC spec)
+# Liberal scope content `[^()]+` per Q4'=b operator UX rationale.
+# Trailing anchor `(?:\s|$)` accepts colon-with-or-without trailing
+# whitespace per iter-1 mel WARNING (subjects like `feat:Implementation`
+# without space were rejected by pre-iter-1 `:\s` strict anchor).
+_PREFIX_FROM_SUBJECT_RE = re.compile(r"^([a-z]+)(?:\([^()]+\))?!?:(?:\s|$)")
 
 
 def extract_prefix_from_subject(subject: str) -> str | None:
     """Extract TDD prefix from a commit subject.
 
-    Matches both bare and Conventional Commits scoped forms:
+    Matches both bare and Conventional Commits forms:
 
     * Bare: ``test: add failing test`` -> ``"test"``
+    * Bare no-space: ``test:add failing test`` -> ``"test"``
     * Scoped: ``test(close-task): add failing test`` -> ``"test"``
+    * Breaking-change: ``feat!: drop legacy API`` -> ``"feat"``
+    * Scoped breaking-change: ``feat(api)!: drop legacy`` -> ``"feat"``
 
     Liberal scope content per Q4'=b: any non-paren chars accepted
-    (uppercase, underscores, spaces, digits all OK).
+    (uppercase, underscores, spaces, digits all OK). Trailing anchor
+    accepts colon-with-or-without whitespace per iter-1 mel WARNING.
 
-    Returns None when subject doesn't match prefix syntax (no colon-space,
-    or non-alphabetic prefix). Used by
-    :func:`close_task_cmd._preflight` triplet check to support subagents
-    that emit Conventional Commits scoped subjects.
+    Returns None when subject doesn't match prefix syntax (no colon
+    after prefix, or non-alphabetic prefix).
+
+    **Important (iter-1 bal+cas WARNING)**: prefix extraction is NOT
+    prefix validation. The returned prefix is NOT validated against
+    :data:`_ALLOWED_PREFIXES`; downstream callers (e.g.,
+    :func:`close_task_cmd._preflight` triplet check) validate
+    separately if needed. This separation is intentional: liberal
+    extraction surfaces all candidate prefixes; strict downstream
+    validation enforces the allowed set.
 
     Args:
         subject: Commit subject line (first line of commit message).
 
     Returns:
         The bare prefix (``"test"``, ``"feat"``, etc.) or None if no
-        match. Note: returned prefix is NOT validated against
-        :data:`_ALLOWED_PREFIXES`; caller validates separately if needed.
+        match.
     """
     match = _PREFIX_FROM_SUBJECT_RE.match(subject)
     if match is None:
@@ -1159,9 +1318,9 @@ def _validate_forwardable_flags_against_argparse() -> None:
 
     Detects drift between the hardcoded `_FORWARDABLE_FLAGS` mapping
     and the `_build_argparse_parser()` argparse definition. Raises
-    `ValidationError` at module import time (or on explicit invocation
-    in tests) if any key in `_FORWARDABLE_FLAGS` is not a known dest
-    name in the parser.
+    `ValidationError` UNCONDITIONALLY at module import time (or on
+    explicit invocation in tests) if any key in `_FORWARDABLE_FLAGS`
+    is not a known dest name in the parser.
 
     Rationale: `_build_worker_argv` uses `_FORWARDABLE_FLAGS` to
     propagate operator flags to subprocess workers. If a flag is
@@ -1169,11 +1328,20 @@ def _validate_forwardable_flags_against_argparse() -> None:
     `getattr(ns, ns_attr, None)` would silently return None and the
     flag would never be forwarded -- subtle bug. Loud-fast detection
     at module load surfaces drift immediately.
+
+    **Private-attribute fragility acknowledgment (iter-1 mel WARNING)**:
+    this helper traverses argparse internals (`parser._actions` +
+    `action.choices` for subparsers). These are private attrs not
+    part of argparse's public API; future argparse refactors could
+    break this introspection. Acceptable trade-off given the
+    coverage value (drift detection at module load time saves
+    debugging cost). If argparse changes, this helper updates here
+    in one place.
     """
     from errors import ValidationError
 
     parser = _build_argparse_parser()
-    # Collect all argparse dest names across subparsers (auto subcommand)
+    # Private-attribute traversal (acknowledged fragility per docstring).
     dest_names: set[str] = set()
     for action in parser._actions:
         if action.dest:
@@ -1199,16 +1367,12 @@ def _validate_forwardable_flags_against_argparse() -> None:
         )
 
 
-# v1.0.6 K-4: invoke guard at module import to surface drift immediately.
-# Wrapped in try/except so test infrastructure can monkeypatch _FORWARDABLE_FLAGS
-# safely without import-time crashes during fixture setup.
-try:
-    _validate_forwardable_flags_against_argparse()
-except Exception:
-    # Module import time validation may fail if argparse parser building has
-    # side effects in unusual contexts. Tests can call the helper explicitly.
-    if os.environ.get("SBTDD_STRICT_K4_GUARD") == "1":
-        raise
+# v1.0.6 K-4 (iter-1 mel+bal+cas TRIPLE WARNING fix): invoke guard at module
+# import UNCONDITIONALLY. ValidationError is fatal at import time -- drift
+# surfaces immediately. Pre-iter-1 plan wrapped this in try/except with an
+# SBTDD_STRICT_K4_GUARD opt-out env var; that defeated the loud-fast intent
+# (silent swallow in production). Retracted per iter-1 triage.
+_validate_forwardable_flags_against_argparse()
 ```
 
 - [ ] **Step 5: Run K-4 tests to verify PASS**
@@ -1501,7 +1665,22 @@ After dispatch, ALL of the following must be verifiable:
 
 This empirically validates v1.0.5 production-grade `--parallel` end-to-end (deferred dogfood from v1.0.5 sec.2.7).
 
-**Fallback** (if `auto --parallel` surfaces issues mid-cycle): fall back to manual 2-track subagent dispatch via Agent tool fan-out (Q1' option b). Document in CHANGELOG `[1.0.6]` Process notes if invoked.
+**Explicit abort criteria** (iter-1 bal INFO addressed): fall back to manual 2-track subagent dispatch via Agent tool fan-out (Q1' option b) if ANY of:
+
+- (a) `partition_by_tracks` raises (e.g., file-conflict edge cycle, missing task surface declaration).
+- (b) Any worker subprocess crashes on import (e.g., K-4 ValidationError fires due to genuine `_FORWARDABLE_FLAGS` drift introduced mid-cycle).
+- (c) Post-batch sidecar/scratch merge validation fails (corrupt state, lost flips, or audit-trail integrity check fails).
+- (d) Operator interrupts mid-dispatch (Ctrl+C or quota exhaustion via `quota_detector.py`).
+
+Document fallback invocation in CHANGELOG `[1.0.6]` Process notes.
+
+**Worker headless audit** (iter-1 cas WARNING addressed): `auto --parallel` workers DO inherit `SBTDD_HEADLESS` env var from parent process (subprocess inheritance). Workers' `sys.stdin` is typically NOT a TTY (subprocess pipe). So `is_headless_context()` will return True in worker context. **However, workers do NOT dispatch interactive skills** — they execute `close-phase` + `close-task` automation only, which use deterministic git operations + state file writes. The J-3 guard in `superpowers_dispatch.invoke_skill` should NOT fire in worker context because no worker-reachable code path invokes `_SUBPROCESS_INCOMPATIBLE_SKILLS` skills. If it DOES fire, that's a real bug surfacing — abort criterion (b) catches it. Audit before mid-cycle dispatch:
+
+```bash
+grep -rn "invoke_skill" skills/sbtdd/scripts/auto_cmd.py skills/sbtdd/scripts/close_phase_cmd.py skills/sbtdd/scripts/close_task_cmd.py 2>&1 | grep -v "^#"
+```
+
+Expected: no `invoke_skill` callsites in the worker-reachable code path. Document audit results in CHANGELOG `[1.0.6]` Process notes.
 
 ### Activity F-Resume — `/sbtdd spec --resume-from-magi` empirical validation
 
@@ -1565,12 +1744,15 @@ Document outcome in CHANGELOG `[1.0.6]` Process notes.
   `partition_by_tracks` enforces).
 - **Within-track sequential ordering**: Track B (T3 → T5 → T7;
   shared close_task_cmd.py); Track C (T4 → T6; shared auto_cmd.py).
-- **Cross-track import dependency hardening (v1.0.5 carry-forward)**:
+- **Cross-track import dependency (v1.0.5 carry-forward, iter-1 bal WARNING relaxation)**:
   T4 K-2 removes the v1.0.5 `getattr` noop fallback that defended
   against Track Alpha → Track Beta cross-track import dependency
-  development. T4 MUST land AFTER any close_task_cmd.py changes (T3,
-  T5, T7) to avoid inadvertent regression. Per v1.0.5 hardening +
-  v1.0.6 plan invariants block.
+  development. T4 can run TRULY PARALLEL with Track B (T3+T5+T7)
+  because the late-import inside `_dispatch_tracks_concurrent`
+  resolves at CALL-TIME, NOT module-load-time. `_merge_scratch_plans`
+  already ships in v1.0.5 — no missing-helper risk during impl.
+  (Pre-iter-1 plan over-stated this dependency; relaxed per bal
+  WARNING #6.)
 - **Tests baseline**: 1248 + 1 skipped → ~1258-1265 final.
 - **Coverage threshold**: >= 88% (per Q4 v1.0.2 baseline).
 - **`make verify` runtime**: <= 200s soft / 220s hard NF-A
