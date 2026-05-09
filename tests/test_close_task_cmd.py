@@ -834,12 +834,7 @@ class TestSectionHasFlippedPerCheckbox:
         from close_task_cmd import _section_has_flipped
 
         plan_text = (
-            "### Task 1\n"
-            "- [x] Step 1\n"
-            "- [ ] Step 2\n"
-            "- [x] Step 3\n"
-            "\n### Task 2\n"
-            "- [ ] Step 1\n"
+            "### Task 1\n- [x] Step 1\n- [ ] Step 2\n- [x] Step 3\n\n### Task 2\n- [ ] Step 1\n"
         )
         assert _section_has_flipped(plan_text, "1") is False, (
             "Mixed-checkbox section should NOT be considered flipped"
@@ -850,12 +845,7 @@ class TestSectionHasFlippedPerCheckbox:
         from close_task_cmd import _section_has_flipped
 
         plan_text = (
-            "### Task 1\n"
-            "- [x] Step 1\n"
-            "- [x] Step 2\n"
-            "- [x] Step 3\n"
-            "\n### Task 2\n"
-            "- [ ] Step 1\n"
+            "### Task 1\n- [x] Step 1\n- [x] Step 2\n- [x] Step 3\n\n### Task 2\n- [ ] Step 1\n"
         )
         assert _section_has_flipped(plan_text, "1") is True
 
@@ -863,36 +853,21 @@ class TestSectionHasFlippedPerCheckbox:
         """K-1c: section with no checkboxes returns False (vacuously not flipped)."""
         from close_task_cmd import _section_has_flipped
 
-        plan_text = (
-            "### Task 1\n"
-            "Description only, no checkboxes.\n"
-            "\n### Task 2\n"
-            "- [ ] Step 1\n"
-        )
+        plan_text = "### Task 1\nDescription only, no checkboxes.\n\n### Task 2\n- [ ] Step 1\n"
         assert _section_has_flipped(plan_text, "1") is False
 
     def test_k1d_single_open_checkbox_returns_false(self) -> None:
         """K-1d (regression for v1.0.5): section with single [ ] and no [x] returns False."""
         from close_task_cmd import _section_has_flipped
 
-        plan_text = (
-            "### Task 1\n"
-            "- [ ] Step 1\n"
-            "\n### Task 2\n"
-            "- [x] Step 1\n"
-        )
+        plan_text = "### Task 1\n- [ ] Step 1\n\n### Task 2\n- [x] Step 1\n"
         assert _section_has_flipped(plan_text, "1") is False
 
     def test_k1e_single_flipped_checkbox_returns_true(self) -> None:
         """K-1e (preserve v1.0.5): single [x] checkbox + no [ ] returns True."""
         from close_task_cmd import _section_has_flipped
 
-        plan_text = (
-            "### Task 1\n"
-            "- [x] Step 1\n"
-            "\n### Task 2\n"
-            "- [ ] Step 1\n"
-        )
+        plan_text = "### Task 1\n- [x] Step 1\n\n### Task 2\n- [ ] Step 1\n"
         assert _section_has_flipped(plan_text, "1") is True
 
     def test_k1f_codeblock_x_inside_section_does_not_count(self) -> None:
@@ -913,9 +888,7 @@ class TestSectionHasFlippedPerCheckbox:
             "post-fix line-anchored regex returns False"
         )
 
-    def test_k1g_v105_i2_race_partial_worker_failure_no_fabrication(
-        self, tmp_path: Path
-    ) -> None:
+    def test_k1g_v105_i2_race_partial_worker_failure_no_fabrication(self, tmp_path: Path) -> None:
         """K-1g (iter-1 bal WARNING): per-checkbox parity preserves v1.0.5 I-2 race contract.
 
         Worker A scratch shows partial T1 flips (1 of 2 steps `[x]`, 1 still `[ ]`);
@@ -924,13 +897,7 @@ class TestSectionHasFlippedPerCheckbox:
         """
         from close_task_cmd import _apply_flips_from_diff
 
-        main_plan = (
-            "### Task 1\n"
-            "- [ ] Step A\n"
-            "- [ ] Step B\n"
-            "\n### Task 2\n"
-            "- [ ] Step 1\n"
-        )
+        main_plan = "### Task 1\n- [ ] Step A\n- [ ] Step B\n\n### Task 2\n- [ ] Step 1\n"
         # Worker A scratch: T1 partially flipped (Step A done, Step B not done)
         scratch_a = (
             "### Task 1\n"
@@ -948,27 +915,13 @@ class TestSectionHasFlippedPerCheckbox:
             "T1 Step B remained unflipped in main plan (no fabrication)"
         )
 
-    def test_k1h_v105_i2_race_full_worker_completion_flips_correctly(
-        self, tmp_path: Path
-    ) -> None:
+    def test_k1h_v105_i2_race_full_worker_completion_flips_correctly(self, tmp_path: Path) -> None:
         """K-1h (iter-1 bal WARNING): fully-flipped scratch correctly propagates to main."""
         from close_task_cmd import _apply_flips_from_diff
 
-        main_plan = (
-            "### Task 1\n"
-            "- [ ] Step A\n"
-            "- [ ] Step B\n"
-            "\n### Task 2\n"
-            "- [ ] Step 1\n"
-        )
+        main_plan = "### Task 1\n- [ ] Step A\n- [ ] Step B\n\n### Task 2\n- [ ] Step 1\n"
         # Worker A scratch: T1 FULLY flipped
-        scratch_a = (
-            "### Task 1\n"
-            "- [x] Step A\n"
-            "- [x] Step B\n"
-            "\n### Task 2\n"
-            "- [ ] Step 1\n"
-        )
+        scratch_a = "### Task 1\n- [x] Step A\n- [x] Step B\n\n### Task 2\n- [ ] Step 1\n"
 
         merged = _apply_flips_from_diff(main_plan, scratch_a)
         # T1 fully flipped in scratch (per K-1 semantic) → propagates to main

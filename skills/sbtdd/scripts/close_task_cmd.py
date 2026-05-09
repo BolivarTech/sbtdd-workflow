@@ -112,6 +112,13 @@ def _current_head_sha(root: Path) -> str:
 # never cross task-section boundaries.
 _TASK_HEADER_RE = re.compile(r"^### Task ", re.MULTILINE)
 
+# v1.0.6 K-1 iter-2 fix (mel+bal WARNINGs): line-anchored checkbox regexes
+# for per-checkbox parity in :func:`_section_has_flipped`. Pre-fix used
+# unanchored substring ``"- [x]" in section`` which could false-positive
+# on ``[x]`` appearing inside code blocks or descriptive prose.
+_FLIPPED_LINE_RE = re.compile(r"^- \[x\]", re.MULTILINE)
+_OPEN_LINE_RE = re.compile(r"^- \[ \]", re.MULTILINE)
+
 
 def _scratch_plan_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
     """Per-worker scratch plan path.
@@ -169,7 +176,14 @@ def _section_bounds(plan_text: str, task_id: str) -> tuple[int, int] | None:
 
 
 def _section_has_flipped(plan_text: str, task_id: str) -> bool:
-    """True iff the task section contains ``- [x]`` (flipped state).
+    """True iff the task section is fully flipped: has ``- [x]`` lines and zero ``- [ ]`` lines.
+
+    v1.0.6 K-1 iter-2 fix (mel+bal WARNINGs): line-anchored regex
+    (``re.MULTILINE`` matching ``^- [x]``) ignores ``[x]`` appearing
+    inside code blocks or prose. Per-checkbox parity: a section with
+    mixed ``[x]`` + ``[ ]`` returns False (not yet fully flipped),
+    preserving v1.0.5 I-2 race contract that ``_apply_flips_from_diff``
+    must not fabricate full-task flips from partial worker scratch.
 
     v1.0.5 iter-1 helper: bounded section extraction identical to
     :func:`_flip_checkbox` so 'has flipped' check uses the same
@@ -179,7 +193,10 @@ def _section_has_flipped(plan_text: str, task_id: str) -> bool:
     if bounds is None:
         return False
     section_start, section_end = bounds
-    return "- [x]" in plan_text[section_start:section_end]
+    section = plan_text[section_start:section_end]
+    if _OPEN_LINE_RE.search(section):
+        return False
+    return bool(_FLIPPED_LINE_RE.search(section))
 
 
 def _flip_checkbox(plan_text: str, task_id: str) -> str:
@@ -219,10 +236,16 @@ def _apply_flips_from_diff(main_text: str, scratch_text: str) -> str:
     """
     result = main_text
     for task_id in _iter_task_ids(scratch_text):
-        if _section_has_flipped(scratch_text, task_id) and not _section_has_flipped(
-            result, task_id
-        ):
-            result = _flip_checkbox(result, task_id)
+        if not _section_has_flipped(scratch_text, task_id):
+            continue
+        # v1.0.6 K-1: scratch fully flipped (per-checkbox parity) -> flip all
+        # remaining `- [ ]` in the main section so result reaches parity too.
+        # `_flip_checkbox` flips one `- [ ]` per call; loop until idempotent.
+        while not _section_has_flipped(result, task_id):
+            new_result = _flip_checkbox(result, task_id)
+            if new_result == result:
+                break  # no `- [ ]` left to flip; bounds-safe guard
+            result = new_result
     return result
 
 
