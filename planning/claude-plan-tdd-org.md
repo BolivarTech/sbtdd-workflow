@@ -594,8 +594,8 @@ Modify `skills/sbtdd/scripts/close_task_cmd.py:_section_has_flipped`. Pre-fix li
 # v1.0.6 K-1: line-anchored checkbox patterns. Only `- [x]` / `- [ ]`
 # at line start counts. Defends against `[x]` appearing in code blocks
 # or descriptive prose (iter-1 mel WARNING — line-anchor robustness).
-_CHECKBOX_FLIPPED_RE = re.compile(r"^- \[x\]", re.MULTILINE)
-_CHECKBOX_OPEN_RE = re.compile(r"^- \[ \]", re.MULTILINE)
+_CHECKBOX_FLIPPED_RE = re.compile(r"^[ \t]*- \[x\]", re.MULTILINE)
+_CHECKBOX_OPEN_RE = re.compile(r"^[ \t]*- \[ \]", re.MULTILINE)
 
 
 def _section_has_flipped(plan_text: str, task_id: str) -> bool:
@@ -1002,7 +1002,7 @@ Add to `skills/sbtdd/scripts/commits.py` after existing `validate_prefix`:
 # Trailing anchor `(?:\s|$)` accepts colon-with-or-without trailing
 # whitespace per iter-1 mel WARNING (subjects like `feat:Implementation`
 # without space were rejected by pre-iter-1 `:\s` strict anchor).
-_PREFIX_FROM_SUBJECT_RE = re.compile(r"^([a-z]+)(?:\([^()]+\))?!?:(?:\s|$)")
+_PREFIX_FROM_SUBJECT_RE = re.compile(r"^([a-z]+)(?:\([^()]*\))?!?:(?:\s|$)")
 
 
 def extract_prefix_from_subject(subject: str) -> str | None:
@@ -1395,7 +1395,7 @@ Expected: Atomic `feat:` commit (e.g. `feat: v1.0.6 T6 K-4 _FORWARDABLE_FLAGS ar
 
 - [ ] **Step 8: Refactor — verify guard semantics + cleanup**
 
-Confirm the guard's try/except at module import doesn't silently swallow real bugs. The `SBTDD_STRICT_K4_GUARD=1` env var enables strict mode for CI/dev environments where drift should be fatal. Document this env var in the helper docstring.
+Confirm the guard at module import is unconditionally fatal (no try/except wrap, no opt-out env var per iter-1 mel+bal+cas TRIPLE WARNING fix). The `SBTDD_STRICT_K4_GUARD` env var concept is RETRACTED — drift always fatal at module load.
 
 Optionally: if `_build_argparse_parser` is expensive (full subparser tree), consider caching its result or only validating the relevant subparser (auto). For v1.0.6 simplicity, run the full validation at module load — overhead is one-time + small.
 
@@ -1650,9 +1650,14 @@ Document outcome in CHANGELOG `[1.0.6]` Process notes.
 **Steps**:
 
 ```bash
+# Pre-flight (iter-2 bal WARNING — cheap insurance against partition crash)
+python skills/sbtdd/scripts/run_sbtdd.py auto --parallel --dry-run
+
 # v1.0.6 own-cycle uses auto --parallel for impl phase per Q1'=c
 python skills/sbtdd/scripts/run_sbtdd.py auto --parallel
 ```
+
+Pre-flight `--dry-run` validates `partition_by_tracks` computes cleanly (no missing task surface declaration, no file-conflict cycle) without spawning workers — ~5 min insurance vs ~half-day recovery debt if partition fails mid-dispatch.
 
 Expected: `partition_by_tracks` computes disjoint tracks per file-conflict edges. Subprocess workers dispatch per partition; each worker processes its track sequentially per within-track ordering documented in spec sec.5.1. Parent post-batch merges sidecar audits + scratch plan flips per v1.0.5 contract.
 
@@ -1668,7 +1673,7 @@ This empirically validates v1.0.5 production-grade `--parallel` end-to-end (defe
 **Explicit abort criteria** (iter-1 bal INFO addressed): fall back to manual 2-track subagent dispatch via Agent tool fan-out (Q1' option b) if ANY of:
 
 - (a) `partition_by_tracks` raises (e.g., file-conflict edge cycle, missing task surface declaration).
-- (b) Any worker subprocess crashes on import (e.g., K-4 ValidationError fires due to genuine `_FORWARDABLE_FLAGS` drift introduced mid-cycle).
+- (b) Any worker subprocess crashes on import (e.g., K-4 ValidationError fires due to genuine `_FORWARDABLE_FLAGS` drift introduced mid-cycle). **Diagnosis hint** (iter-2 mel WARNING): on abort (b) firing, BEFORE falling back to manual 2-track Q1' option b, check stderr for `ValidationError` from K-4 guard — if present, fix the drift in `_FORWARDABLE_FLAGS` (or argparse) first, then retry `auto --parallel`. K-4 catching real drift IS the desired loud-fast behavior; the abort fallback is for genuine infrastructure failures, not for K-4-detected bugs.
 - (c) Post-batch sidecar/scratch merge validation fails (corrupt state, lost flips, or audit-trail integrity check fails).
 - (d) Operator interrupts mid-dispatch (Ctrl+C or quota exhaustion via `quota_detector.py`).
 
