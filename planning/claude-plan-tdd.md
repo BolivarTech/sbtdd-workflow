@@ -79,7 +79,7 @@ Covers escenarios J-1 through J-10 from spec sec.4.1+4.2.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests for `is_headless_context()` helper**
+- [x] **Step 1: Write the failing tests for `is_headless_context()` helper**
 
 Append to `tests/test_subprocess_utils.py`:
 
@@ -174,12 +174,12 @@ class TestIsHeadlessContext:
             assert is_headless_context() is True, f"value={value!r} should strip"
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_subprocess_utils.py::TestIsHeadlessContext -v`
 Expected: 6/6 FAIL — `is_headless_context` doesn't exist yet (`ImportError`).
 
-- [ ] **Step 3: Write the failing tests for `invoke_skill` headless guard**
+- [x] **Step 3: Write the failing tests for `invoke_skill` headless guard**
 
 Append to `tests/test_superpowers_dispatch.py`:
 
@@ -246,12 +246,12 @@ class TestInvokeSkillHeadlessGuard:
         assert "Cannot dispatch interactive skill" not in msg, "headless check should not fire when membership check already blocks"
 ```
 
-- [ ] **Step 4: Run tests to verify FAIL**
+- [x] **Step 4: Run tests to verify FAIL**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillHeadlessGuard -v`
 Expected: 3/3 FAIL — `invoke_skill` doesn't have headless guard yet (raises wrong message OR proceeds when it shouldn't).
 
-- [ ] **Step 5: close-phase Red**
+- [x] **Step 5: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -259,7 +259,7 @@ Expected: Atomic `test:` commit (e.g. `test: v1.0.6 T1 J-1+J-2+J-3 real headless
 
 #### Green Phase
 
-- [ ] **Step 6: Implement `is_headless_context()` helper in `subprocess_utils.py`**
+- [x] **Step 6: Implement `is_headless_context()` helper in `subprocess_utils.py`**
 
 Add to top of `skills/sbtdd/scripts/subprocess_utils.py` after existing imports (need to add `import os` if not present):
 
@@ -303,12 +303,12 @@ def is_headless_context() -> bool:
         return True
 ```
 
-- [ ] **Step 7: Run subprocess_utils tests to verify PASS**
+- [x] **Step 7: Run subprocess_utils tests to verify PASS**
 
 Run: `pytest tests/test_subprocess_utils.py::TestIsHeadlessContext -v`
 Expected: 6/6 PASS.
 
-- [ ] **Step 8: Implement `invoke_skill` headless guard in `superpowers_dispatch.py`**
+- [x] **Step 8: Implement `invoke_skill` headless guard in `superpowers_dispatch.py`**
 
 Modify `skills/sbtdd/scripts/superpowers_dispatch.py:invoke_skill`. Find the existing membership check (around line 336-337):
 
@@ -338,12 +338,12 @@ Add the new headless guard immediately after (preserves v1.0.4 contract — memb
 
 Confirm `import subprocess_utils` (or `from . import subprocess_utils`) is present at module top; if not, add after existing imports.
 
-- [ ] **Step 9: Run superpowers_dispatch tests to verify PASS**
+- [x] **Step 9: Run superpowers_dispatch tests to verify PASS**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestInvokeSkillHeadlessGuard -v`
 Expected: 3/3 PASS.
 
-- [ ] **Step 10: Add analogous guard to `magi_dispatch.py` (if applicable)**
+- [x] **Step 10: Add analogous guard to `magi_dispatch.py` (if applicable)**
 
 Inspect `skills/sbtdd/scripts/magi_dispatch.py` for any callsite that dispatches interactive skills via subprocess. If MAGI itself is non-interactive (today: all 3 sub-agents are non-interactive analysis), there may be no callsite to modify — in that case, add a comment marker at module top documenting the future-proof contract:
 
@@ -358,12 +358,12 @@ Inspect `skills/sbtdd/scripts/magi_dispatch.py` for any callsite that dispatches
 
 If `magi_dispatch.py` does dispatch interactive skills, mirror the J-3 guard structure from Step 8.
 
-- [ ] **Step 11: Run full test suite to verify no regression**
+- [x] **Step 11: Run full test suite to verify no regression**
 
 Run: `make verify`
 Expected: All checks green (pytest 1248 baseline + 9 new tests = 1257 passed; ruff check; ruff format --check; mypy --strict; coverage >= 88%).
 
-- [ ] **Step 12: close-phase Green**
+- [x] **Step 12: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -371,16 +371,16 @@ Expected: Atomic `feat:` commit (e.g. `feat: v1.0.6 T1 J-1+J-2+J-3 real headless
 
 #### Refactor Phase
 
-- [ ] **Step 13: Refactor — confirm shared module-level constants if duplicated**
+- [x] **Step 13: Refactor — confirm shared module-level constants if duplicated**
 
 If the truthy-set `{"1", "true", "yes"}` is referenced in multiple places (e.g., docs strings, README), extract to a module-level `_HEADLESS_TRUTHY_VALUES: frozenset[str]` constant for DRY. Likely not needed for this small surface; skip if no duplication.
 
-- [ ] **Step 14: Run tests to verify still PASS**
+- [x] **Step 14: Run tests to verify still PASS**
 
 Run: `make verify`
 Expected: Clean.
 
-- [ ] **Step 15: close-phase Refactor + close-task**
+- [x] **Step 15: close-phase Refactor + close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
@@ -1130,7 +1130,7 @@ Covers escenario K-2 from spec sec.4.5.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_auto_cmd.py`:
 
@@ -1159,12 +1159,12 @@ class TestK2GetattrFallbackRemoved:
         )
 ```
 
-- [ ] **Step 2: Run test to verify FAIL**
+- [x] **Step 2: Run test to verify FAIL**
 
 Run: `pytest tests/test_auto_cmd.py::TestK2GetattrFallbackRemoved -v`
 Expected: 1 FAIL (assuming v1.0.5 source has the getattr fallback).
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1172,7 +1172,7 @@ Expected: Atomic `test:` commit.
 
 #### Green Phase
 
-- [ ] **Step 4: Replace getattr fallback with direct late-import**
+- [x] **Step 4: Replace getattr fallback with direct late-import**
 
 Modify `skills/sbtdd/scripts/auto_cmd.py:_dispatch_tracks_concurrent`. Find the post-batch hook (likely contains `getattr(close_task_cmd, "_merge_scratch_plans", ...)` pattern):
 
@@ -1199,17 +1199,17 @@ Post-fix (v1.0.6 K-2):
     _merge_scratch_plans(tracks, project_root)
 ```
 
-- [ ] **Step 5: Run K-2 test to verify PASS**
+- [x] **Step 5: Run K-2 test to verify PASS**
 
 Run: `pytest tests/test_auto_cmd.py::TestK2GetattrFallbackRemoved -v`
 Expected: 1/1 PASS.
 
-- [ ] **Step 6: Run full test suite to verify no regression**
+- [x] **Step 6: Run full test suite to verify no regression**
 
 Run: `make verify`
 Expected: All checks green. Critical: existing v1.0.5 I-2 race regression tests + I-1 sidecar tests must still pass via the new direct import.
 
-- [ ] **Step 7: close-phase Green**
+- [x] **Step 7: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1217,7 +1217,7 @@ Expected: Atomic `refactor:` commit (this is structural cleanup, not feature/fix
 
 #### Refactor Phase
 
-- [ ] **Step 8: Refactor — verify no other defensive getattr patterns to clean up**
+- [x] **Step 8: Refactor — verify no other defensive getattr patterns to clean up**
 
 Search for similar `getattr(<module>, "<helper>", ...)` patterns elsewhere in the codebase:
 
@@ -1227,7 +1227,7 @@ grep -n "getattr.*_merge_scratch_plans\|getattr.*_apply_flips_from_diff" --inclu
 
 Expected: zero matches post-fix. If other similar patterns exist as defensive scaffolding from v1.0.5, document in CHANGELOG `[1.0.6]` Process notes for future cleanup but DO NOT modify in this task (out of scope; would scope-creep).
 
-- [ ] **Step 9: close-phase Refactor + close-task**
+- [x] **Step 9: close-phase Refactor + close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
@@ -1501,7 +1501,7 @@ Expected: Atomic `test:` commit.
 
 #### Green Phase
 
-- [ ] **Step 4: Update `skills/sbtdd/SKILL.md` with archaeology trim procedure**
+- [x] **Step 4: Update `skills/sbtdd/SKILL.md` with archaeology trim procedure**
 
 Find the existing "## Notes" section at end of `skills/sbtdd/SKILL.md` (or insert before it). Add new section:
 
@@ -1533,7 +1533,7 @@ The methodology is doc-only (no code change); see
 guidance.
 ```
 
-- [ ] **Step 5: Update `templates/CLAUDE.local.md.template` with template guidance**
+- [x] **Step 5: Update `templates/CLAUDE.local.md.template` with template guidance**
 
 Find an appropriate section in `templates/CLAUDE.local.md.template` (likely near the methodology / sec.1 specification flow section). Add:
 
@@ -1558,17 +1558,17 @@ Doc-only methodology; no runtime impact. See plugin SKILL.md for
 the canonical procedure.
 ```
 
-- [ ] **Step 6: Run smoke test to verify PASS**
+- [x] **Step 6: Run smoke test to verify PASS**
 
 Run: `pytest tests/test_plan_archaeology_trim_pattern.py -v`
 Expected: 3/3 PASS.
 
-- [ ] **Step 7: Run full test suite to verify no regression**
+- [x] **Step 7: Run full test suite to verify no regression**
 
 Run: `make verify`
 Expected: All checks green.
 
-- [ ] **Step 8: close-phase Green**
+- [x] **Step 8: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1576,14 +1576,14 @@ Expected: Atomic `feat:` commit (e.g. `feat: v1.0.6 T2 C.2 plan archaeology trim
 
 #### Refactor Phase
 
-- [ ] **Step 9: Refactor — verify cross-artifact consistency**
+- [x] **Step 9: Refactor — verify cross-artifact consistency**
 
 Confirm that the SKILL.md and template both reference each other (cross-link). Verify the smoke test catches drift in either direction (e.g., remove pattern from one file → smoke test fails). Run smoke test once more for confidence:
 
 Run: `pytest tests/test_plan_archaeology_trim_pattern.py -v`
 Expected: 3/3 PASS (still).
 
-- [ ] **Step 10: close-phase Refactor + close-task**
+- [x] **Step 10: close-phase Refactor + close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
