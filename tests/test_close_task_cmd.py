@@ -989,3 +989,57 @@ class TestPreflightRenameAndAlias:
         assert "DEPRECATED" in source and "v1.0.7" in source, (
             "Source must contain DEPRECATED + v1.0.7 markers near the alias"
         )
+
+
+class TestPreflightTripletCCScope:
+    """v1.0.6 K-5: _preflight accepts CC scoped triplet subjects.
+
+    Covers escenario K-5d from spec sec.4.8.
+    """
+
+    def test_k5d_triplet_check_accepts_scoped_subjects(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """K-5d: scoped TDD triplet (test(scope): + feat(scope): + refactor(scope):) passes."""
+        from close_task_cmd import _preflight
+
+        # Mock _last_chore_task_close_sha + _git_log_between to return scoped subjects
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc1234",
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test(close-task): write failing test",
+                "feat(close-task): implement",
+                "refactor(close-task): extract helper",
+            ],
+        )
+        state = {"current_task_id": "3"}
+
+        # Should NOT raise (canonical TDD triplet present in scoped form)
+        _preflight(state, tmp_path)
+
+    def test_k5d_triplet_check_accepts_mixed_bare_and_scoped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """K-5d (variant): mix of bare + scoped subjects in chain still passes triplet."""
+        from close_task_cmd import _preflight
+
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc1234",
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",  # bare prefix
+                "feat(close-task): implement",  # scoped prefix
+                "refactor: extract",  # bare prefix
+            ],
+        )
+        state = {"current_task_id": "3"}
+
+        # Should NOT raise (triplet still present even with mix)
+        _preflight(state, tmp_path)
