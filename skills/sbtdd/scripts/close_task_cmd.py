@@ -184,10 +184,8 @@ def _section_has_flipped(plan_text: str, task_id: str) -> bool:
     mixed ``[x]`` + ``[ ]`` returns False (not yet fully flipped),
     preserving v1.0.5 I-2 race contract that ``_apply_flips_from_diff``
     must not fabricate full-task flips from partial worker scratch.
-
-    v1.0.5 iter-1 helper: bounded section extraction identical to
-    :func:`_flip_checkbox` so 'has flipped' check uses the same
-    task-section window.
+    Section bounds via :func:`_section_bounds` so checks never cross
+    task-section boundaries (same window as :func:`_flip_checkbox`).
     """
     bounds = _section_bounds(plan_text, task_id)
     if bounds is None:
@@ -240,11 +238,12 @@ def _apply_flips_from_diff(main_text: str, scratch_text: str) -> str:
             continue
         # v1.0.6 K-1: scratch fully flipped (per-checkbox parity) -> flip all
         # remaining `- [ ]` in the main section so result reaches parity too.
-        # `_flip_checkbox` flips one `- [ ]` per call; loop until idempotent.
+        # `_flip_checkbox` flips one `- [ ]` per call; loop until idempotent
+        # (same plan_text returned means no `- [ ]` left in the section).
         while not _section_has_flipped(result, task_id):
             new_result = _flip_checkbox(result, task_id)
             if new_result == result:
-                break  # no `- [ ]` left to flip; bounds-safe guard
+                break  # section already at parity; nothing left to flip
             result = new_result
     return result
 
