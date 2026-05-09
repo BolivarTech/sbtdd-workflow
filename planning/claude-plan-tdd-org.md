@@ -70,7 +70,7 @@
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/subprocess_utils.py` (add `is_headless_context()` module-level helper)
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py:invoke_skill` (add headless guard after membership check)
+- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (add headless guard after membership check)
 - Modify: `skills/sbtdd/scripts/magi_dispatch.py` (add analogous guard if MAGI dispatches interactive skills)
 - Modify: `tests/test_subprocess_utils.py` (extend with `TestIsHeadlessContext` class)
 - Modify: `tests/test_superpowers_dispatch.py` (extend with `TestInvokeSkillHeadlessGuard` class)
@@ -404,7 +404,7 @@ Expected: Task 1 closed. State file advances `current_task_id: 1 → 2`.
 ### Task 3: K-1 _section_has_flipped per-checkbox parity
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py:_section_has_flipped` (per-checkbox semantic)
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (per-checkbox semantic)
 - Extend: `tests/test_close_task_cmd.py` (TestSectionHasFlippedPerCheckbox class)
 
 Covers escenarios K-1a through K-1c from spec sec.4.4.
@@ -821,7 +821,7 @@ Expected: Task 5 closed. State file advances `current_task_id: 5 → 6`.
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/commits.py` (add `validate_prefix_from_subject` helper or extend existing matcher)
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py:_preflight` (extend triplet matchers)
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py` (extend triplet matchers)
 - Extend: `tests/test_commits.py` + `tests/test_close_task_cmd.py`
 
 Covers escenarios K-5a through K-5d from spec sec.4.8.
@@ -1123,7 +1123,7 @@ Expected: Task 7 closed. State file advances `current_task_id: 7 → 4` (next [ 
 ### Task 4: K-2 getattr late-import fallback removal
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py:_dispatch_tracks_concurrent` post-batch hook
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` post-batch hook
 - Extend: `tests/test_auto_cmd.py` (regression test for direct-import semantic)
 
 Covers escenario K-2 from spec sec.4.5.
