@@ -1429,7 +1429,7 @@ Covers escenarios C2-1 through C2-3 from spec sec.4.3.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing smoke test**
+- [x] **Step 1: Write the failing smoke test**
 
 Create new file `tests/test_plan_archaeology_trim_pattern.py`:
 
@@ -1488,12 +1488,12 @@ def test_c2_3_smoke_cross_artifact_reference_exists_in_both() -> None:
     )
 ```
 
-- [ ] **Step 2: Run smoke test to verify FAIL**
+- [x] **Step 2: Run smoke test to verify FAIL**
 
 Run: `pytest tests/test_plan_archaeology_trim_pattern.py -v`
 Expected: 3/3 FAIL — SKILL.md + template don't mention "plan archaeology trim" yet.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
