@@ -122,35 +122,26 @@ Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase
 | `init` | Bootstrap an SBTDD project (rules, hooks, skeleton spec, .gitignore entries) | `/sbtdd init --stack python --author "Your Name"` |
 | `spec` | Run the spec pipeline: `/brainstorming` -> `/writing-plans` -> MAGI Checkpoint 2 | `/sbtdd spec` |
 | `close-phase` | Close one TDD phase atomically (Red/Green/Refactor): verify + commit + advance state | `/sbtdd close-phase` (or `close-phase --variant fix` for Green-as-fix) |
-| `close-task` | Mark `[x]` in the plan + `chore:` commit + advance to the next `[ ]` | `/sbtdd close-task` (auto-invoked by `close-phase refactor`) |
+| `close-task` | Mark `[x]` in the plan + `chore:` commit + advance to the next `[ ]`. v1.0.5+ HARD-BLOCKS if commit chain since last task close lacks the canonical `test:`/`feat:|fix:`/`refactor:` triplet (override with `--skip-preflight`) | `/sbtdd close-task` (auto-invoked by `close-phase refactor`) |
 | `status` | Read-only structured report of state + git + plan + drift | `/sbtdd status` |
 | `pre-merge` | Run Loop 1 (code review) then Loop 2 (MAGI) sequentially | `/sbtdd pre-merge` |
 | `finalize` | Run sec.M.7 checklist + `/finishing-a-development-branch` | `/sbtdd finalize` |
-| `auto` | Shoot-and-forget full cycle (task loop + pre-merge + checklist), stops before finalize | `/sbtdd auto` or `/sbtdd auto --dry-run` |
+| `auto` | Shoot-and-forget full cycle (task loop + pre-merge + checklist), stops before finalize. Parallel dispatch via `--parallel` (v1.0.4+) | `/sbtdd auto`, `/sbtdd auto --parallel`, or `/sbtdd auto --dry-run` |
 | `resume` | Diagnose interrupted runs and delegate recovery | `/sbtdd resume` or `/sbtdd resume --discard-uncommitted` |
 | `review-spec-compliance` | Per-task spec-reviewer dispatch for manual flows (Feature B, new in v0.2). Exit 0 on approve, exit 12 on issues. | `/sbtdd review-spec-compliance <task-id>` |
 
 ### Recent release highlights
 
-**v0.2** flags (`spec`, `pre-merge`, `finalize`, `close-task`):
-- `--override-checkpoint --reason "<text>"` -- INV-0 escape valve when a MAGI safety valve (INV-11) exhausts. `--reason` is mandatory; reason + verdict are persisted under `.claude/magi-escalations/`.
-- `--non-interactive` -- force the headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
-- `--skip-spec-review` -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
+- **v1.0.5** — Production-grade `--parallel` + close-task preflight HARD-BLOCK. Worker subprocess audit-trail, plan checkbox flips, and CLI flag forwarding all closed (Items I-1/I-2/I-3). New `--skip-preflight` emergency override for `close-task` when canonical TDD triplet (`test:` → `feat:|fix:` → `refactor:`) is intentionally bypassed. DRY-consolidated atomic-write helpers into `state_file.py`.
+- **v1.0.4** — `--parallel` track-based dispatch foundation. `auto --parallel` partitions the plan DAG into file-disjoint tracks via union-find on `addBlockedBy` + file-conflict edges; runs each track in a subprocess worker. `--task-ids T1,T3,T4` filter + `--no-recursive` worker guard. Sequential remains the default; opt in with `--parallel`.
+- **v1.0.3** — Template alignment audit + cross-check Windows fix (WinError 206 from argv length under long cross-check prompts).
+- **v1.0.2** — Spec quality + coverage gate. `spec_lint` 5-rule mechanical gate (R1-R5) runs upstream of MAGI Checkpoint 2; coverage floor enforced at **88%** in `make verify`.
+- **v1.0.1** — `--resume-from-magi` (on `spec`): skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against artifacts produced by hand in an interactive Claude Code session. Use when subprocess transport for interactive skills is unavailable.
+- **v1.0.0** — MAGI cross-check meta-reviewer + dual-license dual-skill registry.
+- **v0.3** — Per-skill model selection (`implementer_model`, `code_review_model`, etc.) for cost optimization on long `/sbtdd auto` runs.
+- **v0.2** — Spec-reviewer (Feature B) + INV-31 hard-block on `close-task` / `auto` (exit code **12** on issues; `--skip-spec-review` to bypass).
 
-**v1.0.1** -- `--resume-from-magi` (on `spec`): skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against operator-produced `sbtdd/spec-behavior.md` + `planning/claude-plan-tdd-org.md`. Recovery path for v1.0.1 Finding A (interactive Skills like `/brainstorming` and `/writing-plans` are silently empty under `claude -p` subprocess transport). Run the two skills manually in an interactive Claude Code session, then invoke `/sbtdd spec --resume-from-magi` to drive Checkpoint 2 against the hand-crafted artifacts. The flag still enforces INV-27 (`spec-behavior-base.md` placeholder check) AND structural validation (spec yields `>=1` escenario via `spec_snapshot.emit_snapshot`; plan-org has `>=1` `### Task` heading + `>=1` `- [ ]` checkbox).
-
-**v1.0.2** -- cross-check completion + spec quality enforcement:
-- `scripts/cross_check_telemetry.py` -- standalone aggregator CLI for `.claude/magi-cross-check/iter*-*.json` artifacts (Feature G v1.0.0). Markdown + JSON output. Per-iter breakdown of KEEP/DOWNGRADE/REJECT decisions, agreement rate, truncation rate. Invocation: `python scripts/cross_check_telemetry.py [--root PATH] [--format markdown|json]`.
-- `skills/sbtdd/scripts/spec_lint.py` -- H5-2 mechanical lint gate with 5 rules (R1 escenario well-formed Given/When/Then bullets, R2 unique escenario IDs, R3 monotonic section headers WARNING-severity, R4 INV-27 mechanical extension to spec-behavior.md + plan-tdd-org.md, R5 frontmatter docstring `> Generado YYYY-MM-DD a partir de <source>`). Integrated in `spec_cmd._run_magi_checkpoint2` ONCE upstream of MAGI iter loop -- error-severity findings raise `ValidationError` aborting cycle without consuming MAGI iter budget; warning-severity emit stderr breadcrumb. CLI: `python -m skills.sbtdd.scripts.spec_lint <path> [--severity error|warning|info] [--rule R1|R2|R3|R4|R5]`.
-- `tests/test_invoke_skill_callsites_audit.py` -- AST-based meta-test enforcing `allow_interactive_skill=True` on direct `invoke_skill` callsites for skills in `_SUBPROCESS_INCOMPATIBLE_SKILLS`. Regression-guards future contributors adding callsites without the override.
-- **Coverage gate** (`pytest-cov >= 4.1` dev dep + `[tool.coverage.*]` config) -- `make verify` now enforces a per-module floor at **88%** (`floor(measured_baseline) - 2%` per Q4 brainstorming protocol). Excludes documented in CHANGELOG `[1.0.2]`.
-
-**v1.0.3** -- template alignment audit + cross-check Windows fix:
-- `docs/audits/v1.0.3-magi-gate-template-alignment.md` -- section-by-section audit of plugin's MAGI dispatch path against canonical template at `D:\jbolivarg\BolivarTech\AI_Tools\magi-gate-template.md` (411 lines). 6 normative template sections audited; 2 MATCH + 4 GAP (1 INFO + 3 WARNING; 0 CRITICAL). All GAPs default-defer to v1.0.4 backlog as `L1.0.4-A` through `L1.0.4-D` LOCKED items.
-- `tests/test_magi_template_alignment.py` -- cross-artifact alignment test (pattern follows `tests/test_changelog.py` HF1). Asserts canonical strings (5 verdict labels + "Prior triage context" carry-forward heading) appear in plugin code via word-boundary regex. Detects template-vs-plugin drift.
-- **Cross-check Windows fix** (`pre_merge_cmd._dispatch_requesting_code_review`) -- WinError 206 root cause was argv length: cross-check prompt (with diff embedded ~200KB) packed into a single `-p <prompt>` argv exceeded Windows cmdline limits. Fix: write prompt to project-relative `<repo_root>/.claude/magi-cross-check/.tmp/prompt-<uuid16>.md` + pass `@<filepath>` reference in argv. Defense-in-depth: project-relative path side-steps MAX_PATH 260 + `@<file>` reference side-steps cmdline limit. `try/finally` cleanup. Items C+D+E (drift line-anchored, spec-snapshot autoregen, close-task convention codification) deferred to v1.0.4 per **first empirical fire of iter-2 CRITICAL trigger** (spec sec.6.1 pre-stage from v1.0.3 iter 1).
-
-> **BREAKING — INV-31 hard block (v0.2.0).** `close-task` and `auto` now invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts and the operator must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The v0.2 promise of routing reviewer issues through a `/receiving-code-review` + mini-cycle TDD feedback loop with up to 3 retry iterations is **deferred to v0.2.1** -- in v0.2.0 a single reviewer issue mid-`/sbtdd auto` aborts the whole run. Operators running quota-constrained or non-superpowers-enabled environments should set `--skip-spec-review` explicitly until v0.2.1 ships.
+> **BREAKING — INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts and the operator must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance.
 
 ### Cost optimization (v0.3.0+)
 
@@ -200,79 +191,42 @@ For one-off bumps without editing the plugin config, pass
 # 1. Bootstrap (once per project)
 /sbtdd init --stack python --author "Your Name"
 
-# 2. Write the spec base, then run the spec pipeline
-#    (drafts spec-behavior.md, claude-plan-tdd-org.md, iterates via MAGI)
+# 2. Spec + plan (drafts sbtdd/spec-behavior.md + planning/claude-plan-tdd.md
+#    via /brainstorming + /writing-plans + MAGI Checkpoint 2)
 /sbtdd spec
-#    Caveat v1.0.1 Finding A (subsists until v1.0.4 real headless detection):
-#    /brainstorming and /writing-plans are interactive skills. /sbtdd spec
-#    dispatches them via `claude -p` subprocess which silently exits empty.
-#    Workaround: in an interactive Claude Code session, manually invoke
-#    /brainstorming + /writing-plans against sbtdd/spec-behavior-base.md and
-#    let them produce sbtdd/spec-behavior.md + planning/claude-plan-tdd-org.md.
-#    THEN dispatch MAGI Checkpoint 2 via:
-/sbtdd spec --resume-from-magi  # validates structurally + runs MAGI only
-#    (See "Recent release highlights" for the v1.0.1 --resume-from-magi flag.)
 
-# 3. Execute the plan
-#    Option A: manual (one phase at a time)
-/sbtdd close-phase            # after implementing Red
-/sbtdd close-phase            # after Green (or: --variant fix)
-/sbtdd close-phase            # after Refactor (auto-invokes close-task)
-# ... repeat for each task ...
+# 3. Execute the plan — pick one mode:
+#    Manual (one TDD phase at a time):
+/sbtdd close-phase            # after Red, Green, Refactor (auto-closes task on Refactor)
 
-#    Option B: shoot-and-forget
+#    Shoot-and-forget (sequential):
 /sbtdd auto
 
-#    Subagent convention (v1.0.2 Q2 Option B mandate): subagents executing
-#    plan tasks MUST close via the close-task automation, NOT manual
-#    plan-file edits (which trigger drift detection):
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-#    (--skip-spec-review bypasses the v0.2 INV-31 spec-reviewer for
-#    defensive infrastructure cycles; omit for feature work where INV-31
-#    enforcement is desired.)
+#    Shoot-and-forget (parallel, v1.0.5+):
+/sbtdd auto --parallel        # auto-partitions DAG into disjoint tracks; runs them concurrently
 
-# 4. Pre-merge gates
-/sbtdd pre-merge              # Loop 1 (code review) + Loop 2 (MAGI)
-#    Caveat (v1.0.4 backlog): /requesting-code-review is invoked as a
-#    subprocess for fix-finding triage between Loop 1 iters; it currently
-#    hangs waiting for interactive input on the same subprocess pattern as
-#    Finding A. Manual fallback per spec sec.6.4: dispatch MAGI Loop 2
-#    directly via:
-python skills/magi/scripts/run_magi.py code-review <payload> \
-    --model opus --timeout 900 --output-dir <dir>
-#    Apply findings via mini-cycle TDD manually + re-dispatch as needed.
-#    v1.0.4 LOCKED ships real headless detection
-#    (SBTDD_HEADLESS=1 + os.isatty(0)) which collapses the hang to a
-#    single LOUD-FAST PreconditionError.
+# 4. Pre-merge gates (Loop 1 code review + Loop 2 MAGI consensus)
+/sbtdd pre-merge
 
-# 5. Finalize (runs the checklist + /finishing-a-development-branch)
-/sbtdd finalize
-#    Then bump plugin.json + marketplace.json to the new version,
-#    append CHANGELOG `[X.Y.Z]` section, commit `chore: bump to X.Y.Z`,
-#    create local tag `git tag vX.Y.Z`, and request explicit user
-#    authorization before pushing (memory rule: commit and push each
-#    require separate explicit authorization).
+# 5. Finalize + ship
+/sbtdd finalize               # runs sec.7 checklist + /finishing-a-development-branch
 ```
 
-### Known operational caveats (v1.0.4 backlog)
+#### Common flags
 
-Until v1.0.4 ships real headless detection + parallel task dispatcher,
-the following caveats apply during cycle execution:
+- `--skip-spec-review` (`close-task`, `auto`): bypass the v0.2 INV-31 spec-reviewer dispatch (use for infrastructure cycles where compliance is verified by hand).
+- `--skip-preflight` (`close-task`, v1.0.5+): operator emergency override of the close-task TDD-triplet HARD-BLOCK gate; emits an audit breadcrumb to stderr.
+- `--resume-from-magi` (`spec`, v1.0.1+): skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against operator-produced spec + plan artifacts. Use when you produced them by hand in an interactive Claude Code session.
+- `--override-checkpoint --reason "<text>"` (`spec`, `pre-merge`, `finalize`, v0.2+): INV-0 escape valve when a MAGI safety-valve (cap=3 / cap=5) exhausts. Use sparingly; explicit per-instance authorization required.
+- `--non-interactive` (v0.2+): force the headless policy on TTY (applies `.claude/magi-auto-policy.json`).
 
-- **Interactive skill subprocess hangs**: `/brainstorming`,
-  `/writing-plans`, and `/receiving-code-review` are interactive skills
-  that hang silently when invoked via `claude -p` subprocess (Finding A
-  v1.0.0 + v1.0.4 LOCKED scope). Use the recovery paths above
-  (`--resume-from-magi`, manual `run_magi.py` for Loop 2).
-- **State file phase advance**: subagents executing plan tasks via raw
-  `git commit` (instead of `/sbtdd close-phase` wrapper) need to manually
-  advance `current_phase` from `red` → `green` → `refactor` in
-  `.claude/session-state.json` before invoking `close-task`. Methodology
-  gap to be addressed by v1.0.4 Item E close-task convention codification.
-- **Cross-check Windows path issues**: resolved in v1.0.3 Item B (project-
-  relative `.claude/magi-cross-check/.tmp/prompt-<uuid16>.md` + `@<file>`
-  reference in argv). Earlier versions hit WinError 206 from argv length
-  exceeding Windows cmdline limits.
+#### `/sbtdd status`
+
+Read-only structured report of state + git + plan + drift. Use anytime to see where you are without touching anything.
+
+#### `/sbtdd resume`
+
+Diagnostic recovery for interrupted runs (token exhaustion, Ctrl+C, crash, reboot). Reads state + git + runtime artifacts and delegates to `auto` / `pre-merge` / `finalize`. Pass `--discard-uncommitted` to drop in-flight work.
 
 ### Direct CLI (bypassing the skill)
 
@@ -432,7 +386,7 @@ make typecheck   # mypy --strict
 make coverage    # pytest --cov=skills/sbtdd/scripts --cov-fail-under=88 (v1.0.2+)
 ```
 
-The coverage target enforces a per-module floor of **88%** since v1.0.2 (`floor(measured_baseline) - 2%` per Q4 brainstorming protocol). `subprocess_utils.py` (74%) and `superpowers_dispatch.py` (83%) are documented v1.0.5+ raise candidates.
+The coverage target enforces a per-module floor of **88%** since v1.0.2 (`floor(measured_baseline) - 2%` per Q4 brainstorming protocol).
 
 ---
 

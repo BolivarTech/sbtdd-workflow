@@ -413,6 +413,70 @@ v1.0.3 ships template alignment audit + cross-check Windows fix:
 - **G1 cap=3 HARD streak now 4 cycles consecutive**: v1.0.0 (last
   override) → v1.0.1 → v1.0.2 → v1.0.3 (all no-override).
 
+### v1.0.4 notes
+
+v1.0.4 ships the `--parallel` track-based dispatch foundation:
+
+- **`auto --parallel`**: partitions plan DAG into file-disjoint
+  tracks via union-find on `addBlockedBy` + file-conflict edges
+  (`partition_by_tracks`); each track runs in a subprocess worker
+  via `_dispatch_tracks_concurrent`. Sequential remains default;
+  opt in with `--parallel`.
+- **`--task-ids T1,T3,T4`** + **`--no-recursive`**: worker-mode flags
+  used by parent dispatcher; manual operators usually do not pass
+  these directly.
+- **Items A+B membership-based subprocess gate**: extends
+  `_SUBPROCESS_INCOMPATIBLE_SKILLS` to include `receiving-code-review`;
+  PRE-spawn UNCONDITIONAL block for incompatible skills with
+  `allow_interactive_skill=True` override hatch.
+- **G1 cap=3 HARD streak**: 5 cycles consecutive (v1.0.4 clean iter-3
+  STRONG GO unanimous at Checkpoint 2). Pre-merge Loop 2 INV-0 invoked
+  at iter-6b for the first time post-v1.0.0 closure (5-cycle pre-merge
+  streak broken; v1.0.5 LOCKED commitment to re-establish from 1
+  cycle).
+
+### v1.0.5 notes
+
+v1.0.5 ships production-grade `--parallel` correctness + Item D
+Q3-A code-side enforcement:
+
+- **Items I-1 + I-2 + I-3 (Pillar A)** close the v1.0.4 LOCKED
+  `--parallel` opt-in path correctness gaps:
+  - **I-1** per-worker sidecar audit-trail (`auto-run-track-{hash}.json`
+    files merged by parent post-batch; `_reap_orphans` mtime guard
+    cleans stale files from prior crashed runs). Closes INV-26
+    violation where workers clobbered parent's `auto-run.json`.
+  - **I-2** per-worker scratch plan + flip-merge
+    (`plan-scratch-{hash}.md` files; `_apply_flips_from_diff` derives
+    flips from scratch-vs-main diff; partial worker failure no
+    longer fabricates false-positive checkbox flips). Closes the
+    plan-checkbox lost-update race.
+  - **I-3** worker CLI flag forwarding (`_FORWARDABLE_FLAGS` +
+    `_build_worker_argv`): `--plugins-root`, `--magi-max-iterations`,
+    `--magi-threshold`, `--verification-retries`, `--model-override`
+    propagated to subprocess workers per parent operator's argv.
+- **Item D Q3 OPTION A (Pillar B)** code-side close-task preflight
+  HARD-BLOCK: `_preflight_triplet_check` raises `PreconditionError`
+  when commit chain since the last `chore: mark task <N> complete`
+  commit (or branch root for first task) lacks the canonical
+  `test:`/`feat:|fix:`/`refactor:` triplet. Operator emergency
+  override via **`--skip-preflight`** flag-only with stderr audit
+  breadcrumb (`since SHA <sha>`).
+- **DRY consolidation**: `atomic_write_json` + `atomic_write_text`
+  extracted to `state_file.py` (uses `tempfile.mkstemp` for
+  collision-safe temp names under concurrent writers). Both
+  `auto_cmd._atomic_write_json` and `close_task_cmd._atomic_write`
+  are now thin re-exports.
+- **G1 cap=3 HARD streak now 6 cycles consecutive**: v1.0.5 clean
+  iter-3 STRONG GO unanimous (Mel 82 + Bal 78 + Cas 82) at
+  Checkpoint 2.
+- **Pre-merge Loop 2 no-override streak RE-ESTABLISHED from 1 cycle**:
+  v1.0.5 clean iter-1 STRONG GO unanimous (Mel 82 + Bal 82 + Cas 78)
+  at Loop 2 sin INV-0. Q5 strict no-INV-0 stance honored;
+  escalate-to-user-before-INV-0 discipline preserved unused.
+- **Pillar C deferred to v1.0.6** per iter-2 Checkpoint 2 CRITICAL
+  trigger pre-staged response (G2 ladder).
+
 ## Notes
 
 - The plugin is pre-1.0 (`v0.1.x`); the schema of `session-state.json` and
