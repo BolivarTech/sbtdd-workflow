@@ -62,8 +62,16 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _preflight(root: Path) -> SessionState:
-    """Validate state + drift before any mutation."""
+def _load_state_and_check_drift(root: Path) -> SessionState:
+    """Validate state + drift before any mutation.
+
+    v1.0.6 K-3 rename: was ``_preflight`` in v1.0.5. Renamed to free
+    the ``_preflight`` slot for the canonical triplet-check helper
+    (formerly ``_preflight_triplet_check``). Per spec sec.4.6
+    K-3a/K-3b: ``close_task_cmd._preflight`` is now the triplet-check
+    function; this helper retains the original state-load + drift
+    semantics under a more descriptive name.
+    """
     state_path = root / ".claude" / "session-state.json"
     if not state_path.exists():
         raise PreconditionError(f"state file not found: {state_path}")
@@ -292,7 +300,8 @@ def _merge_scratch_plans(tracks: list[list[str]], project_root: Path) -> None:
 # (escenarios D-1..D-4).
 #
 # v1.0.5 replaces v1.0.4's scope-trimmed Q3 Option B 3-touchpoint doc-only
-# attempt with code-side enforcement. ``_preflight_triplet_check`` walks
+# attempt with code-side enforcement. ``_preflight`` (was
+# ``_preflight_triplet_check`` pre-v1.0.6 K-3 rename) walks
 # the commit chain since the last ``chore: mark task <N> complete`` commit
 # (or branch root for the very first task) and asserts the canonical
 # Red/Green/Refactor commit triplet (``test:`` + ``feat:|fix:`` +
@@ -338,9 +347,10 @@ def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
     """Return SHA of the most recent ``chore: mark task <N> complete`` commit.
 
     v1.0.5 iter-1 CRITICAL #5 fix: this is the canonical "previous task
-    close" boundary for the :func:`_preflight_triplet_check` triplet
-    sweep. Returns ``None`` if no such commit exists on the current
-    branch (first task in plan).
+    close" boundary for the :func:`_preflight` triplet sweep (was
+    :func:`_preflight_triplet_check` pre-v1.0.6 K-3 rename). Returns
+    ``None`` if no such commit exists on the current branch (first
+    task in plan).
 
     Rebase/squash limitation: if the operator squashed prior task-close
     commits, this returns the most recent surviving ``chore:`` subject
@@ -368,7 +378,7 @@ def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
     return None
 
 
-def _preflight_triplet_check(
+def _preflight(
     state: Any, project_root: Path | None = None, *, skip_preflight: bool = False
 ) -> None:
     """Hard-block when the phase advance gate has been bypassed.
@@ -384,11 +394,17 @@ def _preflight_triplet_check(
     Why "since last chore commit" instead of
     ``phase_started_at_commit`` (iter-1 CRITICAL #5 rationale):
     ``phase_started_at_commit`` advances on every phase close within a
-    task, so when ``_preflight_triplet_check`` runs at task-close time
-    it sees only the LAST phase's commits -- never the full
-    Red+Green+Refactor triplet. Boundary "since last chore: mark task"
-    reliably brackets the entire current task's phase-close commits
-    without phase-state coupling.
+    task, so when ``_preflight`` runs at task-close time it sees only
+    the LAST phase's commits -- never the full Red+Green+Refactor
+    triplet. Boundary "since last chore: mark task" reliably brackets
+    the entire current task's phase-close commits without phase-state
+    coupling.
+
+    v1.0.6 K-3 rename: was ``_preflight_triplet_check`` in v1.0.5;
+    promoted to canonical ``_preflight`` per Loop 1 v1.0.5 iter-2 bal
+    Important #2. The 1-cycle backwards-compat alias
+    ``_preflight_triplet_check = _preflight`` defined below preserves
+    pre-v1.0.6 callers; alias removed in v1.0.7.
 
     Args:
         state: SessionState dataclass or plain dict carrying at least
@@ -427,6 +443,16 @@ def _preflight_triplet_check(
             f"if emergency operator override is appropriate (audit-logged "
             f"via stderr breadcrumb)."
         )
+
+
+# DEPRECATED: 1-cycle alias for v1.0.6 -> v1.0.7 backwards compat (K-3 Q3'=a).
+# Operator scripts that monkeypatch the old name (uncommon since
+# `_preflight_triplet_check` is a private helper) get one cycle to migrate.
+# Alias removed in v1.0.7 per CHANGELOG [1.0.6] Deferred section. Note:
+# monkeypatching this alias does NOT propagate to the canonical ``_preflight``
+# attribute (Python attribute semantics); callers monkeypatching tests should
+# target the canonical name directly per spec sec.4.6 K-3b.
+_preflight_triplet_check = _preflight
 
 
 def _state_field(state: Any, key: str) -> Any:
@@ -591,11 +617,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root: Path = ns.project_root
-    state = _preflight(root)
+    state = _load_state_and_check_drift(root)
     closed_task_id = state.current_task_id or ""
     # v1.0.5 Item D Q3-A: HARD-BLOCK when phase advance gate bypassed.
     # Operator emergency override available via --skip-preflight.
-    _preflight_triplet_check(state, root, skip_preflight=getattr(ns, "skip_preflight", False))
+    # v1.0.6 K-3: ``_preflight`` is the canonical triplet-check helper
+    # (was ``_preflight_triplet_check`` in v1.0.5).
+    _preflight(state, root, skip_preflight=getattr(ns, "skip_preflight", False))
     if not ns.skip_spec_review:
         _run_spec_review(closed_task_id, state, root)
     new_state = mark_and_advance(state, root)

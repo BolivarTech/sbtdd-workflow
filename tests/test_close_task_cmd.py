@@ -111,18 +111,24 @@ def _install_happy_path_patches(
     - ``commit_calls``: list of ``(prefix, message)`` tuples.
     - ``new_sha``: short SHA returned by rev-parse.
 
-    v1.0.5 Item D Q3-A: also monkeypatches ``_preflight_triplet_check``
-    to a no-op so the happy-path tests (which run against ``tmp_path``
-    with no real git history) bypass the new HARD-BLOCK introduced in
-    Task 4. Tests that exercise the preflight gate explicitly target
-    :class:`TestPreflightHardBlock`.
+    v1.0.5 Item D Q3-A: also monkeypatches the canonical preflight
+    triplet-check helper to a no-op so the happy-path tests (which run
+    against ``tmp_path`` with no real git history) bypass the
+    HARD-BLOCK introduced in Task 4. Tests that exercise the preflight
+    gate explicitly target :class:`TestPreflightHardBlock`.
+
+    v1.0.6 K-3 migration: monkeypatch target is now the canonical
+    ``close_task_cmd._preflight`` (formerly
+    ``_preflight_triplet_check`` pre-v1.0.6). Patching the legacy
+    alias does NOT propagate to the canonical attribute that
+    ``main()`` invokes (Python attribute semantics).
     """
     captured.setdefault("commit_calls", [])
     captured.setdefault("new_sha", "f00dcafe")
 
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
     monkeypatch.setattr(
-        "close_task_cmd._preflight_triplet_check",
+        "close_task_cmd._preflight",
         lambda state, project_root=None, *, skip_preflight=False: None,
     )
 
@@ -198,8 +204,10 @@ def test_close_task_chore_commit_contains_only_plan_edit(
 
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
     # v1.0.5 Item D Q3-A: bypass HARD-BLOCK in this happy-path test.
+    # v1.0.6 K-3: patches the canonical ``_preflight`` (was
+    # ``_preflight_triplet_check`` pre-v1.0.6 K-3 rename).
     monkeypatch.setattr(
-        "close_task_cmd._preflight_triplet_check",
+        "close_task_cmd._preflight",
         lambda state, project_root=None, *, skip_preflight=False: None,
     )
 
@@ -654,7 +662,7 @@ class TestPreflightHardBlock:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """D-1: commit chain without TDD triplet -> PreconditionError."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
         from errors import PreconditionError
 
         # Mock _git_log_between to return chain without triplet
@@ -672,7 +680,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
 
         with pytest.raises(PreconditionError) as exc_info:
-            _preflight_triplet_check(state, tmp_path)
+            _preflight(state, tmp_path)
 
         msg = str(exc_info.value)
         assert "Phase advance gate bypassed" in msg
@@ -685,7 +693,7 @@ class TestPreflightHardBlock:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """D-2: canonical TDD triplet in commit chain -> no PreconditionError."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         monkeypatch.setattr(
             "close_task_cmd._git_log_between",
@@ -702,7 +710,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
 
         # Should NOT raise
-        _preflight_triplet_check(state, tmp_path)
+        _preflight(state, tmp_path)
 
     def test_d3_skip_preflight_bypasses_with_breadcrumb(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -712,7 +720,7 @@ class TestPreflightHardBlock:
         Loop 1 iter-2 Important #1 fix: breadcrumb MUST include
         `since SHA <sha>` segment per spec D-3 wording.
         """
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         # Stub _last_chore_task_close_sha so the bypass path produces a
         # deterministic SHA in the breadcrumb (no real git dependency).
@@ -724,7 +732,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3", "phase_started_at_commit": "doesntmatter"}
 
         # Should NOT raise (override active)
-        _preflight_triplet_check(state, tmp_path, skip_preflight=True)
+        _preflight(state, tmp_path, skip_preflight=True)
 
         captured = capsys.readouterr()
         assert "[sbtdd close-task] WARNING" in captured.err
@@ -739,7 +747,7 @@ class TestPreflightHardBlock:
     ) -> None:
         """D-3 (Loop 1 iter-2 fix): first-task case (no prior chore commit)
         renders 'since SHA branch root' in the bypass breadcrumb."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         monkeypatch.setattr(
             "close_task_cmd._last_chore_task_close_sha",
@@ -747,7 +755,7 @@ class TestPreflightHardBlock:
         )
         state = {"current_task_id": "1"}
 
-        _preflight_triplet_check(state, tmp_path, skip_preflight=True)
+        _preflight(state, tmp_path, skip_preflight=True)
 
         captured = capsys.readouterr()
         assert "since SHA branch root" in captured.err
@@ -757,7 +765,7 @@ class TestPreflightHardBlock:
     ) -> None:
         """D-2b (iter-1 CRITICAL #5 fix): no prior `chore: mark task` commit
         -> boundary is branch root + canonical triplet OK -> no raise."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         # Simulate: first task in plan, no prior chore commit exists
         monkeypatch.setattr(
@@ -776,7 +784,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "1"}
 
         # Should NOT raise (first task, branch-root boundary, full triplet)
-        _preflight_triplet_check(state, tmp_path)
+        _preflight(state, tmp_path)
 
     def test_d5_partial_triplet_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -786,7 +794,7 @@ class TestPreflightHardBlock:
 
         (Loop 1 iter-2 minor fix: docstring previously said "D-1" — copy-
         paste typo from D-1 case; corrected to D-5 to match test name.)"""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
         from errors import PreconditionError
 
         monkeypatch.setattr(
@@ -804,7 +812,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3"}
 
         with pytest.raises(PreconditionError) as excinfo:
-            _preflight_triplet_check(state, tmp_path)
+            _preflight(state, tmp_path)
         # iter-1 CRITICAL #5: error message references "since last chore commit"
         # boundary (or "branch root") -- NOT phase_started_at_commit
         assert "since" in str(excinfo.value)

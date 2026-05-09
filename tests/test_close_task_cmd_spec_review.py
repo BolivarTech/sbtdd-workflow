@@ -76,8 +76,10 @@ def _install_happy_path_patches(
     # v1.0.5 Item D Q3-A: bypass HARD-BLOCK in spec-review happy-path tests
     # (no real git history in tmp_path; preflight gate is exercised
     # exclusively in TestPreflightHardBlock).
+    # v1.0.6 K-3: monkeypatch target is the canonical ``_preflight`` (was
+    # ``_preflight_triplet_check`` pre-v1.0.6 K-3 rename).
     monkeypatch.setattr(
-        "close_task_cmd._preflight_triplet_check",
+        "close_task_cmd._preflight",
         lambda state, project_root=None, *, skip_preflight=False: None,
     )
 
