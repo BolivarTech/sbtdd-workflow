@@ -668,7 +668,7 @@ Covers escenarios K-3a + K-3b from spec sec.4.6.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_close_task_cmd.py`:
 
@@ -719,12 +719,12 @@ class TestPreflightRenameAndAlias:
         )
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_close_task_cmd.py::TestPreflightRenameAndAlias -v`
 Expected: 3/3 FAIL — `_preflight` doesn't exist yet (only `_preflight_triplet_check` does).
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -732,7 +732,7 @@ Expected: Atomic `test:` commit.
 
 #### Green Phase
 
-- [ ] **Step 4: Rename `_preflight_triplet_check` to `_preflight` + add alias**
+- [x] **Step 4: Rename `_preflight_triplet_check` to `_preflight` + add alias**
 
 Modify `skills/sbtdd/scripts/close_task_cmd.py`:
 
@@ -750,7 +750,7 @@ Modify `skills/sbtdd/scripts/close_task_cmd.py`:
 _preflight_triplet_check = _preflight
 ```
 
-- [ ] **Step 5: Update all test references**
+- [x] **Step 5: Update all test references**
 
 Modify `tests/test_close_task_cmd.py`:
 
@@ -769,17 +769,17 @@ grep -n "_preflight_triplet_check" tests/test_close_task_cmd.py
 
 Then update each callsite to use `_preflight` (except in TestPreflightRenameAndAlias which intentionally tests both names).
 
-- [ ] **Step 6: Run K-3 tests to verify PASS**
+- [x] **Step 6: Run K-3 tests to verify PASS**
 
 Run: `pytest tests/test_close_task_cmd.py::TestPreflightRenameAndAlias -v`
 Expected: 3/3 PASS.
 
-- [ ] **Step 7: Run full test suite to verify no regression**
+- [x] **Step 7: Run full test suite to verify no regression**
 
 Run: `make verify`
 Expected: All checks green (existing TestPreflightHardBlock tests still pass via renamed function).
 
-- [ ] **Step 8: close-phase Green**
+- [x] **Step 8: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -793,7 +793,7 @@ Expected: Atomic `refactor:` commit (rename is structural refactor, not feature/
 
 #### Refactor Phase
 
-- [ ] **Step 9: Refactor — verify cross-artifact references**
+- [x] **Step 9: Refactor — verify cross-artifact references**
 
 Search the codebase for any remaining `_preflight_triplet_check` references that should be updated to `_preflight`:
 
@@ -808,7 +808,7 @@ Expected matches:
 - `CHANGELOG.md`: historical record (KEEP)
 - Any other code references should be migrated to `_preflight`.
 
-- [ ] **Step 10: close-phase Refactor + close-task**
+- [x] **Step 10: close-phase Refactor + close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
