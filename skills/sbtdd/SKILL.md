@@ -490,8 +490,8 @@ triage context across cycles:
    are valuable historical record but bloat the active plan.
 2. **Trim plan-tdd.md to "active plan only"** -- current scope +
    tasks + acceptance criteria; no iter archaeology.
-3. **Optional belt-and-suspenders**: keep
-   `planning/claude-plan-tdd-org.md` as immutable archaeology
+3. **Optional historical-record retention**: keep
+   `planning/claude-plan-tdd-org.md` as the immutable archaeology
    while `planning/claude-plan-tdd.md` is the trimmed canonical
    active plan. Both files coexist; `*-org.md` is the historical
    record, `claude-plan-tdd.md` is the operational reference.
