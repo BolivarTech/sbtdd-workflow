@@ -231,20 +231,24 @@ def _apply_flips_from_diff(main_text: str, scratch_text: str) -> str:
     ignored ``scratch_text`` and unconditionally flipped every
     ``task_id`` in main, fabricating false-positive flips when workers
     crashed before scratch-write.
+
+    v1.0.6 K-1: per-checkbox parity. When scratch's section is fully
+    flipped (``[x]`` lines, zero ``[ ]`` lines), mass-replace every
+    ``- [ ]`` in the main section with ``- [x]``. Bounded to the task
+    section so flips never cross task boundaries.
     """
     result = main_text
     for task_id in _iter_task_ids(scratch_text):
         if not _section_has_flipped(scratch_text, task_id):
             continue
-        # v1.0.6 K-1: scratch fully flipped (per-checkbox parity) -> flip all
-        # remaining `- [ ]` in the main section so result reaches parity too.
-        # `_flip_checkbox` flips one `- [ ]` per call; loop until idempotent
-        # (same plan_text returned means no `- [ ]` left in the section).
-        while not _section_has_flipped(result, task_id):
-            new_result = _flip_checkbox(result, task_id)
-            if new_result == result:
-                break  # section already at parity; nothing left to flip
-            result = new_result
+        bounds = _section_bounds(result, task_id)
+        if bounds is None:
+            continue  # task absent from main; nothing to merge
+        section_start, section_end = bounds
+        section = result[section_start:section_end]
+        flipped_section = section.replace("- [ ]", "- [x]")
+        if flipped_section != section:
+            result = result[:section_start] + flipped_section + result[section_end:]
     return result
 
 
