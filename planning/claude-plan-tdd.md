@@ -411,7 +411,7 @@ Covers escenarios K-1a through K-1c from spec sec.4.4.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_close_task_cmd.py` after existing `TestPerWorkerScratchPlan` or similar class:
 
@@ -573,12 +573,12 @@ class TestSectionHasFlippedPerCheckbox:
         assert "- [ ] Step 1" in merged
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_close_task_cmd.py::TestSectionHasFlippedPerCheckbox -v`
 Expected: At least 1 test FAILS — pre-fix `_section_has_flipped` returns True on any `[x]` in section, so `test_k1a_mixed_checkbox_section_returns_false` fails (expected False, gets True).
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -586,7 +586,7 @@ Expected: Atomic `test:` commit (e.g. `test: v1.0.6 T3 K-1 _section_has_flipped 
 
 #### Green Phase
 
-- [ ] **Step 4: Implement per-checkbox parity in `_section_has_flipped` (iter-1 mel WARNING line-anchored regex)**
+- [x] **Step 4: Implement per-checkbox parity in `_section_has_flipped` (iter-1 mel WARNING line-anchored regex)**
 
 Modify `skills/sbtdd/scripts/close_task_cmd.py:_section_has_flipped`. Pre-fix likely uses `"- [x]" in section_text` (returns True on any `[x]`). Post-fix: section is "flipped" iff there exists at least one `[x]` AND no `[ ]` in the section, **using line-anchored multiline regex** to avoid false-positives from `[x]` appearing inside code blocks or descriptive prose (iter-1 mel WARNING):
 
@@ -627,17 +627,17 @@ def _section_has_flipped(plan_text: str, task_id: str) -> bool:
 
 Confirm `import re` present at module top (likely already; v1.0.5 uses it for `_TASK_HEADER_RE`).
 
-- [ ] **Step 5: Run K-1 tests to verify PASS**
+- [x] **Step 5: Run K-1 tests to verify PASS**
 
 Run: `pytest tests/test_close_task_cmd.py::TestSectionHasFlippedPerCheckbox -v`
 Expected: 5/5 PASS.
 
-- [ ] **Step 6: Run full test suite to verify no regression**
+- [x] **Step 6: Run full test suite to verify no regression**
 
 Run: `make verify`
 Expected: All checks green. Pay special attention to existing `_apply_flips_from_diff` tests + I-2 race regression tests — confirm semantic change doesn't break v1.0.5 contract.
 
-- [ ] **Step 7: close-phase Green**
+- [x] **Step 7: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -645,11 +645,11 @@ Expected: Atomic `fix:` commit (e.g. `fix: v1.0.6 T3 K-1 _section_has_flipped pe
 
 #### Refactor Phase
 
-- [ ] **Step 8: Refactor — verify docstring + cross-references**
+- [x] **Step 8: Refactor — verify docstring + cross-references**
 
 Confirm `_section_has_flipped` docstring matches new semantic. Search for any other callsites that rely on the pre-fix semantic and update them. Likely no other callsites; `_apply_flips_from_diff` is the primary consumer and it benefits from the fix.
 
-- [ ] **Step 9: close-phase Refactor + close-task**
+- [x] **Step 9: close-phase Refactor + close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
