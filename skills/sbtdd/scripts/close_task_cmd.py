@@ -65,12 +65,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def _load_state_and_check_drift(root: Path) -> SessionState:
     """Validate state + drift before any mutation.
 
-    v1.0.6 K-3 rename: was ``_preflight`` in v1.0.5. Renamed to free
-    the ``_preflight`` slot for the canonical triplet-check helper
-    (formerly ``_preflight_triplet_check``). Per spec sec.4.6
-    K-3a/K-3b: ``close_task_cmd._preflight`` is now the triplet-check
-    function; this helper retains the original state-load + drift
-    semantics under a more descriptive name.
+    v1.0.6 K-3: previously named ``_preflight``; renamed to free that
+    slot for the canonical triplet-check helper (see :func:`_preflight`).
     """
     state_path = root / ".claude" / "session-state.json"
     if not state_path.exists():
@@ -300,10 +296,9 @@ def _merge_scratch_plans(tracks: list[list[str]], project_root: Path) -> None:
 # (escenarios D-1..D-4).
 #
 # v1.0.5 replaces v1.0.4's scope-trimmed Q3 Option B 3-touchpoint doc-only
-# attempt with code-side enforcement. ``_preflight`` (was
-# ``_preflight_triplet_check`` pre-v1.0.6 K-3 rename) walks
-# the commit chain since the last ``chore: mark task <N> complete`` commit
-# (or branch root for the very first task) and asserts the canonical
+# attempt with code-side enforcement. ``_preflight`` walks the commit
+# chain since the last ``chore: mark task <N> complete`` commit (or
+# branch root for the very first task) and asserts the canonical
 # Red/Green/Refactor commit triplet (``test:`` + ``feat:|fix:`` +
 # ``refactor:``). A missing prefix raises :class:`PreconditionError`
 # with operator-actionable recovery guidance. ``--skip-preflight`` is
@@ -347,8 +342,7 @@ def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
     """Return SHA of the most recent ``chore: mark task <N> complete`` commit.
 
     v1.0.5 iter-1 CRITICAL #5 fix: this is the canonical "previous task
-    close" boundary for the :func:`_preflight` triplet sweep (was
-    :func:`_preflight_triplet_check` pre-v1.0.6 K-3 rename). Returns
+    close" boundary for the :func:`_preflight` triplet sweep. Returns
     ``None`` if no such commit exists on the current branch (first
     task in plan).
 
@@ -400,11 +394,10 @@ def _preflight(
     the entire current task's phase-close commits without phase-state
     coupling.
 
-    v1.0.6 K-3 rename: was ``_preflight_triplet_check`` in v1.0.5;
-    promoted to canonical ``_preflight`` per Loop 1 v1.0.5 iter-2 bal
-    Important #2. The 1-cycle backwards-compat alias
-    ``_preflight_triplet_check = _preflight`` defined below preserves
-    pre-v1.0.6 callers; alias removed in v1.0.7.
+    v1.0.6 K-3 rename: promoted from ``_preflight_triplet_check``
+    (v1.0.5) per Loop 1 v1.0.5 iter-2 bal Important #2. A 1-cycle
+    backwards-compat alias under the legacy name is defined below;
+    removed in v1.0.7.
 
     Args:
         state: SessionState dataclass or plain dict carrying at least
@@ -445,13 +438,11 @@ def _preflight(
         )
 
 
-# DEPRECATED: 1-cycle alias for v1.0.6 -> v1.0.7 backwards compat (K-3 Q3'=a).
-# Operator scripts that monkeypatch the old name (uncommon since
-# `_preflight_triplet_check` is a private helper) get one cycle to migrate.
-# Alias removed in v1.0.7 per CHANGELOG [1.0.6] Deferred section. Note:
-# monkeypatching this alias does NOT propagate to the canonical ``_preflight``
-# attribute (Python attribute semantics); callers monkeypatching tests should
-# target the canonical name directly per spec sec.4.6 K-3b.
+# DEPRECATED v1.0.6 -> v1.0.7: 1-cycle backwards-compat alias for the
+# pre-rename name. Tests monkeypatching this attribute will NOT affect
+# callers of the canonical ``_preflight`` (Python attribute semantics);
+# new code must target the canonical name. Alias removed in v1.0.7 per
+# CHANGELOG [1.0.6] Deferred section.
 _preflight_triplet_check = _preflight
 
 
@@ -621,8 +612,6 @@ def main(argv: list[str] | None = None) -> int:
     closed_task_id = state.current_task_id or ""
     # v1.0.5 Item D Q3-A: HARD-BLOCK when phase advance gate bypassed.
     # Operator emergency override available via --skip-preflight.
-    # v1.0.6 K-3: ``_preflight`` is the canonical triplet-check helper
-    # (was ``_preflight_triplet_check`` in v1.0.5).
     _preflight(state, root, skip_preflight=getattr(ns, "skip_preflight", False))
     if not ns.skip_spec_review:
         _run_spec_review(closed_task_id, state, root)

@@ -112,16 +112,13 @@ def _install_happy_path_patches(
     - ``new_sha``: short SHA returned by rev-parse.
 
     v1.0.5 Item D Q3-A: also monkeypatches the canonical preflight
-    triplet-check helper to a no-op so the happy-path tests (which run
-    against ``tmp_path`` with no real git history) bypass the
-    HARD-BLOCK introduced in Task 4. Tests that exercise the preflight
-    gate explicitly target :class:`TestPreflightHardBlock`.
-
-    v1.0.6 K-3 migration: monkeypatch target is now the canonical
-    ``close_task_cmd._preflight`` (formerly
-    ``_preflight_triplet_check`` pre-v1.0.6). Patching the legacy
-    alias does NOT propagate to the canonical attribute that
-    ``main()`` invokes (Python attribute semantics).
+    triplet-check helper (``close_task_cmd._preflight``, renamed from
+    ``_preflight_triplet_check`` in v1.0.6 K-3) to a no-op so happy-path
+    tests bypass the HARD-BLOCK against ``tmp_path``'s empty git
+    history. The preflight gate itself is exercised in
+    :class:`TestPreflightHardBlock`. Patching the legacy alias does NOT
+    propagate to the canonical attribute (Python attribute semantics);
+    new tests must target ``_preflight`` directly.
     """
     captured.setdefault("commit_calls", [])
     captured.setdefault("new_sha", "f00dcafe")
@@ -204,8 +201,6 @@ def test_close_task_chore_commit_contains_only_plan_edit(
 
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
     # v1.0.5 Item D Q3-A: bypass HARD-BLOCK in this happy-path test.
-    # v1.0.6 K-3: patches the canonical ``_preflight`` (was
-    # ``_preflight_triplet_check`` pre-v1.0.6 K-3 rename).
     monkeypatch.setattr(
         "close_task_cmd._preflight",
         lambda state, project_root=None, *, skip_preflight=False: None,
