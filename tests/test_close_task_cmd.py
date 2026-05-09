@@ -929,3 +929,60 @@ class TestSectionHasFlippedPerCheckbox:
         assert "- [x] Step B" in merged
         # T2 untouched
         assert "- [ ] Step 1" in merged
+
+
+class TestPreflightRenameAndAlias:
+    """v1.0.6 K-3: _preflight_triplet_check renamed to _preflight + 1-cycle alias.
+
+    Covers escenarios K-3a + K-3b from spec sec.4.6. Q3'=a 1-cycle window;
+    alias removed in v1.0.7.
+    """
+
+    def test_k3a_canonical_preflight_callable(self, tmp_path: Path) -> None:
+        """K-3a: close_task_cmd._preflight is the canonical name."""
+        import close_task_cmd
+
+        assert hasattr(close_task_cmd, "_preflight"), "Canonical _preflight must exist"
+        assert callable(close_task_cmd._preflight), "_preflight must be callable"
+
+    def test_k3b_legacy_alias_still_callable(self, tmp_path: Path) -> None:
+        """K-3b: close_task_cmd._preflight_triplet_check alias resolves to _preflight.
+
+        iter-1 cas WARNING relaxation: assert module-load-time identity ONLY.
+        Monkeypatch of one name does NOT propagate to the alias (Python
+        attribute semantics). Callers monkeypatching tests should target
+        the canonical name (`_preflight`) per v1.0.6 K-3 migration guidance.
+        """
+        import importlib
+
+        import close_task_cmd
+
+        # Re-import to ensure clean module-load-time state (no prior monkeypatch leakage)
+        importlib.reload(close_task_cmd)
+
+        assert hasattr(close_task_cmd, "_preflight_triplet_check"), (
+            "1-cycle deprecation alias must exist (removed in v1.0.7)"
+        )
+        # At module-load time (no monkeypatch), alias IS the canonical.
+        # mypy: pre-Green (RED phase), the two attributes point to
+        # non-overlapping callables (different signatures), so mypy
+        # flags the identity check via comparison-overlap. Post-Green
+        # rename, they will be the same function object. We cast to
+        # ``object`` to let mypy treat the comparison as legitimate;
+        # the runtime ``is`` check still verifies the canonical alias
+        # contract that K-3 ships.
+        alias_obj: object = close_task_cmd._preflight_triplet_check
+        canonical_obj: object = close_task_cmd._preflight
+        assert alias_obj is canonical_obj, (
+            "Alias must be `_preflight_triplet_check = _preflight` at module-load time. "
+            "Note: post-monkeypatch identity may diverge (Python attribute semantics)."
+        )
+
+    def test_k3c_deprecation_marker_in_source(self) -> None:
+        """K-3c: source contains DEPRECATED comment marker for grep-ability."""
+        from pathlib import Path
+
+        source = Path("skills/sbtdd/scripts/close_task_cmd.py").read_text(encoding="utf-8")
+        assert "DEPRECATED" in source and "v1.0.7" in source, (
+            "Source must contain DEPRECATED + v1.0.7 markers near the alias"
+        )
