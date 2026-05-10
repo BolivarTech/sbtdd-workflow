@@ -1828,9 +1828,12 @@ def _spawn_worker(
         env: Environment dict; this helper injects
             ``SBTDD_AUTO_PARALLEL_WORKER=1`` before spawn.
         **popen_kwargs: Forwarded to :class:`subprocess.Popen` on Windows
-            (e.g. ``cwd=``, ``creationflags=``). POSIX path passes the
-            ``cwd``-equivalent through the PTY helper if supplied; other
-            kwargs are silently ignored (PTY semantics constrain stdio).
+            (e.g. ``cwd=``, ``creationflags=``). v1.0.7 T2 code-review C1
+            fix: the ``cwd`` kwarg is also threaded through the POSIX PTY
+            helper so workers run in the project root regardless of the
+            orchestrator's invocation directory. Other kwargs (e.g.
+            ``creationflags``) are silently ignored on POSIX (PTY semantics
+            constrain stdio + Windows-only flags don't apply).
 
     Returns:
         ``subprocess.Popen`` instance ready for orchestrator post-batch
@@ -1847,51 +1850,83 @@ def _spawn_worker(
             **popen_kwargs,
         )
         return cast("subprocess.Popen[bytes]", proc)
+    # v1.0.7 T2 code-review C1 fix: forward cwd through PTY helper to
+    # preserve cross-platform cwd semantics (Windows uses Popen kwargs;
+    # POSIX needs explicit cwd= forwarding to subprocess.Popen via the
+    # PTY helper signature extension). Without this, POSIX workers
+    # silently inherit orchestrator cwd which fails when invoked from
+    # a subdirectory.
+    cwd = popen_kwargs.get("cwd")
     return cast(
         "subprocess.Popen[bytes]",
-        subprocess_utils._spawn_worker_with_pty(argv, env_with_marker),
+        subprocess_utils._spawn_worker_with_pty(argv, env_with_marker, cwd=cwd),
     )
 
 
 def _verify_worker_sidecars_present(
     project_root: Path,
-    worker_pids: list[int],
+    successful_pids: list[int],
 ) -> None:
     """v1.0.7 iter-3 carry-forward C1: LOUD-FAIL on missing INV-16 sidecar.
 
-    Each spawned worker MUST produce >= 1 sidecar matching the glob
-    ``<pid>-*-verify.json``. Missing sidecar = code-path bug (worker
-    spawned + ran close-phase but failed to persist evidence).
-    LOUD-FAIL via :class:`ConcurrentDispatchError` surfaces it during
-    test/dogfood instead of silent INV-16 evidence loss.
+    Each SUCCESSFUL worker (one that reached close-phase + exited 0) MUST
+    have produced >= 1 sidecar matching ``<pid>-*-verify.json``. Missing
+    sidecar = code-path bug: close-phase ran but persistence silently
+    failed. LOUD-FAIL via :class:`ConcurrentDispatchError` surfaces it
+    during test/dogfood instead of silent INV-16 evidence loss.
+
+    v1.0.7 T2 code-review C2 fix: only checks pids of SUCCESSFUL workers,
+    not all spawned workers. Workers that crashed BEFORE reaching
+    close-phase (e.g., green-phase failure) legitimately have no sidecar;
+    conflating them with persistence bugs masks the real failure surface
+    and produces a misleading "INV-16 evidence loss" diagnostic when the
+    actual cause is a worker crash (already captured in the failures
+    list + raised via ConcurrentDispatchError on the failures path).
 
     Args:
         project_root: Project root (sidecar dir is
             ``<project_root>/.claude/auto-run-workers/``).
-        worker_pids: Pids of spawned workers (collected from
-            :func:`_spawn_worker` returns); used to glob expected sidecars.
+        successful_pids: Pids of workers that exited 0; filtered against
+            the failures list by the caller (typically
+            :func:`_dispatch_tracks_concurrent` post-batch).
 
     Raises:
-        ConcurrentDispatchError: At least one spawned worker pid produced
-            no matching sidecar; message names the missing pids + the
-            observed sidecars + the expected worker pid set so operators
-            can reproduce + diagnose the silent persistence failure.
+        ConcurrentDispatchError: At least one successful worker pid
+            produced no matching sidecar; message names the missing pids
+            + the observed sidecars so operators can reproduce + diagnose
+            the silent persistence failure.
     """
     sidecar_dir = project_root / ".claude" / "auto-run-workers"
     if not sidecar_dir.exists():
-        # No workers wrote sidecars at all; possible if all workers
-        # failed before reaching close-phase. Log + return; missing
-        # close-phase chain is a separate failure surface caught by
-        # worker exit code aggregation.
+        # No sidecar dir at all is legitimate when:
+        # (a) all workers failed before close-phase (caught by failures
+        #     list raise), OR
+        # (b) test fixtures with FakePopen that simulate success without
+        #     actually running close-phase / persisting sidecars.
+        # Real production workers create the dir on first sidecar write;
+        # mid-batch the dir always exists when ANY worker reached
+        # close-phase. The check below catches the more interesting bug:
+        # SOME workers persisted sidecars + others didn't. If the dir
+        # never existed, defer to failures-list raise + integration tests
+        # that actually exercise the close-phase chain.
         return
     observed = list(sidecar_dir.glob("*-verify.json"))
-    observed_pids = {int(p.name.split("-")[0]) for p in observed}
-    missing = [pid for pid in worker_pids if pid not in observed_pids]
+    observed_pids: set[int] = set()
+    for p in observed:
+        try:
+            observed_pids.add(int(p.name.split("-")[0]))
+        except ValueError:
+            # Stray file or future schema change; skip + breadcrumb.
+            sys.stderr.write(
+                f"[WARN] v1.0.7 T2 C1: skipping unparseable sidecar "
+                f"filename {p.name!r} (expected <pid>-*-verify.json)\n"
+            )
+    missing = [pid for pid in successful_pids if pid not in observed_pids]
     if missing:
         raise ConcurrentDispatchError(
-            f"v1.0.7 iter-3 C1: workers {missing} completed but produced "
-            f"no INV-16 sidecar. Observed sidecars: {[p.name for p in observed]}. "
-            f"Expected workers: {worker_pids}. Bug in "
+            f"v1.0.7 iter-3 C1: successful workers {missing} exited 0 but "
+            f"produced no INV-16 sidecar. Observed sidecars: "
+            f"{[p.name for p in observed]}. Bug in "
             f"_persist_worker_verify_evidence OR transient OS error "
             f"swallowed mid-write; investigate before next dispatch."
         )
@@ -1974,6 +2009,11 @@ def _dispatch_tracks_concurrent(
     # check post-batch (each worker MUST produce a verify-evidence sidecar).
     spawned_pids: list[int] = []
     spawned_pids_lock = threading.Lock()
+    # v1.0.7 T2 code-review C2 fix: track successful (rc=0) pids
+    # separately so _verify_worker_sidecars_present LOUD-FAIL only
+    # checks workers that reached close-phase + exited cleanly.
+    successful_pids: list[int] = []
+    successful_pids_lock = threading.Lock()
 
     def worker_loop() -> None:
         while True:
@@ -2036,6 +2076,11 @@ def _dispatch_tracks_concurrent(
                     )
                     with failures_lock:
                         failures.append((track, rc, err_text))
+                else:
+                    # v1.0.7 T2 code-review C2 fix: only successful workers
+                    # are checked by _verify_worker_sidecars_present.
+                    with successful_pids_lock:
+                        successful_pids.append(proc.pid)
             finally:
                 track_queue.task_done()
 
@@ -2046,12 +2091,13 @@ def _dispatch_tracks_concurrent(
     for th in threads:
         th.join()
 
-    # v1.0.7 iter-3 C1 LOUD-FAIL: each spawned worker MUST have produced
-    # a verify-evidence sidecar (close_phase_cmd._persist_worker_verify_evidence).
-    # Missing sidecar = INV-16 evidence loss; raise BEFORE merging so the
-    # operator sees the persistence failure surface explicitly rather than
-    # debugging a silent merge of an incomplete audit.
-    _verify_worker_sidecars_present(project_root, spawned_pids)
+    # v1.0.7 iter-3 C1 LOUD-FAIL (with T2 code-review C2 fix): each
+    # SUCCESSFUL worker (rc=0; reached close-phase) MUST have produced a
+    # verify-evidence sidecar. Failed workers (rc!=0; crashed before
+    # close-phase) legitimately have no sidecar; conflating them with
+    # persistence bugs masks the real failure surface (already in
+    # ``failures`` list).
+    _verify_worker_sidecars_present(project_root, successful_pids)
 
     # v1.0.5 Item I-1: merge per-worker audit sidecars into the canonical
     # ``.claude/auto-run.json``. Performed unconditionally (even when some

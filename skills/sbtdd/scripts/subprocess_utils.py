@@ -512,6 +512,8 @@ def _emit_kill_breadcrumb(per_stream_timeout_seconds: float) -> None:
 def _spawn_worker_with_pty(
     argv: list[str],
     env: dict[str, str],
+    *,
+    cwd: str | None = None,
 ) -> "subprocess.Popen[bytes]":
     """v1.0.7 A1 POSIX: allocate pseudo-TTY for worker subprocess.
 
@@ -535,12 +537,20 @@ def _spawn_worker_with_pty(
     BOTH ``master_fd`` and ``slave_fd`` are closed before the exception
     re-raises so neither end leaks on spawn failure.
 
+    v1.0.7 T2 code-review C1 fix: forwards explicit ``cwd`` kwarg so
+    POSIX workers run in the project root regardless of the
+    orchestrator's invocation directory (matches Windows path's
+    ``subprocess.Popen(cwd=...)`` semantics; closes silent-cwd-drop
+    correctness bug).
+
     Args:
         argv: Subprocess argv (executable + args). ``shell=False``
             invariant from sec.S.8.6 preserved.
         env: Environment dict passed to the subprocess. Caller must
             inject ``SBTDD_AUTO_PARALLEL_WORKER=1`` (done by
             ``auto_cmd._spawn_worker`` cross-platform dispatcher).
+        cwd: Working directory for the subprocess; ``None`` inherits
+            orchestrator's cwd (default Popen behaviour).
 
     Returns:
         ``subprocess.Popen`` instance with ``_pty_master_fd`` integer
@@ -573,6 +583,7 @@ def _spawn_worker_with_pty(
             stdout=slave_fd,
             stderr=slave_fd,
             env=env,
+            cwd=cwd,
             close_fds=True,
         )
     except Exception:

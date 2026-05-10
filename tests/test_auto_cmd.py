@@ -3214,6 +3214,81 @@ class TestPath3DispatchTracksConcurrent:
         )
 
 
+class TestVerifyWorkerSidecarsPresent:
+    """v1.0.7 T2 code-review C1+C2 fixes per spec sec.4.2 escenario A2-10."""
+
+    def test_no_sidecar_dir_with_no_successful_pids_returns(self, tmp_path: Path) -> None:
+        """All workers failed pre-close-phase: no sidecar dir is legitimate."""
+        import auto_cmd
+
+        # Sidecar dir does not exist; no successful workers either.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[])
+        # No exception raised → contract satisfied.
+
+    def test_no_sidecar_dir_with_successful_pids_returns_quietly(self, tmp_path: Path) -> None:
+        """No sidecar dir at all = test fixture or pre-close-phase failures.
+
+        The helper defers to integration tests + failures-list raise for the
+        all-workers-failed-pre-close-phase case. The interesting bug surface
+        (some succeeded + some missed sidecar) requires the dir to exist.
+        """
+        import auto_cmd
+
+        # No exception raised even with successful_pids set: the check is
+        # gated on dir existing, so test fixtures + edge cases don't trip
+        # the LOUD-FAIL.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[12345])
+
+    def test_failed_worker_pids_NOT_checked(self, tmp_path: Path) -> None:
+        """v1.0.7 T2 C2 fix: failed workers (rc!=0) legitimately have no sidecar.
+
+        The pre-fix helper checked ALL spawned pids; under partial failure
+        scenarios (some workers crash before close-phase), it raised a
+        misleading "INV-16 evidence loss" message instead of letting the
+        actual failures-list raise propagate. Post-fix: caller passes only
+        successful_pids; failed pids are excluded → no false-positive raise.
+        """
+        import auto_cmd
+
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecar_dir.mkdir(parents=True)
+        # Worker 11111 succeeded + persisted; worker 22222 crashed pre-close-phase
+        # so produced no sidecar. Caller passes only [11111] (the successful pid).
+        (sidecar_dir / "11111-12345-aabbccdd-verify.json").write_text("{}", encoding="utf-8")
+        # No sidecar for 22222 — that's expected for failed workers.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[11111])
+        # No exception → C2 contract satisfied.
+
+    def test_successful_worker_missing_sidecar_raises(self, tmp_path: Path) -> None:
+        """v1.0.7 iter-3 C1: successful worker without sidecar is a real bug."""
+        import auto_cmd
+        from errors import ConcurrentDispatchError
+
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecar_dir.mkdir(parents=True)
+        # Worker 11111 succeeded + persisted; worker 22222 ALSO succeeded but
+        # never persisted (real persistence bug).
+        (sidecar_dir / "11111-12345-aabbccdd-verify.json").write_text("{}", encoding="utf-8")
+        with pytest.raises(ConcurrentDispatchError, match="22222"):
+            auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[11111, 22222])
+
+    def test_unparseable_sidecar_filename_skipped_with_breadcrumb(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Stray file with unparseable name is skipped + breadcrumb to stderr."""
+        import auto_cmd
+
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecar_dir.mkdir(parents=True)
+        (sidecar_dir / "11111-12345-aabbccdd-verify.json").write_text("{}", encoding="utf-8")
+        # Stray file (not <pid>-... pattern).
+        (sidecar_dir / "stray-name-verify.json").write_text("{}", encoding="utf-8")
+        # Should not raise; should emit stderr breadcrumb.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[11111])
+        captured = capsys.readouterr()
+        assert "skipping unparseable sidecar" in captured.err
+
+
 class TestPath3WorkerModeFlowControl:
     """v1.0.4 Path 3 -- worker mode (--task-ids + --no-recursive) does NOT
     re-spawn parent dispatcher; processes given task IDs sequentially.
@@ -3822,13 +3897,19 @@ class TestSpawnWorkerDispatcher:
         class FakeProc:
             pass
 
-        def fake_pty_spawn(argv: list[str], env: dict[str, str]) -> FakeProc:
+        def fake_pty_spawn(
+            argv: list[str], env: dict[str, str], *, cwd: str | None = None
+        ) -> FakeProc:
+            # v1.0.7 T2 code-review C1 fix: PTY helper now accepts cwd kwarg.
             captured["argv"] = argv
             captured["env"] = env
+            captured["cwd"] = cwd
             return FakeProc()
 
         monkeypatch.setattr("subprocess_utils._spawn_worker_with_pty", fake_pty_spawn)
-        auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"})
+        auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"}, cwd="/tmp/x")
         assert captured["argv"] == ["python", "-c", "pass"]
         assert captured["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"  # type: ignore[index]
         assert captured["env"]["PATH"] == "/usr/bin"  # type: ignore[index]
+        # v1.0.7 T2 code-review C1: cwd MUST forward through PTY helper.
+        assert captured["cwd"] == "/tmp/x"

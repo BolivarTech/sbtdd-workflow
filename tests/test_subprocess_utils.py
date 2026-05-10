@@ -511,6 +511,47 @@ class TestSpawnWorkerWithPty:
         finally:
             subprocess_utils._close_pty_master(proc)
 
+    def test_posix_worker_with_pty_forwards_cwd_kwarg(self, tmp_path: Path) -> None:
+        """v1.0.7 T2 code-review C1 fix: cwd kwarg reaches subprocess.
+
+        Without the fix, POSIX workers silently inherit orchestrator cwd
+        (regression: orchestrator invoked from subdirectory → workers
+        run in wrong dir). The fix threads cwd through the PTY helper
+        signature; this test verifies via a worker that prints its cwd.
+        """
+        if sys.platform == "win32":
+            pytest.skip("POSIX-only test")
+        worker_script = tmp_path / "worker_pwd.py"
+        worker_script.write_text(
+            "import os, sys\nsys.stdout.write('cwd=' + os.getcwd())\nsys.stdout.flush()\n",
+            encoding="utf-8",
+        )
+        target_cwd = tmp_path / "subdir"
+        target_cwd.mkdir()
+        proc = subprocess_utils._spawn_worker_with_pty(
+            [sys.executable, str(worker_script)],
+            env=dict(os.environ),
+            cwd=str(target_cwd),
+        )
+        try:
+            output = b""
+            proc.wait(timeout=10)
+            try:
+                while True:
+                    chunk = os.read(proc._pty_master_fd, 4096)  # type: ignore[attr-defined]
+                    if not chunk:
+                        break
+                    output += chunk
+            except OSError:
+                pass
+            assert proc.returncode == 0
+            # Worker reported its cwd; must match the target dir we passed.
+            assert str(target_cwd).encode() in output, (
+                f"worker did not run in cwd={target_cwd!r}; output={output!r}"
+            )
+        finally:
+            subprocess_utils._close_pty_master(proc)
+
     def test_windows_worker_spawn_raises_runtime_error(self) -> None:
         """A1-2: Windows worker spawn raises if PTY helper called directly."""
         if sys.platform != "win32":
