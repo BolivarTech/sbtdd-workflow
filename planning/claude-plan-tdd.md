@@ -210,7 +210,7 @@ sec.4.1.
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests in `tests/test_subprocess_utils.py`**
+- [x] **Step 1: Write failing tests in `tests/test_subprocess_utils.py`**
 
 First, create the worker fixture at
 `tests/fixtures/pty/worker_isatty.py`:
@@ -349,20 +349,20 @@ from pathlib import Path
 import pytest
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run on Windows dev env: `pytest tests/test_subprocess_utils.py::TestSpawnWorkerWithPty -v`
 Expected: `test_windows_worker_spawn_raises_runtime_error` FAILS with
 `AttributeError: module 'subprocess_utils' has no attribute '_spawn_worker_with_pty'`.
 The two POSIX-only tests SKIP on Windows.
 
-- [ ] **Step 3: Run `make verify` (must show only the new test failures)**
+- [x] **Step 3: Run `make verify` (must show only the new test failures)**
 
 Run: `make verify`
 Expected: pytest collects, the 3 new tests fail/skip per platform, all
 other tests pass; ruff + mypy clean.
 
-- [ ] **Step 4: Close Red phase**
+- [x] **Step 4: Close Red phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 A1 POSIX PTY allocation tests"`
 
@@ -370,7 +370,7 @@ Expected: commit with prefix `test:` lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 5: Implement `_spawn_worker_with_pty` + `_close_pty_master` in `subprocess_utils.py`**
+- [x] **Step 5: Implement `_spawn_worker_with_pty` + `_close_pty_master` in `subprocess_utils.py`**
 
 Add at the bottom of `skills/sbtdd/scripts/subprocess_utils.py`:
 
@@ -491,17 +491,17 @@ def _close_pty_master(proc: "subprocess.Popen[bytes]") -> None:
     proc._pty_master_fd = None  # type: ignore[attr-defined]
 ```
 
-- [ ] **Step 6: Run the new tests to verify they pass**
+- [x] **Step 6: Run the new tests to verify they pass**
 
 Run: `pytest tests/test_subprocess_utils.py::TestSpawnWorkerWithPty -v`
 Expected: on POSIX, all 3 PASS; on Windows, the guard test PASSES, the
 other 2 SKIP.
 
-- [ ] **Step 7: Run `make verify`**
+- [x] **Step 7: Run `make verify`**
 
 Expected: pytest all green; ruff + mypy clean.
 
-- [ ] **Step 8: Close Green phase**
+- [x] **Step 8: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 A1 POSIX PTY allocation in subprocess_utils"`
 
@@ -509,7 +509,7 @@ Expected: commit with prefix `feat:` lands; state advances to `refactor`.
 
 #### Refactor Phase
 
-- [ ] **Step 9: Tighten `_spawn_worker_with_pty` docstring + sort imports**
+- [x] **Step 9: Tighten `_spawn_worker_with_pty` docstring + sort imports**
 
 Inspect the helper with fresh eyes; if any line exceeds 100 chars, wrap
 appropriately. Consider hoisting the `import pty` + `import os as _os`
@@ -531,11 +531,11 @@ comment above the local imports:
     import os as _os
 ```
 
-- [ ] **Step 10: Run `make verify`**
+- [x] **Step 10: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 11: Close Refactor phase + close task**
+- [x] **Step 11: Close Refactor phase + close task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 A1 PTY helper docstring + import comment"`
 
