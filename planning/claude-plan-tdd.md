@@ -2136,7 +2136,7 @@ Covers escenarios B3-1, B3-2, B3-3 from spec sec.4.6.
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests in `tests/test_state_file.py`**
+- [x] **Step 1: Write failing tests in `tests/test_state_file.py`**
 
 Append:
 
@@ -2216,17 +2216,17 @@ class TestAtomicWriteJsonRetry:
 
 Add `import json`, `import os`, `import state_file`, and `from pathlib import Path` if missing at top of file.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `pytest tests/test_state_file.py::TestAtomicWriteJsonRetry -v`
 Expected: all 3 FAIL (current impl raises on first PermissionError;
 no retry; no `time.sleep` call).
 
-- [ ] **Step 3: Run `make verify`**
+- [x] **Step 3: Run `make verify`**
 
 Expected: only the 3 new tests fail; ruff + mypy clean.
 
-- [ ] **Step 4: Close Red phase**
+- [x] **Step 4: Close Red phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 B3 atomic_write_json retry-with-backoff tests"`
 
@@ -2234,7 +2234,7 @@ Expected: `test:` commit lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 5: Add retry-with-backoff to `atomic_write_json`**
+- [x] **Step 5: Add retry-with-backoff to `atomic_write_json`**
 
 Edit `skills/sbtdd/scripts/state_file.py:143-171` — replace the body:
 
@@ -2299,16 +2299,16 @@ NOTE: the inner retry loop's `return` exits early on success; the outer
 the final retry re-raised. The `os.replace` success path bypasses the
 cleanup (the tmp file is gone — `os.replace` rename consumed it).
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `pytest tests/test_state_file.py -v`
 Expected: full module green including the 3 new B3 tests.
 
-- [ ] **Step 7: Run `make verify`**
+- [x] **Step 7: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 8: Close Green phase**
+- [x] **Step 8: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 B3 atomic_write_json retry-with-backoff for Windows PermissionError"`
 
@@ -2316,7 +2316,7 @@ Expected: `fix:` commit lands; state advances to `refactor`.
 
 #### Refactor Phase
 
-- [ ] **Step 9: Apply same retry to `atomic_write_text` (DRY)**
+- [x] **Step 9: Apply same retry to `atomic_write_text` (DRY)**
 
 Inspect `state_file.atomic_write_text` (line 174+) — it has the same
 `os.replace` pattern. Apply identical retry-with-backoff for symmetry,
@@ -2328,11 +2328,11 @@ helper used by both `atomic_write_json` and `atomic_write_text` to keep
 DRY. Choose whichever surface is cleaner; the helper-extraction path
 is preferred when the function bodies otherwise diverge significantly.
 
-- [ ] **Step 10: Run `make verify`**
+- [x] **Step 10: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 11: Close Refactor phase + close task**
+- [x] **Step 11: Close Refactor phase + close task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor v1.0.7 B3 share retry helper between atomic_write_json + atomic_write_text"`
 
