@@ -828,7 +828,7 @@ Covers escenarios K-5a through K-5d from spec sec.4.8.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_commits.py`:
 
@@ -975,12 +975,12 @@ class TestPreflightTripletCCScope:
         _preflight(state, tmp_path)
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_commits.py::TestValidatePrefixFromSubjectCCScope tests/test_close_task_cmd.py::TestPreflightTripletCCScope -v`
 Expected: 7/7 FAIL — `extract_prefix_from_subject` doesn't exist yet; `_preflight` raises on scoped subjects.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -988,7 +988,7 @@ Expected: Atomic `test:` commit.
 
 #### Green Phase
 
-- [ ] **Step 4: Implement `extract_prefix_from_subject` in `commits.py`**
+- [x] **Step 4: Implement `extract_prefix_from_subject` in `commits.py`**
 
 Add to `skills/sbtdd/scripts/commits.py` after existing `validate_prefix`:
 
@@ -1046,12 +1046,12 @@ def extract_prefix_from_subject(subject: str) -> str | None:
 
 Confirm `import re` is present at module top (likely already there).
 
-- [ ] **Step 5: Run commits tests to verify PASS**
+- [x] **Step 5: Run commits tests to verify PASS**
 
 Run: `pytest tests/test_commits.py::TestValidatePrefixFromSubjectCCScope -v`
 Expected: 5/5 PASS.
 
-- [ ] **Step 6: Update `_preflight` triplet matchers in `close_task_cmd.py`**
+- [x] **Step 6: Update `_preflight` triplet matchers in `close_task_cmd.py`**
 
 Modify `skills/sbtdd/scripts/close_task_cmd.py:_preflight`. Find the existing triplet check (around line 390):
 
@@ -1078,17 +1078,17 @@ Replace with `extract_prefix_from_subject`-based matchers:
 
 Confirm `from commits import extract_prefix_from_subject` is added at module top (or inside the function for late-import; either is acceptable for this small surface).
 
-- [ ] **Step 7: Run K-5d tests to verify PASS**
+- [x] **Step 7: Run K-5d tests to verify PASS**
 
 Run: `pytest tests/test_close_task_cmd.py::TestPreflightTripletCCScope -v`
 Expected: 2/2 PASS.
 
-- [ ] **Step 8: Run full test suite to verify no regression**
+- [x] **Step 8: Run full test suite to verify no regression**
 
 Run: `make verify`
 Expected: All checks green. Confirm existing TestPreflightHardBlock tests still pass with the new extraction-based matchers (bare prefixes still extracted correctly).
 
-- [ ] **Step 9: close-phase Green**
+- [x] **Step 9: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1096,11 +1096,11 @@ Expected: Atomic `feat:` commit (e.g. `feat: v1.0.6 T7 K-5 liberal CC scope synt
 
 #### Refactor Phase
 
-- [ ] **Step 10: Refactor — verify regex documentation + edge cases**
+- [x] **Step 10: Refactor — verify regex documentation + edge cases**
 
 Confirm `_PREFIX_FROM_SUBJECT_RE` regex docstring documents the Q4'=b liberal scope rationale. Add a brief comment explaining why the regex anchors to start-of-string (`^`) and requires colon-space (`:\s`) — defensive against false-positive matches in subjects that contain `(text):` mid-string.
 
-- [ ] **Step 11: close-phase Refactor + close-task**
+- [x] **Step 11: close-phase Refactor + close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
