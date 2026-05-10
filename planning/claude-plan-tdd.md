@@ -1824,7 +1824,7 @@ Covers escenarios B4-1, B4-2, B4-3, B4-4 from spec sec.4.5.
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests in `tests/test_spec_review_dispatch.py`**
+- [x] **Step 1: Write failing tests in `tests/test_spec_review_dispatch.py`**
 
 Append:
 
@@ -1987,17 +1987,17 @@ class TestSpecReviewerFileReference:
 
 Add `import spec_review_dispatch` and `from pathlib import Path` if missing.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `pytest tests/test_spec_review_dispatch.py::TestSpecReviewerFileReference -v`
 Expected: all 4 FAIL (current impl puts inline prompt in argv → no
 `@`-prefix tokens, no tempfile created).
 
-- [ ] **Step 3: Run `make verify`**
+- [x] **Step 3: Run `make verify`**
 
 Expected: only the 4 new tests fail; ruff + mypy clean.
 
-- [ ] **Step 4: Close Red phase**
+- [x] **Step 4: Close Red phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 B4 spec_review_dispatch file-reference tests"`
 
@@ -2005,7 +2005,7 @@ Expected: `test:` commit lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 5: Refactor `dispatch_spec_reviewer` to use file-reference pattern**
+- [x] **Step 5: Refactor `dispatch_spec_reviewer` to use file-reference pattern**
 
 Edit `skills/sbtdd/scripts/spec_review_dispatch.py` around line 413-485.
 Locate the prompt-build + argv-build block (lines ~413-435):
@@ -2079,16 +2079,16 @@ NOTE: the existing function returns `SpecReviewResult` from inside the
 for-loop and raises `SpecReviewError` from inside the for-loop too;
 both flows now hit the `finally:` block as required.
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `pytest tests/test_spec_review_dispatch.py -v`
 Expected: full module green including the 4 new B4 tests.
 
-- [ ] **Step 7: Run `make verify`**
+- [x] **Step 7: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 8: Close Green phase**
+- [x] **Step 8: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 B4 spec_review_dispatch file-reference closes WinError 206"`
 
@@ -2096,7 +2096,7 @@ Expected: `fix:` commit lands; state advances to `refactor`.
 
 #### Refactor Phase
 
-- [ ] **Step 9: Hoist `import uuid` to module top + audit other long-prompt callsites**
+- [x] **Step 9: Hoist `import uuid` to module top + audit other long-prompt callsites**
 
 Move the local `import uuid` to the module-top imports block of
 `spec_review_dispatch.py`. Confirm no other callsite in the codebase
@@ -2110,11 +2110,11 @@ If other dispatch helpers exhibit the same pattern (e.g., a future
 cross-check helper), document them in a follow-up backlog entry; do
 NOT broaden the v1.0.7 B4 scope — that's a separate cycle.
 
-- [ ] **Step 10: Run `make verify`**
+- [x] **Step 10: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 11: Close Refactor phase + close task**
+- [x] **Step 11: Close Refactor phase + close task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 B4 hoist uuid import + audit other callsites"`
 
