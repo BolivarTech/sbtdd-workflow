@@ -3724,3 +3724,45 @@ class TestWorkerFlagForwarding:
         docstring = auto_cmd._build_worker_argv.__doc__ or ""
         for flag_value in auto_cmd._FORWARDABLE_FLAGS.values():
             assert flag_value in docstring, f"Helper docstring missing: {flag_value}"
+
+
+class TestK4ForwardableFlagsArgparseGuard:
+    """v1.0.6 K-4: _FORWARDABLE_FLAGS argparse-presence guard.
+
+    Covers escenarios K-4a + K-4b from spec sec.4.7. Detects drift
+    between hardcoded _FORWARDABLE_FLAGS mapping and argparse dest
+    set so a flag added to the mapping but not registered in argparse
+    surfaces LOUD-FAST at module import time rather than silently
+    failing to forward.
+    """
+
+    def test_k4a_clean_forwardable_flags_passes(self) -> None:
+        """K-4b: real _FORWARDABLE_FLAGS matches argparse dest set."""
+        import auto_cmd
+
+        assert hasattr(auto_cmd, "_validate_forwardable_flags_against_argparse"), (
+            "K-4 guard helper must exist"
+        )
+        # Invocation with current state should not raise
+        auto_cmd._validate_forwardable_flags_against_argparse()
+
+    def test_k4a_drift_detected_raises_validation_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """K-4a: synthetic _FORWARDABLE_FLAGS with drifted key raises ValidationError."""
+        from errors import ValidationError
+        import auto_cmd
+        from types import MappingProxyType
+
+        fake_flags = MappingProxyType({
+            **dict(auto_cmd._FORWARDABLE_FLAGS),
+            "nonexistent_fake_flag_for_drift_test": "--nonexistent-fake-flag",
+        })
+        monkeypatch.setattr(auto_cmd, "_FORWARDABLE_FLAGS", fake_flags)
+
+        with pytest.raises(ValidationError) as excinfo:
+            auto_cmd._validate_forwardable_flags_against_argparse()
+        msg = str(excinfo.value)
+        assert "nonexistent_fake_flag_for_drift_test" in msg, (
+            "Drift error message must name the offending key(s)"
+        )
