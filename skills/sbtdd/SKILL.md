@@ -477,6 +477,32 @@ Q3-A code-side enforcement:
 - **Pillar C deferred to v1.0.6** per iter-2 Checkpoint 2 CRITICAL
   trigger pre-staged response (G2 ladder).
 
+### Plan archaeology trim methodology (v1.0.6 C.2)
+
+At ship-time of each v1.0.X release, the orchestrator SHOULD apply
+the **plan archaeology trim** procedure to keep `planning/claude-plan-tdd.md`
+focused on the active scope rather than accumulating iter-by-iter
+triage context across cycles:
+
+1. **Extract iter triage context** from
+   `planning/claude-plan-tdd.md` into the CHANGELOG `[N.N.N]`
+   "Process notes" section. Iter-1 / iter-2 / iter-3 triage decisions
+   are valuable historical record but bloat the active plan.
+2. **Trim plan-tdd.md to "active plan only"** -- current scope +
+   tasks + acceptance criteria; no iter archaeology.
+3. **Optional historical-record retention**: keep
+   `planning/claude-plan-tdd-org.md` as the immutable archaeology
+   while `planning/claude-plan-tdd.md` is the trimmed canonical
+   active plan. Both files coexist; `*-org.md` is the historical
+   record, `claude-plan-tdd.md` is the operational reference.
+
+Originally proposed by Balthasar v1.0.4 INFO #17 ("Plan size
+disproportionate to code delta -- maintenance debt accumulating");
+deferred via v1.0.5 iter-2 G2 ladder; landed in v1.0.6 Item C.2.
+The methodology is doc-only (no code change); see
+`templates/CLAUDE.local.md.template` for destination project
+guidance.
+
 ## Notes
 
 - The plugin is pre-1.0 (`v0.1.x`); the schema of `session-state.json` and

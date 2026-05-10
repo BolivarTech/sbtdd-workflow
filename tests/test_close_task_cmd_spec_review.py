@@ -77,7 +77,7 @@ def _install_happy_path_patches(
     # (no real git history in tmp_path; preflight gate is exercised
     # exclusively in TestPreflightHardBlock).
     monkeypatch.setattr(
-        "close_task_cmd._preflight_triplet_check",
+        "close_task_cmd._preflight",
         lambda state, project_root=None, *, skip_preflight=False: None,
     )
 

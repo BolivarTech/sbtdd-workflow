@@ -39,6 +39,52 @@ def validate_prefix(prefix: str) -> None:
         )
 
 
+# v1.0.6 K-5 (Q4'=b liberal regex): match bare prefix OR Conventional
+# Commits scoped prefix syntax. Liberal scope content per Q4'=b
+# (operator UX over CC spec compliance) -- `[^()]+` accepts any non-
+# paren content. Supports CC `!` breaking-change marker (iter-1 mel+cas
+# WARNING). Trailing `(?:\s|$)` assertion deliberately omitted (iter-1
+# mel WARNING K-5f) so colon-without-trailing-space subjects like
+# `feat:Implementation` and `feat:` (empty body) also match.
+# Anchored to start-of-string (`^`) so subjects containing `(text):`
+# mid-string (e.g., descriptive prose like `Update parser to handle
+# (foo): syntax`) do not accidentally match as scoped prefixes.
+_PREFIX_PATTERN: re.Pattern[str] = re.compile(r"^([a-z]+)(?:\([^()]+\))?!?:")
+
+
+def extract_prefix_from_subject(subject: str) -> str | None:
+    """Extract the bare TDD/CC prefix from a commit subject line.
+
+    Liberal extraction supporting v1.0.6 K-5 Conventional Commits scope
+    syntax. Recognized shapes (Q4'=b liberal):
+
+    - Bare: ``test:``, ``feat:``, ``refactor:``, ``chore:``...
+    - Scoped: ``test(close-task):``, ``feat(api):``...
+    - Breaking-change marker: ``feat!:``, ``feat(api)!:``...
+    - Colon-without-trailing-space: ``feat:Implementation``, ``feat:``...
+
+    Prefix extraction is NOT validation; downstream validates separately.
+    The returned prefix is **not** checked against
+    :data:`_ALLOWED_PREFIXES` -- callers (e.g.,
+    ``close_task_cmd._preflight`` triplet check) compare the extracted
+    string to whatever subset they expect (``"test"``, ``"feat"``,
+    ``"fix"``, ``"refactor"``...). Use :func:`validate_prefix` if strict
+    checking is needed.
+
+    Args:
+        subject: Commit subject line (first line of the commit message).
+
+    Returns:
+        Lowercase prefix verb (e.g., ``"feat"``) or ``None`` if the
+        subject does not match the recognized prefix syntax (no colon,
+        leading non-alphabetic char, etc.).
+    """
+    match = _PREFIX_PATTERN.match(subject)
+    if match is None:
+        return None
+    return match.group(1)
+
+
 _FORBIDDEN_MESSAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"Co-Authored-By", re.IGNORECASE),
     re.compile(r"\bClaude\b", re.IGNORECASE),

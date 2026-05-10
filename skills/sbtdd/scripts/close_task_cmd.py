@@ -37,6 +37,7 @@ import _plan_ops
 import spec_review_dispatch
 import subprocess_utils
 from commits import create as commit_create
+from commits import extract_prefix_from_subject
 from drift import detect_drift
 from errors import DriftError, PreconditionError, SpecReviewError
 from state_file import SessionState, load as load_state, save as save_state
@@ -62,8 +63,12 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _preflight(root: Path) -> SessionState:
-    """Validate state + drift before any mutation."""
+def _load_state_and_check_drift(root: Path) -> SessionState:
+    """Validate state + drift before any mutation.
+
+    v1.0.6 K-3: previously named ``_preflight``; renamed to free that
+    slot for the canonical triplet-check helper (see :func:`_preflight`).
+    """
     state_path = root / ".claude" / "session-state.json"
     if not state_path.exists():
         raise PreconditionError(f"state file not found: {state_path}")
@@ -111,6 +116,13 @@ def _current_head_sha(root: Path) -> str:
 # v1.0.5 iter-1 CRITICAL #2 fix: anchored regex walker; ensures flip ops
 # never cross task-section boundaries.
 _TASK_HEADER_RE = re.compile(r"^### Task ", re.MULTILINE)
+
+# v1.0.6 K-1 iter-2 fix (mel+bal WARNINGs): line-anchored checkbox regexes
+# for per-checkbox parity in :func:`_section_has_flipped`. Pre-fix used
+# unanchored substring ``"- [x]" in section`` which could false-positive
+# on ``[x]`` appearing inside code blocks or descriptive prose.
+_FLIPPED_LINE_RE = re.compile(r"^- \[x\]", re.MULTILINE)
+_OPEN_LINE_RE = re.compile(r"^- \[ \]", re.MULTILINE)
 
 
 def _scratch_plan_path(task_ids: tuple[str, ...], project_root: Path) -> Path:
@@ -169,17 +181,25 @@ def _section_bounds(plan_text: str, task_id: str) -> tuple[int, int] | None:
 
 
 def _section_has_flipped(plan_text: str, task_id: str) -> bool:
-    """True iff the task section contains ``- [x]`` (flipped state).
+    """True iff the task section is fully flipped: has ``- [x]`` lines and zero ``- [ ]`` lines.
 
-    v1.0.5 iter-1 helper: bounded section extraction identical to
-    :func:`_flip_checkbox` so 'has flipped' check uses the same
-    task-section window.
+    v1.0.6 K-1 iter-2 fix (mel+bal WARNINGs): line-anchored regex
+    (``re.MULTILINE`` matching ``^- [x]``) ignores ``[x]`` appearing
+    inside code blocks or prose. Per-checkbox parity: a section with
+    mixed ``[x]`` + ``[ ]`` returns False (not yet fully flipped),
+    preserving v1.0.5 I-2 race contract that ``_apply_flips_from_diff``
+    must not fabricate full-task flips from partial worker scratch.
+    Section bounds via :func:`_section_bounds` so checks never cross
+    task-section boundaries (same window as :func:`_flip_checkbox`).
     """
     bounds = _section_bounds(plan_text, task_id)
     if bounds is None:
         return False
     section_start, section_end = bounds
-    return "- [x]" in plan_text[section_start:section_end]
+    section = plan_text[section_start:section_end]
+    if _OPEN_LINE_RE.search(section):
+        return False
+    return bool(_FLIPPED_LINE_RE.search(section))
 
 
 def _flip_checkbox(plan_text: str, task_id: str) -> str:
@@ -216,13 +236,24 @@ def _apply_flips_from_diff(main_text: str, scratch_text: str) -> str:
     ignored ``scratch_text`` and unconditionally flipped every
     ``task_id`` in main, fabricating false-positive flips when workers
     crashed before scratch-write.
+
+    v1.0.6 K-1: per-checkbox parity. When scratch's section is fully
+    flipped (``[x]`` lines, zero ``[ ]`` lines), mass-replace every
+    ``- [ ]`` in the main section with ``- [x]``. Bounded to the task
+    section so flips never cross task boundaries.
     """
     result = main_text
     for task_id in _iter_task_ids(scratch_text):
-        if _section_has_flipped(scratch_text, task_id) and not _section_has_flipped(
-            result, task_id
-        ):
-            result = _flip_checkbox(result, task_id)
+        if not _section_has_flipped(scratch_text, task_id):
+            continue
+        bounds = _section_bounds(result, task_id)
+        if bounds is None:
+            continue  # task absent from main; nothing to merge
+        section_start, section_end = bounds
+        section = result[section_start:section_end]
+        flipped_section = section.replace("- [ ]", "- [x]")
+        if flipped_section != section:
+            result = result[:section_start] + flipped_section + result[section_end:]
     return result
 
 
@@ -266,9 +297,9 @@ def _merge_scratch_plans(tracks: list[list[str]], project_root: Path) -> None:
 # (escenarios D-1..D-4).
 #
 # v1.0.5 replaces v1.0.4's scope-trimmed Q3 Option B 3-touchpoint doc-only
-# attempt with code-side enforcement. ``_preflight_triplet_check`` walks
-# the commit chain since the last ``chore: mark task <N> complete`` commit
-# (or branch root for the very first task) and asserts the canonical
+# attempt with code-side enforcement. ``_preflight`` walks the commit
+# chain since the last ``chore: mark task <N> complete`` commit (or
+# branch root for the very first task) and asserts the canonical
 # Red/Green/Refactor commit triplet (``test:`` + ``feat:|fix:`` +
 # ``refactor:``). A missing prefix raises :class:`PreconditionError`
 # with operator-actionable recovery guidance. ``--skip-preflight`` is
@@ -312,9 +343,9 @@ def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
     """Return SHA of the most recent ``chore: mark task <N> complete`` commit.
 
     v1.0.5 iter-1 CRITICAL #5 fix: this is the canonical "previous task
-    close" boundary for the :func:`_preflight_triplet_check` triplet
-    sweep. Returns ``None`` if no such commit exists on the current
-    branch (first task in plan).
+    close" boundary for the :func:`_preflight` triplet sweep. Returns
+    ``None`` if no such commit exists on the current branch (first
+    task in plan).
 
     Rebase/squash limitation: if the operator squashed prior task-close
     commits, this returns the most recent surviving ``chore:`` subject
@@ -342,7 +373,7 @@ def _last_chore_task_close_sha(project_root: Path | None = None) -> str | None:
     return None
 
 
-def _preflight_triplet_check(
+def _preflight(
     state: Any, project_root: Path | None = None, *, skip_preflight: bool = False
 ) -> None:
     """Hard-block when the phase advance gate has been bypassed.
@@ -358,11 +389,16 @@ def _preflight_triplet_check(
     Why "since last chore commit" instead of
     ``phase_started_at_commit`` (iter-1 CRITICAL #5 rationale):
     ``phase_started_at_commit`` advances on every phase close within a
-    task, so when ``_preflight_triplet_check`` runs at task-close time
-    it sees only the LAST phase's commits -- never the full
-    Red+Green+Refactor triplet. Boundary "since last chore: mark task"
-    reliably brackets the entire current task's phase-close commits
-    without phase-state coupling.
+    task, so when ``_preflight`` runs at task-close time it sees only
+    the LAST phase's commits -- never the full Red+Green+Refactor
+    triplet. Boundary "since last chore: mark task" reliably brackets
+    the entire current task's phase-close commits without phase-state
+    coupling.
+
+    v1.0.6 K-3 rename: promoted from ``_preflight_triplet_check``
+    (v1.0.5) per Loop 1 v1.0.5 iter-2 bal Important #2. A 1-cycle
+    backwards-compat alias under the legacy name is defined below;
+    removed in v1.0.7.
 
     Args:
         state: SessionState dataclass or plain dict carrying at least
@@ -387,9 +423,13 @@ def _preflight_triplet_check(
         f"last chore commit {last_chore_sha}" if last_chore_sha is not None else "branch root"
     )
     subjects = _git_log_between(last_chore_sha, project_root=project_root)
-    has_test = any(s.startswith("test:") for s in subjects)
-    has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
-    has_refactor = any(s.startswith("refactor:") for s in subjects)
+    # v1.0.6 K-5: extract via liberal CC-aware parser so scoped subjects
+    # like ``feat(close-task): ...`` and breaking-change variants
+    # ``refactor!: ...`` count toward the triplet.
+    prefixes_seen = {extract_prefix_from_subject(s) for s in subjects}
+    has_test = "test" in prefixes_seen
+    has_green = bool(prefixes_seen & {"feat", "fix"})
+    has_refactor = "refactor" in prefixes_seen
     if not (has_test and has_green and has_refactor):
         raise PreconditionError(
             f"Phase advance gate bypassed: commit chain since "
@@ -401,6 +441,14 @@ def _preflight_triplet_check(
             f"if emergency operator override is appropriate (audit-logged "
             f"via stderr breadcrumb)."
         )
+
+
+# DEPRECATED v1.0.6 -> v1.0.7: 1-cycle backwards-compat alias for the
+# pre-rename name. Tests monkeypatching this attribute will NOT affect
+# callers of the canonical ``_preflight`` (Python attribute semantics);
+# new code must target the canonical name. Alias removed in v1.0.7 per
+# CHANGELOG [1.0.6] Deferred section.
+_preflight_triplet_check = _preflight
 
 
 def _state_field(state: Any, key: str) -> Any:
@@ -565,11 +613,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root: Path = ns.project_root
-    state = _preflight(root)
+    state = _load_state_and_check_drift(root)
     closed_task_id = state.current_task_id or ""
     # v1.0.5 Item D Q3-A: HARD-BLOCK when phase advance gate bypassed.
     # Operator emergency override available via --skip-preflight.
-    _preflight_triplet_check(state, root, skip_preflight=getattr(ns, "skip_preflight", False))
+    _preflight(state, root, skip_preflight=getattr(ns, "skip_preflight", False))
     if not ns.skip_spec_review:
         _run_spec_review(closed_task_id, state, root)
     new_state = mark_and_advance(state, root)

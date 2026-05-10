@@ -52,6 +52,25 @@ start a feature, then `/sbtdd close-phase` after each Red/Green/Refactor,
 `/sbtdd close-task` at Refactor close, `/sbtdd pre-merge` when all tasks are
 complete, and `/sbtdd finalize` to wrap the branch.
 
+### Plan archaeology trim (v1.0.6 C.2 cross-link)
+
+When shipping each v1.0.X release of YOUR project that uses SBTDD,
+apply the **plan archaeology trim** procedure documented in the
+plugin's `skills/sbtdd/SKILL.md` (section "Plan archaeology trim
+methodology"). In summary:
+
+1. Extract iter-by-iter triage context from
+   `planning/claude-plan-tdd.md` into CHANGELOG `[N.N.N]` Process
+   notes section.
+2. Trim plan-tdd.md to "active plan only" (scope + tasks +
+   acceptance; no iter archaeology).
+3. Optional: keep `planning/claude-plan-tdd-org.md` as immutable
+   historical record while plan-tdd.md is the trimmed canonical
+   reference.
+
+Doc-only methodology; no runtime impact. See plugin SKILL.md for
+the canonical procedure.
+
 ---
 
 ## 2. Artefactos y fuentes de estado

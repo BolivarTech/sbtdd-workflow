@@ -111,18 +111,21 @@ def _install_happy_path_patches(
     - ``commit_calls``: list of ``(prefix, message)`` tuples.
     - ``new_sha``: short SHA returned by rev-parse.
 
-    v1.0.5 Item D Q3-A: also monkeypatches ``_preflight_triplet_check``
-    to a no-op so the happy-path tests (which run against ``tmp_path``
-    with no real git history) bypass the new HARD-BLOCK introduced in
-    Task 4. Tests that exercise the preflight gate explicitly target
-    :class:`TestPreflightHardBlock`.
+    v1.0.5 Item D Q3-A: also monkeypatches the canonical preflight
+    triplet-check helper (``close_task_cmd._preflight``, renamed from
+    ``_preflight_triplet_check`` in v1.0.6 K-3) to a no-op so happy-path
+    tests bypass the HARD-BLOCK against ``tmp_path``'s empty git
+    history. The preflight gate itself is exercised in
+    :class:`TestPreflightHardBlock`. Patching the legacy alias does NOT
+    propagate to the canonical attribute (Python attribute semantics);
+    new tests must target ``_preflight`` directly.
     """
     captured.setdefault("commit_calls", [])
     captured.setdefault("new_sha", "f00dcafe")
 
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
     monkeypatch.setattr(
-        "close_task_cmd._preflight_triplet_check",
+        "close_task_cmd._preflight",
         lambda state, project_root=None, *, skip_preflight=False: None,
     )
 
@@ -199,7 +202,7 @@ def test_close_task_chore_commit_contains_only_plan_edit(
     monkeypatch.setattr("close_task_cmd.detect_drift", lambda *a, **k: None)
     # v1.0.5 Item D Q3-A: bypass HARD-BLOCK in this happy-path test.
     monkeypatch.setattr(
-        "close_task_cmd._preflight_triplet_check",
+        "close_task_cmd._preflight",
         lambda state, project_root=None, *, skip_preflight=False: None,
     )
 
@@ -654,7 +657,7 @@ class TestPreflightHardBlock:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """D-1: commit chain without TDD triplet -> PreconditionError."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
         from errors import PreconditionError
 
         # Mock _git_log_between to return chain without triplet
@@ -672,7 +675,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
 
         with pytest.raises(PreconditionError) as exc_info:
-            _preflight_triplet_check(state, tmp_path)
+            _preflight(state, tmp_path)
 
         msg = str(exc_info.value)
         assert "Phase advance gate bypassed" in msg
@@ -685,7 +688,7 @@ class TestPreflightHardBlock:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """D-2: canonical TDD triplet in commit chain -> no PreconditionError."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         monkeypatch.setattr(
             "close_task_cmd._git_log_between",
@@ -702,7 +705,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3", "phase_started_at_commit": "abc123"}
 
         # Should NOT raise
-        _preflight_triplet_check(state, tmp_path)
+        _preflight(state, tmp_path)
 
     def test_d3_skip_preflight_bypasses_with_breadcrumb(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -712,7 +715,7 @@ class TestPreflightHardBlock:
         Loop 1 iter-2 Important #1 fix: breadcrumb MUST include
         `since SHA <sha>` segment per spec D-3 wording.
         """
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         # Stub _last_chore_task_close_sha so the bypass path produces a
         # deterministic SHA in the breadcrumb (no real git dependency).
@@ -724,7 +727,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3", "phase_started_at_commit": "doesntmatter"}
 
         # Should NOT raise (override active)
-        _preflight_triplet_check(state, tmp_path, skip_preflight=True)
+        _preflight(state, tmp_path, skip_preflight=True)
 
         captured = capsys.readouterr()
         assert "[sbtdd close-task] WARNING" in captured.err
@@ -739,7 +742,7 @@ class TestPreflightHardBlock:
     ) -> None:
         """D-3 (Loop 1 iter-2 fix): first-task case (no prior chore commit)
         renders 'since SHA branch root' in the bypass breadcrumb."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         monkeypatch.setattr(
             "close_task_cmd._last_chore_task_close_sha",
@@ -747,7 +750,7 @@ class TestPreflightHardBlock:
         )
         state = {"current_task_id": "1"}
 
-        _preflight_triplet_check(state, tmp_path, skip_preflight=True)
+        _preflight(state, tmp_path, skip_preflight=True)
 
         captured = capsys.readouterr()
         assert "since SHA branch root" in captured.err
@@ -757,7 +760,7 @@ class TestPreflightHardBlock:
     ) -> None:
         """D-2b (iter-1 CRITICAL #5 fix): no prior `chore: mark task` commit
         -> boundary is branch root + canonical triplet OK -> no raise."""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
 
         # Simulate: first task in plan, no prior chore commit exists
         monkeypatch.setattr(
@@ -776,7 +779,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "1"}
 
         # Should NOT raise (first task, branch-root boundary, full triplet)
-        _preflight_triplet_check(state, tmp_path)
+        _preflight(state, tmp_path)
 
     def test_d5_partial_triplet_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -786,7 +789,7 @@ class TestPreflightHardBlock:
 
         (Loop 1 iter-2 minor fix: docstring previously said "D-1" — copy-
         paste typo from D-1 case; corrected to D-5 to match test name.)"""
-        from close_task_cmd import _preflight_triplet_check
+        from close_task_cmd import _preflight
         from errors import PreconditionError
 
         monkeypatch.setattr(
@@ -804,7 +807,7 @@ class TestPreflightHardBlock:
         state = {"current_task_id": "3"}
 
         with pytest.raises(PreconditionError) as excinfo:
-            _preflight_triplet_check(state, tmp_path)
+            _preflight(state, tmp_path)
         # iter-1 CRITICAL #5: error message references "since last chore commit"
         # boundary (or "branch root") -- NOT phase_started_at_commit
         assert "since" in str(excinfo.value)
@@ -819,3 +822,224 @@ class TestPreflightHardBlock:
         assert ns.skip_preflight is True
         ns_default = parser.parse_args([])
         assert ns_default.skip_preflight is False
+
+
+class TestSectionHasFlippedPerCheckbox:
+    """v1.0.6 K-1: _section_has_flipped per-checkbox parity.
+
+    Covers escenarios K-1a through K-1c from spec sec.4.4. Pre-fix:
+    returned True on first [x] in section. Post-fix: requires ALL
+    checkboxes in section to be [x] for True.
+    """
+
+    def test_k1a_mixed_checkbox_section_returns_false(self) -> None:
+        """K-1a: section with both [x] and [ ] returns False (not fully flipped)."""
+        from close_task_cmd import _section_has_flipped
+
+        plan_text = (
+            "### Task 1\n- [x] Step 1\n- [ ] Step 2\n- [x] Step 3\n\n### Task 2\n- [ ] Step 1\n"
+        )
+        assert _section_has_flipped(plan_text, "1") is False, (
+            "Mixed-checkbox section should NOT be considered flipped"
+        )
+
+    def test_k1b_fully_flipped_section_returns_true(self) -> None:
+        """K-1b: section with all [x] returns True."""
+        from close_task_cmd import _section_has_flipped
+
+        plan_text = (
+            "### Task 1\n- [x] Step 1\n- [x] Step 2\n- [x] Step 3\n\n### Task 2\n- [ ] Step 1\n"
+        )
+        assert _section_has_flipped(plan_text, "1") is True
+
+    def test_k1c_empty_section_returns_false(self) -> None:
+        """K-1c: section with no checkboxes returns False (vacuously not flipped)."""
+        from close_task_cmd import _section_has_flipped
+
+        plan_text = "### Task 1\nDescription only, no checkboxes.\n\n### Task 2\n- [ ] Step 1\n"
+        assert _section_has_flipped(plan_text, "1") is False
+
+    def test_k1d_single_open_checkbox_returns_false(self) -> None:
+        """K-1d (regression for v1.0.5): section with single [ ] and no [x] returns False."""
+        from close_task_cmd import _section_has_flipped
+
+        plan_text = "### Task 1\n- [ ] Step 1\n\n### Task 2\n- [x] Step 1\n"
+        assert _section_has_flipped(plan_text, "1") is False
+
+    def test_k1e_single_flipped_checkbox_returns_true(self) -> None:
+        """K-1e (preserve v1.0.5): single [x] checkbox + no [ ] returns True."""
+        from close_task_cmd import _section_has_flipped
+
+        plan_text = "### Task 1\n- [x] Step 1\n\n### Task 2\n- [ ] Step 1\n"
+        assert _section_has_flipped(plan_text, "1") is True
+
+    def test_k1f_codeblock_x_inside_section_does_not_count(self) -> None:
+        """K-1f (iter-1 mel WARNING): line-anchored regex ignores `[x]` inside code blocks."""
+        from close_task_cmd import _section_has_flipped
+
+        # `[x]` appears inside a code block (not at line start) -- should NOT count
+        plan_text = (
+            "### Task 1\n"
+            "Example code: `if x is None:` shows `[x]` syntax\n"
+            "- [ ] Step 1\n"  # actual checkbox open
+            "\n### Task 2\n"
+            "- [ ] Step 1\n"
+        )
+        # has_x=False (no `^- [x]`), has_open=True → False
+        assert _section_has_flipped(plan_text, "1") is False, (
+            "Pre-fix substring check would have returned True (matched `[x]` in prose); "
+            "post-fix line-anchored regex returns False"
+        )
+
+    def test_k1g_v105_i2_race_partial_worker_failure_no_fabrication(self, tmp_path: Path) -> None:
+        """K-1g (iter-1 bal WARNING): per-checkbox parity preserves v1.0.5 I-2 race contract.
+
+        Worker A scratch shows partial T1 flips (1 of 2 steps `[x]`, 1 still `[ ]`);
+        `_apply_flips_from_diff` MUST NOT fabricate full-task `[x]` for T1
+        in main plan based on the partial scratch state.
+        """
+        from close_task_cmd import _apply_flips_from_diff
+
+        main_plan = "### Task 1\n- [ ] Step A\n- [ ] Step B\n\n### Task 2\n- [ ] Step 1\n"
+        # Worker A scratch: T1 partially flipped (Step A done, Step B not done)
+        scratch_a = (
+            "### Task 1\n"
+            "- [x] Step A\n"
+            "- [ ] Step B\n"  # NOT flipped
+            "\n### Task 2\n"
+            "- [ ] Step 1\n"
+        )
+
+        merged = _apply_flips_from_diff(main_plan, scratch_a)
+        # Per K-1 line-anchored + per-checkbox parity: T1 section in scratch
+        # is NOT fully flipped (has both [x] and [ ]) → main plan T1 unchanged
+        # NO fabrication of full-task `[x]` flip
+        assert "- [ ] Step B" in merged, (
+            "T1 Step B remained unflipped in main plan (no fabrication)"
+        )
+
+    def test_k1h_v105_i2_race_full_worker_completion_flips_correctly(self, tmp_path: Path) -> None:
+        """K-1h (iter-1 bal WARNING): fully-flipped scratch correctly propagates to main."""
+        from close_task_cmd import _apply_flips_from_diff
+
+        main_plan = "### Task 1\n- [ ] Step A\n- [ ] Step B\n\n### Task 2\n- [ ] Step 1\n"
+        # Worker A scratch: T1 FULLY flipped
+        scratch_a = "### Task 1\n- [x] Step A\n- [x] Step B\n\n### Task 2\n- [ ] Step 1\n"
+
+        merged = _apply_flips_from_diff(main_plan, scratch_a)
+        # T1 fully flipped in scratch (per K-1 semantic) → propagates to main
+        assert "- [x] Step A" in merged
+        assert "- [x] Step B" in merged
+        # T2 untouched
+        assert "- [ ] Step 1" in merged
+
+
+class TestPreflightRenameAndAlias:
+    """v1.0.6 K-3: _preflight_triplet_check renamed to _preflight + 1-cycle alias.
+
+    Covers escenarios K-3a + K-3b from spec sec.4.6. Q3'=a 1-cycle window;
+    alias removed in v1.0.7.
+    """
+
+    def test_k3a_canonical_preflight_callable(self, tmp_path: Path) -> None:
+        """K-3a: close_task_cmd._preflight is the canonical name."""
+        import close_task_cmd
+
+        assert hasattr(close_task_cmd, "_preflight"), "Canonical _preflight must exist"
+        assert callable(close_task_cmd._preflight), "_preflight must be callable"
+
+    def test_k3b_legacy_alias_still_callable(self, tmp_path: Path) -> None:
+        """K-3b: close_task_cmd._preflight_triplet_check alias resolves to _preflight.
+
+        iter-1 cas WARNING relaxation: assert module-load-time identity ONLY.
+        Monkeypatch of one name does NOT propagate to the alias (Python
+        attribute semantics). Callers monkeypatching tests should target
+        the canonical name (`_preflight`) per v1.0.6 K-3 migration guidance.
+        """
+        import importlib
+
+        import close_task_cmd
+
+        # Re-import to ensure clean module-load-time state (no prior monkeypatch leakage)
+        importlib.reload(close_task_cmd)
+
+        assert hasattr(close_task_cmd, "_preflight_triplet_check"), (
+            "1-cycle deprecation alias must exist (removed in v1.0.7)"
+        )
+        # At module-load time (no monkeypatch), alias IS the canonical.
+        # mypy: pre-Green (RED phase), the two attributes point to
+        # non-overlapping callables (different signatures), so mypy
+        # flags the identity check via comparison-overlap. Post-Green
+        # rename, they will be the same function object. We cast to
+        # ``object`` to let mypy treat the comparison as legitimate;
+        # the runtime ``is`` check still verifies the canonical alias
+        # contract that K-3 ships.
+        alias_obj: object = close_task_cmd._preflight_triplet_check
+        canonical_obj: object = close_task_cmd._preflight
+        assert alias_obj is canonical_obj, (
+            "Alias must be `_preflight_triplet_check = _preflight` at module-load time. "
+            "Note: post-monkeypatch identity may diverge (Python attribute semantics)."
+        )
+
+    def test_k3c_deprecation_marker_in_source(self) -> None:
+        """K-3c: source contains DEPRECATED comment marker for grep-ability."""
+        from pathlib import Path
+
+        source = Path("skills/sbtdd/scripts/close_task_cmd.py").read_text(encoding="utf-8")
+        assert "DEPRECATED" in source and "v1.0.7" in source, (
+            "Source must contain DEPRECATED + v1.0.7 markers near the alias"
+        )
+
+
+class TestPreflightTripletCCScope:
+    """v1.0.6 K-5: _preflight accepts CC scoped triplet subjects.
+
+    Covers escenario K-5d from spec sec.4.8.
+    """
+
+    def test_k5d_triplet_check_accepts_scoped_subjects(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """K-5d: scoped TDD triplet (test(scope): + feat(scope): + refactor(scope):) passes."""
+        from close_task_cmd import _preflight
+
+        # Mock _last_chore_task_close_sha + _git_log_between to return scoped subjects
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc1234",
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test(close-task): write failing test",
+                "feat(close-task): implement",
+                "refactor(close-task): extract helper",
+            ],
+        )
+        state = {"current_task_id": "3"}
+
+        # Should NOT raise (canonical TDD triplet present in scoped form)
+        _preflight(state, tmp_path)
+
+    def test_k5d_triplet_check_accepts_mixed_bare_and_scoped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """K-5d (variant): mix of bare + scoped subjects in chain still passes triplet."""
+        from close_task_cmd import _preflight
+
+        monkeypatch.setattr(
+            "close_task_cmd._last_chore_task_close_sha",
+            lambda project_root=None: "abc1234",
+        )
+        monkeypatch.setattr(
+            "close_task_cmd._git_log_between",
+            lambda start_sha, project_root=None: [
+                "test: write failing test",  # bare prefix
+                "feat(close-task): implement",  # scoped prefix
+                "refactor: extract",  # bare prefix
+            ],
+        )
+        state = {"current_task_id": "3"}
+
+        # Should NOT raise (triplet still present even with mix)
+        _preflight(state, tmp_path)

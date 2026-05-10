@@ -226,3 +226,88 @@ def test_license_dual_in_pyproject():
     root = Path(__file__).parent.parent
     content = (root / "pyproject.toml").read_text()
     assert 'license = "MIT OR Apache-2.0"' in content
+
+
+class TestValidatePrefixFromSubjectCCScope:
+    """v1.0.6 K-5: liberal CC scope syntax support (Q4'=b liberal regex).
+
+    Covers escenarios K-5a + K-5b + K-5c from spec sec.4.8.
+    """
+
+    def test_k5a_bare_prefix_matches_backwards_compat(self) -> None:
+        """K-5a: bare prefix `test:` still matches (v1.0.5 backwards compat)."""
+        from commits import extract_prefix_from_subject
+
+        assert extract_prefix_from_subject("test: add failing test for X") == "test"
+        assert extract_prefix_from_subject("feat: implement Y") == "feat"
+        assert extract_prefix_from_subject("fix: bug Z") == "fix"
+        assert extract_prefix_from_subject("refactor: extract helper") == "refactor"
+        assert extract_prefix_from_subject("chore: mark task 1 complete") == "chore"
+
+    def test_k5b_scoped_prefix_matches_NEW(self) -> None:
+        """K-5b: `test(scope): ...` scoped prefix matches per Q4'=b liberal."""
+        from commits import extract_prefix_from_subject
+
+        assert extract_prefix_from_subject("test(close-task): add failing test") == "test"
+        assert extract_prefix_from_subject("feat(close-task): implement") == "feat"
+        assert extract_prefix_from_subject("fix(commits): bug fix") == "fix"
+        assert extract_prefix_from_subject("refactor(state-file): extract helper") == "refactor"
+
+    def test_k5c_liberal_scope_content_accepted(self) -> None:
+        """K-5c: liberal regex `[^()]+` accepts any non-paren scope content."""
+        from commits import extract_prefix_from_subject
+
+        # Uppercase scope
+        assert extract_prefix_from_subject("feat(Close-Task): X") == "feat"
+        # Underscore scope
+        assert extract_prefix_from_subject("fix(close_task): X") == "fix"
+        # Space in scope
+        assert extract_prefix_from_subject("refactor(some scope): X") == "refactor"
+        # Numeric scope
+        assert extract_prefix_from_subject("test(123): X") == "test"
+        # Mixed
+        assert extract_prefix_from_subject("feat(My-Scope_v2): X") == "feat"
+
+    def test_k5e_cc_breaking_change_marker_supported(self) -> None:
+        """K-5e (iter-1 cas WARNING): CC spec `!` breaking-change marker matches."""
+        from commits import extract_prefix_from_subject
+
+        # Bare with breaking marker
+        assert extract_prefix_from_subject("feat!: drop legacy API") == "feat"
+        assert extract_prefix_from_subject("fix!: backwards-incompatible bug fix") == "fix"
+        # Scoped with breaking marker
+        assert extract_prefix_from_subject("feat(api)!: drop legacy") == "feat"
+        assert extract_prefix_from_subject("refactor(close-task)!: rename helper") == "refactor"
+
+    def test_k5f_colon_without_trailing_space_supported(self) -> None:
+        """K-5f (iter-1 mel WARNING): colon without trailing whitespace matches."""
+        from commits import extract_prefix_from_subject
+
+        # No space after colon
+        assert extract_prefix_from_subject("feat:Implementation") == "feat"
+        assert extract_prefix_from_subject("test(scope):add tests") == "test"
+        # Colon at end of line (just prefix, empty body — uncommon but valid syntax)
+        assert extract_prefix_from_subject("feat:") == "feat"
+
+    def test_k5_extraction_is_liberal_validation_is_separate(self) -> None:
+        """K-5 (Q4'=b + iter-1 bal+cas WARNING): extraction is liberal; validation is downstream.
+
+        Returned prefix is NOT validated against `_ALLOWED_PREFIXES`.
+        Caller (e.g., _preflight triplet check) validates separately.
+        """
+        from commits import extract_prefix_from_subject
+
+        # Known prefixes extract correctly
+        assert extract_prefix_from_subject("docs: update README") == "docs"
+        # Unknown lowercase prefix extracts (extraction is liberal)
+        assert extract_prefix_from_subject("madeup: subject") == "madeup"
+        # No-colon subject returns None
+        assert extract_prefix_from_subject("noprefix subject only") is None
+        # Non-alphabetic prefix returns None (regex requires `[a-z]+`)
+        assert extract_prefix_from_subject("123: numeric prefix") is None
+
+    def test_k5_subject_with_no_colon_returns_none(self) -> None:
+        """K-5: subject without colon doesn't match prefix syntax."""
+        from commits import extract_prefix_from_subject
+
+        assert extract_prefix_from_subject("just a subject without colon") is None
