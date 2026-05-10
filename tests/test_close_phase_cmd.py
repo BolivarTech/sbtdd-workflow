@@ -547,11 +547,15 @@ class TestRunVerificationWorkerBypass:
         monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
         close_phase_cmd._run_verification(tmp_path)
         assert skill_called == []  # bypassed
+        # v1.0.7 T3 dogfood empirical fix: chain uses sys.executable -m
+        # form for cross-env portability (bare ruff/mypy not always on PATH).
+        import sys as _sys
+
         assert captured_cmds == [
-            ["pytest"],
-            ["ruff", "check", "."],
-            ["ruff", "format", "--check", "."],
-            ["mypy", "."],
+            [_sys.executable, "-m", "pytest"],
+            [_sys.executable, "-m", "ruff", "check", "."],
+            [_sys.executable, "-m", "ruff", "format", "--check", "."],
+            [_sys.executable, "-m", "mypy", "."],
         ]
 
     def test_worker_mode_first_tool_failure_aborts_chain_and_persists_evidence(
@@ -573,22 +577,26 @@ class TestRunVerificationWorkerBypass:
             stdout = "PASS"
             stderr = ""
 
+        import sys as _sys
+
+        pytest_cmd = [_sys.executable, "-m", "pytest"]
+
         def fake_run(cmd: list[str], **kwargs: object) -> object:
             captured_cmds.append(cmd)
-            return FailResult() if cmd == ["pytest"] else PassResult()
+            return FailResult() if cmd == pytest_cmd else PassResult()
 
         monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
-        with pytest.raises(ValidationError, match="A2 worker-mode verify failed at 'pytest'"):
+        with pytest.raises(ValidationError, match=r"A2 worker-mode verify failed at"):
             close_phase_cmd._run_verification(tmp_path)
         # Only pytest ran; ruff/mypy NOT invoked (early-abort).
-        assert captured_cmds == [["pytest"]]
+        assert captured_cmds == [pytest_cmd]
         # Evidence sidecar persisted with the partial chain.
         sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
         sidecars = list(sidecar_dir.glob("*-verify.json"))
         assert len(sidecars) == 1
         payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
         assert payload["verify_chain"] == [
-            {"cmd": ["pytest"], "rc": 1, "stdout": "FAILED", "stderr": "test foo failed"}
+            {"cmd": pytest_cmd, "rc": 1, "stdout": "FAILED", "stderr": "test foo failed"}
         ]
 
     def test_worker_mode_full_chain_success_persists_evidence(

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -109,11 +110,17 @@ def _run_verification(root: Path) -> None:
             (orchestrator mode only; shell command path is offline).
     """
     if os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1":
+        # v1.0.7 T3 dogfood empirical fix: invoke via ``sys.executable -m
+        # <tool>`` instead of bare names. Bare ``pytest`` / ``ruff`` /
+        # ``mypy`` are not always on PATH (e.g., Python 3.14 installs
+        # without venv Scripts/, CI base images, certain Windows configs).
+        # Module invocation works in any env where the tool is pip-installed
+        # for the active Python — which is the v1.0.7 dependency contract.
         commands = [
-            ["pytest"],
-            ["ruff", "check", "."],
-            ["ruff", "format", "--check", "."],
-            ["mypy", "."],
+            [sys.executable, "-m", "pytest"],
+            [sys.executable, "-m", "ruff", "check", "."],
+            [sys.executable, "-m", "ruff", "format", "--check", "."],
+            [sys.executable, "-m", "mypy", "."],
         ]
         captured: list[dict[str, object]] = []
         for cmd in commands:
