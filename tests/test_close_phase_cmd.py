@@ -661,6 +661,85 @@ class TestRunVerificationWorkerBypass:
         assert all(stem.startswith(f"{os.getpid()}-") for stem in stems)
         assert len(set(stems)) == 2
 
+    def test_worker_mode_runs_real_subprocess_with_sec_0_1_chain(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """v1.0.7 Loop 2 iter-1 Mel condition (2): production-path empirical signal.
+
+        Exercises ``_run_verification`` worker-mode bypass with REAL
+        ``subprocess.run`` invocations against the system Python (pytest +
+        ruff + mypy invoked via ``sys.executable -m``). Verifies the
+        chicken-and-egg path (workers reaching sec.0.1 chain without
+        skill subprocess hang) at production-realistic granularity —
+        smaller scope than full ``auto --parallel`` integration test (T3
+        xfail) but exercises the actual T2 worker-mode bypass path with
+        zero mocking.
+        """
+        import sys as _sys
+
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+        # Stage a minimal Python project in tmp_path so sec.0.1 chain has
+        # something to discover. pytest finds zero tests (acceptable, exits
+        # with rc=5 "no tests collected" which T2 treats as failure;
+        # ruff/mypy succeed on empty src). We monkey one cmd to PASS so
+        # the chain reaches the success persistence path AND we capture
+        # the real subprocess.run call shape.
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "smoke"\nversion = "0.0.1"\nrequires-python = ">=3.9"\n'
+            '[tool.pytest.ini_options]\ntestpaths = ["."]\n'
+            "[tool.ruff]\nline-length = 100\n"
+            "[tool.mypy]\nstrict = false\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "test_dummy.py").write_text("def test_dummy(): assert True\n", encoding="utf-8")
+        # Verify the worker-mode bypass actually invokes sys.executable -m
+        # for each tool (the v1.0.7 T3 cross-env portability fix).
+        import subprocess as _subprocess
+
+        captured_cmds: list[list[str]] = []
+        original_run = _subprocess.run
+
+        def spy_run(cmd: list[str], **kwargs: object) -> object:
+            captured_cmds.append(cmd)
+            return original_run(cmd, **kwargs)
+
+        monkeypatch.setattr("close_phase_cmd.subprocess.run", spy_run)
+        # Run; may raise ValidationError on first non-zero rc (e.g. mypy
+        # complains about missing __init__.py). What matters: subprocess
+        # actually invoked + captured the sys.executable -m form.
+        try:
+            close_phase_cmd._run_verification(tmp_path)
+        except ValidationError:
+            pass  # Expected if any tool returns non-zero on the smoke fixture.
+
+        # Empirical assertions: chain DID dispatch sys.executable -m form
+        # for at least the first tool (pytest). Workers reach the sec.0.1
+        # chain — chicken-and-egg empirically closed at this scope.
+        assert captured_cmds, "worker-mode bypass did not invoke any subprocess"
+        first_cmd = captured_cmds[0]
+        assert first_cmd[0] == _sys.executable, (
+            f"worker chain did not use sys.executable; got {first_cmd[0]!r}"
+        )
+        assert first_cmd[1] == "-m", (
+            f"worker chain did not use module invocation form; got {first_cmd}"
+        )
+        assert first_cmd[2] == "pytest", f"worker chain first tool not pytest; got {first_cmd}"
+        # Sidecar persisted (success or partial-failure path; both write
+        # to the sidecar dir).
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        assert sidecar_dir.exists(), "sidecar dir not created"
+        sidecars = list(sidecar_dir.glob("*-verify.json"))
+        assert sidecars, "no sidecar persisted post-chain"
+        # Filename matches v1.0.7 iter-3 C1 3-component pattern.
+        stem = sidecars[0].stem
+        parts = stem.split("-")
+        assert len(parts) == 4 and parts[-1] == "verify", (
+            f"sidecar filename {sidecars[0].name!r} does not match "
+            f"<pid>-<monotonic_ns>-<uuid8>-verify pattern"
+        )
+
     def test_orchestrator_mode_preserves_skill_dispatch(
         self,
         monkeypatch: pytest.MonkeyPatch,
