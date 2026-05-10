@@ -299,7 +299,11 @@ class TestSpecReviewerFileReference:
             repo_root=repo_root,
             max_iterations=1,
         )
-        argv = captured_argv[0]
+        # Filter to the claude invocation (other calls are git helpers
+        # in _collect_task_diff which also go through run_with_timeout).
+        claude_argvs = [a for a in captured_argv if a and a[0] == "claude"]
+        assert len(claude_argvs) == 1
+        argv = claude_argvs[0]
         at_tokens = [t for t in argv if isinstance(t, str) and t.startswith("@")]
         assert len(at_tokens) == 1
         # No inline prompt content (would be a giant string in argv).
