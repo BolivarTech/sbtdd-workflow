@@ -1443,6 +1443,69 @@ _FORWARDABLE_FLAGS: Mapping[str, str] = MappingProxyType(
 )
 
 
+def _validate_forwardable_flags_against_argparse() -> None:
+    """v1.0.6 K-4: validate ``_FORWARDABLE_FLAGS`` keys exist in argparse dest set.
+
+    Detects drift between the hardcoded :data:`_FORWARDABLE_FLAGS`
+    mapping and the ``_build_parser()`` argparse definition.
+    Raises :class:`ValidationError` UNCONDITIONALLY at module import
+    time (or on explicit invocation in tests) if any key in
+    ``_FORWARDABLE_FLAGS`` is not a known dest name in the parser.
+
+    Rationale: :func:`_build_worker_argv` uses ``_FORWARDABLE_FLAGS``
+    to propagate operator flags to subprocess workers. If a flag is
+    added to ``_FORWARDABLE_FLAGS`` but not registered in argparse,
+    ``getattr(ns, ns_attr, None)`` would silently return None and the
+    flag would never be forwarded — subtle bug. Loud-fast detection
+    at module load surfaces drift immediately.
+
+    **Private-attribute fragility acknowledgment** (iter-1 mel
+    WARNING): this helper traverses argparse internals
+    (``parser._actions`` + ``action.choices`` for subparsers). These
+    are private attrs not part of argparse's public API; future
+    argparse refactors could break this introspection. Acceptable
+    trade-off given the coverage value (drift detection at module
+    load time saves debugging cost). If argparse changes, this
+    helper updates here in one place. Single-level subparser walk;
+    deeper nesting not supported (see v1.0.7 LOCKED C1 polish).
+
+    Tests that monkeypatch ``_FORWARDABLE_FLAGS`` should call this
+    helper directly rather than reloading auto_cmd to avoid
+    import-time guard interaction (see v1.0.7 LOCKED C6 polish).
+
+    Raises:
+        ValidationError: When ``_FORWARDABLE_FLAGS`` contains a key
+            not registered as an argparse dest name in any subparser.
+    """
+    parser = _build_parser()
+    # Private-attribute traversal (acknowledged fragility per docstring).
+    dest_names: set[str] = set()
+    for action in parser._actions:
+        if action.dest:
+            dest_names.add(action.dest)
+    # Walk subparsers (single-level only).
+    for action in parser._actions:
+        if hasattr(action, "choices") and isinstance(action.choices, dict):
+            for sub_parser in action.choices.values():
+                if not hasattr(sub_parser, "_actions"):
+                    continue
+                for sub_action in sub_parser._actions:
+                    if sub_action.dest:
+                        dest_names.add(sub_action.dest)
+
+    missing = [
+        ns_attr for ns_attr in _FORWARDABLE_FLAGS
+        if ns_attr not in dest_names
+    ]
+    if missing:
+        raise ValidationError(
+            f"v1.0.6 K-4: _FORWARDABLE_FLAGS drift detected -- the "
+            f"following keys are NOT registered as argparse dest names: "
+            f"{sorted(missing)}. Either remove them from "
+            f"_FORWARDABLE_FLAGS or add them to _build_parser()."
+        )
+
+
 def _run_sbtdd_path() -> Path:
     """Return path to ``run_sbtdd.py`` entry point.
 
