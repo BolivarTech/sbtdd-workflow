@@ -46,6 +46,9 @@ def validate_prefix(prefix: str) -> None:
 # WARNING). Trailing `(?:\s|$)` assertion deliberately omitted (iter-1
 # mel WARNING K-5f) so colon-without-trailing-space subjects like
 # `feat:Implementation` and `feat:` (empty body) also match.
+# Anchored to start-of-string (`^`) so subjects containing `(text):`
+# mid-string (e.g., descriptive prose like `Update parser to handle
+# (foo): syntax`) do not accidentally match as scoped prefixes.
 _PREFIX_PATTERN: re.Pattern[str] = re.compile(r"^([a-z]+)(?:\([^()]+\))?!?:")
 
 
