@@ -948,46 +948,20 @@ class TestPreflightRenameAndAlias:
         assert hasattr(close_task_cmd, "_preflight"), "Canonical _preflight must exist"
         assert callable(close_task_cmd._preflight), "_preflight must be callable"
 
-    def test_k3b_legacy_alias_still_callable(self, tmp_path: Path) -> None:
-        """K-3b: close_task_cmd._preflight_triplet_check alias resolves to _preflight.
+    # v1.0.7 C-X-K3-Removal: tests test_k3b_legacy_alias_still_callable +
+    # test_k3c_deprecation_marker_in_source REMOVED. The 1-cycle alias
+    # removed per v1.0.6 commitment + Q3'=a window expiration. The new
+    # contract (alias raises AttributeError; canonical _preflight remains
+    # callable) is validated by TestCXK3RemovalAliasGone.
 
-        iter-1 cas WARNING relaxation: assert module-load-time identity ONLY.
-        Monkeypatch of one name does NOT propagate to the alias (Python
-        attribute semantics). Callers monkeypatching tests should target
-        the canonical name (`_preflight`) per v1.0.6 K-3 migration guidance.
-        """
-        import importlib
-
-        import close_task_cmd
-
-        # Re-import to ensure clean module-load-time state (no prior monkeypatch leakage)
-        importlib.reload(close_task_cmd)
-
-        assert hasattr(close_task_cmd, "_preflight_triplet_check"), (
-            "1-cycle deprecation alias must exist (removed in v1.0.7)"
-        )
-        # At module-load time (no monkeypatch), alias IS the canonical.
-        # mypy: pre-Green (RED phase), the two attributes point to
-        # non-overlapping callables (different signatures), so mypy
-        # flags the identity check via comparison-overlap. Post-Green
-        # rename, they will be the same function object. We cast to
-        # ``object`` to let mypy treat the comparison as legitimate;
-        # the runtime ``is`` check still verifies the canonical alias
-        # contract that K-3 ships.
-        alias_obj: object = close_task_cmd._preflight_triplet_check
-        canonical_obj: object = close_task_cmd._preflight
-        assert alias_obj is canonical_obj, (
-            "Alias must be `_preflight_triplet_check = _preflight` at module-load time. "
-            "Note: post-monkeypatch identity may diverge (Python attribute semantics)."
-        )
-
-    def test_k3c_deprecation_marker_in_source(self) -> None:
-        """K-3c: source contains DEPRECATED comment marker for grep-ability."""
+    def test_k3c_removal_marker_in_source(self) -> None:
+        """v1.0.7 C-X-K3-Removal: source documents the alias removal + migration path."""
         from pathlib import Path
 
         source = Path("skills/sbtdd/scripts/close_task_cmd.py").read_text(encoding="utf-8")
-        assert "DEPRECATED" in source and "v1.0.7" in source, (
-            "Source must contain DEPRECATED + v1.0.7 markers near the alias"
+        assert "C-X-K3-Removal" in source and "v1.0.7" in source, (
+            "Source must contain v1.0.7 C-X-K3-Removal markers documenting "
+            "the alias removal + canonical-name migration path."
         )
 
 
@@ -1053,7 +1027,7 @@ class TestCXK3RemovalAliasGone:
         import close_task_cmd
 
         with pytest.raises(AttributeError, match="_preflight_triplet_check"):
-            close_task_cmd._preflight_triplet_check  # noqa: B018
+            close_task_cmd._preflight_triplet_check  # type: ignore[attr-defined] # noqa: B018
 
     def test_canonical_preflight_still_callable(self) -> None:
         """C-X-K3-Removal: canonical `_preflight` still exists + is callable."""
@@ -1062,22 +1036,10 @@ class TestCXK3RemovalAliasGone:
         assert callable(close_task_cmd._preflight)
 
 
-class TestC5DeprecationMarkerMonkeypatchWarning:
-    """v1.0.7 C5 K-3 deprecation marker monkeypatch warning per spec sec.4.7."""
-
-    def test_alias_line_comment_warns_about_monkeypatch_footgun(self) -> None:
-        """C5: comment on alias line mentions monkeypatch warning."""
-        import inspect
-
-        import close_task_cmd
-
-        src = inspect.getsource(close_task_cmd)
-        assert "_preflight_triplet_check = _preflight" in src
-        lines = src.splitlines()
-        for i, line in enumerate(lines):
-            if "_preflight_triplet_check = _preflight" in line:
-                surrounding = "\n".join(lines[max(0, i - 8) : i + 1])
-                assert "monkeypatch" in surrounding.lower()
-                assert "v1.0.7" in surrounding
-                return
-        raise AssertionError("alias line not found")
+# v1.0.7 C-X-K3-Removal: TestC5DeprecationMarkerMonkeypatchWarning REMOVED.
+# Per spec sec.2.7 + plan T8 contract: T7 added the C5 warning comment
+# on the alias line; T8 removed both alias AND comment together. The C5
+# comment was structurally vestigial (Cas iter-2 W9: documented as
+# transitional archaeology; lifespan = T7-commit → T8-commit window).
+# The post-removal contract (canonical _preflight only; no alias) is
+# validated by TestCXK3RemovalAliasGone.

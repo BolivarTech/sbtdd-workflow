@@ -443,12 +443,13 @@ def _preflight(
         )
 
 
-# DEPRECATED v1.0.6 -> v1.0.7: 1-cycle backwards-compat alias for the
-# pre-rename name. Tests monkeypatching this attribute will NOT affect
-# callers of the canonical ``_preflight`` (Python attribute semantics);
-# new code must target the canonical name. Alias removed in v1.0.7 per
-# CHANGELOG [1.0.6] Deferred section.
-_preflight_triplet_check = _preflight
+# v1.0.7 C-X-K3-Removal: the v1.0.6 1-cycle deprecation alias
+# ``_preflight_triplet_check = _preflight`` was REMOVED in v1.0.7 per
+# CHANGELOG [1.0.6] Deferred section + Q3'=a 1-cycle window commitment.
+# Operator scripts that monkeypatched the alias must migrate to the
+# canonical ``_preflight`` name (Python attribute semantics: alias
+# monkeypatch did NOT propagate to canonical, so monkeypatching the
+# canonical name was the only way to actually patch behavior).
 
 
 def _state_field(state: Any, key: str) -> Any:
