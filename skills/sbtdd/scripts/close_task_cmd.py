@@ -37,6 +37,7 @@ import _plan_ops
 import spec_review_dispatch
 import subprocess_utils
 from commits import create as commit_create
+from commits import extract_prefix_from_subject
 from drift import detect_drift
 from errors import DriftError, PreconditionError, SpecReviewError
 from state_file import SessionState, load as load_state, save as save_state
@@ -422,9 +423,13 @@ def _preflight(
         f"last chore commit {last_chore_sha}" if last_chore_sha is not None else "branch root"
     )
     subjects = _git_log_between(last_chore_sha, project_root=project_root)
-    has_test = any(s.startswith("test:") for s in subjects)
-    has_green = any(s.startswith(("feat:", "fix:")) for s in subjects)
-    has_refactor = any(s.startswith("refactor:") for s in subjects)
+    # v1.0.6 K-5: extract via liberal CC-aware parser so scoped subjects
+    # like ``feat(close-task): ...`` and breaking-change variants
+    # ``refactor!: ...`` count toward the triplet.
+    prefixes_seen = {extract_prefix_from_subject(s) for s in subjects}
+    has_test = "test" in prefixes_seen
+    has_green = bool(prefixes_seen & {"feat", "fix"})
+    has_refactor = "refactor" in prefixes_seen
     if not (has_test and has_green and has_refactor):
         raise PreconditionError(
             f"Phase advance gate bypassed: commit chain since "
