@@ -569,7 +569,7 @@ Covers escenarios A2-1 through A2-6 from spec sec.4.2.
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests for `auto_cmd._spawn_worker` dispatcher**
+- [x] **Step 1: Write failing tests for `auto_cmd._spawn_worker` dispatcher**
 
 Append to `tests/test_auto_cmd.py`:
 
@@ -639,7 +639,7 @@ class TestSpawnWorkerDispatcher:
 
 Add `import subprocess` and `import sys` at top of file if missing.
 
-- [ ] **Step 2: Write failing tests for `close_phase_cmd._run_verification` worker bypass (sec.0.1 chain + INV-16 sidecar)**
+- [x] **Step 2: Write failing tests for `close_phase_cmd._run_verification` worker bypass (sec.0.1 chain + INV-16 sidecar)**
 
 Append to `tests/test_close_phase_cmd.py`:
 
@@ -815,7 +815,7 @@ class TestRunVerificationWorkerBypass:
 Add `from errors import ValidationError`, `import close_phase_cmd`,
 `import json`, `from pathlib import Path` at top of file if missing.
 
-- [ ] **Step 3: Write failing tests for Q2'=b worker-context runtime guard**
+- [x] **Step 3: Write failing tests for Q2'=b worker-context runtime guard**
 
 Append to `tests/test_superpowers_dispatch.py`:
 
@@ -914,17 +914,17 @@ from errors import PreconditionError
 import superpowers_dispatch
 ```
 
-- [ ] **Step 4: Run tests to verify failure**
+- [x] **Step 4: Run tests to verify failure**
 
 Run: `pytest tests/test_auto_cmd.py::TestSpawnWorkerDispatcher tests/test_close_phase_cmd.py::TestRunVerificationWorkerBypass tests/test_superpowers_dispatch.py::TestInvokeSkillWorkerGuard -v`
 
 Expected: all FAIL with `AttributeError`/missing-symbol errors.
 
-- [ ] **Step 5: Run `make verify`**
+- [x] **Step 5: Run `make verify`**
 
 Expected: only the new tests fail; ruff + mypy clean.
 
-- [ ] **Step 6: Close Red phase**
+- [x] **Step 6: Close Red phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 A2 Windows hybrid + worker runtime guard tests"`
 
@@ -932,7 +932,7 @@ Expected: `test:` commit lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 7: Implement `auto_cmd._spawn_worker` cross-platform dispatcher**
+- [x] **Step 7: Implement `auto_cmd._spawn_worker` cross-platform dispatcher**
 
 Add to `skills/sbtdd/scripts/auto_cmd.py` near the `_dispatch_tracks_concurrent`
 helper (search for `def _dispatch_tracks_concurrent`):
@@ -991,7 +991,7 @@ landing, only `env` and `argv` are required; if other kwargs surface
 during impl, extend the helper signature in the same Green commit and
 update the dispatcher tests accordingly.
 
-- [ ] **Step 8: Implement `close_phase_cmd._run_verification` worker-mode bypass with sec.0.1 chain + INV-16 sidecar (C4 carry-forward)**
+- [x] **Step 8: Implement `close_phase_cmd._run_verification` worker-mode bypass with sec.0.1 chain + INV-16 sidecar (C4 carry-forward)**
 
 Edit `skills/sbtdd/scripts/close_phase_cmd.py:70` — replace the body of
 `_run_verification` with:
@@ -1147,7 +1147,7 @@ from errors import ValidationError
 import state_file
 ```
 
-- [ ] **Step 9: Implement Q2'=b runtime guard in `superpowers_dispatch.invoke_skill`**
+- [x] **Step 9: Implement Q2'=b runtime guard in `superpowers_dispatch.invoke_skill`**
 
 Edit `skills/sbtdd/scripts/superpowers_dispatch.py` around line 336.
 Locate the existing membership gate:
@@ -1188,17 +1188,17 @@ Insert BEFORE that line:
 
 Add `import os` to the imports at the top of the file if not already present.
 
-- [ ] **Step 10: Run tests to verify they pass**
+- [x] **Step 10: Run tests to verify they pass**
 
 Run: `pytest tests/test_auto_cmd.py::TestSpawnWorkerDispatcher tests/test_close_phase_cmd.py::TestRunVerificationWorkerBypass tests/test_superpowers_dispatch.py::TestInvokeSkillWorkerGuard -v`
 
 Expected: all PASS (POSIX/Windows split per `sys.platform` monkeypatch).
 
-- [ ] **Step 11: Run `make verify`**
+- [x] **Step 11: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 12: Close Green phase**
+- [x] **Step 12: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 A2 Windows hybrid worker spawn + Q2'=b runtime guard"`
 
@@ -1206,7 +1206,7 @@ Expected: `feat:` commit lands; state advances to `refactor`.
 
 #### Refactor Phase
 
-- [ ] **Step 13: Tighten docstrings + audit for remaining direct Popen calls**
+- [x] **Step 13: Tighten docstrings + audit for remaining direct Popen calls**
 
 Search for any other `subprocess.Popen` calls in `auto_cmd.py` that
 spawn workers; if any bypass `_spawn_worker`, they need to route through
@@ -1224,11 +1224,11 @@ helper to preserve the `SBTDD_AUTO_PARALLEL_WORKER=1` env contract that
 `close_phase_cmd._run_verification` and `superpowers_dispatch.invoke_skill`
 depend on."
 
-- [ ] **Step 14: Run `make verify`**
+- [x] **Step 14: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 15: Close Refactor phase + close task**
+- [x] **Step 15: Close Refactor phase + close task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 A2 dispatcher + worker contract documentation"`
 
