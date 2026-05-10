@@ -3913,3 +3913,35 @@ class TestSpawnWorkerDispatcher:
         assert captured["env"]["PATH"] == "/usr/bin"  # type: ignore[index]
         # v1.0.7 T2 code-review C1: cwd MUST forward through PTY helper.
         assert captured["cwd"] == "/tmp/x"
+
+
+class TestC1ForwardableFlagsHelperDocs:
+    """v1.0.7 C1 K-4 helper docs comment per spec sec.4.7."""
+
+    def test_helper_source_documents_single_level_subparser_walk(self) -> None:
+        """C1: helper source contains comment about single-level walk limitation."""
+        import inspect
+
+        import auto_cmd
+
+        src = inspect.getsource(auto_cmd._validate_forwardable_flags_against_argparse)
+        assert "single-level subparser walk" in src.lower()
+
+
+class TestC6ForwardableFlagsImportlibReloadCaveat:
+    """v1.0.7 C6 K-4 helper docstring caveat per spec sec.4.7."""
+
+    def test_docstring_documents_importlib_reload_interaction(self) -> None:
+        """C6: docstring notes importlib.reload caveat for monkeypatch tests."""
+        import auto_cmd
+
+        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
+        assert "importlib.reload" in doc
+        assert "monkeypatch" in doc.lower()
+
+    def test_docstring_cross_links_c1_inline_comment(self) -> None:
+        """C6 Refactor cross-link: docstring references C1 inline comment."""
+        import auto_cmd
+
+        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
+        assert "single-level subparser" in doc.lower() or "see inline comment" in doc.lower()

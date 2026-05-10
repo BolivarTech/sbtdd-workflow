@@ -1043,3 +1043,24 @@ class TestPreflightTripletCCScope:
 
         # Should NOT raise (triplet still present even with mix)
         _preflight(state, tmp_path)
+
+
+class TestC5DeprecationMarkerMonkeypatchWarning:
+    """v1.0.7 C5 K-3 deprecation marker monkeypatch warning per spec sec.4.7."""
+
+    def test_alias_line_comment_warns_about_monkeypatch_footgun(self) -> None:
+        """C5: comment on alias line mentions monkeypatch warning."""
+        import inspect
+
+        import close_task_cmd
+
+        src = inspect.getsource(close_task_cmd)
+        assert "_preflight_triplet_check = _preflight" in src
+        lines = src.splitlines()
+        for i, line in enumerate(lines):
+            if "_preflight_triplet_check = _preflight" in line:
+                surrounding = "\n".join(lines[max(0, i - 8) : i + 1])
+                assert "monkeypatch" in surrounding.lower()
+                assert "v1.0.7" in surrounding
+                return
+        raise AssertionError("alias line not found")
