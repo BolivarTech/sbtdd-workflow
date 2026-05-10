@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 import pytest
+
+import subprocess_utils
 
 
 def test_run_with_timeout_returns_completed_process():
@@ -475,3 +479,136 @@ def test_t1_windows_kill_preserves_pre_kill_stderr_data():
     assert "final-stderr-line" in result.stderr, (
         f"W7 regression: pre-kill stderr data lost. stderr={result.stderr!r}"
     )
+
+
+class TestSpawnWorkerWithPty:
+    """v1.0.7 A1 POSIX PTY allocation + lifecycle per spec sec.4.1."""
+
+    def test_posix_worker_observes_tty_via_isatty(self) -> None:
+        """A1-1 (W7 carry-forward): worker sees real TTY via isatty()."""
+        if sys.platform == "win32":
+            pytest.skip("POSIX-only test")
+        worker_script = Path(__file__).parent / "fixtures" / "pty" / "worker_isatty.py"
+        proc = subprocess_utils._spawn_worker_with_pty(
+            [sys.executable, str(worker_script)],
+            env=dict(os.environ),
+        )
+        try:
+            # Read from master fd to capture worker stdout.
+            output = b""
+            proc.wait(timeout=10)
+            try:
+                while True:
+                    chunk = os.read(proc._pty_master_fd, 4096)  # type: ignore[attr-defined]
+                    if not chunk:
+                        break
+                    output += chunk
+            except OSError:
+                pass  # worker closed slave; drain done
+            assert proc.returncode == 0
+            # CRITICAL: worker must observe TTY (not just parent).
+            assert b"isatty=True" in output, f"worker did not observe TTY. output={output!r}"
+        finally:
+            subprocess_utils._close_pty_master(proc)
+
+    def test_posix_worker_with_pty_forwards_cwd_kwarg(self, tmp_path: Path) -> None:
+        """v1.0.7 T2 code-review C1 fix: cwd kwarg reaches subprocess.
+
+        Without the fix, POSIX workers silently inherit orchestrator cwd
+        (regression: orchestrator invoked from subdirectory → workers
+        run in wrong dir). The fix threads cwd through the PTY helper
+        signature; this test verifies via a worker that prints its cwd.
+        """
+        if sys.platform == "win32":
+            pytest.skip("POSIX-only test")
+        worker_script = tmp_path / "worker_pwd.py"
+        worker_script.write_text(
+            "import os, sys\nsys.stdout.write('cwd=' + os.getcwd())\nsys.stdout.flush()\n",
+            encoding="utf-8",
+        )
+        target_cwd = tmp_path / "subdir"
+        target_cwd.mkdir()
+        proc = subprocess_utils._spawn_worker_with_pty(
+            [sys.executable, str(worker_script)],
+            env=dict(os.environ),
+            cwd=str(target_cwd),
+        )
+        try:
+            output = b""
+            proc.wait(timeout=10)
+            try:
+                while True:
+                    chunk = os.read(proc._pty_master_fd, 4096)  # type: ignore[attr-defined]
+                    if not chunk:
+                        break
+                    output += chunk
+            except OSError:
+                pass
+            assert proc.returncode == 0
+            # Worker reported its cwd; must match the target dir we passed.
+            assert str(target_cwd).encode() in output, (
+                f"worker did not run in cwd={target_cwd!r}; output={output!r}"
+            )
+        finally:
+            subprocess_utils._close_pty_master(proc)
+
+    def test_windows_worker_spawn_raises_runtime_error(self) -> None:
+        """A1-2: Windows worker spawn raises if PTY helper called directly."""
+        if sys.platform != "win32":
+            pytest.skip("Windows-only guard test")
+        with pytest.raises(RuntimeError, match="POSIX-only"):
+            subprocess_utils._spawn_worker_with_pty(
+                [sys.executable, "-c", "pass"],
+                env=dict(os.environ),
+            )
+
+    def test_close_pty_master_drains_then_closes_idempotent(
+        self,
+    ) -> None:
+        """A1-3 (C1 carry-forward): lifecycle helper drains + closes + idempotent."""
+        if sys.platform == "win32":
+            pytest.skip("POSIX-only test")
+        proc = subprocess_utils._spawn_worker_with_pty(
+            [sys.executable, "-c", "import sys; sys.stdout.write('hello'); sys.stdout.flush()"],
+            env=dict(os.environ),
+        )
+        proc.wait(timeout=10)
+        master_fd = proc._pty_master_fd  # type: ignore[attr-defined]
+        assert isinstance(master_fd, int)
+        # First close: drains + closes + sets attr to None.
+        subprocess_utils._close_pty_master(proc)
+        assert proc._pty_master_fd is None  # type: ignore[attr-defined]
+        # Verify fd is actually closed (os.close should raise EBADF).
+        with pytest.raises(OSError):
+            os.close(master_fd)
+        # Second close: idempotent no-op.
+        subprocess_utils._close_pty_master(proc)
+        assert proc._pty_master_fd is None  # type: ignore[attr-defined]
+
+    def test_popen_failure_does_not_leak_fds(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A1-5 (W8 carry-forward): Popen failure closes both master + slave fds."""
+        if sys.platform == "win32":
+            pytest.skip("POSIX-only test")
+        leaked_fds: list[int] = []
+
+        def boom_popen(*args: object, **kwargs: object) -> object:
+            # Capture the fds passed via stdin= kwarg before raising.
+            slave = kwargs.get("stdin")
+            if isinstance(slave, int):
+                leaked_fds.append(slave)
+            raise OSError("simulated spawn failure")
+
+        monkeypatch.setattr("subprocess_utils.subprocess.Popen", boom_popen)
+        with pytest.raises(OSError, match="simulated spawn failure"):
+            subprocess_utils._spawn_worker_with_pty(
+                [sys.executable, "-c", "pass"],
+                env=dict(os.environ),
+            )
+        # Both fds the helper opened should be closed; if the slave_fd
+        # we captured is still open, os.close should succeed (=leak).
+        for fd in leaked_fds:
+            with pytest.raises(OSError):
+                os.close(fd)

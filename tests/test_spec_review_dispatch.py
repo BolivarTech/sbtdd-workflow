@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import spec_review_dispatch
 from errors import SpecReviewError
 
 
@@ -218,3 +219,164 @@ def test_dispatch_safety_valve_raises_spec_review_error(tmp_path, monkeypatch) -
     monkeypatch.setattr("spec_review_dispatch.subprocess_utils.run_with_timeout", fake_run)
     with pytest.raises(SpecReviewError):
         dispatch_spec_reviewer(task_id="1", plan_path=plan, repo_root=tmp_path, max_iterations=3)
+
+
+class TestSpecReviewerFileReference:
+    """v1.0.7 B4 spec_review_dispatch file-reference per spec sec.4.5."""
+
+    def test_prompt_written_to_project_relative_tempfile(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B4-1: prompt written to .claude/spec-reviews/.tmp/prompt-<uuid16>.md."""
+        repo_root = tmp_path / "repo"
+        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
+        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
+        captured: dict[str, object] = {}
+
+        class FakeResult:
+            returncode = 0
+            stdout = '{"approved": true, "issues": []}'
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
+            captured["argv"] = list(cmd)
+            # Verify the prompt file existed at dispatch time.
+            for tok in cmd:
+                if tok.startswith("@"):
+                    captured["prompt_file_existed"] = Path(tok[1:]).exists()
+            return FakeResult()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        spec_review_dispatch.dispatch_spec_reviewer(
+            task_id="1",
+            plan_path=plan_path,
+            repo_root=repo_root,
+            max_iterations=1,
+        )
+        argv = captured["argv"]
+        assert isinstance(argv, list)
+        prompt_token = next(t for t in argv if isinstance(t, str) and t.startswith("@"))
+        prompt_path = Path(prompt_token[1:])
+        # Filename matches prompt-<uuid16>.md pattern.
+        assert prompt_path.parent.name == ".tmp"
+        assert prompt_path.parent.parent.name == "spec-reviews"
+        assert prompt_path.name.startswith("prompt-")
+        assert prompt_path.name.endswith(".md")
+        assert len(prompt_path.stem.removeprefix("prompt-")) == 16
+        # File existed at dispatch time per B4-2.
+        assert captured["prompt_file_existed"] is True
+
+    def test_argv_uses_at_filepath_not_inline_prompt(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B4-2: argv contains @<filepath> reference; no inline prompt."""
+        repo_root = tmp_path / "repo"
+        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
+        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
+        captured_argv: list[list[str]] = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = '{"approved": true, "issues": []}'
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
+            captured_argv.append(list(cmd))
+            return FakeResult()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        spec_review_dispatch.dispatch_spec_reviewer(
+            task_id="1",
+            plan_path=plan_path,
+            repo_root=repo_root,
+            max_iterations=1,
+        )
+        # Filter to the claude invocation (other calls are git helpers
+        # in _collect_task_diff which also go through run_with_timeout).
+        claude_argvs = [a for a in captured_argv if a and a[0] == "claude"]
+        assert len(claude_argvs) == 1
+        argv = claude_argvs[0]
+        at_tokens = [t for t in argv if isinstance(t, str) and t.startswith("@")]
+        assert len(at_tokens) == 1
+        # No inline prompt content (would be a giant string in argv).
+        assert all(len(t) < 1000 for t in argv if isinstance(t, str))
+
+    def test_tempfile_cleaned_up_after_dispatch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B4-3: try/finally cleans tempfile post-dispatch."""
+        repo_root = tmp_path / "repo"
+        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
+        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
+        prompt_paths: list[Path] = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = '{"approved": true, "issues": []}'
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
+            for tok in cmd:
+                if isinstance(tok, str) and tok.startswith("@"):
+                    prompt_paths.append(Path(tok[1:]))
+            return FakeResult()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        spec_review_dispatch.dispatch_spec_reviewer(
+            task_id="1",
+            plan_path=plan_path,
+            repo_root=repo_root,
+            max_iterations=1,
+        )
+        assert prompt_paths
+        for p in prompt_paths:
+            assert not p.exists(), f"tempfile leaked: {p}"
+
+    def test_large_prompt_does_not_blow_argv(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B4-4: 200KB diff -> argv stays under 32K chars."""
+        repo_root = tmp_path / "repo"
+        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
+        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
+        # Force a giant diff via monkeypatch.
+        monkeypatch.setattr(
+            "spec_review_dispatch._collect_task_diff",
+            lambda repo, tid: "x" * 200_000,
+        )
+        captured_argv: list[list[str]] = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = '{"approved": true, "issues": []}'
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
+            captured_argv.append(list(cmd))
+            return FakeResult()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        spec_review_dispatch.dispatch_spec_reviewer(
+            task_id="1",
+            plan_path=plan_path,
+            repo_root=repo_root,
+            max_iterations=1,
+        )
+        argv_total_len = sum(len(t) for t in captured_argv[0] if isinstance(t, str))
+        assert argv_total_len < 5_000  # well under Windows 32K limit

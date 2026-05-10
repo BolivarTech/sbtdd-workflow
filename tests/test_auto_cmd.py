@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+import auto_cmd
 
 
 def test_auto_cmd_module_importable() -> None:
@@ -3080,6 +3083,9 @@ class TestPath3DispatchTracksConcurrent:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
                 popen_calls.append(list(cmd))
                 self.returncode: int | None = None
+                # v1.0.7 A2: _verify_worker_sidecars_present LOUD-FAIL
+                # contract reads proc.pid; provide unique-per-instance pid.
+                self.pid: int = 90000 + len(popen_calls)
 
             def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
                 self.returncode = 0
@@ -3124,7 +3130,9 @@ class TestPath3DispatchTracksConcurrent:
 
         class FailingPopen:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
-                pass
+                # v1.0.7 A2: _verify_worker_sidecars_present LOUD-FAIL
+                # contract reads proc.pid; provide stable pid.
+                self.pid: int = 92345
 
             def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
                 return (b"", b"track failed: T1 failed during green phase")
@@ -3175,6 +3183,9 @@ class TestPath3DispatchTracksConcurrent:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
                 popen_count["n"] += 1
                 self.returncode: int | None = None
+                # v1.0.7 A2: _verify_worker_sidecars_present LOUD-FAIL
+                # contract reads proc.pid; provide unique-per-instance pid.
+                self.pid: int = 91000 + popen_count["n"]
 
             def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
                 self.returncode = 0
@@ -3201,6 +3212,81 @@ class TestPath3DispatchTracksConcurrent:
         assert popen_count["n"] == 5, (
             f"all 5 tracks must be dispatched (queued through 2 workers); got {popen_count['n']}"
         )
+
+
+class TestVerifyWorkerSidecarsPresent:
+    """v1.0.7 T2 code-review C1+C2 fixes per spec sec.4.2 escenario A2-10."""
+
+    def test_no_sidecar_dir_with_no_successful_pids_returns(self, tmp_path: Path) -> None:
+        """All workers failed pre-close-phase: no sidecar dir is legitimate."""
+        import auto_cmd
+
+        # Sidecar dir does not exist; no successful workers either.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[])
+        # No exception raised → contract satisfied.
+
+    def test_no_sidecar_dir_with_successful_pids_returns_quietly(self, tmp_path: Path) -> None:
+        """No sidecar dir at all = test fixture or pre-close-phase failures.
+
+        The helper defers to integration tests + failures-list raise for the
+        all-workers-failed-pre-close-phase case. The interesting bug surface
+        (some succeeded + some missed sidecar) requires the dir to exist.
+        """
+        import auto_cmd
+
+        # No exception raised even with successful_pids set: the check is
+        # gated on dir existing, so test fixtures + edge cases don't trip
+        # the LOUD-FAIL.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[12345])
+
+    def test_failed_worker_pids_NOT_checked(self, tmp_path: Path) -> None:
+        """v1.0.7 T2 C2 fix: failed workers (rc!=0) legitimately have no sidecar.
+
+        The pre-fix helper checked ALL spawned pids; under partial failure
+        scenarios (some workers crash before close-phase), it raised a
+        misleading "INV-16 evidence loss" message instead of letting the
+        actual failures-list raise propagate. Post-fix: caller passes only
+        successful_pids; failed pids are excluded → no false-positive raise.
+        """
+        import auto_cmd
+
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecar_dir.mkdir(parents=True)
+        # Worker 11111 succeeded + persisted; worker 22222 crashed pre-close-phase
+        # so produced no sidecar. Caller passes only [11111] (the successful pid).
+        (sidecar_dir / "11111-12345-aabbccdd-verify.json").write_text("{}", encoding="utf-8")
+        # No sidecar for 22222 — that's expected for failed workers.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[11111])
+        # No exception → C2 contract satisfied.
+
+    def test_successful_worker_missing_sidecar_raises(self, tmp_path: Path) -> None:
+        """v1.0.7 iter-3 C1: successful worker without sidecar is a real bug."""
+        import auto_cmd
+        from errors import ConcurrentDispatchError
+
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecar_dir.mkdir(parents=True)
+        # Worker 11111 succeeded + persisted; worker 22222 ALSO succeeded but
+        # never persisted (real persistence bug).
+        (sidecar_dir / "11111-12345-aabbccdd-verify.json").write_text("{}", encoding="utf-8")
+        with pytest.raises(ConcurrentDispatchError, match="22222"):
+            auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[11111, 22222])
+
+    def test_unparseable_sidecar_filename_skipped_with_breadcrumb(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Stray file with unparseable name is skipped + breadcrumb to stderr."""
+        import auto_cmd
+
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecar_dir.mkdir(parents=True)
+        (sidecar_dir / "11111-12345-aabbccdd-verify.json").write_text("{}", encoding="utf-8")
+        # Stray file (not <pid>-... pattern).
+        (sidecar_dir / "stray-name-verify.json").write_text("{}", encoding="utf-8")
+        # Should not raise; should emit stderr breadcrumb.
+        auto_cmd._verify_worker_sidecars_present(tmp_path, successful_pids=[11111])
+        captured = capsys.readouterr()
+        assert "skipping unparseable sidecar" in captured.err
 
 
 class TestPath3WorkerModeFlowControl:
@@ -3768,3 +3854,94 @@ class TestK4ForwardableFlagsArgparseGuard:
         assert "nonexistent_fake_flag_for_drift_test" in msg, (
             "Drift error message must name the offending key(s)"
         )
+
+
+class TestSpawnWorkerDispatcher:
+    """v1.0.7 A2 cross-platform worker spawn dispatcher per spec sec.4.2."""
+
+    def test_windows_worker_uses_subprocess_pipe_with_env_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A2-1 (Windows path): subprocess.PIPE + SBTDD_AUTO_PARALLEL_WORKER=1."""
+        monkeypatch.setattr(sys, "platform", "win32")
+        captured: dict[str, object] = {}
+
+        class FakeProc:
+            def wait(self, timeout: int | None = None) -> int:
+                return 0
+
+        def fake_popen(
+            argv: list[str],
+            **kwargs: object,
+        ) -> FakeProc:
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            return FakeProc()
+
+        monkeypatch.setattr("auto_cmd.subprocess.Popen", fake_popen)
+        auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"})
+        kwargs = captured["kwargs"]
+        assert kwargs["stdin"] is subprocess.PIPE  # type: ignore[index]
+        assert kwargs["stdout"] is subprocess.PIPE  # type: ignore[index]
+        assert kwargs["stderr"] is subprocess.PIPE  # type: ignore[index]
+        assert kwargs["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"  # type: ignore[index]
+        assert kwargs["env"]["PATH"] == "/usr/bin"  # type: ignore[index]
+
+    def test_posix_worker_routes_to_pty_helper(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A2-1 (POSIX path): routes to subprocess_utils._spawn_worker_with_pty."""
+        if sys.platform == "win32":
+            # Force POSIX behavior by monkeypatching sys.platform.
+            monkeypatch.setattr(sys, "platform", "linux")
+        captured: dict[str, object] = {}
+
+        class FakeProc:
+            pass
+
+        def fake_pty_spawn(
+            argv: list[str], env: dict[str, str], *, cwd: str | None = None
+        ) -> FakeProc:
+            # v1.0.7 T2 code-review C1 fix: PTY helper now accepts cwd kwarg.
+            captured["argv"] = argv
+            captured["env"] = env
+            captured["cwd"] = cwd
+            return FakeProc()
+
+        monkeypatch.setattr("subprocess_utils._spawn_worker_with_pty", fake_pty_spawn)
+        auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"}, cwd="/tmp/x")
+        assert captured["argv"] == ["python", "-c", "pass"]
+        assert captured["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"  # type: ignore[index]
+        assert captured["env"]["PATH"] == "/usr/bin"  # type: ignore[index]
+        # v1.0.7 T2 code-review C1: cwd MUST forward through PTY helper.
+        assert captured["cwd"] == "/tmp/x"
+
+
+class TestC1ForwardableFlagsHelperDocs:
+    """v1.0.7 C1 K-4 helper docs comment per spec sec.4.7."""
+
+    def test_helper_source_documents_single_level_subparser_walk(self) -> None:
+        """C1: helper source contains comment about single-level walk limitation."""
+        import inspect
+
+        import auto_cmd
+
+        src = inspect.getsource(auto_cmd._validate_forwardable_flags_against_argparse)
+        assert "single-level subparser walk" in src.lower()
+
+
+class TestC6ForwardableFlagsImportlibReloadCaveat:
+    """v1.0.7 C6 K-4 helper docstring caveat per spec sec.4.7."""
+
+    def test_docstring_documents_importlib_reload_interaction(self) -> None:
+        """C6: docstring notes importlib.reload caveat for monkeypatch tests."""
+        import auto_cmd
+
+        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
+        assert "importlib.reload" in doc
+        assert "monkeypatch" in doc.lower()
+
+    def test_docstring_cross_links_c1_inline_comment(self) -> None:
+        """C6 Refactor cross-link: docstring references C1 inline comment."""
+        import auto_cmd
+
+        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
+        assert "single-level subparser" in doc.lower() or "see inline comment" in doc.lower()

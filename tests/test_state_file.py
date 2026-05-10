@@ -6,9 +6,14 @@
 
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+
+import state_file
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "state-files"
 
@@ -233,3 +238,76 @@ def test_save_cleans_up_tmp_on_os_replace_failure(tmp_path, monkeypatch):
     # No .tmp file should remain anywhere under tmp_path.
     leaked = list(tmp_path.glob("*.tmp.*"))
     assert leaked == [], f"tmp files leaked: {leaked}"
+
+
+class TestAtomicWriteJsonRetry:
+    """v1.0.7 B3 atomic_write_json retry per spec sec.4.6."""
+
+    def test_permission_error_triggers_retry(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B3-1: PermissionError on first os.replace -> retry."""
+        path = tmp_path / "audit.json"
+        attempts: list[int] = []
+        original_replace = os.replace
+
+        def flaky_replace(src: str, dst: str) -> None:
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise PermissionError(5, "Access denied", src)
+            original_replace(src, dst)
+
+        sleeps: list[float] = []
+
+        def fake_sleep(s: float) -> None:
+            sleeps.append(s)
+
+        monkeypatch.setattr("state_file.os.replace", flaky_replace)
+        monkeypatch.setattr("state_file.time.sleep", fake_sleep)
+        state_file.atomic_write_json(path, {"key": "value"})
+        assert len(attempts) == 2
+        # First retry slept 100ms (attempt-number 1 * 100ms).
+        assert sleeps == [0.1]
+        assert json.loads(path.read_text(encoding="utf-8")) == {"key": "value"}
+
+    def test_retry_backoff_grows_per_attempt(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B3-2: backoff = 100ms × attempt-number."""
+        path = tmp_path / "audit.json"
+        original_replace = os.replace
+
+        def flaky_replace(src: str, dst: str) -> None:
+            flaky_replace.calls += 1  # type: ignore[attr-defined]
+            if flaky_replace.calls < 3:  # type: ignore[attr-defined]
+                raise PermissionError(5, "Access denied", src)
+            original_replace(src, dst)
+
+        flaky_replace.calls = 0  # type: ignore[attr-defined]
+        sleeps: list[float] = []
+
+        monkeypatch.setattr("state_file.os.replace", flaky_replace)
+        monkeypatch.setattr("state_file.time.sleep", lambda s: sleeps.append(s))
+        state_file.atomic_write_json(path, {"key": "value"})
+        # 2 retries: attempt 1 sleeps 100ms, attempt 2 sleeps 200ms.
+        assert sleeps == [0.1, 0.2]
+
+    def test_retry_exhaustion_reraises_permission_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B3-3: 3 attempts all fail -> re-raise PermissionError."""
+        path = tmp_path / "audit.json"
+
+        def always_fail(src: str, dst: str) -> None:
+            raise PermissionError(5, "Access denied", src)
+
+        monkeypatch.setattr("state_file.os.replace", always_fail)
+        monkeypatch.setattr("state_file.time.sleep", lambda s: None)
+        with pytest.raises(PermissionError, match="Access denied"):
+            state_file.atomic_write_json(path, {"key": "value"})

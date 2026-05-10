@@ -16,10 +16,14 @@ validation), INV-16 (verification emits evidence via
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import close_task_cmd
+import state_file
 import subprocess_utils
 import superpowers_dispatch
 from commits import create as commit_create
@@ -79,14 +83,107 @@ def _run_verification(root: Path) -> None:
     makes the working directory match the project root regardless of
     which subdirectory the user invoked the command from.
 
+    v1.0.7 A2 Option B-W3 hybrid: when ``SBTDD_AUTO_PARALLEL_WORKER=1``
+    is set in the environment (parent-injected by
+    :func:`auto_cmd._spawn_worker` for ``--parallel`` workers), bypass
+    the interactive ``/verification-before-completion`` skill subprocess
+    and run the sec.0.1 4-tool chain directly: pytest, ruff check,
+    ruff format --check, mypy. Rationale: workers spawned via
+    ``subprocess.PIPE`` on Windows have no TTY -> the skill subprocess
+    hangs waiting for an interactive prompt that never arrives
+    (chicken-and-egg, empirically confirmed in v1.0.6 dogfood, spec
+    sec.2.1). v1.0.7 iter-2 carry-forward C4: chain is explicit (no
+    ``make`` dependency on Windows) + per-worker stdout/stderr captured
+    to ``<root>/.claude/auto-run-workers/<pid>-<monotonic_ns>-<uuid8>-verify.json``
+    for INV-16 evidence-before-assertions continuity (parent post-batch
+    merge can introspect for actual sec.0.1 results, not just success/fail).
+
     Args:
         root: Project root directory (``--project-root``).
 
     Raises:
-        ValidationError: Skill wrapper raised (timeout / non-zero exit).
-        QuotaExhaustedError: Anthropic API cap hit during verification.
+        ValidationError: Skill wrapper raised (timeout / non-zero exit)
+            in orchestrator mode, OR any sec.0.1 tool returned non-zero
+            in worker mode (early-abort semantics: subsequent tools NOT
+            run; partial captured chain still persisted to sidecar).
+        QuotaExhaustedError: Anthropic API cap hit during verification
+            (orchestrator mode only; shell command path is offline).
     """
+    if os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1":
+        # v1.0.7 T3 dogfood empirical fix: invoke via ``sys.executable -m
+        # <tool>`` instead of bare names. Bare ``pytest`` / ``ruff`` /
+        # ``mypy`` are not always on PATH (e.g., Python 3.14 installs
+        # without venv Scripts/, CI base images, certain Windows configs).
+        # Module invocation works in any env where the tool is pip-installed
+        # for the active Python — which is the v1.0.7 dependency contract.
+        commands = [
+            [sys.executable, "-m", "pytest"],
+            [sys.executable, "-m", "ruff", "check", "."],
+            [sys.executable, "-m", "ruff", "format", "--check", "."],
+            [sys.executable, "-m", "mypy", "."],
+        ]
+        captured: list[dict[str, object]] = []
+        for cmd in commands:
+            result = subprocess.run(
+                cmd,
+                cwd=str(root),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            captured.append(
+                {
+                    "cmd": cmd,
+                    "rc": result.returncode,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                }
+            )
+            if result.returncode != 0:
+                # Persist partial chain BEFORE raising for INV-16 evidence.
+                _persist_worker_verify_evidence(root, captured)
+                raise ValidationError(
+                    f"v1.0.7 A2 worker-mode verify failed at {cmd[0]!r}: rc={result.returncode}"
+                )
+        _persist_worker_verify_evidence(root, captured)
+        return
     superpowers_dispatch.verification_before_completion(cwd=str(root))
+
+
+def _persist_worker_verify_evidence(
+    root: Path,
+    captured: list[dict[str, object]],
+) -> None:
+    """v1.0.7 A2 INV-16 continuity: write per-worker verify capture.
+
+    Writes to
+    ``<root>/.claude/auto-run-workers/<pid>-<monotonic_ns>-<uuid8>-verify.json``
+    so parent post-batch merge has evidence of what each worker actually
+    ran + observed. Uses :func:`state_file.atomic_write_json` (which
+    gains Windows PermissionError retry per v1.0.7 B3 = T6).
+
+    v1.0.7 iter-3 carry-forward C1 (Cas iter-2 CRITICAL): filename has
+    3-component disambiguator preventing PID-recycle / re-spawn collision
+    (pid for human cross-reference + monotonic_ns sub-microsecond
+    resolution + uuid8 final tiebreaker). Parent-side LOUD-FAIL contract
+    enforced in :func:`auto_cmd._verify_worker_sidecars_present`:
+    missing sidecar raises :class:`ConcurrentDispatchError`.
+
+    Args:
+        root: Project root directory (sidecar dir is
+            ``<root>/.claude/auto-run-workers/``).
+        captured: Per-tool capture list (cmd / rc / stdout / stderr dicts)
+            in invocation order. Persisted under the ``"verify_chain"``
+            key.
+    """
+    import time as _time
+    import uuid as _uuid
+
+    sidecar_dir = root / ".claude" / "auto-run-workers"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    suffix = f"{os.getpid()}-{_time.monotonic_ns()}-{_uuid.uuid4().hex[:8]}"
+    sidecar = sidecar_dir / f"{suffix}-verify.json"
+    state_file.atomic_write_json(sidecar, {"verify_chain": captured})
 
 
 def _prefix_for(phase: str, variant: str | None) -> str:

@@ -513,3 +513,31 @@ guidance.
 - Authoritative methodology lives in the destination project's `CLAUDE.local.md`
   (installed by `sbtdd init`); the `sbtdd-rules` and `sbtdd-tdd-cycle` sections
   above are summaries intended for in-skill reference, not redefinitions.
+
+### Ship-time methodology-activity procedure (v1.0.7+)
+
+Any methodology-activity finding (F-J9, F-J10, F-A2, F-Resume, P2 — i.e.,
+non-test process observations surfaced during own-cycle dogfood) that
+does NOT trigger a ship abort gets a v1.0.X+1 LOCKED entry at ship time,
+NOT mid-cycle. Process discipline:
+
+1. **At ship time** (post pre-merge Loop 2 convergence + before tag
+   push), enumerate all methodology-activity findings observed during
+   the cycle (own-cycle dogfood, sequential vs --parallel mode
+   decisions, manual fallbacks, etc.).
+2. **Triage each finding** as either:
+   - **Ship-blocker** → fix in current cycle before ship.
+   - **Next-cycle LOCKED** → write a memory file
+     `project_v1_0_X+1_<finding>_locked.md` referenced by
+     `MEMORY.md` index. Include in next-cycle spec-base sec.1
+     "Out of scope vN.M.Z+1 (rolled forward)".
+   - **Discard** → document rationale in current-cycle CHANGELOG
+     "Process notes" section (e.g., "F-J9 observation noted but
+     superseded by v1.0.7 Pillar A").
+3. **Prevents deferral pipeline drift between cycles**: by ship-time
+   triaging methodology findings, next cycle's spec-base inherits a
+   complete LOCKED backlog without mid-cycle scope creep.
+
+This procedure is documented for v1.0.7 onwards; precedent established
+by v1.0.6 own-cycle dogfood findings → v1.0.7 LOCKED Pillar B
+(B5+B4+B3) carry-forward.

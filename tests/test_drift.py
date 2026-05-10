@@ -509,3 +509,37 @@ def test_detect_drift_io_wrapper_returns_none_when_consistent(tmp_path, monkeypa
         )
         is None
     )
+
+
+class TestPlanAllTasksCompleteLineAnchored:
+    """v1.0.7 B5 drift detector line-anchored regex per spec sec.4.4."""
+
+    def test_codeblock_open_checkbox_does_not_false_positive(self) -> None:
+        """B5-1: `- [ ]` inside Python string literal (code block) ignored."""
+        from drift import _plan_all_tasks_complete
+
+        plan = (
+            "### Task 1: A\n"
+            "- [x] Step 1\n"
+            "    Example fixture content:\n"
+            "    ```python\n"
+            '    text = "- [ ] Step 1\\n"\n'
+            "    ```\n"
+            "### Task 2: B\n"
+            "- [x] Step 1\n"
+        )
+        assert _plan_all_tasks_complete(plan) == "[x]"
+
+    def test_real_open_checkbox_at_line_start_detected(self) -> None:
+        """B5-2: legit `- [ ]` at line start still flags incomplete."""
+        from drift import _plan_all_tasks_complete
+
+        plan = "### Task 1: A\n- [ ] Step 1\n### Task 2: B\n- [x] Step 1\n"
+        assert _plan_all_tasks_complete(plan) == "[ ]"
+
+    def test_indented_open_checkbox_detected(self) -> None:
+        """B5 partial: indented `  - [ ]` still flags incomplete."""
+        from drift import _plan_all_tasks_complete
+
+        plan = "### Task 1: A\n  - [ ] indented step\n### Task 2: B\n- [x] Step 1\n"
+        assert _plan_all_tasks_complete(plan) == "[ ]"

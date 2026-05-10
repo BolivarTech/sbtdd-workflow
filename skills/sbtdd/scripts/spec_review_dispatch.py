@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -415,16 +416,26 @@ def dispatch_spec_reviewer(
     task_text = _extract_task_text(plan_text, task_id)
     diff_text = _collect_task_diff(repo_root, task_id)
     prompt = _build_reviewer_prompt(task_id, task_text, diff_text)
+    # v1.0.7 B4: write prompt to project-relative tempfile + pass
+    # ``@<filepath>`` reference in argv. Closes WinError 206 (Windows
+    # cmdline limit ~32K chars) when prompt + diff exceed argv budget;
+    # filepath is bounded to ~120 chars regardless of prompt size.
+    # Same pattern as v1.0.3 cross-check Item B fix.
+    prompt_dir = repo_root / ".claude" / "spec-reviews" / ".tmp"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = prompt_dir / f"prompt-{uuid.uuid4().hex[:16]}.md"
+    prompt_path.write_text(prompt, encoding="utf-8")
     # v0.3.0 Feature E: apply INV-0 cascade then optionally inject
     # ``--model <id>`` BEFORE the ``-p`` flag (mirrors superpowers_dispatch
-    # convention). With model=None (default) argv is byte-identical to v0.2.x.
+    # convention). With model=None (default) argv is byte-identical to v0.2.x
+    # except for the prompt token which is now ``@<filepath>``.
     from superpowers_dispatch import _apply_inv0_model_check
 
     effective_model = _apply_inv0_model_check(model, skill_field_name)
     cmd: list[str] = ["claude"]
     if effective_model is not None:
         cmd.extend(["--model", effective_model])
-    cmd.extend(["-p", _REVIEWER_SKILL_REF, prompt])
+    cmd.extend(["-p", _REVIEWER_SKILL_REF, f"@{prompt_path}"])
     iter_history: list[dict[str, Any]] = []
     # iter 2 finding #1 + #7: thread stream_prefix so the
     # spec-reviewer subagent's per-iteration progress reaches
@@ -433,55 +444,63 @@ def dispatch_spec_reviewer(
     rwt_kwargs: dict[str, Any] = {"timeout": timeout, "capture": True, "cwd": str(repo_root)}
     if stream_prefix is not None:
         rwt_kwargs["stream_prefix"] = stream_prefix
-    for iteration in range(1, max_iterations + 1):
-        try:
-            result = subprocess_utils.run_with_timeout(cmd, **rwt_kwargs)
-        except subprocess.TimeoutExpired as exc:
-            raise SpecReviewError(
-                f"spec-reviewer timed out at iter {iteration} for task {task_id}",
-                task_id=task_id,
-                iteration=iteration,
-            ) from exc
-        if result.returncode != 0:
-            exhaustion = quota_detector.detect(result.stderr or "")
-            if exhaustion is not None:
-                raise QuotaExhaustedError(f"{exhaustion.kind}: {exhaustion.raw_message}")
-            raise SpecReviewError(
-                f"spec-reviewer exited {result.returncode} at iter {iteration} for task {task_id}",
-                task_id=task_id,
-                iteration=iteration,
-            )
-        approved, issues = _parse_reviewer_output(result.stdout or "")
-        iter_history.append({"iter": iteration, "approved": approved, "n_issues": len(issues)})
-        if approved:
-            artifact = _write_artifact(
-                _build_artifact_payload(
-                    task_id, approved=True, iter_history=iter_history, issues=()
-                ),
-                repo_root,
-                task_id,
-            )
-            return SpecReviewResult(
-                approved=True,
-                issues=(),
-                reviewer_iter=iteration,
-                artifact_path=artifact,
-            )
-        if iteration == max_iterations:
-            artifact = _write_artifact(
-                _build_artifact_payload(
-                    task_id, approved=False, iter_history=iter_history, issues=issues
-                ),
-                repo_root,
-                task_id,
-            )
-            raise SpecReviewError(
-                f"spec-reviewer safety valve exhausted for task {task_id} "
-                f"after {iteration} iterations ({len(issues)} issues)",
-                task_id=task_id,
-                iteration=iteration,
-                issues=tuple(i.text for i in issues),
-            )
+    try:
+        for iteration in range(1, max_iterations + 1):
+            try:
+                result = subprocess_utils.run_with_timeout(cmd, **rwt_kwargs)
+            except subprocess.TimeoutExpired as exc:
+                raise SpecReviewError(
+                    f"spec-reviewer timed out at iter {iteration} for task {task_id}",
+                    task_id=task_id,
+                    iteration=iteration,
+                ) from exc
+            if result.returncode != 0:
+                exhaustion = quota_detector.detect(result.stderr or "")
+                if exhaustion is not None:
+                    raise QuotaExhaustedError(f"{exhaustion.kind}: {exhaustion.raw_message}")
+                raise SpecReviewError(
+                    f"spec-reviewer exited {result.returncode} at iter {iteration} "
+                    f"for task {task_id}",
+                    task_id=task_id,
+                    iteration=iteration,
+                )
+            approved, issues = _parse_reviewer_output(result.stdout or "")
+            iter_history.append({"iter": iteration, "approved": approved, "n_issues": len(issues)})
+            if approved:
+                artifact = _write_artifact(
+                    _build_artifact_payload(
+                        task_id, approved=True, iter_history=iter_history, issues=()
+                    ),
+                    repo_root,
+                    task_id,
+                )
+                return SpecReviewResult(
+                    approved=True,
+                    issues=(),
+                    reviewer_iter=iteration,
+                    artifact_path=artifact,
+                )
+            if iteration == max_iterations:
+                artifact = _write_artifact(
+                    _build_artifact_payload(
+                        task_id, approved=False, iter_history=iter_history, issues=issues
+                    ),
+                    repo_root,
+                    task_id,
+                )
+                raise SpecReviewError(
+                    f"spec-reviewer safety valve exhausted for task {task_id} "
+                    f"after {iteration} iterations ({len(issues)} issues)",
+                    task_id=task_id,
+                    iteration=iteration,
+                    issues=tuple(i.text for i in issues),
+                )
+    finally:
+        # v1.0.7 B4: cleanup tempfile regardless of outcome (success,
+        # SpecReviewError, QuotaExhaustedError, ValidationError, or any
+        # other unexpected exception). missing_ok=True swallows the case
+        # where the file was already cleaned up out-of-band.
+        prompt_path.unlink(missing_ok=True)
     raise SpecReviewError(
         f"unreachable: max_iterations must be >= 1 for task {task_id}",
         task_id=task_id,

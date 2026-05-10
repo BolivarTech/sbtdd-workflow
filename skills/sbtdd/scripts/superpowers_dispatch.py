@@ -50,6 +50,7 @@ gate would not fire, subprocess would spawn, hang persists).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys as _sys
 from dataclasses import dataclass
@@ -333,6 +334,30 @@ def invoke_skill(
     # heuristic -- caspar Checkpoint 2 iter 1 CRITICAL verified that
     # heuristic does not fix the v1.0.3 bug because operator main
     # sessions have TTY=True so the gate would not fire.
+    # v1.0.7 A2 Q2'=b promotion: defense-in-depth worker-context runtime
+    # guard. Workers under `auto --parallel` (parent-injected env var
+    # SBTDD_AUTO_PARALLEL_WORKER=1) MUST NOT dispatch interactive skills
+    # via subprocess. The membership gate below + v1.0.6 J-3 headless
+    # detection catch the orchestrator path; this guard catches the
+    # worker path even when a wrapper sets allow_interactive_skill=True.
+    # Closes Cas v1.0.6 iter-2 WARNING: F-A2 worker headless audit was
+    # grep-snapshot, not runtime guard. Fires loud-fast so any drift
+    # (transitive imports adding a skill dispatch to the worker code
+    # path) surfaces during dev/CI rather than producing a silent
+    # subprocess hang in production.
+    if (
+        skill in _SUBPROCESS_INCOMPATIBLE_SKILLS
+        and os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1"
+    ):
+        raise PreconditionError(
+            f"Worker subprocess attempted to dispatch interactive "
+            f"skill {skill!r}; this should never happen in the auto "
+            f"--parallel worker code path. Bug. Either: (a) the worker "
+            f"code path was extended to call the skill -- refactor to "
+            f"use shell command directly per v1.0.7 A2 "
+            f"_run_verification pattern, OR (b) the parent set "
+            f"SBTDD_AUTO_PARALLEL_WORKER=1 incorrectly."
+        )
     if skill in _SUBPROCESS_INCOMPATIBLE_SKILLS and not allow_interactive_skill:
         raise PreconditionError(_build_recovery_message(skill))
     effective_model = _apply_inv0_model_check(model, skill_field_name)
