@@ -499,7 +499,7 @@ class TestSpawnWorkerWithPty:
             proc.wait(timeout=10)
             try:
                 while True:
-                    chunk = os.read(proc._pty_master_fd, 4096)
+                    chunk = os.read(proc._pty_master_fd, 4096)  # type: ignore[attr-defined]
                     if not chunk:
                         break
                     output += chunk
@@ -532,17 +532,17 @@ class TestSpawnWorkerWithPty:
             env=dict(os.environ),
         )
         proc.wait(timeout=10)
-        master_fd = proc._pty_master_fd
+        master_fd = proc._pty_master_fd  # type: ignore[attr-defined]
         assert isinstance(master_fd, int)
         # First close: drains + closes + sets attr to None.
         subprocess_utils._close_pty_master(proc)
-        assert proc._pty_master_fd is None
+        assert proc._pty_master_fd is None  # type: ignore[attr-defined]
         # Verify fd is actually closed (os.close should raise EBADF).
         with pytest.raises(OSError):
             os.close(master_fd)
         # Second close: idempotent no-op.
         subprocess_utils._close_pty_master(proc)
-        assert proc._pty_master_fd is None
+        assert proc._pty_master_fd is None  # type: ignore[attr-defined]
 
     def test_popen_failure_does_not_leak_fds(
         self,

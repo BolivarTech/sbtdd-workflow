@@ -502,3 +502,129 @@ def _emit_kill_breadcrumb(per_stream_timeout_seconds: float) -> None:
         f"to plugin.local.md auto_no_timeout_dispatch_labels to exempt\n"
     )
     sys.stderr.flush()
+
+
+# ---------------------------------------------------------------------------
+# v1.0.7 A1 — POSIX PTY allocation + lifecycle helper (Pillar A PRIMARY)
+# ---------------------------------------------------------------------------
+
+
+def _spawn_worker_with_pty(
+    argv: list[str],
+    env: dict[str, str],
+) -> "subprocess.Popen[bytes]":
+    """v1.0.7 A1 POSIX: allocate pseudo-TTY for worker subprocess.
+
+    Workers spawned via this helper inherit the slave end as
+    stdin/stdout/stderr; orchestrator holds master end via
+    ``proc._pty_master_fd``. Skill subprocess chain (close-phase ->
+    /verification-before-completion) inherits TTY from worker ->
+    interactive prompts work -> no chicken-and-egg hang (see v1.0.6
+    empirical findings + spec sec.2.1).
+
+    POSIX-only. Windows callers must use the Option B-W3 hybrid path
+    (``subprocess.PIPE`` + ``SBTDD_AUTO_PARALLEL_WORKER`` env +
+    ``close_phase_cmd._run_verification`` worker-mode bypass per A2).
+
+    v1.0.7 iter-2 carry-forward W8: Popen failure closes BOTH master and
+    slave fds before re-raising, preventing fd leak on spawn failure.
+
+    Args:
+        argv: Subprocess argv (executable + args). ``shell=False``
+            invariant from sec.S.8.6 preserved.
+        env: Environment dict passed to the subprocess. Caller must
+            inject ``SBTDD_AUTO_PARALLEL_WORKER=1`` (done by
+            ``auto_cmd._spawn_worker`` cross-platform dispatcher).
+
+    Returns:
+        ``subprocess.Popen`` instance with ``_pty_master_fd`` integer
+        attribute set for downstream :func:`_close_pty_master` cleanup.
+
+    Raises:
+        RuntimeError: When invoked on Windows. Defensive guard against
+            test-harness misuse; production callers route via
+            ``auto_cmd._spawn_worker`` dispatcher.
+        OSError: Re-raised from underlying ``subprocess.Popen``; both
+            master and slave fds closed before re-raise (no leak).
+    """
+    # Guard before importing pty: pty.py transitively imports termios
+    # which is POSIX-only and raises ModuleNotFoundError on Windows.
+    # The win32 check MUST run before the import to keep the Windows
+    # error path returning RuntimeError (the documented contract)
+    # rather than ModuleNotFoundError leaking from stdlib.
+    if sys.platform == "win32":
+        raise RuntimeError(
+            "_spawn_worker_with_pty is POSIX-only; Windows uses "
+            "Option B-W3 hybrid (see auto_cmd._spawn_worker)"
+        )
+    # pty is POSIX-only stdlib; local-import keeps the Windows path
+    # of subprocess_utils.py importable without conditional top-level
+    # ImportError handling.
+    import os as _os
+    import pty
+
+    master_fd, slave_fd = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            env=env,
+            close_fds=True,
+        )
+    except Exception:
+        # v1.0.7 W8 leak guard: close both fds on Popen failure.
+        try:
+            _os.close(master_fd)
+        except OSError:
+            pass
+        try:
+            _os.close(slave_fd)
+        except OSError:
+            pass
+        raise
+    _os.close(slave_fd)  # parent only needs master after success
+    proc._pty_master_fd = master_fd
+    return proc
+
+
+def _close_pty_master(proc: "subprocess.Popen[bytes]") -> None:
+    """v1.0.7 A1 lifecycle: drain + close master fd. Idempotent.
+
+    v1.0.7 iter-2 carry-forward C1 resolution: orchestrator MUST call
+    this helper after ``proc.wait()`` for every worker spawned via
+    :func:`_spawn_worker_with_pty`. Drains buffered output from the
+    master end before close; without drain, subsequent reads raise EIO
+    on POSIX. Idempotent: safe to call multiple times -- second
+    invocation observes ``_pty_master_fd is None`` and returns no-op.
+
+    EIO/SIGHUP race tolerance (R7): if the worker closes the slave end
+    OR receives SIGHUP between ``proc.wait()`` and this helper, the
+    drain loop may observe ``OSError(EIO)`` immediately on first read.
+    Catch broadly + treat as drain-complete; worker exit code +
+    per-worker sidecar evidence preserve the actual results.
+
+    Args:
+        proc: ``subprocess.Popen`` returned by
+            :func:`_spawn_worker_with_pty`.
+    """
+    import os as _os
+
+    master_fd = getattr(proc, "_pty_master_fd", None)
+    if master_fd is None:
+        return
+    try:
+        while True:
+            data = _os.read(master_fd, 4096)
+            if not data:
+                break
+    except OSError:
+        # Worker already closed slave end OR SIGHUP race; drain done.
+        pass
+    try:
+        _os.close(master_fd)
+    except OSError:
+        # Already closed (idempotent).
+        pass
+    proc._pty_master_fd = None  # type: ignore[attr-defined]
