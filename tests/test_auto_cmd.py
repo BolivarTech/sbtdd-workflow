@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+import auto_cmd
 
 
 def test_auto_cmd_module_importable() -> None:
@@ -3768,3 +3771,56 @@ class TestK4ForwardableFlagsArgparseGuard:
         assert "nonexistent_fake_flag_for_drift_test" in msg, (
             "Drift error message must name the offending key(s)"
         )
+
+
+class TestSpawnWorkerDispatcher:
+    """v1.0.7 A2 cross-platform worker spawn dispatcher per spec sec.4.2."""
+
+    def test_windows_worker_uses_subprocess_pipe_with_env_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A2-1 (Windows path): subprocess.PIPE + SBTDD_AUTO_PARALLEL_WORKER=1."""
+        monkeypatch.setattr(sys, "platform", "win32")
+        captured: dict[str, object] = {}
+
+        class FakeProc:
+            def wait(self, timeout: int | None = None) -> int:
+                return 0
+
+        def fake_popen(
+            argv: list[str],
+            **kwargs: object,
+        ) -> FakeProc:
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            return FakeProc()
+
+        monkeypatch.setattr("auto_cmd.subprocess.Popen", fake_popen)
+        auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"})
+        kwargs = captured["kwargs"]
+        assert kwargs["stdin"] is subprocess.PIPE
+        assert kwargs["stdout"] is subprocess.PIPE
+        assert kwargs["stderr"] is subprocess.PIPE
+        assert kwargs["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"
+        assert kwargs["env"]["PATH"] == "/usr/bin"
+
+    def test_posix_worker_routes_to_pty_helper(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A2-1 (POSIX path): routes to subprocess_utils._spawn_worker_with_pty."""
+        if sys.platform == "win32":
+            # Force POSIX behavior by monkeypatching sys.platform.
+            monkeypatch.setattr(sys, "platform", "linux")
+        captured: dict[str, object] = {}
+
+        class FakeProc:
+            pass
+
+        def fake_pty_spawn(argv: list[str], env: dict[str, str]) -> FakeProc:
+            captured["argv"] = argv
+            captured["env"] = env
+            return FakeProc()
+
+        monkeypatch.setattr("subprocess_utils._spawn_worker_with_pty", fake_pty_spawn)
+        auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"})
+        assert captured["argv"] == ["python", "-c", "pass"]
+        assert captured["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"
+        assert captured["env"]["PATH"] == "/usr/bin"

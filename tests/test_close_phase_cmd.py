@@ -5,7 +5,14 @@
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+
 import pytest
+
+import close_phase_cmd
+from errors import ValidationError
 
 
 def test_close_phase_cmd_module_importable() -> None:
@@ -502,3 +509,168 @@ def test_close_phase_verification_receives_project_root_as_cwd(
 
     close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "x"])
     assert captured_kwargs.get("cwd") == str(tmp_path)
+
+
+class TestRunVerificationWorkerBypass:
+    """v1.0.7 A2 worker-mode bypass per spec sec.4.2 + iter-2 C4 carry-forward.
+
+    Replaces `make verify` shell-out with explicit sec.0.1 chain:
+    pytest, ruff check, ruff format --check, mypy. Persists per-worker
+    captured output to <root>/.claude/auto-run-workers/<pid>-verify.json
+    for INV-16 evidence-before-assertions continuity.
+    """
+
+    def test_worker_mode_runs_sec_0_1_chain(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A2-2 (C4 carry-forward): worker runs sec.0.1 4-tool chain."""
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+        skill_called = []
+
+        def fake_skill(*, cwd: str) -> None:
+            skill_called.append(cwd)
+
+        monkeypatch.setattr("superpowers_dispatch.verification_before_completion", fake_skill)
+        captured_cmds: list[list[str]] = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = "PASS"
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kwargs: object) -> FakeResult:
+            captured_cmds.append(cmd)
+            return FakeResult()
+
+        monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
+        close_phase_cmd._run_verification(tmp_path)
+        assert skill_called == []  # bypassed
+        assert captured_cmds == [
+            ["pytest"],
+            ["ruff", "check", "."],
+            ["ruff", "format", "--check", "."],
+            ["mypy", "."],
+        ]
+
+    def test_worker_mode_first_tool_failure_aborts_chain_and_persists_evidence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A2-3 (C4 carry-forward): pytest failure aborts chain + evidence persisted."""
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+        captured_cmds: list[list[str]] = []
+
+        class FailResult:
+            returncode = 1
+            stdout = "FAILED"
+            stderr = "test foo failed"
+
+        class PassResult:
+            returncode = 0
+            stdout = "PASS"
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kwargs: object) -> object:
+            captured_cmds.append(cmd)
+            return FailResult() if cmd == ["pytest"] else PassResult()
+
+        monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
+        with pytest.raises(ValidationError, match="A2 worker-mode verify failed at 'pytest'"):
+            close_phase_cmd._run_verification(tmp_path)
+        # Only pytest ran; ruff/mypy NOT invoked (early-abort).
+        assert captured_cmds == [["pytest"]]
+        # Evidence sidecar persisted with the partial chain.
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecars = list(sidecar_dir.glob("*-verify.json"))
+        assert len(sidecars) == 1
+        payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+        assert payload["verify_chain"] == [
+            {"cmd": ["pytest"], "rc": 1, "stdout": "FAILED", "stderr": "test foo failed"}
+        ]
+
+    def test_worker_mode_full_chain_success_persists_evidence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A2-7 (C4 + iter-3 C1 carry-forward): full success + collision-resistant filename."""
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+
+        class PassResult:
+            returncode = 0
+            stdout = "PASS"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "close_phase_cmd.subprocess.run",
+            lambda cmd, **kw: PassResult(),
+        )
+        close_phase_cmd._run_verification(tmp_path)
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecars = list(sidecar_dir.glob("*-verify.json"))
+        assert len(sidecars) == 1
+        # v1.0.7 iter-3 C1: filename pattern <pid>-<monotonic_ns>-<uuid8>-verify.json
+        stem = sidecars[0].stem
+        # Expected: <pid>-<monotonic_ns>-<uuid8hex>-verify
+        parts = stem.split("-")
+        assert parts[-1] == "verify"
+        assert len(parts) == 4  # pid, monotonic_ns, uuid8, "verify"
+        assert parts[0] == str(os.getpid())
+        assert parts[1].isdigit() and int(parts[1]) > 0  # monotonic_ns
+        assert len(parts[2]) == 8 and all(c in "0123456789abcdef" for c in parts[2])
+        payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+        assert len(payload["verify_chain"]) == 4
+        assert all(entry["rc"] == 0 for entry in payload["verify_chain"])
+
+    def test_pid_recycle_simulation_does_not_collide(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A2-9 (iter-3 C1 carry-forward): same-pid re-spawn produces 2 distinct sidecars."""
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+
+        class PassResult:
+            returncode = 0
+            stdout = "PASS"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "close_phase_cmd.subprocess.run",
+            lambda cmd, **kw: PassResult(),
+        )
+        # Call twice from the same process (simulates PID recycle).
+        close_phase_cmd._run_verification(tmp_path)
+        close_phase_cmd._run_verification(tmp_path)
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecars = list(sidecar_dir.glob("*-verify.json"))
+        assert len(sidecars) == 2  # NO collision
+        # Both sidecars share pid prefix but differ in monotonic_ns or uuid8.
+        stems = [s.stem for s in sidecars]
+        assert all(stem.startswith(f"{os.getpid()}-") for stem in stems)
+        assert len(set(stems)) == 2
+
+    def test_orchestrator_mode_preserves_skill_dispatch(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A2-4: no env var -> existing skill path."""
+        monkeypatch.delenv("SBTDD_AUTO_PARALLEL_WORKER", raising=False)
+        skill_called = []
+
+        def fake_skill(*, cwd: str) -> None:
+            skill_called.append(cwd)
+
+        monkeypatch.setattr("superpowers_dispatch.verification_before_completion", fake_skill)
+
+        # subprocess.run should NOT be called in orchestrator mode.
+        def boom(cmd: list[str], **kw: object) -> None:
+            raise AssertionError("subprocess.run must not be called in orchestrator mode")
+
+        monkeypatch.setattr("close_phase_cmd.subprocess.run", boom)
+        close_phase_cmd._run_verification(tmp_path)
+        assert skill_called == [str(tmp_path)]

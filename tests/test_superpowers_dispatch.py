@@ -11,6 +11,9 @@ from typing import Any
 
 import pytest
 
+import superpowers_dispatch
+from errors import PreconditionError
+
 
 def test_skill_result_is_frozen_dataclass():
     from dataclasses import FrozenInstanceError
@@ -782,3 +785,84 @@ class TestBuildRecoveryMessage:
             invoke_skill("receiving-code-review", args=["any prompt"])
         elapsed = time.monotonic() - start
         assert elapsed < 1.0, f"Expected <1s; took {elapsed:.2f}s"
+
+
+class TestInvokeSkillWorkerGuard:
+    """v1.0.7 A2 Q2'=b worker-context runtime guard per spec sec.4.2 A2-5/A2-6."""
+
+    def test_worker_env_with_incompatible_skill_raises_worker_bug_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A2-5: worker env + incompatible skill -> PreconditionError naming bug."""
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+        # Pick any skill that's in the membership set.
+        skill = next(iter(superpowers_dispatch._SUBPROCESS_INCOMPATIBLE_SKILLS))
+        with pytest.raises(PreconditionError, match="Worker subprocess attempted"):
+            superpowers_dispatch.invoke_skill(skill, allow_interactive_skill=True)
+
+    def test_orchestrator_unaffected_by_worker_guard(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A2-6: no env var -> falls through to existing v1.0.4+v1.0.6 gates."""
+        monkeypatch.delenv("SBTDD_AUTO_PARALLEL_WORKER", raising=False)
+        skill = next(iter(superpowers_dispatch._SUBPROCESS_INCOMPATIBLE_SKILLS))
+        # With allow_interactive_skill=True + no headless context, dispatch
+        # would proceed; we monkeypatch run_with_timeout to short-circuit.
+        captured: list[list[str]] = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
+            captured.append(cmd)
+            return FakeResult()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+        # Force non-headless context for this test.
+        monkeypatch.setattr(
+            "subprocess_utils.is_headless_context",
+            lambda: False,
+            raising=False,
+        )
+        result = superpowers_dispatch.invoke_skill(skill, allow_interactive_skill=True)
+        assert result.returncode == 0
+        assert captured  # subprocess WAS dispatched (no worker guard fired)
+
+    def test_orchestrator_with_tty_dispatches_normally_pin_guard_ordering(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A2-8 (W1 carry-forward): pin guard ordering against future regressions.
+
+        Verifies the v1.0.7 A2 worker check fires AFTER membership +
+        BEFORE headless gate AND requires BOTH env var presence AND
+        skill membership. Checking env var alone would trip on operator
+        scripts that set SBTDD_AUTO_PARALLEL_WORKER=1 unrelated to
+        --parallel context. Future refactors that reorder the guards
+        must keep this test green.
+        """
+        monkeypatch.delenv("SBTDD_AUTO_PARALLEL_WORKER", raising=False)
+        skill = next(iter(superpowers_dispatch._SUBPROCESS_INCOMPATIBLE_SKILLS))
+        captured: list[list[str]] = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        monkeypatch.setattr(
+            "subprocess_utils.run_with_timeout",
+            lambda cmd, **kw: captured.append(cmd) or FakeResult(),
+        )
+        monkeypatch.setattr(
+            "subprocess_utils.is_headless_context",
+            lambda: False,
+            raising=False,
+        )
+        # Orchestrator dispatch SHOULD proceed: not headless + override allowed.
+        result = superpowers_dispatch.invoke_skill(skill, allow_interactive_skill=True)
+        assert result.returncode == 0
+        assert len(captured) == 1
+        # Now flip the env var to verify the worker guard DOES fire.
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+        with pytest.raises(PreconditionError, match="Worker subprocess attempted"):
+            superpowers_dispatch.invoke_skill(skill, allow_interactive_skill=True)
