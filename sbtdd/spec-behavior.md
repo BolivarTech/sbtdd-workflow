@@ -26,6 +26,44 @@
 
 ---
 
+## Iter-3 carry-forward — Checkpoint 2 iter 2 triage applied 2026-05-09
+
+> Per CLAUDE.local.md §6 v1.0.0+ carry-forward block format. Verdict
+> iter 2: GO_WITH_CAVEATS (3-0) full no-degraded — Mel APPROVE 82% +
+> Bal APPROVE 82% + Cas CONDITIONAL 74%. 1 CRITICAL (cas) + 9 WARNING
+> + 9 INFO. Mel + Bal treat the sidecar issue as WARNING; Cas's strict
+> G1 reading triggers G2. **Resolution**: apply ALL of Cas's 7 inline
+> fixes (which subsume Mel + Bal WARNINGs); per Cas item (5) "T7
+> commit-level collapse stays", T7 STAYS in scope (no defer). Iter 3
+> expects clean convergence at 0 CRITICAL preserving the 8-cycle
+> Checkpoint 2 no-override streak.
+
+| Iter | Severity | Title (verbatim from iter 2) | Decision | Rationale |
+|------|----------|-------------------------------|----------|-----------|
+| 2 | critical | Sidecar PID collision silently corrupts INV-16 evidence _(cas)_ | keep | Resolved sec.2.2 + sec.4.2: sidecar filename now `<pid>-<monotonic_ns>-<uuid8>-verify.json` + parent post-batch merge LOUD-FAILS via `ConcurrentDispatchError` on missing sidecar (worker spawned but no sidecar persisted = bug). Updated A2-7 escenario + new sec.5.1 plan T2 implementation outline. |
+| 2 | warning | PID uniqueness in sidecar path under run-reuse _(mel)_ | keep | Same root as C1 above; addressed by monotonic_ns + uuid8 suffix. |
+| 2 | warning | T7 4-doc-smoke-tests in single Red commit _(mel+bal+cas)_ | keep | Resolved plan T7 Red phase: 4 test classes preserved with discriminating function names (`test_c1_*`, `test_c5_*`, `test_c6_*`, `test_c7_*`) so bisect can pinpoint regression to a specific doc surface within a single commit. CHANGELOG Process notes will document the collapse trade-off (per Mel recommendation). |
+| 2 | warning | T6 → T2 ordering: prefer the swap _(bal+cas)_ | keep | Resolved plan §5.1 + plan invariants: swap T2 ↔ T6 in execution order. New order T1 → T6 → T2 → T3 → T4 → T5 → T7 → T8. T6 (atomic_write_json retry) lands BEFORE T2 (which calls it via `_persist_worker_verify_evidence`); eliminates documented PermissionError flake risk during T3 dogfood. Zero-cost swap (both file-disjoint). |
+| 2 | warning | A3 fixture realism does not assert PTY path execution _(cas)_ | keep | Resolved sec.4.3 escenario A3-1: on POSIX, integration test asserts at least one sidecar entry contains evidence the worker observed a TTY (e.g., per-worker stdout fragment confirms PTY path took the v1.0.7 A1 helper, not the Windows hybrid path). NEW escenario A3-3 dedicated to POSIX PTY-path empirical assertion. |
+| 2 | warning | Risk register missing R9 for sidecar collision class _(cas)_ | keep | Resolved sec.8: NEW R9 (per-worker artifact collision class) covering not just sidecars but all per-worker temp files generated under `--parallel`. Documents PID-recycle risk + collision-detection LOUD-FAIL contract. |
+| 2 | info | C1 lifecycle helper EIO drain semantics _(mel)_ | n/a | Positive validation; preserved. |
+| 2 | info | C4 sec.0.1 chain + sidecar evidence preserves INV-16 _(mel)_ | n/a | Positive validation; preserved. |
+| 2 | info | C3 REAL fixture exercises chicken-and-egg surface _(mel)_ | n/a | Positive validation; preserved. |
+| 2 | info | T6→T2 ordering trade-off acceptable _(mel)_ | n/a | Mel commendation acknowledged; chose Bal+Cas swap recommendation anyway because zero-cost. |
+| 2 | info | Backward compat preserved _(mel)_ | n/a | Positive validation; preserved. |
+| 2 | info | sec.0.1 chain replacement is a clear win _(bal)_ | n/a | Positive validation; preserved. |
+| 2 | info | A3 fixture realism is now genuinely empirical _(bal)_ | n/a | Positive validation; preserved. |
+| 2 | info | Scope-trim ladder pre-stage is good operational hygiene _(bal+cas)_ | n/a | Positive validation; G2 ladder preserved as pre-staged option for iter 3 if it surfaces fresh CRITICAL. |
+
+**Pillar C T7 NOT deferred**: Cas item (2) suggested defer Pillar C
+polish per G2 ladder, but Cas item (5) "commit-level collapse stays"
+explicitly KEEPS T7 in scope — the apparent contradiction resolves to
+"T7 stays + improve internal test naming". Mel + Bal endorse keeping
+T7. Net: T7 stays; G2 ladder NOT invoked; 8-cycle no-override streak
+goal preserved.
+
+---
+
 ## Iter-2 carry-forward — Checkpoint 2 iter 1 triage applied 2026-05-09
 
 > Per CLAUDE.local.md §6 v1.0.0+ carry-forward block format. Verdict
@@ -380,16 +418,48 @@ def _persist_worker_verify_evidence(
 ) -> None:
     """v1.0.7 A2 INV-16 continuity: write per-worker verify capture.
 
-    Writes to `<root>/.claude/auto-run-workers/<pid>-verify.json` so
-    parent post-batch merge has evidence of what each worker actually
-    ran + observed. Uses `state_file.atomic_write_json` (which gains
-    Windows PermissionError retry per v1.0.7 B3).
+    Writes to ``<root>/.claude/auto-run-workers/<pid>-<monotonic_ns>-<uuid8>-verify.json``
+    so parent post-batch merge has evidence of what each worker actually
+    ran + observed. Uses ``state_file.atomic_write_json`` (which gains
+    Windows PermissionError retry per v1.0.7 B3 = T6).
+
+    v1.0.7 iter-3 carry-forward C1 (Cas iter-2 CRITICAL): filename
+    contains 3-component disambiguator to prevent silent collision:
+    - ``pid``: human-readable identifier for cross-referencing with
+      OS process listings.
+    - ``monotonic_ns``: ``time.monotonic_ns()`` at write time —
+      sub-microsecond resolution defends against same-pid re-spawn
+      within the same parent batch (PID recycle on POSIX, fast worker
+      churn on Windows).
+    - ``uuid8``: ``uuid.uuid4().hex[:8]`` — final tiebreaker
+      eliminating any residual collision risk under exotic
+      monotonic-clock skew (rare but observable on virtualised hosts).
+
+    The parent post-batch merge in ``auto_cmd._dispatch_tracks_concurrent``
+    LOUD-FAILS via ``ConcurrentDispatchError`` if any spawned worker
+    completed without producing a sidecar (worker spawned but no
+    sidecar persisted = code-path bug, not silent data loss).
     """
+    import time as _time
+    import uuid as _uuid
+
     sidecar_dir = root / ".claude" / "auto-run-workers"
     sidecar_dir.mkdir(parents=True, exist_ok=True)
-    sidecar = sidecar_dir / f"{os.getpid()}-verify.json"
+    suffix = f"{os.getpid()}-{_time.monotonic_ns()}-{_uuid.uuid4().hex[:8]}"
+    sidecar = sidecar_dir / f"{suffix}-verify.json"
     state_file.atomic_write_json(sidecar, {"verify_chain": captured})
 ```
+
+**Parent-side LOUD-FAIL contract** (v1.0.7 iter-3 carry-forward C1):
+``auto_cmd._dispatch_tracks_concurrent`` post-batch merge MUST verify
+each spawned worker produced AT LEAST ONE sidecar matching the prefix
+pattern ``<worker_pid>-*-verify.json`` in ``<root>/.claude/auto-run-workers/``.
+Missing sidecar (worker spawned, ran close-phase, but no evidence
+file) raises ``ConcurrentDispatchError`` naming the offending pid +
+listing all observed sidecars, halting the batch. This catches the
+class of bugs where transient errors swallow the sidecar write before
+``state_file.atomic_write_json`` completes — silently lost INV-16
+evidence is unacceptable; LOUD-FAIL surfaces it during test/dogfood.
 
 ```python
 # superpowers_dispatch.invoke_skill (Q2'=b promotion: runtime guard)
@@ -759,17 +829,49 @@ v1.0.7 introduces:
 > 'pytest': rc=1"`). Subsequent tools (`ruff`, `mypy`) are NOT run
 > (semantically equivalent to `make verify` early-abort behavior).
 
-**Escenario A2-7 (NEW per iter-2 carry-forward C4): Worker close-phase success persists evidence**
+**Escenario A2-7 (per iter-2 carry-forward C4 + iter-3 carry-forward C1): Worker close-phase success persists evidence with collision-resistant filename**
 
 > **Given** Worker subprocess calls `_run_verification(root)` in
 > worker mode; all 4 sec.0.1 tools return 0.
 > **When** Each `subprocess.run` returncode == 0.
 > **Then** `_persist_worker_verify_evidence(root, captured)` is
-> invoked once at the end with all 4 tool captures. The sidecar
-> file `<root>/.claude/auto-run-workers/<pid>-verify.json` exists
-> containing `{"verify_chain": [...]}` with one entry per tool +
-> rc=0 + non-empty stdout. Parent post-batch merge can introspect
-> this for INV-16 evidence-before-assertions continuity.
+> invoked once at the end with all 4 tool captures. A sidecar file
+> matching the glob `<root>/.claude/auto-run-workers/<pid>-*-verify.json`
+> exists with full filename pattern
+> `<pid>-<monotonic_ns>-<uuid8>-verify.json` (3-component
+> disambiguator per iter-3 carry-forward C1: pid for human
+> cross-reference, monotonic_ns sub-microsecond resolution against
+> same-pid re-spawn, uuid8 final tiebreaker). File contains
+> `{"verify_chain": [...]}` with one entry per tool + rc=0 +
+> non-empty stdout. Parent post-batch merge in
+> `auto_cmd._dispatch_tracks_concurrent` can introspect this for
+> INV-16 evidence-before-assertions continuity.
+
+**Escenario A2-9 (NEW per iter-3 carry-forward C1): Parent-side sidecar collision LOUD-FAIL**
+
+> **Given** Two workers spawned via `_dispatch_tracks_concurrent`
+> with overlapping pids (PID recycle scenario simulated by direct
+> orchestrator code path) both call `_persist_worker_verify_evidence`.
+> **When** Filenames are computed: each worker's
+> `<pid>-<monotonic_ns>-<uuid8>-verify.json` is unique because
+> monotonic_ns AND uuid8 differ even when pids match.
+> **Then** Both sidecars exist on disk; neither overwrites the other;
+> parent post-batch merge ingests BOTH into `.claude/auto-run.json`
+> per-worker entry list (no silent data loss).
+
+**Escenario A2-10 (NEW per iter-3 carry-forward C1): Parent-side missing sidecar raises ConcurrentDispatchError**
+
+> **Given** Worker spawned via `_dispatch_tracks_concurrent` with
+> known pid; worker completes (returncode collected) but
+> `<root>/.claude/auto-run-workers/<pid>-*-verify.json` glob returns
+> EMPTY (worker ran close-phase but failed to persist sidecar before
+> exit, e.g., due to a bug in `_persist_worker_verify_evidence` or
+> a transient OS error swallowed mid-write).
+> **When** Parent post-batch merge enumerates expected workers vs
+> observed sidecars.
+> **Then** `ConcurrentDispatchError` raised naming the missing pid +
+> listing observed sidecars + total expected workers. Batch HALTS;
+> no silent INV-16 evidence loss.
 
 **Escenario A2-4: Orchestrator/sequential mode preserves skill dispatch**
 
@@ -848,6 +950,22 @@ v1.0.7 introduces:
 > `subprocess.Popen` stdin=PIPE without TTY). Post Pillar A: workers
 > get either real PTY (POSIX) or worker-mode sec.0.1 bypass (Windows)
 > and complete.
+
+**Escenario A3-3 (NEW per iter-3 carry-forward W "A3 fixture realism"): On POSIX, integration test asserts PTY path executed**
+
+> **Given** A3-1 fixture run on POSIX (`sys.platform != "win32"`).
+> **When** Workers complete; integration test inspects per-worker
+> sidecar files under `<root>/.claude/auto-run-workers/`.
+> **Then** At least one sidecar's `verify_chain` entry's stdout
+> contains evidence the worker observed a TTY (e.g., a pytest
+> verbose marker that only appears under TTY, OR an explicit
+> isatty=True echo from a test helper). This empirically distinguishes
+> the v1.0.7 A1 PTY code path from the Windows hybrid Option B-W3
+> bypass path — without this assertion, the integration test could
+> pass on POSIX even if `_spawn_worker_with_pty` silently fell back
+> to `subprocess.PIPE` (regression invisible to test). On Windows
+> this escenario is SKIPPED (`pytest.skip("POSIX-only assertion")`)
+> because the Windows path uses subprocess.PIPE intentionally.
 
 **Escenario A3-2: --parallel empirically validates --parallel chicken-and-egg closure**
 
@@ -1033,32 +1151,42 @@ runs sequential `auto` in foreground for v1.0.7 own-cycle since
 
 **Within-cycle ordering** (cannot be parallelized due to chicken-and-egg):
 v1.0.7 iter-2 carry-forward C2/C5 collapse — 11 tasks → 8 tasks.
+v1.0.7 iter-3 carry-forward (bal+cas WARNING): T6 → T2 swap places
+B3 (atomic_write_json retry) BEFORE A2 worker-mode bypass that calls
+`state_file.atomic_write_json` via `_persist_worker_verify_evidence`,
+eliminating documented PermissionError flake risk during T3 dogfood.
 
 1. **T1 = A1** (POSIX PTY allocation + lifecycle helper + leak guard) —
    `subprocess_utils.py` (`_spawn_worker_with_pty` + `_close_pty_master`)
    + tests. ~4-6 hours (carry-forward C1 + W7 + W8 expand original
    ~3-5h estimate).
-2. **T2 = A2** (Windows hybrid + Q2'=b worker runtime guard + sec.0.1
-   chain bypass + INV-16 evidence sidecar) — `auto_cmd.py` +
+2. **T6 = B3 (relocated per iter-3 carry-forward)** (atomic_write retry)
+   — `state_file.py` + tests. ~1-2 hours. Lands BEFORE T2 so T2's
+   `_persist_worker_verify_evidence` benefits from retry from day 1.
+3. **T2 = A2** (Windows hybrid + Q2'=b worker runtime guard + sec.0.1
+   chain bypass + INV-16 evidence sidecar with collision-resistant
+   filename + parent-side LOUD-FAIL contract) — `auto_cmd.py` +
    `close_phase_cmd.py` + `superpowers_dispatch.py` +
-   `_persist_worker_verify_evidence` helper + tests. ~6-8 hours
-   (carry-forward C4 + W4 + W1 + W3 expand original ~5-7h estimate).
-3. **T3 = A3** (F-A2 empirical validation with real chicken-and-egg
-   fixture) — synthetic 2-track plan + 4 disjoint tasks each invoking
-   real `close-phase` chain via worker subprocess; integration test
-   + fixture project with `pyproject.toml`. ~4-6 hours (carry-forward
-   C3 expands original ~2-3h estimate).
-4. **T4 = B5** (drift detector regex) — `drift.py` + tests. ~30-60 min.
-5. **T5 = B4** (spec_review_dispatch file-reference) —
+   `_persist_worker_verify_evidence` helper +
+   `_verify_worker_sidecars_present` parent-side helper + tests.
+   ~7-9 hours (carry-forward C4 + W4 + W1 + W3 + iter-3 C1 expand
+   original ~5-7h estimate).
+4. **T3 = A3** (F-A2 empirical validation with real chicken-and-egg
+   fixture + POSIX PTY-path assertion per iter-3 carry-forward) —
+   synthetic 2-track plan + 4 disjoint tasks each invoking real
+   `close-phase` chain via worker subprocess; integration test +
+   fixture project with `pyproject.toml`. ~4-6 hours.
+5. **T4 = B5** (drift detector regex) — `drift.py` + tests. ~30-60 min.
+6. **T5 = B4** (spec_review_dispatch file-reference) —
    `spec_review_dispatch.py` + tests. ~2-3 hours.
-6. **T6 = B3** (atomic_write retry) — `state_file.py` + tests.
-   ~1-2 hours.
 7. **T7 = collapsed Pillar C polish** (C1+C5+C6+C7 in single combined
    task) — `auto_cmd.py` + `close_task_cmd.py` + `skills/sbtdd/SKILL.md`
-   + tests. Single Red writes 4 doc smoke tests; single Green applies
-   4 doc edits; single Refactor cross-links K-4 helper docs from C1+C6.
-   ~1-2 hours total (real Refactor diff satisfies v1.0.5 `_preflight`
-   HARD-BLOCK).
+   + tests. Single Red writes 4 doc smoke tests with discriminating
+   class names (`TestC1*`, `TestC5*`, `TestC6*`, `TestC7*` per iter-3
+   carry-forward bisect-granularity preservation); single Green
+   applies 4 doc edits; single Refactor cross-links K-4 helper docs
+   from C1+C6. ~1-2 hours total (real Refactor diff satisfies v1.0.5
+   `_preflight` HARD-BLOCK).
 8. **T8 = C-X-K3-Removal** (alias removal + test rewrite) —
    `close_task_cmd.py` + tests. Real TDD triplet (Red: AttributeError
    assertion; Green: alias removal + test monkeypatch target rewrites;
@@ -1066,9 +1194,10 @@ v1.0.7 iter-2 carry-forward C2/C5 collapse — 11 tasks → 8 tasks.
    framed as "closes v1.0.7 C5-documented monkeypatch footgun" per
    W10 carry-forward. ~1-2 hours.
 
-Total wall-time estimate: ~20-30 hours = ~3-4 days. Slightly above
-original ~2-3 days estimate due to iter-2 carry-forward expansions
-(C1 + C3 + C4 substantively grew T1, T2, T3 work).
+Total wall-time estimate: ~21-31 hours = ~3-4 days. Slightly above
+original ~2-3 days estimate due to iter-2 + iter-3 carry-forward
+expansions (C1 + C3 + C4 + iter-3 C1 substantively grew T1, T2, T3
+work).
 
 ### 5.2 Cross-cycle implication
 
@@ -1180,7 +1309,20 @@ dispatch + manual mini-cycle commits. Document en CHANGELOG
   validation deferred to CI / v1.0.8 if no POSIX dev env. **Worker-mode
   verify uses sec.0.1 chain (not `make verify`)** per C4 carry-forward,
   preserving INV-16 evidence-before-assertions semantic via per-worker
-  sidecar capture.
+  sidecar capture. **Sidecar filename uses 3-component collision-resistant
+  scheme** (`<pid>-<monotonic_ns>-<uuid8>-verify.json`) per iter-3
+  carry-forward C1 (Cas iter-2 CRITICAL); parent post-batch merge
+  LOUD-FAILS via `ConcurrentDispatchError` on missing sidecar. **T7
+  (combined Pillar C polish) lands 4 doc smoke tests in a single Red
+  commit per C2/C5 collapse — TEST CLASS NAMES preserved as distinct
+  (`TestC1*` / `TestC5*` / `TestC6*` / `TestC7*`) for bisect granularity
+  per iter-3 carry-forward (mel+bal+cas WARNING)**; this is a one-off
+  pattern for v1.0.7 doc-only Pillar C polish, NOT a generalizable
+  template — future cycles default to one-test-per-commit unless
+  v1.0.5 `_preflight` HARD-BLOCK constraints similarly require
+  collapse. **T6 (B3 atomic_write_json retry) lands BEFORE T2 (A2
+  worker-mode bypass)** per iter-3 carry-forward (bal+cas WARNING) so
+  the sidecar write benefits from retry from day 1.
 - **Deferred (rolled to v1.0.8)** — B2 worker subprocess auto-message
   hardening; C2 K-4 escape hatch test coverage; C4 NF-B test count
   rebaseline; C8 F-A2 abort criterion (b) diagnosis hint refinement;
@@ -1252,6 +1394,23 @@ dispatch + manual mini-cycle commits. Document en CHANGELOG
   exit code + per-worker sidecar evidence (v1.0.7 A2 INV-16 capture)
   preserves the actual verify-chain results. Acceptable trade-off for
   v1.0.7; tighten to explicit signal-aware drain in v1.0.8 if observed.
+- **R9 (NEW v1.0.7 iter-3 carry-forward C1)**. Per-worker artifact
+  collision class: PID recycle on POSIX (within ~32K pids on Linux,
+  ~99K on macOS) OR same-pid re-spawn on Windows under fast worker
+  churn could cause two workers' artifacts (sidecar verify evidence,
+  per-worker scratch from v1.0.5 I-2, etc.) to share an identifier and
+  silently collide. Mitigation: filename suffix = `<pid>-<monotonic_ns>-<uuid8>`
+  for sidecars (v1.0.7 A2 implementation); applies same pattern to
+  any future per-worker artifact. Parent-side LOUD-FAIL contract:
+  post-batch merge MUST verify EVERY spawned worker produced AT LEAST
+  ONE expected artifact; missing artifact raises `ConcurrentDispatchError`
+  naming the offender. This catches the broader class of bugs where
+  transient errors silently swallow per-worker writes — silent data
+  loss is unacceptable; LOUD-FAIL surfaces it during dogfood / CI.
+  Future v1.0.8+ work: extend the LOUD-FAIL contract to v1.0.5 I-1
+  audit-trail sidecars + I-2 scratch plans (currently they have
+  collision-resistant naming but no parent-side missing-artifact
+  check).
 - **R8 (NEW v1.0.7 iter-2 carry-forward W1)**. Worker-context guard
   (Q2'=b) false-positive risk: an operator script that sets
   `SBTDD_AUTO_PARALLEL_WORKER=1` in their shell environment for an

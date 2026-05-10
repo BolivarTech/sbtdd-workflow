@@ -4,6 +4,35 @@
 > superpowers:writing-plans skill (interactive session, brainstorming
 > Q1'-Q5' resolved). Frontmatter required by spec_lint R5.
 >
+> **Iter-3 carry-forward applied 2026-05-09**: MAGI Checkpoint 2 iter 2
+> verdict GO_WITH_CAVEATS (3-0) — Mel APPROVE 82% + Bal APPROVE 82% +
+> Cas CONDITIONAL 74%. 1 CRITICAL (sidecar PID collision, cas) + 9
+> WARNING + 9 INFO. Cas item (5) "T7 commit-level collapse stays"
+> KEEPS T7 in scope. Resolution: apply ALL 7 of Cas's inline fixes +
+> swap T6 → T2 ordering per Bal+Cas WARNING. Pillar C T7 NOT deferred.
+> 8-cycle no-override streak goal preserved; iter 3 expects clean
+> convergence at 0 CRITICAL.
+>
+> **Iter-3 carry-forward inlined deltas**:
+> - **Sidecar collision (cas iter-2 CRITICAL)**: T2 implementation
+>   uses `<pid>-<monotonic_ns>-<uuid8>-verify.json` filename + parent
+>   post-batch merge LOUD-FAILS via `ConcurrentDispatchError` on
+>   missing sidecar. New escenarios A2-9 + A2-10.
+> - **T6 → T2 ordering swap (bal+cas iter-2 WARNING)**: execution
+>   order changed to T1 → T6 → T2 → T3 → T4 → T5 → T7 → T8. T6 (B3
+>   atomic_write_json retry) lands BEFORE T2 (which calls it via
+>   `_persist_worker_verify_evidence`). Eliminates documented
+>   PermissionError flake risk during T3 dogfood.
+> - **A3 PTY-path assertion (cas iter-2 WARNING)**: NEW escenario
+>   A3-3 + integration test assertion: on POSIX, sidecar evidence must
+>   include TTY-observation marker; SKIPPED on Windows.
+> - **R9 risk register (cas iter-2 WARNING)**: per-worker artifact
+>   collision class added to spec sec.8.
+> - **T7 4-doc Red commit bisect (mel+bal+cas iter-2 WARNING)**:
+>   discriminating test class names preserved (`TestC1*`, `TestC5*`,
+>   `TestC6*`, `TestC7*`); CHANGELOG Process notes will document the
+>   collapse trade-off so it isn't generalized.
+>
 > **Iter-2 carry-forward applied 2026-05-09**: MAGI Checkpoint 2 iter 1
 > verdict GO_WITH_CAVEATS (3-0) full no-degraded with 5 CRITICAL + 10
 > WARNING + 5 INFO findings. Triage applied via INV-29 receiving-code-review
@@ -123,10 +152,12 @@ baseline; Q5'=a default G2 ladder.
   spec-reviewer dispatch (~1-2 min/task overhead acceptable but not
   required for these infrastructure items).
 - **Sequential execution mandate**: Q1'=a forces SINGLE subagent
-  through the full T1 → ... → T11 chain. NO `auto --parallel`
-  self-dispatch during v1.0.7 own-cycle (chicken-and-egg until Pillar A
-  ships + A3 dogfood validates). v1.0.7 own-cycle uses `auto`
-  sequential foreground OR manual subagent dispatch via Agent tool.
+  through the full chain. **Order (post iter-3 carry-forward T6 → T2
+  swap)**: T1 → T6 → T2 → T3 → T4 → T5 → T7 → T8. NO
+  `auto --parallel` self-dispatch during v1.0.7 own-cycle
+  (chicken-and-egg until Pillar A ships + A3 dogfood validates).
+  v1.0.7 own-cycle uses `auto` sequential foreground OR manual
+  subagent dispatch via Agent tool.
 - **Within-Pillar-A ordering (HARD)**: T1 (A1) must land BEFORE T2 (A2)
   because A2's cross-platform dispatcher imports `_spawn_worker_with_pty`
   + `_close_pty_master` from `subprocess_utils`. T3 (A3) integration
@@ -700,7 +731,7 @@ class TestRunVerificationWorkerBypass:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """A2-7 (C4 carry-forward): all 4 tools pass + evidence persisted."""
+        """A2-7 (C4 + iter-3 C1 carry-forward): full success + collision-resistant filename."""
         monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
 
         class PassResult:
@@ -716,9 +747,46 @@ class TestRunVerificationWorkerBypass:
         sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
         sidecars = list(sidecar_dir.glob("*-verify.json"))
         assert len(sidecars) == 1
+        # v1.0.7 iter-3 C1: filename pattern <pid>-<monotonic_ns>-<uuid8>-verify.json
+        stem = sidecars[0].stem
+        # Expected: <pid>-<monotonic_ns>-<uuid8hex>-verify
+        parts = stem.split("-")
+        assert parts[-1] == "verify"
+        assert len(parts) == 4  # pid, monotonic_ns, uuid8, "verify"
+        assert parts[0] == str(os.getpid())
+        assert parts[1].isdigit() and int(parts[1]) > 0  # monotonic_ns
+        assert len(parts[2]) == 8 and all(c in "0123456789abcdef" for c in parts[2])
         payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
         assert len(payload["verify_chain"]) == 4
         assert all(entry["rc"] == 0 for entry in payload["verify_chain"])
+
+    def test_pid_recycle_simulation_does_not_collide(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A2-9 (iter-3 C1 carry-forward): same-pid re-spawn produces 2 distinct sidecars."""
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+
+        class PassResult:
+            returncode = 0
+            stdout = "PASS"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "close_phase_cmd.subprocess.run",
+            lambda cmd, **kw: PassResult(),
+        )
+        # Call twice from the same process (simulates PID recycle).
+        close_phase_cmd._run_verification(tmp_path)
+        close_phase_cmd._run_verification(tmp_path)
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecars = list(sidecar_dir.glob("*-verify.json"))
+        assert len(sidecars) == 2  # NO collision
+        # Both sidecars share pid prefix but differ in monotonic_ns or uuid8.
+        stems = [s.stem for s in sidecars]
+        assert all(stem.startswith(f"{os.getpid()}-") for stem in stems)
+        assert len(set(stems)) == 2
 
     def test_orchestrator_mode_preserves_skill_dispatch(
         self,
@@ -1004,16 +1072,70 @@ def _persist_worker_verify_evidence(
 ) -> None:
     """v1.0.7 A2 INV-16 continuity: write per-worker verify capture.
 
-    Writes to ``<root>/.claude/auto-run-workers/<pid>-verify.json`` so
-    parent post-batch merge has evidence of what each worker actually
+    Writes to ``<root>/.claude/auto-run-workers/<pid>-<monotonic_ns>-<uuid8>-verify.json``
+    so parent post-batch merge has evidence of what each worker actually
     ran + observed. Uses ``state_file.atomic_write_json`` (which gains
     Windows PermissionError retry per v1.0.7 B3 = T6).
+
+    v1.0.7 iter-3 carry-forward C1 (Cas iter-2 CRITICAL): filename
+    has 3-component disambiguator preventing PID-recycle / re-spawn
+    collision (pid for human cross-reference + monotonic_ns
+    sub-microsecond resolution + uuid8 final tiebreaker). Parent-side
+    LOUD-FAIL contract enforced in `_dispatch_tracks_concurrent`
+    post-batch merge: missing sidecar raises ConcurrentDispatchError.
     """
+    import time as _time
+    import uuid as _uuid
+
     sidecar_dir = root / ".claude" / "auto-run-workers"
     sidecar_dir.mkdir(parents=True, exist_ok=True)
-    sidecar = sidecar_dir / f"{os.getpid()}-verify.json"
+    suffix = f"{os.getpid()}-{_time.monotonic_ns()}-{_uuid.uuid4().hex[:8]}"
+    sidecar = sidecar_dir / f"{suffix}-verify.json"
     state_file.atomic_write_json(sidecar, {"verify_chain": captured})
 ```
+
+**Parent-side LOUD-FAIL contract** (v1.0.7 iter-3 carry-forward C1):
+in `auto_cmd._dispatch_tracks_concurrent` post-batch merge, after
+collecting worker exit codes, glob for sidecars matching each
+spawned worker's pid:
+
+```python
+# auto_cmd._dispatch_tracks_concurrent post-batch merge addendum
+def _verify_worker_sidecars_present(
+    project_root: Path,
+    worker_pids: list[int],
+) -> None:
+    """v1.0.7 iter-3 carry-forward C1: LOUD-FAIL on missing sidecar.
+
+    Each spawned worker MUST produce >= 1 sidecar matching the
+    glob `<pid>-*-verify.json`. Missing sidecar = code-path bug
+    (worker spawned + ran close-phase but failed to persist evidence).
+    LOUD-FAIL via ConcurrentDispatchError surfaces it during
+    test/dogfood instead of silent INV-16 evidence loss.
+    """
+    sidecar_dir = project_root / ".claude" / "auto-run-workers"
+    if not sidecar_dir.exists():
+        # No workers wrote sidecars at all; possible if all workers
+        # failed before reaching close-phase. Log + return; missing
+        # close-phase chain is a separate failure surface caught by
+        # worker exit code aggregation.
+        return
+    observed = list(sidecar_dir.glob("*-verify.json"))
+    observed_pids = {int(p.name.split("-")[0]) for p in observed}
+    missing = [pid for pid in worker_pids if pid not in observed_pids]
+    if missing:
+        raise ConcurrentDispatchError(
+            f"v1.0.7 iter-3 C1: workers {missing} completed but produced "
+            f"no INV-16 sidecar. Observed sidecars: {[p.name for p in observed]}. "
+            f"Expected workers: {worker_pids}. Bug in "
+            f"_persist_worker_verify_evidence OR transient OS error "
+            f"swallowed mid-write; investigate before next dispatch."
+        )
+```
+
+Wire `_verify_worker_sidecars_present(project_root, [proc.pid for
+proc in completed_workers])` into `_dispatch_tracks_concurrent` just
+before the existing per-worker sidecar/scratch merge.
 
 Add to imports at the top of `close_phase_cmd.py` if missing:
 
@@ -1205,12 +1327,27 @@ Create `tests/fixtures/parallel-e2e/tests/test_sample.py`:
 
 ```python
 """Sample tests for fixture project (passes pytest)."""
+import sys
+
 from src.sample import add
 
 
 def test_add() -> None:
     """add returns sum."""
     assert add(1, 2) == 3
+
+
+def test_isatty_observation() -> None:
+    """v1.0.7 iter-3 A3-3 carry-forward: emit isatty marker for INV-16 evidence.
+
+    On POSIX, the worker subprocess inherits a real TTY via PTY
+    allocation (T1 production code); on Windows it inherits PIPE.
+    This test prints the observation to stdout so the captured
+    sec.0.1 chain output (T2 sidecar) records it for the integration
+    test (T3) to assert.
+    """
+    print(f"isatty={sys.stdin.isatty()}")
+    assert True  # always passes; the side-effect is the print
 ```
 
 Create `tests/fixtures/parallel-e2e/Makefile` (optional fallback for
@@ -1367,11 +1504,43 @@ def test_auto_parallel_synthetic_2track_4task_e2e(
     assert workers_dir.exists(), "T2 INV-16 sidecar dir must exist post-cycle"
     sidecars = list(workers_dir.glob("*-verify.json"))
     assert len(sidecars) >= 1, "at least one worker must have written verify evidence"
-    # Each sidecar must contain the 4-tool sec.0.1 chain (or partial on failure).
+    # v1.0.7 iter-3 carry-forward C1: collision-resistant filename pattern.
     for sidecar in sidecars:
+        stem = sidecar.stem
+        parts = stem.split("-")
+        assert parts[-1] == "verify"
+        assert len(parts) == 4, f"sidecar {sidecar.name} not in <pid>-<monotonic_ns>-<uuid8>-verify pattern"
+        assert parts[0].isdigit()  # pid
+        assert parts[1].isdigit() and int(parts[1]) > 0  # monotonic_ns
+        assert len(parts[2]) == 8 and all(c in "0123456789abcdef" for c in parts[2])  # uuid8
         payload = json.loads(sidecar.read_text(encoding="utf-8"))
         assert "verify_chain" in payload
         assert all("rc" in entry and "stdout" in entry for entry in payload["verify_chain"])
+    # v1.0.7 iter-3 carry-forward W (cas A3 fixture realism): on POSIX,
+    # at least one sidecar must contain TTY-observation evidence (PTY
+    # path executed, not Windows hybrid bypass). On Windows this check
+    # is skipped (Windows uses subprocess.PIPE intentionally).
+    if sys.platform != "win32":
+        tty_observed = False
+        for sidecar in sidecars:
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            for entry in payload["verify_chain"]:
+                # pytest under TTY emits "PASSED" with color codes OR
+                # known TTY-only marker; fixture conftest.py asserts
+                # sys.stdin.isatty() in a test that prints the result
+                # to stdout, captured here.
+                if "isatty=True" in entry["stdout"]:
+                    tty_observed = True
+                    break
+            if tty_observed:
+                break
+        assert tty_observed, (
+            "POSIX A3-3 carry-forward: at least one worker must have observed "
+            "a TTY via _spawn_worker_with_pty. Without this assertion, the "
+            "test could pass even if the PTY path silently fell back to "
+            "subprocess.PIPE (regression invisible). Add an isatty=True echo "
+            "to the fixture's conftest.py or a smoke test."
+        )
 ```
 
 - [ ] **Step 3: Run test to verify failure**
@@ -2209,7 +2378,14 @@ ships in T8 (separate task; has real code change).
 
 #### Red Phase
 
-- [ ] **Step 1: Write 4 failing smoke tests covering C1+C5+C6+C7**
+- [ ] **Step 1: Write 4 failing smoke tests covering C1+C5+C6+C7 with discriminating class names**
+
+> **iter-3 carry-forward (mel+bal+cas WARNING)**: even though all 4
+> doc smoke tests land in a single Red commit (per C2/C5 collapse),
+> the test CLASS NAMES must remain distinct (`TestC1*`, `TestC5*`,
+> `TestC6*`, `TestC7*`) so future bisect can pinpoint which doc
+> surface regressed. Do NOT collapse the test classes themselves into
+> one — only the commit boundary collapses.
 
 Append to `tests/test_auto_cmd.py` (C1 + C6 — both touch K-4 helper):
 
@@ -2690,20 +2866,19 @@ After T11 closes:
    - `dispatch_spec_reviewer(...)` (T5) — public signature unchanged; only argv-build internals refactored.
    - `atomic_write_json(path: Path, data: object) -> None` (T6) — public signature unchanged; only body wrapped with retry loop.
 
-4. **Cross-task ordering invariants**:
+4. **Cross-task ordering invariants** (post iter-3 carry-forward T6 → T2 swap):
+   - T1 → T6 → T2 → T3 → T4 → T5 → T7 → T8 (sequential execution
+     order).
    - T1 → T2 (A2 imports `_spawn_worker_with_pty` + `_close_pty_master`
      from T1).
+   - T6 → T2 (HARD per iter-3 bal+cas WARNING resolution): T2's
+     `_persist_worker_verify_evidence` calls
+     `state_file.atomic_write_json` which T6 hardens with retry; T6
+     lands BEFORE T2 so the sidecar write benefits from retry from
+     day 1, eliminating documented Windows PermissionError flake risk
+     during T3 dogfood.
    - T2 → T3 (A3 e2e exercises T1+T2 production code; fixture project
      depends on T2 worker-mode bypass to avoid hanging).
-   - T6 → T2 (T2's `_persist_worker_verify_evidence` calls
-     `state_file.atomic_write_json` which T6 hardens with retry; T6 can
-     land before OR after T2 since the retry helper is a strict
-     superset of the existing function — T2's evidence sidecar benefits
-     from T6's retry on Windows but doesn't require it for correctness).
-     Recommend T6 lands before T2 to avoid PermissionError flake during
-     T3 dogfood; current sequential order T2 → ... → T6 means T2
-     code-paths use the pre-retry helper until T6 ships. Acceptable —
-     dogfood phase tolerates one retry.
    - T7 → T8 (T7 collapsed Pillar C polish adds C5 comment on alias
      line; T8 removes both alias + comment together).
    - All other tasks file-disjoint or doc-only.
