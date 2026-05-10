@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -420,8 +421,6 @@ def dispatch_spec_reviewer(
     # cmdline limit ~32K chars) when prompt + diff exceed argv budget;
     # filepath is bounded to ~120 chars regardless of prompt size.
     # Same pattern as v1.0.3 cross-check Item B fix.
-    import uuid
-
     prompt_dir = repo_root / ".claude" / "spec-reviews" / ".tmp"
     prompt_dir.mkdir(parents=True, exist_ok=True)
     prompt_path = prompt_dir / f"prompt-{uuid.uuid4().hex[:16]}.md"
