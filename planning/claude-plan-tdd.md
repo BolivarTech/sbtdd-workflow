@@ -1640,7 +1640,7 @@ Covers escenarios B5-1, B5-2, B5-3 from spec sec.4.4.
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing tests in `tests/test_drift.py`**
+- [x] **Step 1: Write failing tests in `tests/test_drift.py`**
 
 Append:
 
@@ -1685,18 +1685,18 @@ class TestPlanAllTasksCompleteLineAnchored:
 
 Add `import drift` if missing.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `pytest tests/test_drift.py::TestPlanAllTasksCompleteLineAnchored -v`
 Expected: `test_codeblock_open_checkbox_does_not_false_positive` FAILS
 (returns `"[ ]"` due to current unanchored substring check). The other
 two PASS already (existing implementation handles them correctly).
 
-- [ ] **Step 3: Run `make verify`**
+- [x] **Step 3: Run `make verify`**
 
 Expected: only the one new test fails; ruff + mypy clean.
 
-- [ ] **Step 4: Close Red phase**
+- [x] **Step 4: Close Red phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 B5 drift detector code-block fixture regression test"`
 
@@ -1704,7 +1704,7 @@ Expected: `test:` commit lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 5: Replace substring check with line-anchored regex in `drift._plan_all_tasks_complete`**
+- [x] **Step 5: Replace substring check with line-anchored regex in `drift._plan_all_tasks_complete`**
 
 Edit `skills/sbtdd/scripts/drift.py:242` — locate the `if "- [ ]" in plan_text[start:end]:` line. Replace with line-anchored multiline regex:
 
@@ -1763,18 +1763,18 @@ _OPEN_CHECKBOX_LINE_RE = re.compile(r"^[ \t]*- \[ \]", re.MULTILINE)
 
 Confirm `re` is already imported at the top of `drift.py`.
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `pytest tests/test_drift.py -v`
 Expected: full module green including the 3 new B5 tests + the
 previously-failing v1.0.6 `test_v104_plan_has_no_h3_task_headers...`
 regression (escenario B5-3 hand-validated).
 
-- [ ] **Step 7: Run `make verify`**
+- [x] **Step 7: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 8: Close Green phase**
+- [x] **Step 8: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 B5 drift detector line-anchored regex eliminates code-block false-positive"`
 
@@ -1782,7 +1782,7 @@ Expected: `fix:` commit lands; state advances to `refactor`.
 
 #### Refactor Phase
 
-- [ ] **Step 9: Audit other drift.py callsites for unanchored substring patterns**
+- [x] **Step 9: Audit other drift.py callsites for unanchored substring patterns**
 
 Grep `drift.py` for other `"- [ ]"` substring occurrences:
 
@@ -1797,11 +1797,11 @@ fix consistently. Otherwise leave them alone (e.g.,
 unlikely to contain code-block fixtures referencing `- [ ]`; the v1.0.7
 B5 fix targets `_plan_all_tasks_complete` specifically).
 
-- [ ] **Step 10: Run `make verify`**
+- [x] **Step 10: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 11: Close Refactor phase + close task**
+- [x] **Step 11: Close Refactor phase + close task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 B5 audit + docstring rationale"`
 
