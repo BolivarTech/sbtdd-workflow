@@ -141,6 +141,61 @@ def load(path: Path | str) -> SessionState:
         raise StateFileError(f"state file schema mismatch: {exc}") from exc
 
 
+def _replace_with_retry(tmp_str: str, path: Path, max_attempts: int = 3) -> None:
+    """Atomic ``os.replace`` with retry-with-backoff for Windows flakes.
+
+    v1.0.7 B3 Refactor (Option B): DRY helper extracted from
+    :func:`atomic_write_json` and :func:`atomic_write_text` so both
+    writers absorb the same class of transient renaming failures.
+
+    Behaviour:
+      * Up to ``max_attempts`` (default 3) calls to ``os.replace``.
+      * On ``PermissionError``, sleeps ``0.1 * attempt`` seconds and
+        retries (no sleep after the final attempt).
+      * After ``max_attempts`` exhausted, re-raises the most recent
+        ``PermissionError`` so the operator sees the real error if
+        the lock is persistent.
+
+    Empirical context: v1.0.6 mid-cycle hit ``PermissionError:
+    [WinError 5] Access is denied: '...auto-run.json.q6wjytm7.tmp' ->
+    '...auto-run.json'`` once. Cause: AV scanner OR concurrent writer
+    holding the destination file briefly (~150ms typical release
+    window). The retry-with-backoff absorbs the usual transient and
+    surfaces only persistent locks. Conceptually analogous to the
+    v1.0.5 K-2 ``_reap_orphans`` PermissionError catch and to R7's
+    EIO/SIGHUP race tolerance for PTY draining: small bounded retries
+    around a known transient kernel/filesystem race.
+
+    All callers MUST use ``time.sleep`` and ``os.replace`` via the
+    ``state_file`` module namespace so tests can monkeypatch
+    ``state_file.os.replace`` and ``state_file.time.sleep`` to assert
+    timing/behaviour without real I/O delay.
+
+    Args:
+        tmp_str: Source tmp file path produced by ``tempfile.mkstemp``.
+        path: Destination path; receives the renamed tmp on success.
+        max_attempts: Total attempts (default 3 = 0 backoff + 100ms +
+            200ms). Must be >= 1.
+
+    Raises:
+        PermissionError: If all ``max_attempts`` calls to
+            ``os.replace`` raise PermissionError; the most recent
+            exception is re-raised.
+    """
+    last_exc: PermissionError | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            os.replace(tmp_str, path)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            if attempt < max_attempts:
+                time.sleep(0.1 * attempt)
+    # All attempts exhausted; re-raise the last PermissionError.
+    assert last_exc is not None  # mypy: unreachable
+    raise last_exc
+
+
 def atomic_write_json(path: Path, data: object) -> None:
     """Atomic JSON write via ``tempfile.mkstemp`` + ``os.replace``.
 
@@ -154,14 +209,15 @@ def atomic_write_json(path: Path, data: object) -> None:
     leaks.
 
     v1.0.7 B3: ``os.replace`` is wrapped in a 3-attempt retry-with-backoff
-    (``100ms * attempt-number``) absorbing transient Windows
-    ``PermissionError`` flakes from AV-scanner / concurrent-writer
-    contention. Empirical context: v1.0.6 mid-cycle hit
-    ``PermissionError: [WinError 5] Access is denied:
-    '...auto-run.json.q6wjytm7.tmp' -> '...auto-run.json'`` once;
-    retry absorbs the typical AV-scanner release window (~150ms).
-    Final attempt failure re-raises the original ``PermissionError``
-    so the operator sees the real error if the lock is persistent.
+    (``100ms * attempt-number``) via :func:`_replace_with_retry`,
+    absorbing transient Windows ``PermissionError`` flakes from
+    AV-scanner / concurrent-writer contention. Empirical context:
+    v1.0.6 mid-cycle hit ``PermissionError: [WinError 5] Access is
+    denied: '...auto-run.json.q6wjytm7.tmp' -> '...auto-run.json'``
+    once; retry absorbs the typical AV-scanner release window
+    (~150ms). Final attempt failure re-raises the original
+    ``PermissionError`` so the operator sees the real error if the
+    lock is persistent.
 
     Args:
         path: Destination JSON path. Parent directory is created if
@@ -173,19 +229,7 @@ def atomic_write_json(path: Path, data: object) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        # v1.0.7 B3: retry-with-backoff for Windows PermissionError flakes.
-        last_exc: PermissionError | None = None
-        for attempt in range(1, 4):  # 3 attempts: 0 backoff, 100ms, 200ms
-            try:
-                os.replace(tmp_str, path)
-                return
-            except PermissionError as exc:
-                last_exc = exc
-                if attempt < 3:
-                    time.sleep(0.1 * attempt)
-        # 3 attempts exhausted; re-raise the last PermissionError.
-        assert last_exc is not None  # mypy: unreachable
-        raise last_exc
+        _replace_with_retry(tmp_str, path)
     except Exception:
         try:
             os.unlink(tmp_str)
@@ -203,6 +247,12 @@ def atomic_write_text(path: Path, text: str) -> None:
     Mirror of :func:`atomic_write_json` for text payloads. Same
     collision-free tmp naming + atomic rename + tmp cleanup contract.
 
+    v1.0.7 B3 Refactor: shares the :func:`_replace_with_retry` helper
+    with :func:`atomic_write_json` so both writers absorb the same
+    transient Windows ``PermissionError`` flakes from AV-scanner /
+    concurrent-writer contention. Symmetric exposure surface, single
+    retry implementation.
+
     Args:
         path: Destination text path. Parent directory is created if
             absent.
@@ -213,7 +263,7 @@ def atomic_write_text(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
-        os.replace(tmp_str, path)
+        _replace_with_retry(tmp_str, path)
     except Exception:
         try:
             os.unlink(tmp_str)
