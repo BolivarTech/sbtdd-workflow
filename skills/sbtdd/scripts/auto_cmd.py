@@ -1493,10 +1493,7 @@ def _validate_forwardable_flags_against_argparse() -> None:
                     if sub_action.dest:
                         dest_names.add(sub_action.dest)
 
-    missing = [
-        ns_attr for ns_attr in _FORWARDABLE_FLAGS
-        if ns_attr not in dest_names
-    ]
+    missing = [ns_attr for ns_attr in _FORWARDABLE_FLAGS if ns_attr not in dest_names]
     if missing:
         raise ValidationError(
             f"v1.0.6 K-4: _FORWARDABLE_FLAGS drift detected -- the "

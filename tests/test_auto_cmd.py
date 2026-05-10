@@ -3754,10 +3754,12 @@ class TestK4ForwardableFlagsArgparseGuard:
         import auto_cmd
         from types import MappingProxyType
 
-        fake_flags = MappingProxyType({
-            **dict(auto_cmd._FORWARDABLE_FLAGS),
-            "nonexistent_fake_flag_for_drift_test": "--nonexistent-fake-flag",
-        })
+        fake_flags = MappingProxyType(
+            {
+                **dict(auto_cmd._FORWARDABLE_FLAGS),
+                "nonexistent_fake_flag_for_drift_test": "--nonexistent-fake-flag",
+            }
+        )
         monkeypatch.setattr(auto_cmd, "_FORWARDABLE_FLAGS", fake_flags)
 
         with pytest.raises(ValidationError) as excinfo:
