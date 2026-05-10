@@ -1,0 +1,31 @@
+[project]
+name = "parallel-e2e-fixture"
+version = "0.0.1"
+requires-python = ">= 3.9"
+description = "Synthetic Python project for v1.0.7 A3 auto --parallel e2e fixture"
+license = "MIT OR Apache-2.0"
+authors = [{name = "Julian Bolivar"}]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+mypy_path = "src"
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_decorators = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+warn_return_any = false
