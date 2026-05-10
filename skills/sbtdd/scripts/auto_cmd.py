@@ -2843,6 +2843,18 @@ def _dispatch_batch_concurrent(batch: set[str], project_root: Path) -> None:
     The Popen-per-task shape is preserved so test fixtures that
     monkeypatch ``subprocess.Popen`` still observe N invocations.
 
+    **v1.0.7 A2 audit note**: this helper does NOT route through
+    :func:`_spawn_worker` (the cross-platform PTY/PIPE+env-marker
+    dispatcher) because :func:`_run_single_task_isolated` does NOT
+    dispatch interactive skills (no ``/verification-before-completion``,
+    no ``/receiving-code-review``) — the chicken-and-egg failure mode
+    that v1.0.7 Pillar A fixes does not apply here. Pre-verification
+    workers run only `pytest` collection / `git status` checks. If a
+    future cycle extends the pre-verification surface to invoke
+    interactive skills, the worker spawn site MUST be migrated to
+    :func:`_spawn_worker` to preserve the SBTDD_AUTO_PARALLEL_WORKER=1
+    env contract.
+
     Args:
         batch: Set of task ids to pre-verify concurrently. Must have
             ``len(batch) > 1`` for the helper to do useful work; size-1
