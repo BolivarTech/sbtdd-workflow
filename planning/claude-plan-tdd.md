@@ -1246,7 +1246,7 @@ Covers escenarios K-4a + K-4b from spec sec.4.7.
 
 #### Red Phase
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_auto_cmd.py`:
 
@@ -1295,12 +1295,12 @@ class TestK4ForwardableFlagsArgparseGuard:
         )
 ```
 
-- [ ] **Step 2: Run tests to verify FAIL**
+- [x] **Step 2: Run tests to verify FAIL**
 
 Run: `pytest tests/test_auto_cmd.py::TestK4ForwardableFlagsArgparseGuard -v`
 Expected: 2/2 FAIL — `_validate_forwardable_flags_against_argparse` doesn't exist yet.
 
-- [ ] **Step 3: close-phase Red**
+- [x] **Step 3: close-phase Red**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1308,7 +1308,7 @@ Expected: Atomic `test:` commit.
 
 #### Green Phase
 
-- [ ] **Step 4: Implement `_validate_forwardable_flags_against_argparse` helper**
+- [x] **Step 4: Implement `_validate_forwardable_flags_against_argparse` helper**
 
 Modify `skills/sbtdd/scripts/auto_cmd.py`. Add the helper near `_FORWARDABLE_FLAGS` definition (around line 1435):
 
@@ -1375,17 +1375,17 @@ def _validate_forwardable_flags_against_argparse() -> None:
 _validate_forwardable_flags_against_argparse()
 ```
 
-- [ ] **Step 5: Run K-4 tests to verify PASS**
+- [x] **Step 5: Run K-4 tests to verify PASS**
 
 Run: `pytest tests/test_auto_cmd.py::TestK4ForwardableFlagsArgparseGuard -v`
 Expected: 2/2 PASS.
 
-- [ ] **Step 6: Run full test suite to verify no regression**
+- [x] **Step 6: Run full test suite to verify no regression**
 
 Run: `make verify`
 Expected: All checks green. Confirm existing `_FORWARDABLE_FLAGS` (5 keys per v1.0.5) all present in argparse dest set.
 
-- [ ] **Step 7: close-phase Green**
+- [x] **Step 7: close-phase Green**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 
@@ -1393,13 +1393,13 @@ Expected: Atomic `feat:` commit (e.g. `feat: v1.0.6 T6 K-4 _FORWARDABLE_FLAGS ar
 
 #### Refactor Phase
 
-- [ ] **Step 8: Refactor — verify guard semantics + cleanup**
+- [x] **Step 8: Refactor — verify guard semantics + cleanup**
 
 Confirm the guard at module import is unconditionally fatal (no try/except wrap, no opt-out env var per iter-1 mel+bal+cas TRIPLE WARNING fix). The `SBTDD_STRICT_K4_GUARD` env var concept is RETRACTED — drift always fatal at module load.
 
 Optionally: if `_build_argparse_parser` is expensive (full subparser tree), consider caching its result or only validating the relevant subparser (auto). For v1.0.6 simplicity, run the full validation at module load — overhead is one-time + small.
 
-- [ ] **Step 9: close-phase Refactor + close-task**
+- [x] **Step 9: close-phase Refactor + close-task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase`
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
