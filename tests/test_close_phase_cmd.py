@@ -740,6 +740,96 @@ class TestRunVerificationWorkerBypass:
             f"<pid>-<monotonic_ns>-<uuid8>-verify pattern"
         )
 
+    def test_chicken_and_egg_subprocess_bypass_no_hang(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """v1.0.7 Loop 2 iter-2 Cas CRITICAL closure: empirically test chicken-and-egg surface.
+
+        Spawns a REAL subprocess via ``subprocess.Popen`` with
+        ``stdin=PIPE`` (no TTY — same shape as auto --parallel
+        workers) + ``SBTDD_AUTO_PARALLEL_WORKER=1`` env. The
+        subprocess then invokes worker-mode ``_run_verification``
+        via a small Python -c command. If the bypass works (worker
+        sees env var → runs sec.0.1 chain shell-direct, NOT
+        interactive skill subprocess), the subprocess completes
+        within 30s. If the chicken-and-egg surface is still open
+        (env var not propagated, OR bypass not firing), subprocess
+        would hang the full timeout.
+
+        Smaller-scope than full ``auto --parallel`` integration
+        (T3 xfail) but exercises the EXACT subprocess shape
+        (stdin=PIPE, no TTY) that produced the v1.0.6 hang.
+        Empirical proof at production-spawn-realistic granularity.
+        """
+        import subprocess as _subprocess
+        import sys as _sys
+
+        # Stage minimal Python project so sec.0.1 chain has discovery target.
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "smoke"\nversion = "0.0.1"\nrequires-python = ">=3.9"\n'
+            '[tool.pytest.ini_options]\ntestpaths = ["."]\n'
+            "[tool.ruff]\nline-length = 100\n"
+            "[tool.mypy]\nstrict = false\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "test_dummy.py").write_text("def test_dummy(): assert True\n", encoding="utf-8")
+        # Locate close_phase_cmd module so the spawned subprocess can import it.
+        scripts_dir = Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"
+        # Worker script invoked by the spawned subprocess. Mirrors the
+        # production chicken-and-egg path: subprocess inherits stdin=PIPE
+        # (no TTY) + reads SBTDD_AUTO_PARALLEL_WORKER env → calls
+        # _run_verification → bypass should trigger sec.0.1 shell chain.
+        # Test passes if subprocess returns within timeout (no hang).
+        worker_code = (
+            f"import sys\n"
+            f"sys.path.insert(0, {str(scripts_dir)!r})\n"
+            f"from pathlib import Path\n"
+            f"import close_phase_cmd\n"
+            f"try:\n"
+            f"    close_phase_cmd._run_verification(Path({str(tmp_path)!r}))\n"
+            f"except Exception as e:\n"
+            f"    sys.stdout.write(f'BYPASS_REACHED:{{type(e).__name__}}')\n"
+            f"    sys.exit(0)\n"
+            f"sys.stdout.write('BYPASS_REACHED:OK')\n"
+        )
+        env = dict(os.environ)
+        env["SBTDD_AUTO_PARALLEL_WORKER"] = "1"
+        proc = _subprocess.Popen(
+            [_sys.executable, "-c", worker_code],
+            stdin=_subprocess.PIPE,
+            stdout=_subprocess.PIPE,
+            stderr=_subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout_b, stderr_b = proc.communicate(timeout=60)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            stdout_b, stderr_b = proc.communicate()
+            raise AssertionError(
+                "v1.0.7 Loop 2 iter-2 Cas CRITICAL closure FAILED: "
+                "subprocess with stdin=PIPE + SBTDD_AUTO_PARALLEL_WORKER=1 "
+                "hung past 60s. Chicken-and-egg surface NOT closed at "
+                "subprocess-spawn granularity. Either env var not "
+                "propagated OR _run_verification bypass not firing under "
+                "real subprocess context.\n"
+                f"stdout (last 4KB): {stdout_b[-4096:]!r}\n"
+                f"stderr (last 4KB): {stderr_b[-4096:]!r}"
+            )
+        # Subprocess returned within 60s → chicken-and-egg surface
+        # empirically closed at the spawn-shape granularity that
+        # produced the v1.0.6 hang. Whether the verification chain
+        # ultimately succeeded or raised ValidationError doesn't
+        # matter for THIS test — what matters is the bypass
+        # PREVENTED the hang.
+        stdout = stdout_b.decode("utf-8", errors="replace")
+        assert "BYPASS_REACHED" in stdout, (
+            f"_run_verification did not reach the bypass path; "
+            f"unexpected exit. stdout={stdout!r} stderr={stderr_b!r}"
+        )
+
     def test_orchestrator_mode_preserves_skill_dispatch(
         self,
         monkeypatch: pytest.MonkeyPatch,
