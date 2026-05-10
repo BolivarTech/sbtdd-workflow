@@ -2378,7 +2378,7 @@ ships in T8 (separate task; has real code change).
 
 #### Red Phase
 
-- [ ] **Step 1: Write 4 failing smoke tests covering C1+C5+C6+C7 with discriminating class names**
+- [x] **Step 1: Write 4 failing smoke tests covering C1+C5+C6+C7 with discriminating class names**
 
 > **iter-3 carry-forward (mel+bal+cas WARNING)**: even though all 4
 > doc smoke tests land in a single Red commit (per C2/C5 collapse),
@@ -2461,17 +2461,17 @@ def test_skill_md_documents_methodology_activity_ship_time_procedure() -> None:
     assert "v1.0.X+1 LOCKED" in text or "next-cycle LOCKED" in text.lower()
 ```
 
-- [ ] **Step 2: Run all 4 new tests to verify failure**
+- [x] **Step 2: Run all 4 new tests to verify failure**
 
 Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning tests/test_skill_md_methodology_activity_procedure.py -v`
 
 Expected: all FAIL (4 doc surfaces missing).
 
-- [ ] **Step 3: Run `make verify`**
+- [x] **Step 3: Run `make verify`**
 
 Expected: only the new doc smoke tests fail; ruff + mypy clean.
 
-- [ ] **Step 4: Close Red phase**
+- [x] **Step 4: Close Red phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 Pillar C polish doc smoke tests (C1+C5+C6+C7)"`
 
@@ -2479,7 +2479,7 @@ Expected: `test:` commit lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 5: Apply C1 inline comment in K-4 helper**
+- [x] **Step 5: Apply C1 inline comment in K-4 helper**
 
 Edit `skills/sbtdd/scripts/auto_cmd.py:1447` — locate
 `_validate_forwardable_flags_against_argparse` body and insert just
@@ -2493,7 +2493,7 @@ above the parser-walk loop:
         # ... existing walk logic ...
 ```
 
-- [ ] **Step 6: Apply C5 deprecation marker comment in close_task_cmd.py**
+- [x] **Step 6: Apply C5 deprecation marker comment in close_task_cmd.py**
 
 Edit `skills/sbtdd/scripts/close_task_cmd.py:451`. Replace existing
 deprecation comment block + alias line with:
@@ -2509,7 +2509,7 @@ deprecation comment block + alias line with:
 _preflight_triplet_check = _preflight
 ```
 
-- [ ] **Step 7: Apply C6 docstring note in K-4 helper**
+- [x] **Step 7: Apply C6 docstring note in K-4 helper**
 
 Continue editing `auto_cmd.py:1447`. In the
 `_validate_forwardable_flags_against_argparse` docstring, insert a
@@ -2524,7 +2524,7 @@ mask the monkeypatch's effect. Direct helper invocation respects the
 patched dictionary.
 ```
 
-- [ ] **Step 8: Apply C7 ship-time methodology-activity procedure in SKILL.md**
+- [x] **Step 8: Apply C7 ship-time methodology-activity procedure in SKILL.md**
 
 Append to `skills/sbtdd/SKILL.md` (placement: near existing
 version-notes sections):
@@ -2559,7 +2559,7 @@ by v1.0.6 own-cycle dogfood findings → v1.0.7 LOCKED Pillar B
 (B5+B4+B3) carry-forward.
 ```
 
-- [ ] **Step 9: Run all 4 new doc tests + full make verify**
+- [x] **Step 9: Run all 4 new doc tests + full make verify**
 
 Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning tests/test_skill_md_methodology_activity_procedure.py -v`
 
@@ -2570,7 +2570,7 @@ Then: `make verify`
 Expected: only the C6 cross-link smoke test fails; ruff + mypy clean
 on production changes.
 
-- [ ] **Step 10: Close Green phase**
+- [x] **Step 10: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 Pillar C polish (C1+C5+C6+C7) docs land"`
 
@@ -2580,7 +2580,7 @@ remaining failing C6 cross-link test is the explicit Refactor surface
 
 #### Refactor Phase
 
-- [ ] **Step 11: Cross-link C1 inline comment + C6 docstring note in K-4 helper**
+- [x] **Step 11: Cross-link C1 inline comment + C6 docstring note in K-4 helper**
 
 Edit `skills/sbtdd/scripts/auto_cmd.py:1447` —
 `_validate_forwardable_flags_against_argparse`. The Green-phase additions
@@ -2605,7 +2605,7 @@ inline comment above the loop body for limitations + extension path).
 This satisfies the C6 cross-link smoke test (`assert "single-level
 subparser" in doc.lower() or "see inline comment" in doc.lower()`).
 
-- [ ] **Step 12: Run smoke tests + `make verify`**
+- [x] **Step 12: Run smoke tests + `make verify`**
 
 Run: `pytest tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat -v`
 Expected: PASS (cross-link present).
@@ -2613,7 +2613,7 @@ Expected: PASS (cross-link present).
 Then: `make verify`
 Expected: full suite green.
 
-- [ ] **Step 13: Close Refactor phase + close task**
+- [x] **Step 13: Close Refactor phase + close task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor v1.0.7 Pillar C polish -- cross-link C1 inline comment + C6 docstring in K-4 helper"`
 
