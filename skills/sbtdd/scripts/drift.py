@@ -239,13 +239,21 @@ def _all_task_steps_complete(plan_text: str, task_id: str) -> str:
     return "[ ]"
 
 
+#: v1.0.7 B5: line-anchored open-checkbox regex. Matches ``- [ ]`` at line
+#: start (with optional leading whitespace for indented bullets) so plan
+#: text containing ``- [ ]`` inside code-block string literals doesn't
+#: false-positive the drift detector.
+_OPEN_CHECKBOX_LINE_RE = re.compile(r"^[ \t]*- \[ \]", re.MULTILINE)
+
+
 def _plan_all_tasks_complete(plan_text: str) -> str:
     """Return ``"[x]"`` iff every ``### Task <id>:`` section is fully flipped.
 
     Walks every task header in the plan and checks that the text between
-    it and the next task header contains NO ``- [ ]`` markers. Used by
-    :func:`detect_drift` when the state file has ``current_task_id=None``
-    (terminal ``done`` state) to distinguish between:
+    it and the next task header contains NO line-anchored ``- [ ]``
+    markers. Used by :func:`detect_drift` when the state file has
+    ``current_task_id=None`` (terminal ``done`` state) to distinguish
+    between:
 
     * ``state=done, all chores landed`` -> every section ``[x]`` -> ``"[x]"``
       -> no drift (terminal).
@@ -258,6 +266,16 @@ def _plan_all_tasks_complete(plan_text: str) -> str:
     conservative in the other direction (phase=done with open-task
     evidence is real drift, but phase=done with a planless repo is not a
     useful signal).
+
+    v1.0.7 B5 fix: line-anchored multiline regex ``^[ \\t]*- \\[ \\]``
+    replaces the previous unanchored substring check ``"- [ ]" in section``.
+    The substring check produced false-positives on plans containing
+    Python test fixture string literals like ``"- [ ] Step 1\\n"`` inside
+    code blocks (v1.0.6 dogfood empirical finding). The regex requires
+    the ``- [ ]`` marker to start at line beginning (with optional
+    leading whitespace for indented bullets), excluding code-block
+    fixtures whose ``- [ ]`` substrings sit inside string literal
+    contexts.
     """
     headers = list(_ANY_TASK_HEADER.finditer(plan_text))
     if not headers:
@@ -265,6 +283,6 @@ def _plan_all_tasks_complete(plan_text: str) -> str:
     for i, match in enumerate(headers):
         start = match.end()
         end = headers[i + 1].start() if i + 1 < len(headers) else len(plan_text)
-        if "- [ ]" in plan_text[start:end]:
+        if _OPEN_CHECKBOX_LINE_RE.search(plan_text[start:end]):
             return "[ ]"
     return "[x]"

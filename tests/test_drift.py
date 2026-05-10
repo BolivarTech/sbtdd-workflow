@@ -511,7 +511,6 @@ def test_detect_drift_io_wrapper_returns_none_when_consistent(tmp_path, monkeypa
     )
 
 
-
 class TestPlanAllTasksCompleteLineAnchored:
     """v1.0.7 B5 drift detector line-anchored regex per spec sec.4.4."""
 
