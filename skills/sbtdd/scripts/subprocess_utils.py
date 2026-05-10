@@ -515,19 +515,25 @@ def _spawn_worker_with_pty(
 ) -> "subprocess.Popen[bytes]":
     """v1.0.7 A1 POSIX: allocate pseudo-TTY for worker subprocess.
 
-    Workers spawned via this helper inherit the slave end as
-    stdin/stdout/stderr; orchestrator holds master end via
-    ``proc._pty_master_fd``. Skill subprocess chain (close-phase ->
-    /verification-before-completion) inherits TTY from worker ->
-    interactive prompts work -> no chicken-and-egg hang (see v1.0.6
-    empirical findings + spec sec.2.1).
+    Workers spawned via this helper inherit the PTY slave end as
+    stdin/stdout/stderr; the orchestrator retains the master end via
+    ``proc._pty_master_fd`` (cleaned up by :func:`_close_pty_master`).
+    The skill subprocess chain (close-phase ->
+    /verification-before-completion) inherits the TTY from the worker,
+    so interactive prompts succeed and the v1.0.6 chicken-and-egg
+    subprocess hang on close-phase verification is closed (see spec
+    sec.2.1 + v1.0.6 own-cycle empirical findings).
 
     POSIX-only. Windows callers must use the Option B-W3 hybrid path
     (``subprocess.PIPE`` + ``SBTDD_AUTO_PARALLEL_WORKER`` env +
     ``close_phase_cmd._run_verification`` worker-mode bypass per A2).
+    The Windows guard runs BEFORE ``import pty`` because ``pty.py``
+    transitively imports ``termios`` and would raise
+    ``ModuleNotFoundError`` on Windows otherwise.
 
-    v1.0.7 iter-2 carry-forward W8: Popen failure closes BOTH master and
-    slave fds before re-raising, preventing fd leak on spawn failure.
+    v1.0.7 iter-2 carry-forward W8: when ``subprocess.Popen`` raises,
+    BOTH ``master_fd`` and ``slave_fd`` are closed before the exception
+    re-raises so neither end leaks on spawn failure.
 
     Args:
         argv: Subprocess argv (executable + args). ``shell=False``
@@ -545,21 +551,17 @@ def _spawn_worker_with_pty(
             test-harness misuse; production callers route via
             ``auto_cmd._spawn_worker`` dispatcher.
         OSError: Re-raised from underlying ``subprocess.Popen``; both
-            master and slave fds closed before re-raise (no leak).
+            master and slave fds closed before re-raise (W8 leak guard).
     """
-    # Guard before importing pty: pty.py transitively imports termios
-    # which is POSIX-only and raises ModuleNotFoundError on Windows.
-    # The win32 check MUST run before the import to keep the Windows
-    # error path returning RuntimeError (the documented contract)
-    # rather than ModuleNotFoundError leaking from stdlib.
+    # Win32 guard runs BEFORE import pty (see docstring); failing here
+    # with RuntimeError preserves the documented contract.
     if sys.platform == "win32":
         raise RuntimeError(
             "_spawn_worker_with_pty is POSIX-only; Windows uses "
             "Option B-W3 hybrid (see auto_cmd._spawn_worker)"
         )
-    # pty is POSIX-only stdlib; local-import keeps the Windows path
-    # of subprocess_utils.py importable without conditional top-level
-    # ImportError handling.
+    # Local-import keeps subprocess_utils.py importable on Windows
+    # without conditional top-level ImportError handling.
     import os as _os
     import pty
 
