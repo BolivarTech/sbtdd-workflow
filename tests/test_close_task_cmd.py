@@ -1045,6 +1045,23 @@ class TestPreflightTripletCCScope:
         _preflight(state, tmp_path)
 
 
+class TestCXK3RemovalAliasGone:
+    """v1.0.7 C-X-K3-Removal: alias removed per spec sec.4.7."""
+
+    def test_legacy_alias_no_longer_attribute_of_module(self) -> None:
+        """C-X-K3-Removal: `_preflight_triplet_check` raises AttributeError."""
+        import close_task_cmd
+
+        with pytest.raises(AttributeError, match="_preflight_triplet_check"):
+            close_task_cmd._preflight_triplet_check  # noqa: B018
+
+    def test_canonical_preflight_still_callable(self) -> None:
+        """C-X-K3-Removal: canonical `_preflight` still exists + is callable."""
+        import close_task_cmd
+
+        assert callable(close_task_cmd._preflight)
+
+
 class TestC5DeprecationMarkerMonkeypatchWarning:
     """v1.0.7 C5 K-3 deprecation marker monkeypatch warning per spec sec.4.7."""
 
