@@ -14,6 +14,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -152,6 +153,16 @@ def atomic_write_json(path: Path, data: object) -> None:
     failure the tmp file is cleaned up before re-raising so nothing
     leaks.
 
+    v1.0.7 B3: ``os.replace`` is wrapped in a 3-attempt retry-with-backoff
+    (``100ms * attempt-number``) absorbing transient Windows
+    ``PermissionError`` flakes from AV-scanner / concurrent-writer
+    contention. Empirical context: v1.0.6 mid-cycle hit
+    ``PermissionError: [WinError 5] Access is denied:
+    '...auto-run.json.q6wjytm7.tmp' -> '...auto-run.json'`` once;
+    retry absorbs the typical AV-scanner release window (~150ms).
+    Final attempt failure re-raises the original ``PermissionError``
+    so the operator sees the real error if the lock is persistent.
+
     Args:
         path: Destination JSON path. Parent directory is created if
             absent.
@@ -162,7 +173,19 @@ def atomic_write_json(path: Path, data: object) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        os.replace(tmp_str, path)
+        # v1.0.7 B3: retry-with-backoff for Windows PermissionError flakes.
+        last_exc: PermissionError | None = None
+        for attempt in range(1, 4):  # 3 attempts: 0 backoff, 100ms, 200ms
+            try:
+                os.replace(tmp_str, path)
+                return
+            except PermissionError as exc:
+                last_exc = exc
+                if attempt < 3:
+                    time.sleep(0.1 * attempt)
+        # 3 attempts exhausted; re-raise the last PermissionError.
+        assert last_exc is not None  # mypy: unreachable
+        raise last_exc
     except Exception:
         try:
             os.unlink(tmp_str)
