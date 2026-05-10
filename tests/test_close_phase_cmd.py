@@ -782,11 +782,15 @@ class TestRunVerificationWorkerBypass:
         # (no TTY) + reads SBTDD_AUTO_PARALLEL_WORKER env → calls
         # _run_verification → bypass should trigger sec.0.1 shell chain.
         # Test passes if subprocess returns within timeout (no hang).
+        # v1.0.7 Loop 2 iter-3 Cas polish: assert os.isatty(0) is False
+        # so POSIX vacuous-pass is impossible (must observe no-TTY shape).
         worker_code = (
             f"import sys\n"
             f"sys.path.insert(0, {str(scripts_dir)!r})\n"
             f"from pathlib import Path\n"
             f"import close_phase_cmd\n"
+            f"# v1.0.7 iter-3 Cas polish: prove subprocess actually runs no-TTY.\n"
+            f"assert sys.stdin.isatty() is False, 'fixture broken: subprocess HAS TTY'\n"
             f"try:\n"
             f"    close_phase_cmd._run_verification(Path({str(tmp_path)!r}))\n"
             f"except Exception as e:\n"
@@ -804,7 +808,10 @@ class TestRunVerificationWorkerBypass:
             env=env,
         )
         try:
-            stdout_b, stderr_b = proc.communicate(timeout=60)
+            # v1.0.7 Loop 2 iter-3 Mel polish: tightened timeout 60s -> 15s
+            # for sharper regression signal (observed 1.19s; 12x headroom is
+            # ample for AV scanner / CI variance without masking real hangs).
+            stdout_b, stderr_b = proc.communicate(timeout=15)
         except _subprocess.TimeoutExpired:
             proc.kill()
             stdout_b, stderr_b = proc.communicate()
