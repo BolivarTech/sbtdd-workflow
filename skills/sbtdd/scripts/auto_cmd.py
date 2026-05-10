@@ -1469,9 +1469,16 @@ def _validate_forwardable_flags_against_argparse() -> None:
     helper updates here in one place. Single-level subparser walk;
     deeper nesting not supported (see v1.0.7 LOCKED C1 polish).
 
-    Tests that monkeypatch ``_FORWARDABLE_FLAGS`` should call this
-    helper directly rather than reloading auto_cmd to avoid
-    import-time guard interaction (see v1.0.7 LOCKED C6 polish).
+    v1.0.7 C6 NOTE: tests that monkeypatch ``_FORWARDABLE_FLAGS``
+    should call this helper directly rather than reloading
+    ``auto_cmd`` via ``importlib.reload`` to avoid the import-time
+    guard interaction. The guard fires at module import; reload
+    re-imports + re-fires, which can mask the monkeypatch's effect.
+    Direct helper invocation respects the patched dictionary.
+
+    Implementation note: the parser walk below is single-level (see
+    inline comment above the loop body for limitations + extension
+    path).
 
     Raises:
         ValidationError: When ``_FORWARDABLE_FLAGS`` contains a key
