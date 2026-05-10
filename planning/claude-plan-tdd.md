@@ -1271,7 +1271,7 @@ complete.
 
 #### Red Phase
 
-- [ ] **Step 1: Create synthetic 2-track + 4-task plan fixture WITH real Python project (C3 carry-forward)**
+- [x] **Step 1: Create synthetic 2-track + 4-task plan fixture WITH real Python project (C3 carry-forward)**
 
 Create `tests/fixtures/parallel-e2e/spec-fixture.md`:
 
