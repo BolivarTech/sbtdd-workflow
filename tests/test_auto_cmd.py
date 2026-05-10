@@ -3083,6 +3083,9 @@ class TestPath3DispatchTracksConcurrent:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
                 popen_calls.append(list(cmd))
                 self.returncode: int | None = None
+                # v1.0.7 A2: _verify_worker_sidecars_present LOUD-FAIL
+                # contract reads proc.pid; provide unique-per-instance pid.
+                self.pid: int = 90000 + len(popen_calls)
 
             def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
                 self.returncode = 0
@@ -3127,7 +3130,9 @@ class TestPath3DispatchTracksConcurrent:
 
         class FailingPopen:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
-                pass
+                # v1.0.7 A2: _verify_worker_sidecars_present LOUD-FAIL
+                # contract reads proc.pid; provide stable pid.
+                self.pid: int = 92345
 
             def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
                 return (b"", b"track failed: T1 failed during green phase")
@@ -3178,6 +3183,9 @@ class TestPath3DispatchTracksConcurrent:
             def __init__(self, cmd: list[str], **kwargs: object) -> None:
                 popen_count["n"] += 1
                 self.returncode: int | None = None
+                # v1.0.7 A2: _verify_worker_sidecars_present LOUD-FAIL
+                # contract reads proc.pid; provide unique-per-instance pid.
+                self.pid: int = 91000 + popen_count["n"]
 
             def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
                 self.returncode = 0
@@ -3798,11 +3806,11 @@ class TestSpawnWorkerDispatcher:
         monkeypatch.setattr("auto_cmd.subprocess.Popen", fake_popen)
         auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"})
         kwargs = captured["kwargs"]
-        assert kwargs["stdin"] is subprocess.PIPE
-        assert kwargs["stdout"] is subprocess.PIPE
-        assert kwargs["stderr"] is subprocess.PIPE
-        assert kwargs["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"
-        assert kwargs["env"]["PATH"] == "/usr/bin"
+        assert kwargs["stdin"] is subprocess.PIPE  # type: ignore[index]
+        assert kwargs["stdout"] is subprocess.PIPE  # type: ignore[index]
+        assert kwargs["stderr"] is subprocess.PIPE  # type: ignore[index]
+        assert kwargs["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"  # type: ignore[index]
+        assert kwargs["env"]["PATH"] == "/usr/bin"  # type: ignore[index]
 
     def test_posix_worker_routes_to_pty_helper(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A2-1 (POSIX path): routes to subprocess_utils._spawn_worker_with_pty."""
@@ -3822,5 +3830,5 @@ class TestSpawnWorkerDispatcher:
         monkeypatch.setattr("subprocess_utils._spawn_worker_with_pty", fake_pty_spawn)
         auto_cmd._spawn_worker(["python", "-c", "pass"], env={"PATH": "/usr/bin"})
         assert captured["argv"] == ["python", "-c", "pass"]
-        assert captured["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"
-        assert captured["env"]["PATH"] == "/usr/bin"
+        assert captured["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"  # type: ignore[index]
+        assert captured["env"]["PATH"] == "/usr/bin"  # type: ignore[index]

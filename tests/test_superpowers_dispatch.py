@@ -849,10 +849,11 @@ class TestInvokeSkillWorkerGuard:
             stdout = ""
             stderr = ""
 
-        monkeypatch.setattr(
-            "subprocess_utils.run_with_timeout",
-            lambda cmd, **kw: captured.append(cmd) or FakeResult(),
-        )
+        def _capture_run(cmd: list[str], **kw: Any) -> FakeResult:
+            captured.append(cmd)
+            return FakeResult()
+
+        monkeypatch.setattr("subprocess_utils.run_with_timeout", _capture_run)
         monkeypatch.setattr(
             "subprocess_utils.is_headless_context",
             lambda: False,

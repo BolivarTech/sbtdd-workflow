@@ -1798,6 +1798,105 @@ def _resolve_effective_workers(natural_n: int, user_max: int | None) -> int:
     return min(natural_n, user_max)
 
 
+def _spawn_worker(
+    argv: list[str],
+    env: dict[str, str],
+    **popen_kwargs: Any,
+) -> "subprocess.Popen[bytes]":
+    """v1.0.7 A2 cross-platform worker spawn dispatcher.
+
+    POSIX -> real PTY allocation via
+    :func:`subprocess_utils._spawn_worker_with_pty` (Item A1). Workers
+    inherit slave fd as stdin/stdout/stderr; close-phase /verification-
+    before-completion subprocess inherits TTY -> no chicken-and-egg hang.
+
+    Windows -> ``subprocess.PIPE`` (Option B-W3 hybrid; Windows lacks
+    POSIX-style PTY). Workers carry ``SBTDD_AUTO_PARALLEL_WORKER=1`` env
+    marker so :func:`close_phase_cmd._run_verification` shells out to the
+    sec.0.1 4-tool chain directly instead of dispatching the interactive
+    skill (sidesteps TTY requirement).
+
+    All worker subprocess spawns under ``auto --parallel`` MUST go through
+    this helper to preserve the ``SBTDD_AUTO_PARALLEL_WORKER=1`` env
+    contract that :func:`close_phase_cmd._run_verification` and
+    :func:`superpowers_dispatch.invoke_skill` depend on. Direct
+    ``subprocess.Popen`` invocations bypassing this dispatcher break the
+    chicken-and-egg fix and produce silent hangs in production.
+
+    Args:
+        argv: Subprocess argv. ``shell=False`` invariant preserved.
+        env: Environment dict; this helper injects
+            ``SBTDD_AUTO_PARALLEL_WORKER=1`` before spawn.
+        **popen_kwargs: Forwarded to :class:`subprocess.Popen` on Windows
+            (e.g. ``cwd=``, ``creationflags=``). POSIX path passes the
+            ``cwd``-equivalent through the PTY helper if supplied; other
+            kwargs are silently ignored (PTY semantics constrain stdio).
+
+    Returns:
+        ``subprocess.Popen`` instance ready for orchestrator post-batch
+        merge (per v1.0.5 I-1 sidecar + I-2 scratch patterns).
+    """
+    env_with_marker = {**env, "SBTDD_AUTO_PARALLEL_WORKER": "1"}
+    if sys.platform == "win32":
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env_with_marker,
+            **popen_kwargs,
+        )
+        return cast("subprocess.Popen[bytes]", proc)
+    return cast(
+        "subprocess.Popen[bytes]",
+        subprocess_utils._spawn_worker_with_pty(argv, env_with_marker),
+    )
+
+
+def _verify_worker_sidecars_present(
+    project_root: Path,
+    worker_pids: list[int],
+) -> None:
+    """v1.0.7 iter-3 carry-forward C1: LOUD-FAIL on missing INV-16 sidecar.
+
+    Each spawned worker MUST produce >= 1 sidecar matching the glob
+    ``<pid>-*-verify.json``. Missing sidecar = code-path bug (worker
+    spawned + ran close-phase but failed to persist evidence).
+    LOUD-FAIL via :class:`ConcurrentDispatchError` surfaces it during
+    test/dogfood instead of silent INV-16 evidence loss.
+
+    Args:
+        project_root: Project root (sidecar dir is
+            ``<project_root>/.claude/auto-run-workers/``).
+        worker_pids: Pids of spawned workers (collected from
+            :func:`_spawn_worker` returns); used to glob expected sidecars.
+
+    Raises:
+        ConcurrentDispatchError: At least one spawned worker pid produced
+            no matching sidecar; message names the missing pids + the
+            observed sidecars + the expected worker pid set so operators
+            can reproduce + diagnose the silent persistence failure.
+    """
+    sidecar_dir = project_root / ".claude" / "auto-run-workers"
+    if not sidecar_dir.exists():
+        # No workers wrote sidecars at all; possible if all workers
+        # failed before reaching close-phase. Log + return; missing
+        # close-phase chain is a separate failure surface caught by
+        # worker exit code aggregation.
+        return
+    observed = list(sidecar_dir.glob("*-verify.json"))
+    observed_pids = {int(p.name.split("-")[0]) for p in observed}
+    missing = [pid for pid in worker_pids if pid not in observed_pids]
+    if missing:
+        raise ConcurrentDispatchError(
+            f"v1.0.7 iter-3 C1: workers {missing} completed but produced "
+            f"no INV-16 sidecar. Observed sidecars: {[p.name for p in observed]}. "
+            f"Expected workers: {worker_pids}. Bug in "
+            f"_persist_worker_verify_evidence OR transient OS error "
+            f"swallowed mid-write; investigate before next dispatch."
+        )
+
+
 def _dispatch_tracks_concurrent(
     tracks: list[list[str]],
     effective_workers: int,
@@ -1871,6 +1970,10 @@ def _dispatch_tracks_concurrent(
         track_queue.put(t)
     failures: list[tuple[list[str], int, str]] = []
     failures_lock = threading.Lock()
+    # v1.0.7 iter-3 C1: collect per-worker pids for parent-side LOUD-FAIL
+    # check post-batch (each worker MUST produce a verify-evidence sidecar).
+    spawned_pids: list[int] = []
+    spawned_pids_lock = threading.Lock()
 
     def worker_loop() -> None:
         while True:
@@ -1903,12 +2006,19 @@ def _dispatch_tracks_concurrent(
                         task_ids_arg,
                         "--no-recursive",
                     ]
-                proc = subprocess.Popen(
+                # v1.0.7 A2: route through the cross-platform dispatcher so
+                # the SBTDD_AUTO_PARALLEL_WORKER=1 env contract holds for
+                # every worker (POSIX -> PTY allocation; Windows -> PIPE +
+                # env marker). Direct subprocess.Popen here would bypass
+                # the chicken-and-egg fix.
+                worker_env = os.environ.copy()
+                proc = _spawn_worker(
                     argv,
+                    env=worker_env,
                     cwd=str(project_root),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
                 )
+                with spawned_pids_lock:
+                    spawned_pids.append(proc.pid)
                 try:
                     _stdout_b, stderr_b = proc.communicate(timeout=7200)
                 except subprocess.TimeoutExpired:
@@ -1935,6 +2045,13 @@ def _dispatch_tracks_concurrent(
         th.start()
     for th in threads:
         th.join()
+
+    # v1.0.7 iter-3 C1 LOUD-FAIL: each spawned worker MUST have produced
+    # a verify-evidence sidecar (close_phase_cmd._persist_worker_verify_evidence).
+    # Missing sidecar = INV-16 evidence loss; raise BEFORE merging so the
+    # operator sees the persistence failure surface explicitly rather than
+    # debugging a silent merge of an incomplete audit.
+    _verify_worker_sidecars_present(project_root, spawned_pids)
 
     # v1.0.5 Item I-1: merge per-worker audit sidecars into the canonical
     # ``.claude/auto-run.json``. Performed unconditionally (even when some
