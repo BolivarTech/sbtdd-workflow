@@ -26,6 +26,40 @@
 
 ---
 
+## Iter-2 carry-forward — Checkpoint 2 iter 1 triage applied 2026-05-09
+
+> Per CLAUDE.local.md §6 v1.0.0+ carry-forward block format. Verdict
+> iter 1: GO_WITH_CAVEATS (3-0) full no-degraded, but 5 CRITICAL +
+> 10 WARNING + 5 INFO findings. Triage applied via INV-29
+> `/receiving-code-review` discipline; resolutions inlined into spec
+> sec.2.1, sec.2.2, sec.2.3, sec.2.7, sec.4.1, sec.4.2, sec.4.3,
+> sec.4.7, sec.5.1, sec.7.2, sec.8 below.
+
+| Iter | Severity | Title (verbatim from iter 1) | Decision | Rationale |
+|------|----------|-------------------------------|----------|-----------|
+| 1 | critical | A1 PTY lifecycle: master fd close + EIO + slave-in-parent not specified _(mel)_ | keep | Resolved sec.2.1: explicit `_close_pty_master(proc)` lifecycle helper + drain semantics + Popen-failure slave_fd leak guard added to implementation outline + escenarios A1-3 / A1-5. |
+| 1 | critical | Pillar C T7..T10 empty-Refactor blocked by v1.0.5 _preflight HARD-BLOCK _(mel)_ | keep | Resolved sec.2.7 + sec.5.1: collapse C1+C5+C6+C7 into single combined task with real Refactor (cross-link K-4 helper docs + consolidate). 11 tasks -> 8 tasks. C-X-K3-Removal stays separate (real code change). |
+| 1 | critical | A3 dogfood fixture doesn't exercise the chicken-and-egg failure surface _(cas)_ | keep | Resolved sec.2.3 + sec.4.3: fixture rewritten to exercise real `close-phase` -> worker `_run_verification` -> sec.0.1 chain dispatch in workers. Without this, A3 doesn't validate the fix. |
+| 1 | critical | Worker-mode `make verify` bypass: Windows make dependency + INV-16 regression _(cas)_ | keep | Resolved sec.2.2 + sec.4.2: A2 replaces `["make", "verify"]` with explicit sec.0.1 chain (`pytest` / `ruff check` / `ruff format --check` / `mypy`); per-worker captured stdout/stderr persisted to sidecar for INV-16 evidence-before-assertions continuity. |
+| 1 | critical | T7+T8+T9+T10 doc-only tasks fake the Red->Green->Refactor triplet _(cas)_ | keep | Same root as C2; resolution above (collapse into single multi-edit task with real diffs in each phase). |
+| 1 | warning | Q2'=b worker-guard ordering risks orchestrator false-positive trip _(mel)_ | keep | Resolved sec.4.2 escenario A2-6': explicit test that orchestrator-mode (no env var) does NOT trip guard even when invoking incompatible skill via `allow_interactive_skill=True`. |
+| 1 | warning | A3-2 dogfood does not exercise PTY drain under large cumulative output _(mel)_ | defer | Smoke validation in A3-1 suffices for v1.0.7 ship. Large-output drain is rare path; v1.0.8 follow-up backlog item (memory `project_v108_pty_drain_locked.md`). |
+| 1 | warning | Risk register sec.8 omits EIO/SIGHUP race and guard false-positive _(mel)_ | keep | Resolved sec.8: R7 EIO/SIGHUP race + R8 worker-context guard false-positive resilience added. |
+| 1 | warning | Windows worker INV-16 evidence gap (Pillar A2) _(bal)_ | keep | Same root as C4; resolution above (per-worker sidecar captured output). |
+| 1 | warning | POSIX path ships unvalidated end-to-end (A3 scope) _(bal)_ | keep | Resolved sec.7.2 + sec.7.3: `--parallel` POSIX marked **experimental** in v1.0.7 docs; CHANGELOG `[1.0.7]` Process notes documents Windows-mandatory + POSIX deferred to v1.0.8 dogfood. README operational note added. |
+| 1 | warning | Empty-Refactor gate interaction not verified upfront (Pillar C) _(bal)_ | keep | Same root as C2; resolution above (collapse + real Refactor diffs). |
+| 1 | warning | A1-1 test does not validate `sys.stdin.isatty() == True`; spec promise unfulfilled _(cas)_ | keep | Resolved plan T1 Red phase test: `worker_isatty.py` worker writes `isatty=True` to its stdout; orchestrator reads + asserts via PTY master fd. |
+| 1 | warning | T1 implementation lacks master_fd leak guard on Popen failure + omits pre-close drain _(cas)_ | keep | Resolved sec.2.1: implementation outline wraps `subprocess.Popen` in `try/except` with `os.close(slave_fd)` on failure + drain-before-close in `_close_pty_master`. |
+| 1 | warning | C5 <-> C-X-K3-Removal pair both ship in v1.0.7; comment is structurally vestigial _(cas)_ | defer | Documented as transitional archaeology in plan: C5 comment lives between T7-collapsed commit and T8 (= old T11) commit. Educational value for `git log` readers preserved. |
+| 1 | warning | T11 alias-removal `--variant fix` commit prefix violates CLAUDE.md sec.Git semantics _(cas)_ | keep | Resolved plan T8 (= old T11): Green commit uses `--variant fix` framing as "closes v1.0.7 C5-documented monkeypatch footgun"; documented in plan task header. |
+| 1 | info | B-pillar order Q3'=b smallest-fix-first is correct _(mel)_ | n/a | Positive validation; preserved. |
+| 1 | info | Q1'=a single-sequential modality is the only safe choice for v1.0.7 _(mel)_ | n/a | Positive validation; preserved. |
+| 1 | info | Cross-task ordering documented but not mechanically enforced _(bal)_ | n/a | Positive triage; mechanical enforcement deferred to v1.0.8 backlog (`addBlockedBy` integration). |
+| 1 | info | G2 ladder defer order well-calibrated _(bal)_ | n/a | Positive validation; preserved. |
+| 1 | info | Risk register R1-R6 coverage adequate for shipped scope _(bal)_ | n/a | Positive validation; R7+R8 added per W3 above. |
+
+---
+
 ## 1. Resumen ejecutivo
 
 **Objetivo v1.0.7**: ships PTY allocation in worker subprocess spawn
@@ -179,9 +213,69 @@ def _spawn_worker_with_pty(argv: list[str], env: dict[str, str]) -> "subprocess.
     return proc
 ```
 
-**Cleanup**: post-worker-completion, `os.close(proc._pty_master_fd)` to
-free the master end. Orchestrator drains buffered output before close
-(prevents EIO on subsequent reads).
+**Cleanup (v1.0.7 iter-2 carry-forward C1 resolution)**: dedicated
+lifecycle helper colocated with `_spawn_worker_with_pty`:
+
+```python
+def _close_pty_master(proc: "subprocess.Popen[bytes]") -> None:
+    """v1.0.7 A1 lifecycle: drain + close master fd. Idempotent.
+
+    Drains buffered output from the master end before close; without
+    drain, subsequent reads raise EIO on POSIX. Idempotent: safe to
+    call multiple times (no-op when ``_pty_master_fd`` attribute
+    missing or already closed).
+    """
+    import os as _os
+
+    master_fd = getattr(proc, "_pty_master_fd", None)
+    if master_fd is None:
+        return
+    try:
+        while True:
+            data = _os.read(master_fd, 4096)
+            if not data:
+                break
+    except OSError:
+        # Worker already closed slave end; drain done.
+        pass
+    try:
+        _os.close(master_fd)
+    except OSError:
+        # Already closed (idempotent).
+        pass
+    # Mark consumed so re-invocation is a true no-op.
+    proc._pty_master_fd = None  # type: ignore[attr-defined]
+```
+
+Orchestrator MUST call `_close_pty_master(proc)` after `proc.wait()`
+in `_dispatch_tracks_concurrent` post-batch cleanup (NEW production
+contract; not just test cleanup). The integration test in plan T3 + the
+A1 unit tests in plan T1 BOTH cover the lifecycle pattern.
+
+**Popen-failure leak guard (v1.0.7 iter-2 carry-forward W8 resolution)**:
+the `_spawn_worker_with_pty` body wraps the `subprocess.Popen` call in
+`try/except`, closing both `master_fd` and `slave_fd` on failure to
+prevent file descriptor leak when `Popen` raises:
+
+```python
+    master_fd, slave_fd = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            env=env,
+            close_fds=True,
+        )
+    except Exception:
+        os.close(master_fd)
+        os.close(slave_fd)
+        raise
+    os.close(slave_fd)  # parent only needs master after success
+    proc._pty_master_fd = master_fd
+    return proc
+```
 
 ### 2.2 Item A2 — Windows hybrid Option B-W3 + worker env runtime guard (Pillar A PRIMARY HARD-LOCKED, Q2'=b promotion)
 
@@ -224,26 +318,77 @@ def _spawn_worker(argv, env):
 ```python
 # close_phase_cmd._run_verification (worker bypass)
 import os
+import subprocess
+
 def _run_verification(root: Path) -> None:
-    """v1.0.7 A2: worker-mode bypass.
+    """v1.0.7 A2: worker-mode bypass via explicit sec.0.1 chain.
 
     When SBTDD_AUTO_PARALLEL_WORKER=1 set (parent-injected env),
     bypass interactive `/verification-before-completion` skill and
-    run `make verify` shell command directly. Deterministic; no
-    interactive prompt; no TTY required. ValidationError raised on
-    non-zero exit (equivalent to skill failure semantics).
+    run the sec.0.1 4-tool chain directly: pytest, ruff check,
+    ruff format --check, mypy. Deterministic; no interactive prompt;
+    no TTY required; no make-on-Windows dependency.
+
+    v1.0.7 iter-2 carry-forward C4 resolution: replaces earlier
+    `make verify` shell-out which (a) requires `make` installed on
+    Windows (cygwin/MSYS only — not always present), (b) loses INV-16
+    evidence-before-assertions semantic by sending stdout/stderr to
+    inherited streams. New design captures stdout/stderr per-tool +
+    persists to per-worker sidecar
+    (`<root>/.claude/auto-run-workers/<worker_id>-verify.json`) so
+    INV-16 evidence is preserved across the parent post-batch merge.
+
+    ValidationError raised on first non-zero exit; remaining tools NOT
+    run (semantically equivalent to `make verify` early-abort).
     """
     if os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1":
-        result = subprocess.run(
-            ["make", "verify"], cwd=str(root), check=False
-        )
-        if result.returncode != 0:
-            raise ValidationError(
-                f"v1.0.7 A2 worker-mode verify failed: rc={result.returncode}"
+        # sec.0.1 4-tool chain (matches /verification-before-completion
+        # skill's discovery on Python stack).
+        commands = [
+            ["pytest"],
+            ["ruff", "check", "."],
+            ["ruff", "format", "--check", "."],
+            ["mypy", "."],
+        ]
+        captured: list[dict[str, object]] = []
+        for cmd in commands:
+            result = subprocess.run(
+                cmd, cwd=str(root), check=False,
+                capture_output=True, text=True,
             )
+            captured.append({
+                "cmd": cmd,
+                "rc": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            })
+            if result.returncode != 0:
+                _persist_worker_verify_evidence(root, captured)
+                raise ValidationError(
+                    f"v1.0.7 A2 worker-mode verify failed at "
+                    f"{cmd[0]!r}: rc={result.returncode}"
+                )
+        _persist_worker_verify_evidence(root, captured)
         return
     # Orchestrator/sequential mode: existing v1.0.5+ skill dispatch
     superpowers_dispatch.verification_before_completion(cwd=str(root))
+
+
+def _persist_worker_verify_evidence(
+    root: Path,
+    captured: list[dict[str, object]],
+) -> None:
+    """v1.0.7 A2 INV-16 continuity: write per-worker verify capture.
+
+    Writes to `<root>/.claude/auto-run-workers/<pid>-verify.json` so
+    parent post-batch merge has evidence of what each worker actually
+    ran + observed. Uses `state_file.atomic_write_json` (which gains
+    Windows PermissionError retry per v1.0.7 B3).
+    """
+    sidecar_dir = root / ".claude" / "auto-run-workers"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = sidecar_dir / f"{os.getpid()}-verify.json"
+    state_file.atomic_write_json(sidecar, {"verify_chain": captured})
 ```
 
 ```python
@@ -296,14 +441,44 @@ tasks `[x]`. NO subprocess hang.
 POSIX validation deferred to CI or v1.0.8 if no POSIX dev env
 available.
 
-**Acceptance**: integration test `tests/test_auto_parallel_e2e.py`
-(new) exercises full `auto --parallel` flow end-to-end on Windows
-with synthetic plan fixture + asserts:
-- All workers complete (no `ConcurrentDispatchError`).
-- `.claude/auto-run.json` contains start_time + per-worker records (I-1).
-- Plan checkboxes all `[x]` post-merge (I-2).
+**Acceptance** (v1.0.7 iter-2 carry-forward C3 resolution): integration
+test `tests/test_auto_parallel_e2e.py` (new) MUST exercise the
+chicken-and-egg failure surface explicitly. Trivial "append text"
+worker tasks DO NOT trip the chicken-and-egg; the failure mode requires
+workers to actually invoke `close-phase` -> `_run_verification` ->
+sec.0.1 chain dispatch.
+
+Fixture design:
+- Synthetic 2-track plan + 4 tasks, each task's TDD cycle invokes a
+  REAL `python skills/sbtdd/scripts/run_sbtdd.py close-phase` from
+  inside the worker subprocess (not a no-op shell command).
+- Each task's "Step 2: verify" actually runs the worker
+  `_run_verification` path (which on workers is the new sec.0.1 chain
+  per A2). The fixture project ships a minimal `pyproject.toml` +
+  `tests/test_smoke.py` so `pytest` / `ruff check` / `ruff format
+  --check` / `mypy` all succeed inside the worker.
+- Pre-A1+A2 baseline: WITHOUT v1.0.7 Pillar A, worker stdin=PIPE has
+  no TTY -> if the worker code path attempted skill dispatch, hang.
+  Post-Pillar A: workers either get PTY (POSIX) or use sec.0.1 chain
+  bypass (Windows) and complete.
+
+The integration test asserts:
+- All workers complete within 600s timeout (no `ConcurrentDispatchError`,
+  no subprocess hang).
+- `.claude/auto-run.json` contains `start_time` + per-worker records
+  (validates v1.0.5 I-1 sidecar merge).
+- `.claude/auto-run-workers/<pid>-verify.json` files exist per worker
+  containing the captured sec.0.1 chain stdout/stderr (validates
+  v1.0.7 A2 INV-16 evidence continuity).
+- Plan checkboxes all `[x]` post-merge (validates v1.0.5 I-2 scratch
+  merge).
 - State file `current_phase: "done"` post-completion.
-- No subprocess hangs > 600s timeout.
+- No subprocess hangs > 600s timeout (THE chicken-and-egg closure
+  signal).
+
+**Smoke vs full validation**: v1.0.7 ships smoke validation only
+(synthetic 4-task fixture). PTY drain under large cumulative output
+deferred to v1.0.8 per W2 triage above.
 
 ### 2.4 Item B5 — Drift detector line-anchored `[ ]` regex (Pillar B, Q3'=b first)
 
@@ -384,10 +559,43 @@ Per memory `project_v107_locked_backlog.md` Pillar C details:
   alias per Q3'=a decision in v1.0.6 (1-cycle deprecation window
   expires in v1.0.7). Update test references.
 
-**Within-Pillar-C ordering**: C5 → C-X-K3-Removal pair (C5 adds
-warning comment, C-X-K3-Removal removes alias + comment; C5 is
-quasi-vestigial but documented as transitional). C1 + C6 + C7
-independent; can run in any order.
+**v1.0.7 iter-2 carry-forward C2/C5 resolution — task collapse**: the
+v1.0.5 Item D Q3-A `_preflight` HARD-BLOCK enforces canonical
+Red→Green→Refactor triplet with REAL diffs in each phase. Doc-only
+items C1+C5+C6+C7 each individually have no real Refactor surface
+(empty-Refactor commits are blocked), and using `--skip-preflight`
+audit-log per-task degrades the v1.0.5 contract.
+
+**Resolution**: collapse C1+C5+C6+C7 into ONE combined task (new T7) with:
+- Single Red phase: write all 4 doc smoke tests in one commit (one
+  `test:` close).
+- Single Green phase: apply all 4 doc edits in one commit (one
+  `feat:` close — `feat:` justified because the cumulative diff
+  introduces new documented contracts, not bug fixes).
+- Single Refactor phase with REAL diff: cross-link C1 ↔ C6 (both
+  touch the same K-4 helper `_validate_forwardable_flags_against_argparse`
+  — the inline comment from C1 + the docstring note from C6 should
+  reference each other; consolidate any duplicated wording so the
+  single-level walk limitation + importlib.reload caveat read as a
+  coherent helper-level documentation block, not as two disjoint
+  notes added 2 commits apart).
+
+**C-X-K3-Removal stays as separate task** (new T8) — has real code
+change (alias removal + test monkeypatch target rewrites), legitimate
+TDD triplet (Red: assert AttributeError on legacy name; Green: remove
+alias + rewrite test refs; Refactor: final sweep + lint cleanup).
+
+**Plan task count**: 11 tasks → 8 tasks total (T1 A1, T2 A2, T3 A3,
+T4 B5, T5 B4, T6 B3, T7 collapsed Pillar C polish, T8 C-X-K3-Removal).
+
+**Within-Pillar-C ordering** (post-collapse): T7 (combined polish)
+must land BEFORE T8 (C-X-K3-Removal). T7's C5 component adds the
+deprecation marker comment on the alias line; T8 removes both alias +
+comment together. The C5 comment IS structurally vestigial (W9 cas
+WARNING acknowledged + deferred); preserved as transitional
+archaeology — for the duration between T7 commit and T8 commit, `git
+log` readers see the documented footgun rationale that motivated the
+removal. Educational value justifies the brief lifespan.
 
 ### 2.8 v1.0.7 own-cycle dogfood
 
@@ -455,15 +663,20 @@ v1.0.7 introduces:
 
 ### 4.1 Item A1 — POSIX PTY allocation
 
-**Escenario A1-1: POSIX worker spawn allocates PTY**
+**Escenario A1-1: POSIX worker spawn allocates PTY + worker observes TTY (W7 carry-forward)**
 
 > **Given** Operator on POSIX (`sys.platform != "win32"`).
 > **When** `_dispatch_tracks_concurrent` calls
-> `subprocess_utils._spawn_worker_with_pty(argv, env)` for a track.
+> `subprocess_utils._spawn_worker_with_pty(argv, env)` for a track,
+> where ``argv`` invokes a Python subprocess that writes
+> ``isatty=<sys.stdin.isatty()>`` to stdout and exits.
 > **Then** Worker subprocess has stdin/stdout/stderr connected to
 > PTY slave (returned by `pty.openpty()`); orchestrator holds master
-> end via `proc._pty_master_fd`. Worker subprocess can detect TTY
-> via `sys.stdin.isatty()` returning True.
+> end via `proc._pty_master_fd`; orchestrator reads buffered output
+> from master fd post-`proc.wait()` and asserts the literal string
+> `isatty=True` is present (proves the worker observed a TTY, not
+> just that the parent allocated one). The integer file descriptor
+> is non-negative (`proc._pty_master_fd >= 0`) for downstream cleanup.
 
 **Escenario A1-2: Windows worker spawn raises if PTY helper called**
 
@@ -473,13 +686,29 @@ v1.0.7 introduces:
 > **Then** Raises `RuntimeError` with message naming Option B-W3
 > hybrid path. Defensive guard prevents accidental misuse.
 
-**Escenario A1-3: Master fd cleanup post-worker-completion**
+**Escenario A1-3: Master fd lifecycle helper drains then closes (C1 carry-forward)**
 
 > **Given** Worker subprocess completed; orchestrator collected exit code.
-> **When** Orchestrator calls cleanup helper.
-> **Then** `os.close(proc._pty_master_fd)` invoked; master fd freed.
-> Subsequent buffered-output reads (if any) drained before close.
-> No file descriptor leak across multi-worker dispatch.
+> **When** Orchestrator calls `subprocess_utils._close_pty_master(proc)`.
+> **Then** Master fd buffered output is drained via repeated
+> `os.read(master_fd, 4096)` until empty (silently absorbing OSError if
+> the worker closed the slave end first); then `os.close(master_fd)`
+> invoked; then `proc._pty_master_fd` set to `None` for idempotency.
+> Helper is safe to call multiple times — second invocation observes
+> `master_fd is None` and returns no-op. No file descriptor leak across
+> multi-worker dispatch (verified via `psutil.Process().num_fds()` delta
+> assertion in unit test, or equivalent platform fd count check).
+
+**Escenario A1-5: Popen failure does not leak slave fd (W8 carry-forward)**
+
+> **Given** Operator on POSIX; `pty.openpty()` returned valid
+> (master_fd, slave_fd); `subprocess.Popen` is patched to raise
+> `OSError("simulated spawn failure")`.
+> **When** `_spawn_worker_with_pty(argv, env)` invoked.
+> **Then** The Popen exception propagates AND both `master_fd` and
+> `slave_fd` are closed BEFORE the exception escapes the helper. No
+> file descriptor leak. Verified via `os.close(master_fd)` raising
+> `OSError(EBADF)` post-helper (proves the helper closed it).
 
 **Escenario A1-4: Worker close-phase /verification-before-completion succeeds with PTY**
 
@@ -503,25 +732,44 @@ v1.0.7 introduces:
 > `SBTDD_AUTO_PARALLEL_WORKER=1`. No PTY allocation attempted
 > (Windows doesn't support).
 
-**Escenario A2-2: Worker close-phase bypasses skill via SBTDD_AUTO_PARALLEL_WORKER**
+**Escenario A2-2: Worker close-phase runs sec.0.1 chain (C4 carry-forward)**
 
 > **Given** Worker subprocess on any platform with
 > `SBTDD_AUTO_PARALLEL_WORKER=1` set in env.
 > **When** Worker calls `close_phase_cmd._run_verification(root)`.
 > **Then** `_run_verification` checks env var → True → bypasses
 > `superpowers_dispatch.verification_before_completion()` skill
-> dispatch → runs `subprocess.run(["make", "verify"], cwd=root,
-> check=False)` directly. Deterministic verify result; no
-> interactive prompt.
+> dispatch → runs the sec.0.1 4-tool chain in order (`pytest`,
+> `ruff check .`, `ruff format --check .`, `mypy .`) via
+> `subprocess.run(..., capture_output=True, text=True)` directly.
+> Each tool's stdout/stderr/returncode is captured into a
+> `captured` list. No `make` dependency. No interactive prompt. No
+> TTY required.
 
-**Escenario A2-3: Worker close-phase shell verify failure raises ValidationError**
+**Escenario A2-3: Worker close-phase failure raises ValidationError + persists evidence (C4 carry-forward)**
 
 > **Given** Worker subprocess calls `_run_verification(root)` in
-> worker mode; `make verify` returns non-zero.
-> **When** `subprocess.run` returncode != 0.
-> **Then** `ValidationError` raised with rc info, equivalent to
-> existing skill failure semantics. Worker subprocess exits with
-> error code; orchestrator collects + reports.
+> worker mode; `pytest` (the first sec.0.1 tool) returns non-zero.
+> **When** `subprocess.run` for `pytest` returncode != 0.
+> **Then** `_persist_worker_verify_evidence(root, captured)` is
+> invoked first (writes the partial captured chain to
+> `<root>/.claude/auto-run-workers/<pid>-verify.json` so INV-16
+> evidence is preserved); THEN `ValidationError` is raised naming
+> the failing tool (e.g., `"v1.0.7 A2 worker-mode verify failed at
+> 'pytest': rc=1"`). Subsequent tools (`ruff`, `mypy`) are NOT run
+> (semantically equivalent to `make verify` early-abort behavior).
+
+**Escenario A2-7 (NEW per iter-2 carry-forward C4): Worker close-phase success persists evidence**
+
+> **Given** Worker subprocess calls `_run_verification(root)` in
+> worker mode; all 4 sec.0.1 tools return 0.
+> **When** Each `subprocess.run` returncode == 0.
+> **Then** `_persist_worker_verify_evidence(root, captured)` is
+> invoked once at the end with all 4 tool captures. The sidecar
+> file `<root>/.claude/auto-run-workers/<pid>-verify.json` exists
+> containing `{"verify_chain": [...]}` with one entry per tool +
+> rc=0 + non-empty stdout. Parent post-batch merge can introspect
+> this for INV-16 evidence-before-assertions continuity.
 
 **Escenario A2-4: Orchestrator/sequential mode preserves skill dispatch**
 
@@ -556,17 +804,50 @@ v1.0.7 introduces:
 > **Then** Worker guard short-circuits + falls through to existing
 > v1.0.4 + v1.0.6 membership/headless gates. No worker-bug error.
 
+**Escenario A2-8 (NEW per iter-2 carry-forward W1): Orchestrator invoke_skill with TTY context dispatches normally (guard ordering pin)**
+
+> **Given** Orchestrator (no `SBTDD_AUTO_PARALLEL_WORKER` env var)
+> invokes a `_SUBPROCESS_INCOMPATIBLE_SKILLS` member with
+> `allow_interactive_skill=True` AND `subprocess_utils.is_headless_context()`
+> returns False (TTY present, no `SBTDD_HEADLESS` env var).
+> **When** Code path traverses the v1.0.7 A2 Q2'=b worker guard,
+> then v1.0.4 membership gate, then v1.0.6 J-3 headless guard.
+> **Then** All three gates short-circuit (worker-env False, member +
+> override True, headless False); subprocess dispatch via `claude -p`
+> proceeds normally. Test asserts the underlying
+> `subprocess_utils.run_with_timeout` is invoked with the expected
+> argv. No false-positive worker-context error in orchestrator code
+> path. (This regression test pins the guard ordering: worker check
+> MUST come first AND must check env var presence + skill membership
+> jointly; checking env var alone would trip on operator scripts
+> that set the env var unrelated to `--parallel`.)
+
 ### 4.3 Item A3 — F-A2 empirical validation
 
-**Escenario A3-1: Synthetic 2-track plan dispatches via auto --parallel end-to-end on Windows**
+**Escenario A3-1: Synthetic 2-track plan dispatches via auto --parallel end-to-end on Windows + exercises chicken-and-egg surface (C3 carry-forward)**
 
-> **Given** Synthetic 2-track plan (4 disjoint tasks; test fixture).
+> **Given** Synthetic 2-track plan + 4 disjoint tasks where each task
+> ships a real (not no-op) `_run_verification` invocation chain — the
+> fixture project has `pyproject.toml` + minimal source + tests so the
+> sec.0.1 chain (`pytest`, `ruff check`, `ruff format --check`, `mypy`)
+> all return 0. Each task's TDD cycle invokes the actual `python
+> skills/sbtdd/scripts/run_sbtdd.py close-phase` from inside the worker
+> subprocess (NOT a shell-noop), which in turn calls
+> `_run_verification` → worker-mode bypass → sec.0.1 chain dispatch.
 > **When** Operator on Windows runs `auto --parallel` against fixture.
 > **Then** All workers complete within 600s timeout (no
 > `ConcurrentDispatchError`); `.claude/auto-run.json` contains
 > start_time + per-worker completion records (validates v1.0.5 I-1);
-> plan checkboxes all `[x]` post-merge (validates I-2); state file
-> `current_phase: "done"` post-completion.
+> per-worker `<root>/.claude/auto-run-workers/<pid>-verify.json` files
+> exist containing the captured sec.0.1 chain output (validates v1.0.7
+> A2 INV-16 evidence persistence); plan checkboxes all `[x]` post-merge
+> (validates I-2); state file `current_phase: "done"` post-completion.
+> No subprocess hangs > 600s timeout — THE chicken-and-egg closure
+> signal. WITHOUT v1.0.7 Pillar A (A1+A2), this fixture would hang on
+> the first worker close-phase invocation (workers spawned via
+> `subprocess.Popen` stdin=PIPE without TTY). Post Pillar A: workers
+> get either real PTY (POSIX) or worker-mode sec.0.1 bypass (Windows)
+> and complete.
 
 **Escenario A3-2: --parallel empirically validates --parallel chicken-and-egg closure**
 
@@ -680,6 +961,14 @@ v1.0.7 introduces:
 
 ### 4.7 Items C1+C5+C6+C7+C-X-K3-Removal — Polish
 
+> **v1.0.7 iter-2 carry-forward C2/C5 task collapse**: C1+C5+C6+C7 ship
+> as ONE plan task T7 (combined polish with cross-linked Refactor diff
+> per sec.2.7). C-X-K3-Removal ships as separate plan task T8.
+> Escenarios below remain individually addressable but are validated
+> within the collapsed-task TDD cycle (one Red writes all 4 doc smoke
+> tests; one Green applies all 4 doc edits; one Refactor cross-links
+> the K-4 helper docs from C1 + C6).
+
 **Escenario C1: K-4 helper docstring documents single-level subparser walk**
 
 > **Given** `auto_cmd._validate_forwardable_flags_against_argparse`
@@ -743,20 +1032,43 @@ runs sequential `auto` in foreground for v1.0.7 own-cycle since
 **Wall-time estimado**: ~2-3 dias.
 
 **Within-cycle ordering** (cannot be parallelized due to chicken-and-egg):
+v1.0.7 iter-2 carry-forward C2/C5 collapse — 11 tasks → 8 tasks.
 
-1. **A1** (POSIX PTY allocation) — `subprocess_utils.py` +
-   `auto_cmd.py` + tests. ~3-5 hours.
-2. **A2** (Windows hybrid + Q2'=b worker runtime guard) —
-   `auto_cmd.py` + `close_phase_cmd.py` +
-   `superpowers_dispatch.py` + tests. ~5-7 hours.
-3. **A3** (F-A2 empirical validation) — orchestrator activity post
-   A1+A2 ship. Synthetic 2-track plan integration test. ~2-3 hours.
-4. **B5** (drift detector regex) — `drift.py` + tests. ~30-60 min.
-5. **B4** (spec_review_dispatch file-reference) —
+1. **T1 = A1** (POSIX PTY allocation + lifecycle helper + leak guard) —
+   `subprocess_utils.py` (`_spawn_worker_with_pty` + `_close_pty_master`)
+   + tests. ~4-6 hours (carry-forward C1 + W7 + W8 expand original
+   ~3-5h estimate).
+2. **T2 = A2** (Windows hybrid + Q2'=b worker runtime guard + sec.0.1
+   chain bypass + INV-16 evidence sidecar) — `auto_cmd.py` +
+   `close_phase_cmd.py` + `superpowers_dispatch.py` +
+   `_persist_worker_verify_evidence` helper + tests. ~6-8 hours
+   (carry-forward C4 + W4 + W1 + W3 expand original ~5-7h estimate).
+3. **T3 = A3** (F-A2 empirical validation with real chicken-and-egg
+   fixture) — synthetic 2-track plan + 4 disjoint tasks each invoking
+   real `close-phase` chain via worker subprocess; integration test
+   + fixture project with `pyproject.toml`. ~4-6 hours (carry-forward
+   C3 expands original ~2-3h estimate).
+4. **T4 = B5** (drift detector regex) — `drift.py` + tests. ~30-60 min.
+5. **T5 = B4** (spec_review_dispatch file-reference) —
    `spec_review_dispatch.py` + tests. ~2-3 hours.
-6. **B3** (atomic_write retry) — `state_file.py` + tests. ~1-2 hours.
-7. **C polish** (5 items) — close_task_cmd.py + auto_cmd.py +
-   SKILL.md + tests. ~30-60 min total.
+6. **T6 = B3** (atomic_write retry) — `state_file.py` + tests.
+   ~1-2 hours.
+7. **T7 = collapsed Pillar C polish** (C1+C5+C6+C7 in single combined
+   task) — `auto_cmd.py` + `close_task_cmd.py` + `skills/sbtdd/SKILL.md`
+   + tests. Single Red writes 4 doc smoke tests; single Green applies
+   4 doc edits; single Refactor cross-links K-4 helper docs from C1+C6.
+   ~1-2 hours total (real Refactor diff satisfies v1.0.5 `_preflight`
+   HARD-BLOCK).
+8. **T8 = C-X-K3-Removal** (alias removal + test rewrite) —
+   `close_task_cmd.py` + tests. Real TDD triplet (Red: AttributeError
+   assertion; Green: alias removal + test monkeypatch target rewrites;
+   Refactor: final sweep + lint cleanup). Green commit prefix `fix:`
+   framed as "closes v1.0.7 C5-documented monkeypatch footgun" per
+   W10 carry-forward. ~1-2 hours.
+
+Total wall-time estimate: ~20-30 hours = ~3-4 days. Slightly above
+original ~2-3 days estimate due to iter-2 carry-forward expansions
+(C1 + C3 + C4 substantively grew T1, T2, T3 work).
 
 ### 5.2 Cross-cycle implication
 
@@ -857,10 +1169,18 @@ dispatch + manual mini-cycle commits. Document en CHANGELOG
   2026-05-09 ("dejar parallel completamente operacional"); Q2'=b
   promotion of C3 worker env runtime guard into A2 as
   defense-in-depth; Q3'=b Pillar B ordering (B5 first, smallest fix
-  unblocks make verify); Q4'=a all 5 Pillar C items shipped;
-  Q5'=a default G2 ladder pre-staged; Q1'=a single subagent
-  sequential forced by chicken-and-egg; A3 own-cycle dogfood
-  validates `--parallel` end-to-end on Windows.
+  unblocks make verify); Q4'=a all 5 Pillar C items shipped (collapsed
+  into 1 combined task per iter-2 C2/C5 carry-forward + 1 separate
+  C-X-K3-Removal task = 2 plan tasks for Pillar C, 8 plan tasks total);
+  Q5'=a default G2 ladder pre-staged; Q1'=a single subagent sequential
+  forced by chicken-and-egg; A3 own-cycle dogfood validates `--parallel`
+  end-to-end on Windows. **`--parallel` POSIX path marked experimental**
+  until v1.0.8 own-cycle dogfood validates POSIX end-to-end (per W5
+  carry-forward) — A3 v1.0.7 dogfood mandatory on Windows only; POSIX
+  validation deferred to CI / v1.0.8 if no POSIX dev env. **Worker-mode
+  verify uses sec.0.1 chain (not `make verify`)** per C4 carry-forward,
+  preserving INV-16 evidence-before-assertions semantic via per-worker
+  sidecar capture.
 - **Deferred (rolled to v1.0.8)** — B2 worker subprocess auto-message
   hardening; C2 K-4 escape hatch test coverage; C4 NF-B test count
   rebaseline; C8 F-A2 abort criterion (b) diagnosis hint refinement;
@@ -920,6 +1240,29 @@ dispatch + manual mini-cycle commits. Document en CHANGELOG
   documented in CHANGELOG `[1.0.6]` Deferred section + this CHANGELOG
   `[1.0.7]` Removed section. Operators on contract: monkeypatch
   canonical `_preflight` name only.
+- **R7 (NEW v1.0.7 iter-2 carry-forward W3)**. POSIX PTY master fd
+  EIO/SIGHUP race: if the worker subprocess closes the slave end OR
+  receives SIGHUP between `proc.wait()` returning and the orchestrator
+  invoking `_close_pty_master`, the buffered-output drain loop may
+  observe `OSError(EIO)` immediately on the first `os.read`. Mitigation:
+  the lifecycle helper catches `OSError` broadly during drain (treats
+  any failure as "drain complete") + idempotently closes the master
+  fd. If a real SIGHUP race manifests in the field, the worst case is
+  some buffered worker output is silently dropped — but the worker's
+  exit code + per-worker sidecar evidence (v1.0.7 A2 INV-16 capture)
+  preserves the actual verify-chain results. Acceptable trade-off for
+  v1.0.7; tighten to explicit signal-aware drain in v1.0.8 if observed.
+- **R8 (NEW v1.0.7 iter-2 carry-forward W1)**. Worker-context guard
+  (Q2'=b) false-positive risk: an operator script that sets
+  `SBTDD_AUTO_PARALLEL_WORKER=1` in their shell environment for an
+  unrelated reason AND invokes a `_SUBPROCESS_INCOMPATIBLE_SKILLS`
+  member would trip the guard with a misleading "worker subprocess"
+  error. Mitigation: env var name is descriptive +
+  operator-namespaced; documented in README + SKILL.md as
+  parent-injected only (operator scripts MUST NOT set it manually).
+  Escenario A2-6' (NEW) regression test pins the orchestrator-mode
+  pass-through to catch any guard-ordering regression in future
+  refactors.
 
 ---
 
@@ -981,9 +1324,13 @@ v1.0.7 ship-ready cuando:
 - **P6**. `/receiving-code-review` skill applied to every Loop 2
   iter findings sin excepcion.
 - **P7**. v1.0.7 own-cycle dogfood: A3 `auto --parallel` end-to-end
-  on Windows; B4 spec-reviewer file-reference closes WinError 206
-  even with large diffs; B5 drift detector test_v104 regression
-  passes.
+  on Windows with REAL chicken-and-egg fixture (each worker invokes
+  real `close-phase` chain → sec.0.1 4-tool dispatch); B4
+  spec-reviewer file-reference closes WinError 206 even with large
+  diffs; B5 drift detector test_v104 regression passes; per-worker
+  `<root>/.claude/auto-run-workers/<pid>-verify.json` sidecar files
+  exist post-cycle (validates v1.0.7 A2 INV-16 evidence persistence).
+  POSIX validation deferred to v1.0.8 / CI per W5 carry-forward.
 - **P8**. `/sbtdd pre-merge` validated end-to-end post Pillar A ship.
 
 ### 9.4 Distribution

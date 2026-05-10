@@ -4,6 +4,39 @@
 > superpowers:writing-plans skill (interactive session, brainstorming
 > Q1'-Q5' resolved). Frontmatter required by spec_lint R5.
 >
+> **Iter-2 carry-forward applied 2026-05-09**: MAGI Checkpoint 2 iter 1
+> verdict GO_WITH_CAVEATS (3-0) full no-degraded with 5 CRITICAL + 10
+> WARNING + 5 INFO findings. Triage applied via INV-29 receiving-code-review
+> discipline. Inlined deltas:
+>
+> - **C1 (mel)**: T1 prod code adds `_close_pty_master(proc)` lifecycle
+>   helper + Popen-failure leak guard.
+> - **C2/C5 (mel+cas)**: Pillar C C1+C5+C6+C7 collapsed into ONE plan
+>   task (T7) with real Refactor diff (cross-link K-4 helper docs from
+>   C1+C6); C-X-K3-Removal stays separate (T8). 11 tasks → 8 tasks.
+> - **C3 (cas)**: T3 fixture rewritten — each worker invokes real
+>   `close-phase` chain via `pyproject.toml`-bearing fixture project
+>   so sec.0.1 chain dispatches and trips chicken-and-egg surface.
+> - **C4 (cas)**: T2 worker-mode bypass replaces `["make", "verify"]`
+>   with explicit sec.0.1 chain (`pytest` / `ruff check` /
+>   `ruff format --check` / `mypy`) + per-worker
+>   `<root>/.claude/auto-run-workers/<pid>-verify.json` sidecar
+>   capture for INV-16 evidence-before-assertions continuity.
+> - **W1 (mel)**: T2 adds A2-8 regression test pinning orchestrator-mode
+>   pass-through.
+> - **W3 (mel)**: spec sec.8 R7 (PTY EIO/SIGHUP race) + R8 (worker
+>   guard false-positive) added.
+> - **W7 (cas)**: T1 A1-1 test exercises real `sys.stdin.isatty() == True`
+>   assertion via worker-writes-isatty fixture script.
+> - **W8 (cas)**: T1 implementation wraps `subprocess.Popen` in
+>   try/except closing slave_fd on Popen failure.
+> - **W10 (cas)**: T8 (= old T11) Green commit prefix `--variant fix`
+>   framed as "closes v1.0.7 C5-documented monkeypatch footgun" in
+>   task header.
+> - **W2/W9 deferred**: PTY drain under large output → v1.0.8;
+>   C5↔C-X-K3-Removal vestigial-comment → kept as transitional
+>   archaeology (T7 commit → T8 commit window has educational value).
+>
 > v1.0.7 = **`--parallel` operational unblock cycle (NON-POSTPONABLE)** per
 > user mandate 2026-05-09 ("dejar parallel completamente operacional").
 > Three pillars:
@@ -14,8 +47,8 @@
 >   fix first): B5 drift detector line-anchored regex + B4
 >   spec_review_dispatch file-reference + B3 atomic_write_json
 >   PermissionError retry.
-> - Pillar C LOCKED (selective polish, Q4'=a all 5): C1 + C5 + C6 + C7
->   + C-X-K3-Removal.
+> - Pillar C LOCKED (selective polish, Q4'=a all 5; iter-2 collapsed):
+>   T7 combined polish (C1+C5+C6+C7) + T8 C-X-K3-Removal.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax for tracking.
 
@@ -25,8 +58,9 @@ end-to-end on POSIX + Windows hybrid) + ship 3 Pillar B v1.0.6 dogfood
 findings (B5 drift regex false-positive, B4 spec_review_dispatch
 WinError 206, B3 atomic_write_json Windows PermissionError flake) + 5
 cherry-picked Pillar C polish items (C1+C5+C6+C7+C-X-K3-Removal).
-**11 plan tasks; single subagent sequential execution per Q1'=a forced
-by chicken-and-egg until Pillar A ships + v1.0.8 own-cycle validates.**
+**8 plan tasks (collapsed from 11 per iter-2 C2/C5 carry-forward); single
+subagent sequential execution per Q1'=a forced by chicken-and-egg until
+Pillar A ships + v1.0.8 own-cycle validates.**
 
 **Architecture:** Pillar A introduces `subprocess_utils._spawn_worker_with_pty`
 (POSIX-only `pty.openpty()` per worker spawn) + `auto_cmd._spawn_worker`
@@ -95,12 +129,12 @@ baseline; Q5'=a default G2 ladder.
   sequential foreground OR manual subagent dispatch via Agent tool.
 - **Within-Pillar-A ordering (HARD)**: T1 (A1) must land BEFORE T2 (A2)
   because A2's cross-platform dispatcher imports `_spawn_worker_with_pty`
-  from `subprocess_utils`. T3 (A3) integration test must run AFTER T1+T2
-  ship.
-- **Within-Pillar-C ordering (HARD)**: T8 (C5 deprecation marker comment
-  with monkeypatch warning) must land BEFORE T11 (C-X-K3-Removal alias
-  removal) — C5 adds the warning comment, C-X-K3-Removal removes both
-  alias AND comment together. T7 (C1), T9 (C6), T10 (C7) independent.
+  + `_close_pty_master` from `subprocess_utils`. T3 (A3) integration
+  test must run AFTER T1+T2 ship.
+- **Within-Pillar-C ordering (HARD, post iter-2 collapse)**: T7
+  (combined C1+C5+C6+C7 polish) must land BEFORE T8 (C-X-K3-Removal
+  alias removal) — T7 adds the C5 warning comment on the alias line;
+  T8 removes both alias AND comment together.
 - INV-37 composite-signature tripwire preserved unchanged.
 - Item C v1.0.2 spec_lint gate (R1-R5) preserved unchanged.
 - v1.0.4 Items A+B membership-based subprocess gate preserved + EXTENDED
@@ -126,53 +160,77 @@ baseline; Q5'=a default G2 ladder.
 
 ## Pillar A PRIMARY HARD-LOCKED — `auto --parallel` operational unblock
 
-### Task 1: A1 — POSIX PTY allocation in worker subprocess spawn
+### Task 1: A1 — POSIX PTY allocation + lifecycle helper + leak guard
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/subprocess_utils.py` (add
-  `_spawn_worker_with_pty(argv, env) -> subprocess.Popen[bytes]`
-  module-level helper; POSIX-only; raises `RuntimeError` on Windows)
+  `_spawn_worker_with_pty(argv, env) -> subprocess.Popen[bytes]` +
+  `_close_pty_master(proc) -> None` module-level helpers; POSIX-only;
+  raises `RuntimeError` on Windows for the spawn helper)
 - Modify: `tests/test_subprocess_utils.py` (extend with
-  `TestSpawnWorkerWithPty` class covering escenarios A1-1 through A1-3)
+  `TestSpawnWorkerWithPty` class covering escenarios A1-1 through A1-5)
+- Create: `tests/fixtures/pty/worker_isatty.py` (worker fixture script
+  that writes `isatty=<sys.stdin.isatty()>` to stdout — used by A1-1
+  to validate worker observes a TTY)
 
-Covers escenarios A1-1, A1-2, A1-3 from spec sec.4.1.
+Covers escenarios A1-1 (W7 isatty assertion), A1-2, A1-3 (C1 lifecycle
+helper drain+close), A1-5 (W8 Popen-failure leak guard) from spec
+sec.4.1.
 
 #### Red Phase
 
 - [ ] **Step 1: Write failing tests in `tests/test_subprocess_utils.py`**
 
-Append at the end of the file:
+First, create the worker fixture at
+`tests/fixtures/pty/worker_isatty.py`:
+
+```python
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-05-09
+"""v1.0.7 A1 worker fixture: writes isatty=<bool> to stdout."""
+import sys
+sys.stdout.write("isatty=" + str(sys.stdin.isatty()))
+sys.stdout.flush()
+```
+
+Then append to `tests/test_subprocess_utils.py`:
 
 ```python
 class TestSpawnWorkerWithPty:
-    """v1.0.7 A1 POSIX PTY allocation per spec sec.4.1."""
+    """v1.0.7 A1 POSIX PTY allocation + lifecycle per spec sec.4.1."""
 
-    def test_posix_worker_spawn_allocates_pty(self, tmp_path: Path) -> None:
-        """A1-1: POSIX worker spawn allocates PTY; worker sees TTY stdin."""
+    def test_posix_worker_observes_tty_via_isatty(self) -> None:
+        """A1-1 (W7 carry-forward): worker sees real TTY via isatty()."""
         if sys.platform == "win32":
             pytest.skip("POSIX-only test")
-        # Worker checks isatty(0) and writes result + exits.
-        worker_script = tmp_path / "worker_isatty.py"
-        worker_script.write_text(
-            "import sys\n"
-            "sys.stdout.write('isatty=' + str(sys.stdin.isatty()))\n"
-            "sys.stdout.flush()\n",
-            encoding="utf-8",
+        worker_script = (
+            Path(__file__).parent / "fixtures" / "pty" / "worker_isatty.py"
         )
         proc = subprocess_utils._spawn_worker_with_pty(
             [sys.executable, str(worker_script)],
             env=dict(os.environ),
         )
         try:
+            # Read from master fd to capture worker stdout.
+            output = b""
             proc.wait(timeout=10)
-            # Drain master fd before close (prevents EIO).
-            assert proc.returncode == 0
-            assert hasattr(proc, "_pty_master_fd")
-        finally:
             try:
-                os.close(proc._pty_master_fd)
+                while True:
+                    chunk = os.read(proc._pty_master_fd, 4096)
+                    if not chunk:
+                        break
+                    output += chunk
             except OSError:
-                pass
+                pass  # worker closed slave; drain done
+            assert proc.returncode == 0
+            # CRITICAL: worker must observe TTY (not just parent).
+            assert b"isatty=True" in output, (
+                f"worker did not observe TTY. output={output!r}"
+            )
+        finally:
+            subprocess_utils._close_pty_master(proc)
 
     def test_windows_worker_spawn_raises_runtime_error(self) -> None:
         """A1-2: Windows worker spawn raises if PTY helper called directly."""
@@ -184,25 +242,70 @@ class TestSpawnWorkerWithPty:
                 env=dict(os.environ),
             )
 
-    def test_master_fd_is_int_attached_to_proc(self, tmp_path: Path) -> None:
-        """A1-3 partial: master fd attached as integer attribute."""
+    def test_close_pty_master_drains_then_closes_idempotent(
+        self,
+    ) -> None:
+        """A1-3 (C1 carry-forward): lifecycle helper drains + closes + idempotent."""
         if sys.platform == "win32":
             pytest.skip("POSIX-only test")
-        worker_script = tmp_path / "worker_noop.py"
-        worker_script.write_text("pass\n", encoding="utf-8")
         proc = subprocess_utils._spawn_worker_with_pty(
-            [sys.executable, str(worker_script)],
+            [sys.executable, "-c", "import sys; sys.stdout.write('hello'); sys.stdout.flush()"],
             env=dict(os.environ),
         )
-        try:
-            assert isinstance(proc._pty_master_fd, int)
-            assert proc._pty_master_fd >= 0
-            proc.wait(timeout=10)
-        finally:
-            try:
-                os.close(proc._pty_master_fd)
-            except OSError:
-                pass
+        proc.wait(timeout=10)
+        master_fd = proc._pty_master_fd
+        assert isinstance(master_fd, int)
+        # First close: drains + closes + sets attr to None.
+        subprocess_utils._close_pty_master(proc)
+        assert proc._pty_master_fd is None
+        # Verify fd is actually closed (os.close should raise EBADF).
+        with pytest.raises(OSError):
+            os.close(master_fd)
+        # Second close: idempotent no-op.
+        subprocess_utils._close_pty_master(proc)
+        assert proc._pty_master_fd is None
+
+    def test_popen_failure_does_not_leak_fds(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A1-5 (W8 carry-forward): Popen failure closes both master + slave fds."""
+        if sys.platform == "win32":
+            pytest.skip("POSIX-only test")
+        leaked_fds: list[int] = []
+        original_popen = subprocess.Popen
+
+        def boom_popen(*args: object, **kwargs: object) -> object:
+            # Capture the fds passed via stdin= kwarg before raising.
+            slave = kwargs.get("stdin")
+            if isinstance(slave, int):
+                leaked_fds.append(slave)
+            raise OSError("simulated spawn failure")
+
+        monkeypatch.setattr(
+            "subprocess_utils.subprocess.Popen", boom_popen
+        )
+        with pytest.raises(OSError, match="simulated spawn failure"):
+            subprocess_utils._spawn_worker_with_pty(
+                [sys.executable, "-c", "pass"],
+                env=dict(os.environ),
+            )
+        # Both fds the helper opened should be closed; if the slave_fd
+        # we captured is still open, os.close should succeed (=leak).
+        for fd in leaked_fds:
+            with pytest.raises(OSError):
+                os.close(fd)
+```
+
+Add at the top of `tests/test_subprocess_utils.py` if missing:
+
+```python
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 ```
 
 Add at the top of `tests/test_subprocess_utils.py` if missing:
@@ -236,7 +339,7 @@ Expected: commit with prefix `test:` lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 5: Implement `_spawn_worker_with_pty` in `subprocess_utils.py`**
+- [ ] **Step 5: Implement `_spawn_worker_with_pty` + `_close_pty_master` in `subprocess_utils.py`**
 
 Add at the bottom of `skills/sbtdd/scripts/subprocess_utils.py`:
 
@@ -258,6 +361,9 @@ def _spawn_worker_with_pty(
     (``subprocess.PIPE`` + ``SBTDD_AUTO_PARALLEL_WORKER`` env +
     ``close_phase_cmd._run_verification`` worker-mode bypass per A2).
 
+    v1.0.7 iter-2 carry-forward W8: Popen failure closes BOTH master and
+    slave fds before re-raising, preventing fd leak on spawn failure.
+
     Args:
         argv: Subprocess argv (executable + args). ``shell=False``
             invariant from sec.S.8.6 preserved.
@@ -267,13 +373,18 @@ def _spawn_worker_with_pty(
 
     Returns:
         ``subprocess.Popen`` instance with ``_pty_master_fd`` integer
-        attribute set for orchestrator cleanup post-completion.
+        attribute set for downstream :func:`_close_pty_master` cleanup.
 
     Raises:
         RuntimeError: When invoked on Windows. Defensive guard against
             test-harness misuse; production callers route via
             ``auto_cmd._spawn_worker`` dispatcher.
+        OSError: Re-raised from underlying ``subprocess.Popen``; both
+            master and slave fds closed before re-raise (no leak).
     """
+    # pty is POSIX-only stdlib; local-import keeps the Windows path
+    # of subprocess_utils.py importable without conditional top-level
+    # ImportError handling.
     import pty
     import os as _os
 
@@ -283,17 +394,70 @@ def _spawn_worker_with_pty(
             "Option B-W3 hybrid (see auto_cmd._spawn_worker)"
         )
     master_fd, slave_fd = pty.openpty()
-    proc = subprocess.Popen(
-        argv,
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        env=env,
-        close_fds=True,
-    )
-    _os.close(slave_fd)  # parent only needs master
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            env=env,
+            close_fds=True,
+        )
+    except Exception:
+        # v1.0.7 W8 leak guard: close both fds on Popen failure.
+        try:
+            _os.close(master_fd)
+        except OSError:
+            pass
+        try:
+            _os.close(slave_fd)
+        except OSError:
+            pass
+        raise
+    _os.close(slave_fd)  # parent only needs master after success
     proc._pty_master_fd = master_fd  # type: ignore[attr-defined]
     return proc
+
+
+def _close_pty_master(proc: "subprocess.Popen[bytes]") -> None:
+    """v1.0.7 A1 lifecycle: drain + close master fd. Idempotent.
+
+    v1.0.7 iter-2 carry-forward C1 resolution: orchestrator MUST call
+    this helper after ``proc.wait()`` for every worker spawned via
+    :func:`_spawn_worker_with_pty`. Drains buffered output from the
+    master end before close; without drain, subsequent reads raise EIO
+    on POSIX. Idempotent: safe to call multiple times — second
+    invocation observes ``_pty_master_fd is None`` and returns no-op.
+
+    EIO/SIGHUP race tolerance (R7): if the worker closes the slave end
+    OR receives SIGHUP between ``proc.wait()`` and this helper, the
+    drain loop may observe ``OSError(EIO)`` immediately on first read.
+    Catch broadly + treat as drain-complete; worker exit code +
+    per-worker sidecar evidence preserve the actual results.
+
+    Args:
+        proc: ``subprocess.Popen`` returned by
+            :func:`_spawn_worker_with_pty`.
+    """
+    import os as _os
+
+    master_fd = getattr(proc, "_pty_master_fd", None)
+    if master_fd is None:
+        return
+    try:
+        while True:
+            data = _os.read(master_fd, 4096)
+            if not data:
+                break
+    except OSError:
+        # Worker already closed slave end OR SIGHUP race; drain done.
+        pass
+    try:
+        _os.close(master_fd)
+    except OSError:
+        # Already closed (idempotent).
+        pass
+    proc._pty_master_fd = None  # type: ignore[attr-defined]
 ```
 
 - [ ] **Step 6: Run the new tests to verify they pass**
@@ -444,20 +608,26 @@ class TestSpawnWorkerDispatcher:
 
 Add `import subprocess` and `import sys` at top of file if missing.
 
-- [ ] **Step 2: Write failing tests for `close_phase_cmd._run_verification` worker bypass**
+- [ ] **Step 2: Write failing tests for `close_phase_cmd._run_verification` worker bypass (sec.0.1 chain + INV-16 sidecar)**
 
 Append to `tests/test_close_phase_cmd.py`:
 
 ```python
 class TestRunVerificationWorkerBypass:
-    """v1.0.7 A2 worker-mode bypass per spec sec.4.2 escenarios A2-2..A2-4."""
+    """v1.0.7 A2 worker-mode bypass per spec sec.4.2 + iter-2 C4 carry-forward.
 
-    def test_worker_mode_bypasses_skill_runs_make_verify(
+    Replaces `make verify` shell-out with explicit sec.0.1 chain:
+    pytest, ruff check, ruff format --check, mypy. Persists per-worker
+    captured output to <root>/.claude/auto-run-workers/<pid>-verify.json
+    for INV-16 evidence-before-assertions continuity.
+    """
+
+    def test_worker_mode_runs_sec_0_1_chain(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """A2-2: SBTDD_AUTO_PARALLEL_WORKER=1 -> shell make verify."""
+        """A2-2 (C4 carry-forward): worker runs sec.0.1 4-tool chain."""
         monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
         skill_called = []
 
@@ -467,37 +637,88 @@ class TestRunVerificationWorkerBypass:
         monkeypatch.setattr(
             "superpowers_dispatch.verification_before_completion", fake_skill
         )
-        captured_cmd: list[list[str]] = []
+        captured_cmds: list[list[str]] = []
 
         class FakeResult:
             returncode = 0
+            stdout = "PASS"
+            stderr = ""
 
         def fake_run(cmd: list[str], **kwargs: object) -> FakeResult:
-            captured_cmd.append(cmd)
+            captured_cmds.append(cmd)
             return FakeResult()
 
         monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
         close_phase_cmd._run_verification(tmp_path)
         assert skill_called == []  # bypassed
-        assert captured_cmd == [["make", "verify"]]
+        assert captured_cmds == [
+            ["pytest"],
+            ["ruff", "check", "."],
+            ["ruff", "format", "--check", "."],
+            ["mypy", "."],
+        ]
 
-    def test_worker_mode_shell_failure_raises_validation_error(
+    def test_worker_mode_first_tool_failure_aborts_chain_and_persists_evidence(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """A2-3: non-zero returncode raises ValidationError."""
+        """A2-3 (C4 carry-forward): pytest failure aborts chain + evidence persisted."""
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+        captured_cmds: list[list[str]] = []
+
+        class FailResult:
+            returncode = 1
+            stdout = "FAILED"
+            stderr = "test foo failed"
+
+        class PassResult:
+            returncode = 0
+            stdout = "PASS"
+            stderr = ""
+
+        def fake_run(cmd: list[str], **kwargs: object) -> object:
+            captured_cmds.append(cmd)
+            return FailResult() if cmd == ["pytest"] else PassResult()
+
+        monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
+        with pytest.raises(ValidationError, match="A2 worker-mode verify failed at 'pytest'"):
+            close_phase_cmd._run_verification(tmp_path)
+        # Only pytest ran; ruff/mypy NOT invoked (early-abort).
+        assert captured_cmds == [["pytest"]]
+        # Evidence sidecar persisted with the partial chain.
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecars = list(sidecar_dir.glob("*-verify.json"))
+        assert len(sidecars) == 1
+        payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+        assert payload["verify_chain"] == [
+            {"cmd": ["pytest"], "rc": 1, "stdout": "FAILED", "stderr": "test foo failed"}
+        ]
+
+    def test_worker_mode_full_chain_success_persists_evidence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A2-7 (C4 carry-forward): all 4 tools pass + evidence persisted."""
         monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
 
-        class FakeResult:
-            returncode = 1
+        class PassResult:
+            returncode = 0
+            stdout = "PASS"
+            stderr = ""
 
         monkeypatch.setattr(
             "close_phase_cmd.subprocess.run",
-            lambda cmd, **kw: FakeResult(),
+            lambda cmd, **kw: PassResult(),
         )
-        with pytest.raises(ValidationError, match="A2 worker-mode verify failed"):
-            close_phase_cmd._run_verification(tmp_path)
+        close_phase_cmd._run_verification(tmp_path)
+        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
+        sidecars = list(sidecar_dir.glob("*-verify.json"))
+        assert len(sidecars) == 1
+        payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+        assert len(payload["verify_chain"]) == 4
+        assert all(entry["rc"] == 0 for entry in payload["verify_chain"])
 
     def test_orchestrator_mode_preserves_skill_dispatch(
         self,
@@ -523,8 +744,8 @@ class TestRunVerificationWorkerBypass:
         assert skill_called == [str(tmp_path)]
 ```
 
-Add `from errors import ValidationError` and `import close_phase_cmd` at
-top of file if missing.
+Add `from errors import ValidationError`, `import close_phase_cmd`,
+`import json`, `from pathlib import Path` at top of file if missing.
 
 - [ ] **Step 3: Write failing tests for Q2'=b worker-context runtime guard**
 
@@ -575,6 +796,47 @@ class TestInvokeSkillWorkerGuard:
         )
         assert result.returncode == 0
         assert captured  # subprocess WAS dispatched (no worker guard fired)
+
+    def test_orchestrator_with_tty_dispatches_normally_pin_guard_ordering(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A2-8 (W1 carry-forward): pin guard ordering against future regressions.
+
+        Verifies the v1.0.7 A2 worker check fires AFTER membership +
+        BEFORE headless gate AND requires BOTH env var presence AND
+        skill membership. Checking env var alone would trip on operator
+        scripts that set SBTDD_AUTO_PARALLEL_WORKER=1 unrelated to
+        --parallel context. Future refactors that reorder the guards
+        must keep this test green.
+        """
+        monkeypatch.delenv("SBTDD_AUTO_PARALLEL_WORKER", raising=False)
+        skill = next(iter(superpowers_dispatch._SUBPROCESS_INCOMPATIBLE_SKILLS))
+        captured: list[list[str]] = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        monkeypatch.setattr(
+            "subprocess_utils.run_with_timeout",
+            lambda cmd, **kw: (captured.append(cmd) or FakeResult()),
+        )
+        monkeypatch.setattr(
+            "subprocess_utils.is_headless_context", lambda: False
+        )
+        # Orchestrator dispatch SHOULD proceed: not headless + override allowed.
+        result = superpowers_dispatch.invoke_skill(
+            skill, allow_interactive_skill=True
+        )
+        assert result.returncode == 0
+        assert len(captured) == 1
+        # Now flip the env var to verify the worker guard DOES fire.
+        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
+        with pytest.raises(PreconditionError, match="Worker subprocess attempted"):
+            superpowers_dispatch.invoke_skill(
+                skill, allow_interactive_skill=True
+            )
 ```
 
 Add imports if missing at top of `tests/test_superpowers_dispatch.py`:
@@ -661,7 +923,7 @@ landing, only `env` and `argv` are required; if other kwargs surface
 during impl, extend the helper signature in the same Green commit and
 update the dispatcher tests accordingly.
 
-- [ ] **Step 8: Implement `close_phase_cmd._run_verification` worker-mode bypass**
+- [ ] **Step 8: Implement `close_phase_cmd._run_verification` worker-mode bypass with sec.0.1 chain + INV-16 sidecar (C4 carry-forward)**
 
 Edit `skills/sbtdd/scripts/close_phase_cmd.py:70` — replace the body of
 `_run_verification` with:
@@ -683,33 +945,74 @@ def _run_verification(root: Path) -> None:
     is set in the environment (parent-injected by
     :func:`auto_cmd._spawn_worker` for ``--parallel`` workers), bypass
     the interactive ``/verification-before-completion`` skill subprocess
-    and shell out to ``make verify`` directly. Rationale: workers
-    spawned via ``subprocess.PIPE`` on Windows have no TTY -> the skill
-    subprocess hangs waiting for an interactive prompt that never
-    arrives (chicken-and-egg, empirically confirmed in v1.0.6 dogfood,
-    spec sec.2.1). The shell command is deterministic; non-zero return
-    raises ``ValidationError`` equivalent to skill-failure semantics.
+    and run the sec.0.1 4-tool chain directly: pytest, ruff check,
+    ruff format --check, mypy. Rationale: workers spawned via
+    ``subprocess.PIPE`` on Windows have no TTY -> the skill subprocess
+    hangs waiting for an interactive prompt that never arrives
+    (chicken-and-egg, empirically confirmed in v1.0.6 dogfood, spec
+    sec.2.1). v1.0.7 iter-2 carry-forward C4: chain is explicit (no
+    `make` dependency on Windows) + per-worker stdout/stderr captured
+    to ``<root>/.claude/auto-run-workers/<pid>-verify.json`` for INV-16
+    evidence-before-assertions continuity (parent post-batch merge can
+    introspect for actual sec.0.1 results, not just success/fail).
 
     Args:
         root: Project root directory (``--project-root``).
 
     Raises:
         ValidationError: Skill wrapper raised (timeout / non-zero exit)
-            in orchestrator mode, OR ``make verify`` returned non-zero
-            in worker mode.
+            in orchestrator mode, OR any sec.0.1 tool returned non-zero
+            in worker mode (early-abort semantics: subsequent tools NOT
+            run; partial captured chain still persisted to sidecar).
         QuotaExhaustedError: Anthropic API cap hit during verification
             (orchestrator mode only; shell command path is offline).
     """
     if os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1":
-        result = subprocess.run(
-            ["make", "verify"], cwd=str(root), check=False
-        )
-        if result.returncode != 0:
-            raise ValidationError(
-                f"v1.0.7 A2 worker-mode verify failed: rc={result.returncode}"
+        commands = [
+            ["pytest"],
+            ["ruff", "check", "."],
+            ["ruff", "format", "--check", "."],
+            ["mypy", "."],
+        ]
+        captured: list[dict[str, object]] = []
+        for cmd in commands:
+            result = subprocess.run(
+                cmd, cwd=str(root), check=False,
+                capture_output=True, text=True,
             )
+            captured.append({
+                "cmd": cmd,
+                "rc": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            })
+            if result.returncode != 0:
+                # Persist partial chain BEFORE raising for INV-16 evidence.
+                _persist_worker_verify_evidence(root, captured)
+                raise ValidationError(
+                    f"v1.0.7 A2 worker-mode verify failed at "
+                    f"{cmd[0]!r}: rc={result.returncode}"
+                )
+        _persist_worker_verify_evidence(root, captured)
         return
     superpowers_dispatch.verification_before_completion(cwd=str(root))
+
+
+def _persist_worker_verify_evidence(
+    root: Path,
+    captured: list[dict[str, object]],
+) -> None:
+    """v1.0.7 A2 INV-16 continuity: write per-worker verify capture.
+
+    Writes to ``<root>/.claude/auto-run-workers/<pid>-verify.json`` so
+    parent post-batch merge has evidence of what each worker actually
+    ran + observed. Uses ``state_file.atomic_write_json`` (which gains
+    Windows PermissionError retry per v1.0.7 B3 = T6).
+    """
+    sidecar_dir = root / ".claude" / "auto-run-workers"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = sidecar_dir / f"{os.getpid()}-verify.json"
+    state_file.atomic_write_json(sidecar, {"verify_chain": captured})
 ```
 
 Add to imports at the top of `close_phase_cmd.py` if missing:
@@ -719,6 +1022,7 @@ import os
 import subprocess
 
 from errors import ValidationError
+import state_file
 ```
 
 - [ ] **Step 9: Implement Q2'=b runtime guard in `superpowers_dispatch.invoke_skill`**
@@ -812,90 +1116,158 @@ Expected: `refactor:` + `chore:` commits land; state advances to next task.
 
 ---
 
-### Task 3: A3 — F-A2 dogfood empirical end-to-end validation
+### Task 3: A3 — F-A2 dogfood empirical e2e (REAL chicken-and-egg fixture per C3 carry-forward)
 
 **Files:**
 - Create: `tests/test_auto_parallel_e2e.py` (new integration test
   exercising full `auto --parallel` flow on Windows with synthetic
-  2-track + 4 disjoint tasks)
+  2-track + 4 disjoint tasks where each worker invokes REAL
+  `close-phase` chain → sec.0.1 dispatch)
 - Create: `tests/fixtures/parallel-e2e/plan-fixture.md` (synthetic
-  4-task plan; trivial Red/Green/Refactor stubs)
+  4-task plan; each task's TDD cycle invokes real `close-phase` from
+  worker subprocess)
 - Create: `tests/fixtures/parallel-e2e/spec-fixture.md` (synthetic
   spec)
+- Create: `tests/fixtures/parallel-e2e/pyproject.toml` (minimal
+  fixture project so worker `pytest` / `ruff` / `mypy` chain can
+  discover something to run)
+- Create: `tests/fixtures/parallel-e2e/src/sample.py` + tests (minimal
+  source + smoke tests that all 4 sec.0.1 tools succeed against)
 
-Covers escenarios A3-1 and A3-2 from spec sec.4.3.
+Covers escenarios A3-1 (C3 real chicken-and-egg fixture) and A3-2 from
+spec sec.4.3.
+
+**CRITICAL design constraint (C3 carry-forward)**: trivial "append
+text" worker tasks DO NOT trip the chicken-and-egg failure surface.
+The fixture project MUST be a real Python project with pyproject.toml
++ source + tests so each worker's `close-phase` invocation actually
+dispatches the sec.0.1 chain (`pytest`, `ruff check`, `ruff format
+--check`, `mypy`). WITHOUT v1.0.7 Pillar A, this fixture would hang
+on the first worker close-phase invocation. WITH Pillar A: workers
+either get real PTY (POSIX) or use sec.0.1 chain bypass (Windows) and
+complete.
 
 #### Red Phase
 
-- [ ] **Step 1: Create synthetic 2-track + 4-task plan fixture**
+- [ ] **Step 1: Create synthetic 2-track + 4-task plan fixture WITH real Python project (C3 carry-forward)**
 
-Create `tests/fixtures/parallel-e2e/spec-fixture.md` with minimal SDD+BDD
-content (single line of objective + one Given/When/Then). The contents
-exist only to satisfy spec_lint R5 frontmatter + INV-27 (no uppercase
-placeholders).
+Create `tests/fixtures/parallel-e2e/spec-fixture.md`:
 
 ```markdown
 # Synthetic e2e spec
 
-> v1.0.7 A3 dogfood fixture — minimal spec for parallel e2e integration test.
+> v1.0.7 A3 dogfood fixture — exercises real chicken-and-egg surface
+> via worker close-phase chain dispatch.
 
 ## 1. Objective
 
-Synthetic 4-task workload to exercise `auto --parallel` end-to-end.
+Synthetic 4-task workload to exercise `auto --parallel` end-to-end with
+each worker invoking real close-phase → sec.0.1 chain.
 
 ## 4. Escenarios
 
-**Escenario fixture-1**: Given the parallel dispatcher; When 4 disjoint
-tasks dispatched across 2 tracks; Then all complete without hang.
+**Escenario fixture-1**: Given the parallel dispatcher + a real Python
+fixture project; When 4 disjoint tasks dispatched across 2 tracks each
+invoking real close-phase; Then all complete without hang AND
+per-worker verify-evidence sidecars exist.
 ```
 
-Create `tests/fixtures/parallel-e2e/plan-fixture.md` with 4 trivial tasks
-where each task's Red/Green/Refactor produce a tiny no-op file edit. The
-plan must follow the `### Task N: <title>` header convention so
-`partition_by_tracks` recognises it. Each task touches a different
-fixture file under `tests/fixtures/parallel-e2e/scratch/` to ensure
-disjoint surfaces.
+Create `tests/fixtures/parallel-e2e/pyproject.toml`:
+
+```toml
+[project]
+name = "parallel-e2e-fixture"
+version = "0.0.1"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+strict = true
+```
+
+Create `tests/fixtures/parallel-e2e/src/sample.py`:
+
+```python
+"""Sample source for fixture project (passes ruff + mypy --strict)."""
+
+
+def add(x: int, y: int) -> int:
+    """Return x + y."""
+    return x + y
+```
+
+Create `tests/fixtures/parallel-e2e/tests/test_sample.py`:
+
+```python
+"""Sample tests for fixture project (passes pytest)."""
+from src.sample import add
+
+
+def test_add() -> None:
+    """add returns sum."""
+    assert add(1, 2) == 3
+```
+
+Create `tests/fixtures/parallel-e2e/Makefile` (optional fallback for
+operators who want to run `make verify` locally; v1.0.7 worker bypass
+does NOT depend on it):
+
+```makefile
+verify:
+	pytest && ruff check . && ruff format --check . && mypy .
+```
+
+Create `tests/fixtures/parallel-e2e/plan-fixture.md` with 4 tasks
+where each task's Step 2 invokes the REAL `close-phase` chain (which
+in worker mode dispatches the sec.0.1 chain via T2 production code).
+Each task touches a different scratch file for disjoint surfaces:
 
 ```markdown
 # Synthetic 4-task parallel e2e plan
 
-**Goal:** Exercise auto --parallel end-to-end with 4 disjoint tasks.
+**Goal:** Exercise auto --parallel end-to-end with 4 disjoint tasks
+each invoking real close-phase chain.
 
-### Task 1: Touch alpha file
-
-**Files:**
-- Modify: `tests/fixtures/parallel-e2e/scratch/alpha.txt`
-
-- [ ] Step 1: Append "alpha-red" to alpha.txt
-- [ ] Step 2: Run noop verify
-- [ ] Step 3: Commit
-
-### Task 2: Touch beta file
+### Task 1: Touch alpha + invoke close-phase chain
 
 **Files:**
-- Modify: `tests/fixtures/parallel-e2e/scratch/beta.txt`
+- Modify: `scratch/alpha.txt`
 
-- [ ] Step 1: Append "beta-red" to beta.txt
-- [ ] Step 2: Run noop verify
-- [ ] Step 3: Commit
+- [ ] Step 1: Append "alpha-red" to scratch/alpha.txt
+- [ ] Step 2: close-phase via run_sbtdd.py (dispatches sec.0.1 chain)
+- [ ] Step 3: Done
 
-### Task 3: Touch gamma file
-
-**Files:**
-- Modify: `tests/fixtures/parallel-e2e/scratch/gamma.txt`
-
-- [ ] Step 1: Append "gamma-red" to gamma.txt
-- [ ] Step 2: Run noop verify
-- [ ] Step 3: Commit
-
-### Task 4: Touch delta file
+### Task 2: Touch beta + invoke close-phase chain
 
 **Files:**
-- Modify: `tests/fixtures/parallel-e2e/scratch/delta.txt`
+- Modify: `scratch/beta.txt`
 
-- [ ] Step 1: Append "delta-red" to delta.txt
-- [ ] Step 2: Run noop verify
-- [ ] Step 3: Commit
+- [ ] Step 1: Append "beta-red" to scratch/beta.txt
+- [ ] Step 2: close-phase via run_sbtdd.py
+- [ ] Step 3: Done
+
+### Task 3: Touch gamma + invoke close-phase chain
+
+**Files:**
+- Modify: `scratch/gamma.txt`
+
+- [ ] Step 1: Append "gamma-red" to scratch/gamma.txt
+- [ ] Step 2: close-phase via run_sbtdd.py
+- [ ] Step 3: Done
+
+### Task 4: Touch delta + invoke close-phase chain
+
+**Files:**
+- Modify: `scratch/delta.txt`
+
+- [ ] Step 1: Append "delta-red" to scratch/delta.txt
+- [ ] Step 2: close-phase via run_sbtdd.py
+- [ ] Step 3: Done
 ```
 
 - [ ] **Step 2: Write failing integration test in `tests/test_auto_parallel_e2e.py`**
@@ -990,6 +1362,16 @@ def test_auto_parallel_synthetic_2track_4task_e2e(
         (project_root / ".claude" / "session-state.json").read_text(encoding="utf-8")
     )
     assert state["current_phase"] == "done"
+    # v1.0.7 iter-2 carry-forward C4: per-worker INV-16 evidence sidecars.
+    workers_dir = project_root / ".claude" / "auto-run-workers"
+    assert workers_dir.exists(), "T2 INV-16 sidecar dir must exist post-cycle"
+    sidecars = list(workers_dir.glob("*-verify.json"))
+    assert len(sidecars) >= 1, "at least one worker must have written verify evidence"
+    # Each sidecar must contain the 4-tool sec.0.1 chain (or partial on failure).
+    for sidecar in sidecars:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert "verify_chain" in payload
+        assert all("rc" in entry and "stdout" in entry for entry in payload["verify_chain"])
 ```
 
 - [ ] **Step 3: Run test to verify failure**
@@ -1791,22 +2173,45 @@ Expected: `refactor:` + `chore:` commits land; state advances to next task.
 
 ---
 
-## Pillar C LOCKED — Selective polish (Q4'=a all 5 items)
+## Pillar C LOCKED — Selective polish (Q4'=a all 5 items, iter-2 collapsed per C2/C5 carry-forward)
 
-### Task 7: C1 — K-4 helper inline comment for single-level subparser walk
+### Task 7: Combined Pillar C polish (C1+C5+C6+C7) — single TDD cycle
+
+> **v1.0.7 iter-2 carry-forward C2/C5 resolution**: original plan had
+> C1+C5+C6+C7 as 4 separate tasks (T7-T10) each with empty-Refactor
+> commits. v1.0.5 Item D Q3-A `_preflight` HARD-BLOCK rejects empty
+> Refactor diffs (canonical TDD triplet must have real diffs in each
+> phase). Resolution: collapse all 4 into ONE task with single
+> Red/Green/Refactor cycle:
+> - Red: write all 4 doc smoke tests in one commit.
+> - Green: apply all 4 doc edits in one commit.
+> - Refactor: cross-link C1 ↔ C6 in K-4 helper docs (real diff —
+>   both C1 inline comment + C6 docstring note touch the same
+>   `_validate_forwardable_flags_against_argparse` helper; the Refactor
+>   makes them reference each other as a coherent helper-level docs
+>   block instead of two disjoint additions).
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py:1447` (add inline comment to
-  `_validate_forwardable_flags_against_argparse`)
-- Modify: `tests/test_auto_cmd.py` (extend with smoke test for C1)
+- Modify: `skills/sbtdd/scripts/auto_cmd.py:1447`
+  (`_validate_forwardable_flags_against_argparse` — C1 inline comment
+  + C6 docstring note; Refactor cross-links them)
+- Modify: `skills/sbtdd/scripts/close_task_cmd.py:451` (C5 deprecation
+  marker comment with monkeypatch footgun warning)
+- Modify: `skills/sbtdd/SKILL.md` (C7 ship-time methodology-activity
+  procedure section)
+- Modify: `tests/test_auto_cmd.py` (smoke tests for C1 + C6)
+- Modify: `tests/test_close_task_cmd.py` (smoke test for C5)
+- Create: `tests/test_skill_md_methodology_activity_procedure.py`
+  (smoke test for C7)
 
-Covers escenario C1 from spec sec.4.7.
+Covers escenarios C1, C5, C6, C7 from spec sec.4.7. C-X-K3-Removal
+ships in T8 (separate task; has real code change).
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing smoke test in `tests/test_auto_cmd.py`**
+- [ ] **Step 1: Write 4 failing smoke tests covering C1+C5+C6+C7**
 
-Append:
+Append to `tests/test_auto_cmd.py` (C1 + C6 — both touch K-4 helper):
 
 ```python
 class TestC1ForwardableFlagsHelperDocs:
@@ -1817,92 +2222,26 @@ class TestC1ForwardableFlagsHelperDocs:
         import inspect
         src = inspect.getsource(auto_cmd._validate_forwardable_flags_against_argparse)
         assert "single-level subparser walk" in src.lower()
+
+
+class TestC6ForwardableFlagsImportlibReloadCaveat:
+    """v1.0.7 C6 K-4 helper docstring caveat per spec sec.4.7."""
+
+    def test_docstring_documents_importlib_reload_interaction(self) -> None:
+        """C6: docstring notes importlib.reload caveat for monkeypatch tests."""
+        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
+        assert "importlib.reload" in doc
+        assert "monkeypatch" in doc.lower()
+
+    def test_docstring_cross_links_c1_inline_comment(self) -> None:
+        """C6 Refactor cross-link (iter-2 carry-forward C2/C5): docstring references C1."""
+        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
+        # Refactor phase cross-links C1 inline comment + C6 docstring note
+        # so the helper's docs read as a coherent block.
+        assert "single-level subparser" in doc.lower() or "see inline comment" in doc.lower()
 ```
 
-- [ ] **Step 2: Run test to verify failure**
-
-Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs -v`
-Expected: FAIL — comment not present yet.
-
-- [ ] **Step 3: Run `make verify`**
-
-Expected: only C1 test fails; ruff + mypy clean.
-
-- [ ] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 C1 K-4 helper docs smoke test"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [ ] **Step 5: Add inline comment in `_validate_forwardable_flags_against_argparse`**
-
-Edit `skills/sbtdd/scripts/auto_cmd.py:1447`. Add an inline comment
-inside the helper body (just above the loop that walks subparsers):
-
-```python
-    # v1.0.7 C1: single-level subparser walk; deeper nesting not supported.
-    # If the plugin gains deeply nested subparsers (e.g., subcommands of
-    # subcommands), extend this loop with a recursive walk.
-    for action in parser._actions:
-        # ... existing walk logic ...
-```
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs -v`
-Expected: PASS.
-
-- [ ] **Step 7: Run `make verify`**
-
-Expected: clean.
-
-- [ ] **Step 8: Close Green phase + Refactor (no-op) + close task**
-
-C1 is a doc-only one-line addition; no Refactor work needed beyond
-running the close-phase sequence. Run:
-
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 C1 document single-level subparser walk in K-4 helper"
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor: no-op v1.0.7 C1 (doc-only)"
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-```
-
-NOTE: the empty-Refactor `close-phase` may fail the canonical TDD
-triplet check by being a no-op commit; if so, instead use
-`--allow-empty` semantics OR fold C1's comment + Refactor docstring
-into a single Green commit. The cleanest path: use `git commit --allow-empty
--m "refactor: ..."` ONLY if `close-phase` rejects empty commits, otherwise
-trust the close-phase happy path.
-
-If empty-commit path proves brittle, write a 1-line docstring tweak in
-Refactor (e.g., normalise whitespace inside the helper docstring) so
-Refactor has a real diff.
-
-Expected: `feat:` + `refactor:` + `chore:` commits land; state advances to next task.
-
----
-
-### Task 8: C5 — K-3 deprecation marker comment with monkeypatch warning
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py:451` (extend the
-  deprecation marker comment with monkeypatch footgun warning)
-- Modify: `tests/test_close_task_cmd.py` (extend with smoke test for C5)
-
-Covers escenario C5 from spec sec.4.7.
-
-**Plan invariant**: T8 (C5) must land BEFORE T11 (C-X-K3-Removal). C5
-adds a comment on the alias line; C-X-K3-Removal removes the alias +
-comment together. The C5 comment is documented as transitional
-("vestigial after C-X-K3-Removal but documented here as the bridge").
-
-#### Red Phase
-
-- [ ] **Step 1: Write failing smoke test in `tests/test_close_task_cmd.py`**
-
-Append:
+Append to `tests/test_close_task_cmd.py` (C5 — touches alias):
 
 ```python
 class TestC5DeprecationMarkerMonkeypatchWarning:
@@ -1912,10 +2251,7 @@ class TestC5DeprecationMarkerMonkeypatchWarning:
         """C5: comment on alias line mentions monkeypatch warning."""
         import inspect
         src = inspect.getsource(close_task_cmd)
-        # Locate the alias declaration (still present pre-C-X-K3-Removal).
         assert "_preflight_triplet_check = _preflight" in src
-        # Confirm the warning comment exists near the alias.
-        # Find the alias line and check the surrounding context.
         lines = src.splitlines()
         for i, line in enumerate(lines):
             if "_preflight_triplet_check = _preflight" in line:
@@ -1926,158 +2262,7 @@ class TestC5DeprecationMarkerMonkeypatchWarning:
         raise AssertionError("alias line not found")
 ```
 
-- [ ] **Step 2: Run test to verify failure**
-
-Run: `pytest tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning -v`
-Expected: FAIL.
-
-- [ ] **Step 3: Run `make verify`**
-
-Expected: only the new test fails; ruff + mypy clean.
-
-- [ ] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 C5 deprecation marker monkeypatch warning smoke test"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [ ] **Step 5: Extend the deprecation marker comment**
-
-Edit `skills/sbtdd/scripts/close_task_cmd.py:451`. Locate the line
-`_preflight_triplet_check = _preflight` and the existing comment above
-it. Replace the comment block with:
-
-```python
-# v1.0.6 K-3: alias for backward-compat; legacy callsites monkeypatched
-# this name. SCHEDULED REMOVAL in v1.0.7 C-X-K3-Removal.
-# v1.0.7 C5 NOTE: monkeypatch.setattr("close_task_cmd._preflight_triplet_check",
-# fake) does NOT patch the canonical `_preflight` (alias is a module-load-time
-# rebind, not a transparent reference). Tests must monkeypatch the canonical
-# `_preflight` name to actually patch behavior. This footgun is the reason
-# C-X-K3-Removal proceeds (single canonical entry point).
-_preflight_triplet_check = _preflight
-```
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `pytest tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning -v`
-Expected: PASS.
-
-- [ ] **Step 7: Run `make verify`**
-
-Expected: clean.
-
-- [ ] **Step 8: Close Green + Refactor (no-op) + close task**
-
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 C5 K-3 deprecation marker comment with monkeypatch warning"
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor: no-op v1.0.7 C5 (doc-only)"
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-```
-
-Same empty-Refactor caveat as T7 applies; fold a minor whitespace tweak
-into Refactor if `close-phase` rejects empty commits.
-
-Expected: `feat:` + `refactor:` + `chore:` commits land; state advances to next task.
-
----
-
-### Task 9: C6 — K-4 helper docstring importlib.reload caveat
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py:1447`
-  (`_validate_forwardable_flags_against_argparse` docstring extension)
-- Modify: `tests/test_auto_cmd.py` (extend with smoke test for C6)
-
-Covers escenario C6 from spec sec.4.7.
-
-#### Red Phase
-
-- [ ] **Step 1: Write failing smoke test**
-
-Append to `tests/test_auto_cmd.py`:
-
-```python
-class TestC6ForwardableFlagsImportlibReloadCaveat:
-    """v1.0.7 C6 K-4 helper docstring caveat per spec sec.4.7."""
-
-    def test_docstring_documents_importlib_reload_interaction(self) -> None:
-        """C6: docstring notes importlib.reload caveat for monkeypatch tests."""
-        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
-        assert "importlib.reload" in doc
-        assert "monkeypatch" in doc.lower()
-```
-
-- [ ] **Step 2: Run test to verify failure**
-
-Run: `pytest tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat -v`
-Expected: FAIL.
-
-- [ ] **Step 3: Run `make verify`**
-
-Expected: only the new test fails; ruff + mypy clean.
-
-- [ ] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 C6 K-4 helper importlib.reload caveat docstring test"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [ ] **Step 5: Extend the docstring**
-
-Edit `skills/sbtdd/scripts/auto_cmd.py:1447`. Locate the
-`_validate_forwardable_flags_against_argparse` docstring and append a
-note paragraph (just before the `Raises:` section):
-
-```
-v1.0.7 C6 NOTE: tests that monkeypatch ``_FORWARDABLE_FLAGS`` should
-call this helper directly rather than reloading ``auto_cmd`` via
-``importlib.reload`` to avoid the import-time guard interaction. The
-guard fires at module import; reload re-imports + re-fires, which can
-mask the monkeypatch's effect. Direct helper invocation respects the
-patched dictionary.
-```
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `pytest tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat -v`
-Expected: PASS.
-
-- [ ] **Step 7: Run `make verify`**
-
-Expected: clean.
-
-- [ ] **Step 8: Close Green + Refactor + close task**
-
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 C6 K-4 helper docstring importlib.reload caveat note"
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor: no-op v1.0.7 C6 (doc-only)"
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
-```
-
-Expected: `feat:` + `refactor:` + `chore:` commits land; state advances to next task.
-
----
-
-### Task 10: C7 — SKILL.md ship-time methodology-activity procedure
-
-**Files:**
-- Modify: `skills/sbtdd/SKILL.md` (add new section documenting
-  methodology-activity → next-cycle-LOCKED procedure)
-- Create: `tests/test_skill_md_methodology_activity_procedure.py` (new
-  smoke test asserting SKILL.md contains the procedure)
-
-Covers escenario C7 from spec sec.4.7.
-
-#### Red Phase
-
-- [ ] **Step 1: Write failing smoke test**
-
-Create `tests/test_skill_md_methodology_activity_procedure.py`:
+Create `tests/test_skill_md_methodology_activity_procedure.py` (C7):
 
 ```python
 #!/usr/bin/env python3
@@ -2097,31 +2282,76 @@ def test_skill_md_documents_methodology_activity_ship_time_procedure() -> None:
     text = skill_md.read_text(encoding="utf-8")
     assert "methodology-activity" in text.lower()
     assert "ship time" in text.lower() or "ship-time" in text.lower()
-    # Procedural language signal.
     assert "v1.0.X+1 LOCKED" in text or "next-cycle LOCKED" in text.lower()
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [ ] **Step 2: Run all 4 new tests to verify failure**
 
-Run: `pytest tests/test_skill_md_methodology_activity_procedure.py -v`
-Expected: FAIL.
+Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning tests/test_skill_md_methodology_activity_procedure.py -v`
+
+Expected: all FAIL (4 doc surfaces missing).
 
 - [ ] **Step 3: Run `make verify`**
 
-Expected: only the new test fails; ruff + mypy clean.
+Expected: only the new doc smoke tests fail; ruff + mypy clean.
 
 - [ ] **Step 4: Close Red phase**
 
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 C7 SKILL.md methodology-activity procedure smoke test"`
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 Pillar C polish doc smoke tests (C1+C5+C6+C7)"`
 
 Expected: `test:` commit lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 5: Add the procedure section to `skills/sbtdd/SKILL.md`**
+- [ ] **Step 5: Apply C1 inline comment in K-4 helper**
 
-Append a new section to `skills/sbtdd/SKILL.md` (placement: near the
-existing version-notes sections):
+Edit `skills/sbtdd/scripts/auto_cmd.py:1447` — locate
+`_validate_forwardable_flags_against_argparse` body and insert just
+above the parser-walk loop:
+
+```python
+    # v1.0.7 C1: single-level subparser walk; deeper nesting not supported.
+    # If the plugin gains deeply nested subparsers (e.g., subcommands of
+    # subcommands), extend this loop with a recursive walk.
+    for action in parser._actions:
+        # ... existing walk logic ...
+```
+
+- [ ] **Step 6: Apply C5 deprecation marker comment in close_task_cmd.py**
+
+Edit `skills/sbtdd/scripts/close_task_cmd.py:451`. Replace existing
+deprecation comment block + alias line with:
+
+```python
+# v1.0.6 K-3: alias for backward-compat; legacy callsites monkeypatched
+# this name. SCHEDULED REMOVAL in v1.0.7 C-X-K3-Removal (T8 of v1.0.7).
+# v1.0.7 C5 NOTE: monkeypatch.setattr("close_task_cmd._preflight_triplet_check",
+# fake) does NOT patch the canonical `_preflight` (alias is a module-load-time
+# rebind, not a transparent reference). Tests must monkeypatch the canonical
+# `_preflight` name to actually patch behavior. This footgun is the reason
+# C-X-K3-Removal proceeds (single canonical entry point).
+_preflight_triplet_check = _preflight
+```
+
+- [ ] **Step 7: Apply C6 docstring note in K-4 helper**
+
+Continue editing `auto_cmd.py:1447`. In the
+`_validate_forwardable_flags_against_argparse` docstring, insert a
+note paragraph just before the `Raises:` section:
+
+```
+v1.0.7 C6 NOTE: tests that monkeypatch ``_FORWARDABLE_FLAGS`` should
+call this helper directly rather than reloading ``auto_cmd`` via
+``importlib.reload`` to avoid the import-time guard interaction. The
+guard fires at module import; reload re-imports + re-fires, which can
+mask the monkeypatch's effect. Direct helper invocation respects the
+patched dictionary.
+```
+
+- [ ] **Step 8: Apply C7 ship-time methodology-activity procedure in SKILL.md**
+
+Append to `skills/sbtdd/SKILL.md` (placement: near existing
+version-notes sections):
 
 ```markdown
 ### Ship-time methodology-activity procedure (v1.0.7+)
@@ -2153,28 +2383,73 @@ by v1.0.6 own-cycle dogfood findings → v1.0.7 LOCKED Pillar B
 (B5+B4+B3) carry-forward.
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Step 9: Run all 4 new doc tests + full make verify**
 
-Run: `pytest tests/test_skill_md_methodology_activity_procedure.py -v`
-Expected: PASS.
+Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning tests/test_skill_md_methodology_activity_procedure.py -v`
 
-- [ ] **Step 7: Run `make verify`**
+Expected: 3 of 4 PASS; the C6 cross-link test still FAILS (Refactor
+phase will resolve it). All other tests still green.
 
-Expected: clean.
+Then: `make verify`
+Expected: only the C6 cross-link smoke test fails; ruff + mypy clean
+on production changes.
 
-- [ ] **Step 8: Close Green + Refactor + close task**
+- [ ] **Step 10: Close Green phase**
 
-```bash
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 C7 document ship-time methodology-activity procedure in SKILL.md"
-python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor: no-op v1.0.7 C7 (doc-only)"
-python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 Pillar C polish (C1+C5+C6+C7) docs land"`
+
+Expected: `feat:` commit lands; state advances to `refactor`. The
+remaining failing C6 cross-link test is the explicit Refactor surface
+(designed-in real Refactor diff per iter-2 C2/C5 carry-forward).
+
+#### Refactor Phase
+
+- [ ] **Step 11: Cross-link C1 inline comment + C6 docstring note in K-4 helper**
+
+Edit `skills/sbtdd/scripts/auto_cmd.py:1447` —
+`_validate_forwardable_flags_against_argparse`. The Green-phase additions
+left the C1 inline comment (above the walk loop) and the C6 docstring
+note (in the docstring) as two disjoint additions. Refactor restructures
+them into a coherent helper-level docs block:
+
+In the docstring, change the C6 note paragraph to reference C1 explicitly:
+
+```
+v1.0.7 C6 NOTE: tests that monkeypatch ``_FORWARDABLE_FLAGS`` should
+call this helper directly rather than reloading ``auto_cmd`` via
+``importlib.reload`` to avoid the import-time guard interaction. The
+guard fires at module import; reload re-imports + re-fires, which can
+mask the monkeypatch's effect. Direct helper invocation respects the
+patched dictionary.
+
+Implementation note: the parser walk below is single-level (see
+inline comment above the loop body for limitations + extension path).
 ```
 
-Expected: `feat:` + `refactor:` + `chore:` commits land; state advances to next task.
+This satisfies the C6 cross-link smoke test (`assert "single-level
+subparser" in doc.lower() or "see inline comment" in doc.lower()`).
+
+- [ ] **Step 12: Run smoke tests + `make verify`**
+
+Run: `pytest tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat -v`
+Expected: PASS (cross-link present).
+
+Then: `make verify`
+Expected: full suite green.
+
+- [ ] **Step 13: Close Refactor phase + close task**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor v1.0.7 Pillar C polish -- cross-link C1 inline comment + C6 docstring in K-4 helper"`
+
+Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
+
+Expected: `refactor:` + `chore:` commits land; state advances to next
+task. Real Refactor diff (cross-link statement added to docstring +
+test PASSES post-cross-link) satisfies v1.0.5 `_preflight` HARD-BLOCK.
 
 ---
 
-### Task 11: C-X-K3-Removal — Remove `_preflight_triplet_check` 1-cycle alias
+### Task 8: C-X-K3-Removal — Remove `_preflight_triplet_check` 1-cycle alias
 
 **Files:**
 - Modify: `skills/sbtdd/scripts/close_task_cmd.py:451` (delete the
@@ -2185,8 +2460,19 @@ Expected: `feat:` + `refactor:` + `chore:` commits land; state advances to next 
 
 Covers escenario C-X-K3-Removal from spec sec.4.7.
 
-**Plan invariant**: T11 must run AFTER T8 (C5 added the warning comment;
-T11 removes both alias + comment together).
+**Plan invariant**: T8 must run AFTER T7 (T7 collapsed Pillar C polish
+adds the C5 warning comment on the alias line; T8 removes both alias +
+comment together).
+
+**Commit prefix framing (v1.0.7 iter-2 carry-forward W10)**: T8 Green
+commit uses `--variant fix` because the alias removal closes the
+v1.0.7 C5-documented monkeypatch footgun (semantically a fix to the
+test discipline surface — the alias was a footgun that silently
+bypassed canonical-name patches; removing it forces tests onto the
+correct surface). Even though the diff is "code removal", the framing
+as `fix:` is accurate per CLAUDE.local.md sec.5 commit prefix map
+(Green close uses `feat:` for new features OR `fix:` for bug-fix
+behavior change).
 
 #### Red Phase
 
@@ -2374,18 +2660,21 @@ After T11 closes:
 
 ## Self-review checklist (run before handoff)
 
-1. **Spec coverage**:
-   - [x] A1 → T1 (POSIX PTY allocation in `subprocess_utils`)
-   - [x] A2 → T2 (Windows hybrid + Q2'=b runtime guard)
-   - [x] A3 → T3 (F-A2 dogfood empirical e2e)
+1. **Spec coverage** (post iter-2 carry-forward C2/C5 task collapse:
+   11 tasks → 8 tasks):
+   - [x] A1 → T1 (POSIX PTY allocation + lifecycle helper + leak guard
+     in `subprocess_utils`)
+   - [x] A2 → T2 (Windows hybrid + Q2'=b runtime guard + sec.0.1 chain
+     bypass + INV-16 evidence sidecar per C4 carry-forward)
+   - [x] A3 → T3 (F-A2 dogfood empirical e2e with REAL chicken-and-egg
+     fixture per C3 carry-forward)
    - [x] B5 → T4 (drift regex line-anchored)
    - [x] B4 → T5 (spec_review_dispatch file-reference)
    - [x] B3 → T6 (atomic_write_json retry)
-   - [x] C1 → T7 (K-4 helper inline comment)
-   - [x] C5 → T8 (deprecation marker monkeypatch warning)
-   - [x] C6 → T9 (K-4 helper docstring importlib.reload note)
-   - [x] C7 → T10 (SKILL.md methodology-activity procedure)
-   - [x] C-X-K3-Removal → T11 (alias removal)
+   - [x] C1+C5+C6+C7 → T7 (combined Pillar C polish single TDD cycle
+     with real Refactor cross-link per C2/C5 carry-forward)
+   - [x] C-X-K3-Removal → T8 (alias removal; W10 carry-forward
+     `--variant fix` framing documented)
 
 2. **Placeholder scan**: zero placeholder markers (no uppercase
    to-be-determined / to-do / to-be-defined word-boundary tokens)
@@ -2393,16 +2682,30 @@ After T11 closes:
 
 3. **Type consistency**:
    - `_spawn_worker_with_pty(argv: list[str], env: dict[str, str]) -> subprocess.Popen[bytes]` (T1) — referenced consistently in T2's `_spawn_worker(argv, env)` dispatcher.
+   - `_close_pty_master(proc: subprocess.Popen[bytes]) -> None` (T1) — new lifecycle helper per C1 carry-forward.
    - `_run_verification(root: Path) -> None` (T2) — signature unchanged from existing v1.0.6 baseline; only body modified.
+   - `_persist_worker_verify_evidence(root: Path, captured: list[dict[str, object]]) -> None` (T2) — new helper per C4 carry-forward.
    - `_OPEN_CHECKBOX_LINE_RE: re.Pattern[str]` (T4) — new module-level constant in `drift.py`.
-   - `_preflight` (post-T11) — canonical name remains; alias removed.
+   - `_preflight` (post-T8) — canonical name remains; alias removed.
    - `dispatch_spec_reviewer(...)` (T5) — public signature unchanged; only argv-build internals refactored.
    - `atomic_write_json(path: Path, data: object) -> None` (T6) — public signature unchanged; only body wrapped with retry loop.
 
 4. **Cross-task ordering invariants**:
-   - T1 → T2 (A2 imports `_spawn_worker_with_pty` from T1).
-   - T2 → T3 (A3 e2e exercises T1+T2 production code).
-   - T8 → T11 (C5 adds comment that T11 removes; T11 must come AFTER T8).
+   - T1 → T2 (A2 imports `_spawn_worker_with_pty` + `_close_pty_master`
+     from T1).
+   - T2 → T3 (A3 e2e exercises T1+T2 production code; fixture project
+     depends on T2 worker-mode bypass to avoid hanging).
+   - T6 → T2 (T2's `_persist_worker_verify_evidence` calls
+     `state_file.atomic_write_json` which T6 hardens with retry; T6 can
+     land before OR after T2 since the retry helper is a strict
+     superset of the existing function — T2's evidence sidecar benefits
+     from T6's retry on Windows but doesn't require it for correctness).
+     Recommend T6 lands before T2 to avoid PermissionError flake during
+     T3 dogfood; current sequential order T2 → ... → T6 means T2
+     code-paths use the pre-retry helper until T6 ships. Acceptable —
+     dogfood phase tolerates one retry.
+   - T7 → T8 (T7 collapsed Pillar C polish adds C5 comment on alias
+     line; T8 removes both alias + comment together).
    - All other tasks file-disjoint or doc-only.
 
 5. **Commit prefix discipline**: every Red closes with `test:`, every
