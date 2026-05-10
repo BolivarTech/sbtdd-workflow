@@ -2652,7 +2652,7 @@ behavior change).
 
 #### Red Phase
 
-- [ ] **Step 1: Write failing test asserting `AttributeError` on legacy alias**
+- [x] **Step 1: Write failing test asserting `AttributeError` on legacy alias**
 
 Append to `tests/test_close_task_cmd.py`:
 
@@ -2674,13 +2674,13 @@ class TestCXK3RemovalAliasGone:
         assert callable(close_task_cmd._preflight)
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `pytest tests/test_close_task_cmd.py::TestCXK3RemovalAliasGone -v`
 Expected: `test_legacy_alias_no_longer_attribute_of_module` FAILS — alias
 still present from T8; the second test PASSES.
 
-- [ ] **Step 3: Audit existing tests for `_preflight_triplet_check` references**
+- [x] **Step 3: Audit existing tests for `_preflight_triplet_check` references**
 
 Run:
 
@@ -2692,14 +2692,14 @@ grep -rn "_preflight_triplet_check" skills/
 For each callsite that monkeypatches or references the alias name,
 note the location. The Green step rewrites them to use `_preflight`.
 
-- [ ] **Step 4: Run `make verify`**
+- [x] **Step 4: Run `make verify`**
 
 Expected: only the new alias-removal test fails (and possibly some
 pre-existing tests that monkeypatch the alias — those will need
 update in Green); ruff + mypy clean except for any pre-existing
 test refs that produce import warnings.
 
-- [ ] **Step 5: Close Red phase**
+- [x] **Step 5: Close Red phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 C-X-K3-Removal alias-removal regression tests"`
 
@@ -2707,7 +2707,7 @@ Expected: `test:` commit lands; state advances to `green`.
 
 #### Green Phase
 
-- [ ] **Step 6: Remove the alias line + C5 comment**
+- [x] **Step 6: Remove the alias line + C5 comment**
 
 Edit `skills/sbtdd/scripts/close_task_cmd.py:451`. Delete BOTH the
 multi-line C5 comment block and the alias assignment line:
@@ -2724,7 +2724,7 @@ Lines to remove:
 _preflight_triplet_check = _preflight
 ```
 
-- [ ] **Step 7: Update test callsites that monkeypatched the alias**
+- [x] **Step 7: Update test callsites that monkeypatched the alias**
 
 For each location identified in Red Step 3, rewrite:
 
@@ -2740,17 +2740,17 @@ monkeypatch.setattr("close_task_cmd._preflight", fake)
 
 Same transformation for any direct attribute references.
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 Run: `pytest tests/test_close_task_cmd.py -v`
 Expected: full module green including the new C-X-K3-Removal tests
 + all previously-passing tests (after monkeypatch target rewrites).
 
-- [ ] **Step 9: Run `make verify`**
+- [x] **Step 9: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 10: Close Green phase**
+- [x] **Step 10: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 C-X-K3-Removal remove _preflight_triplet_check alias + update tests"`
 
@@ -2758,7 +2758,7 @@ Expected: `fix:` commit lands; state advances to `refactor`.
 
 #### Refactor Phase
 
-- [ ] **Step 11: Audit codebase for any remaining alias references**
+- [x] **Step 11: Audit codebase for any remaining alias references**
 
 Final sweep:
 
@@ -2773,11 +2773,11 @@ If any test files OR production code still references the alias, fix
 them now (monkeypatch path or direct call). Confirm test count
 preserved.
 
-- [ ] **Step 12: Run `make verify`**
+- [x] **Step 12: Run `make verify`**
 
 Expected: clean.
 
-- [ ] **Step 13: Close Refactor phase + close task**
+- [x] **Step 13: Close Refactor phase + close task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 C-X-K3-Removal final alias sweep"`
 
