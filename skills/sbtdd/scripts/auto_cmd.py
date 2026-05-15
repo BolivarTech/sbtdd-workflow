@@ -1969,6 +1969,21 @@ def _dispatch_tracks_concurrent(
     module docstring). Worker-side commits also serialize via the git
     index lock; parallel git operations on the same worktree are safe.
 
+    **Env var propagation contract** (v1.0.8 Pillar A2): each
+    worker subprocess inherits the parent's environment via
+    ``worker_env = os.environ.copy()`` at line ~2061 — UNFILTERED.
+    All env vars present in the parent process are propagated to
+    workers unchanged. This contract is load-bearing for v1.0.8
+    Pillar A1: the stub gate's env var (``SBTDD_E2E_STUB_DISPATCH``)
+    flows from a parent test process down through the orchestrator
+    to each worker, where the gate fires and bypasses real
+    ``claude -p`` dispatch. A future refactor introducing an
+    env-var allowlist (e.g., to scrub secrets) would break the
+    stub gate semantics and the v1.0.8 e2e test
+    (``test_auto_parallel_e2e``). The regression test
+    ``test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch``
+    in ``tests/test_auto_cmd.py`` pins this contract at runtime.
+
     Args:
         tracks: Output of :func:`parallel_dispatcher.partition_by_tracks`.
             Each inner list is one track in topological execution order.
@@ -2058,6 +2073,16 @@ def _dispatch_tracks_concurrent(
                 # every worker (POSIX -> PTY allocation; Windows -> PIPE +
                 # env marker). Direct subprocess.Popen here would bypass
                 # the chicken-and-egg fix.
+                #
+                # v1.0.8 A2: env propagation is UNFILTERED — os.environ.copy()
+                # preserves all parent env vars in the worker context. This
+                # contract is load-bearing for v1.0.8 Pillar A1 (the stub
+                # gate's SBTDD_E2E_STUB_DISPATCH env var flows parent ->
+                # orchestrator -> worker unchanged; gate fires in worker
+                # subprocess + bypasses real claude -p). The regression
+                # test test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch
+                # pins this. Any future allowlist refactor MUST update
+                # both this comment AND the regression test together.
                 worker_env = os.environ.copy()
                 proc = _spawn_worker(
                     argv,

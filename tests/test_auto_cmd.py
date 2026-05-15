@@ -3254,21 +3254,16 @@ def test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch(
     # "_merge_scratch_plans", None)` and invokes it if present (auto_cmd.py
     # line ~2124-2128). Without this stub, the helper may try to read
     # scratch plans from disk and fail in the test temp dir.
-    monkeypatch.setattr(
-        auto_cmd, "_verify_worker_sidecars_present", lambda *a, **kw: None
-    )
-    monkeypatch.setattr(
-        auto_cmd, "_merge_audit_sidecars", lambda *a, **kw: {"schema_version": 1}
-    )
-    monkeypatch.setattr(
-        auto_cmd, "_atomic_write_json", lambda *a, **kw: None
-    )
+    monkeypatch.setattr(auto_cmd, "_verify_worker_sidecars_present", lambda *a, **kw: None)
+    monkeypatch.setattr(auto_cmd, "_merge_audit_sidecars", lambda *a, **kw: {"schema_version": 1})
+    monkeypatch.setattr(auto_cmd, "_atomic_write_json", lambda *a, **kw: None)
     monkeypatch.setattr(auto_cmd, "_reap_orphans", lambda *a, **kw: None)
 
     # Stub close_task_cmd._merge_scratch_plans (post-batch hook resolved
     # via getattr in auto_cmd line ~2126). Use monkeypatch on the close_task_cmd
     # module attribute so the getattr lookup finds our stub.
     import close_task_cmd
+
     monkeypatch.setattr(
         close_task_cmd, "_merge_scratch_plans", lambda *a, **kw: None, raising=False
     )
