@@ -1302,7 +1302,7 @@ Expected: `refactor:` commit + close-task cascade.
 
 **Spec mapping:** Escenario B1-1 (fixture ships JSON), B1-2 (helper materializes), B1-3 (presence assertion)
 
-- [ ] **Step 1: Write the failing Red — extend test_fixture_files_present with new expected file**
+- [x] **Step 1: Write the failing Red — extend test_fixture_files_present with new expected file**
 
 Modify `tests/test_auto_parallel_e2e.py::test_fixture_files_present` (line ~270). Change:
 
@@ -1331,12 +1331,12 @@ To:
     )
 ```
 
-- [ ] **Step 2: Run the Red test to verify it fails**
+- [x] **Step 2: Run the Red test to verify it fails**
 
 Run: `pytest tests/test_auto_parallel_e2e.py::test_fixture_files_present -v`
 Expected: FAIL with `AssertionError: missing fixture files: ['dot-claude-settings.json']`.
 
-- [ ] **Step 3: Close Red phase via raw git commit**
+- [x] **Step 3: Close Red phase via raw git commit**
 
 Per the iter-2 Red-phase commit methodology (plan header): the test fails because the fixture file doesn't exist yet; close-phase verification would abort. Use raw git commit.
 
@@ -1347,7 +1347,7 @@ git commit -m "test: v1.0.8 T5 Red — assert dot-claude-settings.json fixture f
 
 Expected: Commit recorded; `git status` clean; state unchanged.
 
-- [ ] **Step 4: Write the Green — create the fixture file**
+- [x] **Step 4: Write the Green — create the fixture file**
 
 Create new file `tests/fixtures/parallel-e2e/dot-claude-settings.json` with content:
 
@@ -1369,7 +1369,7 @@ Create new file `tests/fixtures/parallel-e2e/dot-claude-settings.json` with cont
 }
 ```
 
-- [ ] **Step 5: Update `_stage_fixture` helper to materialize the file**
+- [x] **Step 5: Update `_stage_fixture` helper to materialize the file**
 
 In `tests/test_auto_parallel_e2e.py::_stage_fixture` (around line 106), AFTER the existing `shutil.copy(Path(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md", claude_dir / "plugin.local.md")` line and BEFORE the `(dest / "scratch").mkdir(exist_ok=True)` line, add:
 
@@ -1386,7 +1386,7 @@ In `tests/test_auto_parallel_e2e.py::_stage_fixture` (around line 106), AFTER th
     )
 ```
 
-- [ ] **Step 6: Run the Green test to verify it passes**
+- [x] **Step 6: Run the Green test to verify it passes**
 
 Run: `pytest tests/test_auto_parallel_e2e.py::test_fixture_files_present -v`
 Expected: PASSED.
@@ -1397,13 +1397,13 @@ Expected: all module tests pass.
 Run: `make verify`
 Expected: clean sec.0.1 chain.
 
-- [ ] **Step 7: Close Green phase**
+- [x] **Step 7: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T5 Green: add dot-claude-settings.json fixture + _stage_fixture extension"`
 
 Expected: `feat:` commit.
 
-- [ ] **Step 8: Write the Refactor — add module-level helper constant for fixture path**
+- [x] **Step 8: Write the Refactor — add module-level helper constant for fixture path**
 
 In `tests/test_auto_parallel_e2e.py`, after the existing `_FIXTURE_DIR`, `_REPO_ROOT`, `_RUN_SBTDD` constants (around line 60), add:
 
@@ -1420,7 +1420,7 @@ Then replace the inline `_FIXTURE_DIR / "dot-claude-settings.json"` reference in
     shutil.copy(_FIXTURE_SETTINGS_JSON, claude_dir / "settings.json")
 ```
 
-- [ ] **Step 9: Run sec.0.1 chain after refactor**
+- [x] **Step 9: Run sec.0.1 chain after refactor**
 
 Run: `pytest tests/test_auto_parallel_e2e.py -v`
 Expected: all pass.
@@ -1428,7 +1428,7 @@ Expected: all pass.
 Run: `make verify`
 Expected: clean.
 
-- [ ] **Step 10: Close Refactor phase + Task**
+- [x] **Step 10: Close Refactor phase + Task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T5 Refactor: extract _FIXTURE_SETTINGS_JSON module constant"`
 
