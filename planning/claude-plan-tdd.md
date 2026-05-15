@@ -1449,7 +1449,7 @@ Expected: `refactor:` commit + close-task cascade.
 
 **Spec mapping:** Escenario B2-1 (CLAUDE.md section), B2-2 (memory file), B2-3 (MEMORY.md index), B2-4 (CHANGELOG Deferred section)
 
-- [ ] **Step 1: Write the failing Red — doc coherence smoke test**
+- [x] **Step 1: Write the failing Red — doc coherence smoke test**
 
 Create new file `tests/test_doc_coherence_v108.py`:
 
@@ -1512,12 +1512,12 @@ def test_v108_b2_changelog_has_v108_deferred_section() -> None:
     )
 ```
 
-- [ ] **Step 2: Run the Red tests to verify they fail**
+- [x] **Step 2: Run the Red tests to verify they fail**
 
 Run: `pytest tests/test_doc_coherence_v108.py -v`
 Expected: 2 FAILED — both assertions fire because the docs haven't been updated yet.
 
-- [ ] **Step 3: Close Red phase via raw git commit**
+- [x] **Step 3: Close Red phase via raw git commit**
 
 Per the iter-2 Red-phase commit methodology (plan header): the 2 doc-coherence tests fail because the docs haven't been updated yet; close-phase verification would abort. Use raw git commit.
 
@@ -1528,7 +1528,7 @@ git commit -m "test: v1.0.8 T6 Red — doc-coherence smoke tests for upstream bu
 
 Expected: Commit recorded; `git status` clean; state unchanged.
 
-- [ ] **Step 4: Write the Green — append "Known upstream limitations" section to CLAUDE.md**
+- [x] **Step 4: Write the Green — append "Known upstream limitations" section to CLAUDE.md**
 
 Append the following section to the END of `CLAUDE.md` (after the last existing section, which is the License section):
 
@@ -1567,7 +1567,7 @@ diagnostic evidence). v1.0.8 does NOT submit — deferred to user decision
 post-v1.0.8 ship per spec sec.5 scope exclusions.
 ```
 
-- [ ] **Step 5: Write the Green — create memory archive file (LOCAL-ONLY, not test-asserted)**
+- [x] **Step 5: Write the Green — create memory archive file (LOCAL-ONLY, not test-asserted)**
 
 Per iter-2 carry-forward Cas-W12 + Bal-I6: the memory file lives OUTSIDE the repo in the developer's per-project Claude memory dir. This is **local-only** — it will not exist on CI machines or fresh clones. The doc-coherence test created in Step 1 asserts CLAUDE.md + CHANGELOG only (which ARE in the repo); the memory file is verified by **human review of the closing commit narrative**, not by an automated assertion.
 
@@ -1691,7 +1691,7 @@ error or hint to operator instead of silent hang?
 - v1.0.7 chicken-and-egg empirical context [[project_v107_pty_workers_locked]]
 ```
 
-- [ ] **Step 6: Update `MEMORY.md` index with pointer**
+- [x] **Step 6: Update `MEMORY.md` index with pointer**
 
 Append the following line to
 `C:\Users\jbolivarg\.claude\projects\D--jbolivarg-PythonProjects-SBTDD\memory\MEMORY.md`:
@@ -1700,7 +1700,7 @@ Append the following line to
 - [v1.0.8 claude -p hang upstream archive](project_v108_claude_p_hang_upstream.md) — `claude -p /test-driven-development` hangs >180s zero output in fixture-style cwd lacking `.claude/settings.json`; workaround = `SBTDD_E2E_STUB_DISPATCH=1` env gate (v1.0.8 Pillar A1); upstream report staged for future submission
 ```
 
-- [ ] **Step 7: Write the Green — add CHANGELOG [1.0.8] entry**
+- [x] **Step 7: Write the Green — add CHANGELOG [1.0.8] entry**
 
 Modify `CHANGELOG.md`. Locate the `## [Unreleased]` section (line 11) and the `## [1.0.7]` section that follows (line 15). Insert a new section between them:
 
@@ -1829,7 +1829,7 @@ hint); Pillar D v1.0.5 polish carry-forward; Edge cases E1-E3.
 
 ```
 
-- [ ] **Step 8: Run the Green doc-coherence tests + full sec.0.1 chain**
+- [x] **Step 8: Run the Green doc-coherence tests + full sec.0.1 chain**
 
 Run: `pytest tests/test_doc_coherence_v108.py -v`
 Expected: 2 PASSED.
@@ -1837,13 +1837,13 @@ Expected: 2 PASSED.
 Run: `make verify`
 Expected: clean sec.0.1 chain.
 
-- [ ] **Step 9: Close Green phase**
+- [x] **Step 9: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T6 Green: add Known upstream limitations section + memory archive + CHANGELOG [1.0.8]"`
 
 Expected: `feat:` commit.
 
-- [ ] **Step 10: Write the Refactor — tighten CHANGELOG cross-references**
+- [x] **Step 10: Write the Refactor — tighten CHANGELOG cross-references**
 
 In `CHANGELOG.md` `[1.0.8]` "Process notes" section, after the line ending `Q5'=a G2 ladder pre-staged.`, append one more sentence:
 
@@ -1853,7 +1853,7 @@ resolutions) + sec.6 (G1/G2 binding stance) for full decision
 rationale.
 ```
 
-- [ ] **Step 11: Run sec.0.1 chain after refactor**
+- [x] **Step 11: Run sec.0.1 chain after refactor**
 
 Run: `pytest tests/test_doc_coherence_v108.py -v`
 Expected: 2 PASSED.
@@ -1861,7 +1861,7 @@ Expected: 2 PASSED.
 Run: `make verify`
 Expected: clean.
 
-- [ ] **Step 12: Close Refactor phase + Task**
+- [x] **Step 12: Close Refactor phase + Task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T6 Refactor: cross-reference Q1'-Q5' decisions to spec sections in CHANGELOG"`
 
