@@ -59,6 +59,10 @@ pytestmark = [
 _FIXTURE_DIR = Path(__file__).parent / "fixtures" / "parallel-e2e"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _RUN_SBTDD = _REPO_ROOT / "skills" / "sbtdd" / "scripts" / "run_sbtdd.py"
+# v1.0.8 T5: settings.json fixture path resolved at module load to
+# surface missing-fixture errors at collection time instead of test
+# runtime.
+_FIXTURE_SETTINGS_JSON = _FIXTURE_DIR / "dot-claude-settings.json"
 # Subprocess timeout for the entire ``auto --parallel`` invocation.
 # Generous enough for real worker close-phase chains (~3 min/worker on a
 # warm ruff/mypy cache) but bounded so a hang surfaces as a test failure
@@ -132,10 +136,7 @@ def _stage_fixture(dest: Path) -> str:
     # scratch/, tests/, src/ + bash invocations for pytest/ruff/mypy).
     # Doble defensa: even if the v1.0.8 A1 stub gate is bypassed in a
     # future test variant, the fixture is "less broken" upstream.
-    shutil.copy(
-        _FIXTURE_DIR / "dot-claude-settings.json",
-        claude_dir / "settings.json",
-    )
+    shutil.copy(_FIXTURE_SETTINGS_JSON, claude_dir / "settings.json")
     # scratch/ holds the per-task touch targets declared in plan-fixture.md.
     (dest / "scratch").mkdir(exist_ok=True)
     _git_init_with_identity(dest)
