@@ -3214,6 +3214,86 @@ class TestPath3DispatchTracksConcurrent:
         )
 
 
+def test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v1.0.8 A2-1: parent env var SBTDD_E2E_STUB_DISPATCH propagates to worker.
+
+    Pins the contract that ``_dispatch_tracks_concurrent`` does NOT
+    filter env vars when building ``worker_env = os.environ.copy()``.
+    A future refactor introducing an allowlist would break v1.0.8
+    Pillar A1 (gate would never fire in worker subprocess).
+
+    Test monkeypatches ``_spawn_worker`` to capture the env dict; no
+    real subprocess spawned.
+    """
+    import auto_cmd
+
+    monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+    monkeypatch.setenv("V108_A2_REGRESSION_MARKER", "propagated")
+
+    captured_envs: list[dict[str, str]] = []
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.pid = 4242
+            self.returncode = 0
+
+        def communicate(self, timeout: int):
+            return (b"", b"")
+
+    def _fake_spawn_worker(argv, env, **popen_kwargs):
+        captured_envs.append(dict(env))
+        return _FakeProc()
+
+    monkeypatch.setattr(auto_cmd, "_spawn_worker", _fake_spawn_worker)
+
+    # Stub out post-batch hooks so the test focuses only on env propagation.
+    # Per iter-2 carry-forward Mel-W1: also stub close_task_cmd._merge_scratch_plans
+    # because auto_cmd._dispatch_tracks_concurrent does `getattr(_ctc,
+    # "_merge_scratch_plans", None)` and invokes it if present (auto_cmd.py
+    # line ~2124-2128). Without this stub, the helper may try to read
+    # scratch plans from disk and fail in the test temp dir.
+    monkeypatch.setattr(
+        auto_cmd, "_verify_worker_sidecars_present", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(
+        auto_cmd, "_merge_audit_sidecars", lambda *a, **kw: {"schema_version": 1}
+    )
+    monkeypatch.setattr(
+        auto_cmd, "_atomic_write_json", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(auto_cmd, "_reap_orphans", lambda *a, **kw: None)
+
+    # Stub close_task_cmd._merge_scratch_plans (post-batch hook resolved
+    # via getattr in auto_cmd line ~2126). Use monkeypatch on the close_task_cmd
+    # module attribute so the getattr lookup finds our stub.
+    import close_task_cmd
+    monkeypatch.setattr(
+        close_task_cmd, "_merge_scratch_plans", lambda *a, **kw: None, raising=False
+    )
+
+    (tmp_path / ".claude").mkdir()
+
+    auto_cmd._dispatch_tracks_concurrent(
+        tracks=[["1"]],
+        effective_workers=1,
+        project_root=tmp_path,
+        ns=None,
+    )
+
+    assert len(captured_envs) == 1, "exactly one worker should have been spawned"
+    worker_env = captured_envs[0]
+    assert worker_env.get("SBTDD_E2E_STUB_DISPATCH") == "1", (
+        "v1.0.8 A2 regression: SBTDD_E2E_STUB_DISPATCH must propagate from "
+        "parent to worker unchanged"
+    )
+    assert worker_env.get("V108_A2_REGRESSION_MARKER") == "propagated", (
+        "v1.0.8 A2-2 regression: unrelated custom env vars must also "
+        "propagate (no filtering allowlist)"
+    )
+
+
 class TestVerifyWorkerSidecarsPresent:
     """v1.0.7 T2 code-review C1+C2 fixes per spec sec.4.2 escenario A2-10."""
 
