@@ -86,12 +86,15 @@ v1.0.7 PRIORITY LOCKED T3 e2e empirical closure shipped. v1.0.8
 diagnostic 2026-05-14 ruled out 4 of 5 v1.0.7 hypotheses (env
 propagation, pytest recursion, residual A2 bug, Windows PIPE
 buffer fill); root cause confirmed as upstream `claude -p` hang
-in fixture-style cwd. Q1'=a baseline stubbable skills set;
-Q2'=a minimal marker stdout; Q3'=a explicit permissions allow
-list; Q4'=a+ deterministic assertions; Q5'=a G2 ladder
-pre-staged. See `sbtdd/spec-behavior.md` v1.0.8 sec.1 (Resumen
-ejecutivo Q1'-Q5' resolutions) + sec.6 (G1/G2 binding stance)
-for full decision rationale.
+in fixture-style cwd. Brainstorming refinement decisions cross-
+referenced to `sbtdd/spec-behavior.md` v1.0.8: Q1'=a baseline
+stubbable skills set (sec.1 Resumen ejecutivo + sec.2.1 A1);
+Q2'=a minimal marker stdout (sec.1 + sec.2.3 A3); Q3'=a explicit
+permissions allow list (sec.1 + sec.2.5 B1); Q4'=a+ deterministic
+assertions (sec.1 + sec.2.3 A3); Q5'=a G2 ladder pre-staged
+(sec.1 + sec.6.1 Checkpoint 2 + sec.6.3 Loop 2). G1/G2 binding
+stance is fully laid out in sec.6 (Checkpoint 2 cap=3 HARD + Loop
+1 cap=10 + Loop 2 cap=5 + G2 scope-trim ladder).
 
 **Red-phase commit methodology adjustment** (iter-2
 Mel-W3+Cas-W9): v1.0.8 plan replaced the v1.0.7-precedent
