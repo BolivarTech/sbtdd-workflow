@@ -644,6 +644,8 @@ v1.0.8 introduces:
 
 **Escenario A1-1: Gate fires for stubbable skill with env var set AND pytest loaded**
 
+> **SUPERSEDED by "v1.0.8 implementation design pivot" section above (W11 option a → option b switch). Mentally substitute `"pytest" in sys.modules` → `_E2E_TEST_RUNNER_ENV == "1"` per as-shipped AND-gate. Full rewrite deferred to v1.0.9 LOCKED #6 per Loop 2 iter-2 Mel-W2.**
+>
 > **Given** `os.environ["SBTDD_E2E_STUB_DISPATCH"] == "1"` AND
 > `"pytest" in sys.modules` (test context) AND
 > `skill == "test-driven-development"` (member of
@@ -660,6 +662,8 @@ v1.0.8 introduces:
 
 **Escenario A1-2: Gate does not fire when env var unset**
 
+> **SUPERSEDED by "v1.0.8 implementation design pivot" section above. As-shipped: gate also does not fire if `SBTDD_E2E_TEST_RUNNER` is unset, even if `SBTDD_E2E_STUB_DISPATCH=1`. Full rewrite deferred to v1.0.9 LOCKED #6 per Loop 2 iter-2 Mel-W2.**
+>
 > **Given** `os.environ` does NOT contain `SBTDD_E2E_STUB_DISPATCH`
 > (or contains a non-`"1"` value) AND `"pytest" in sys.modules`
 > (test context — gate would otherwise fire if env was set) AND
@@ -704,6 +708,8 @@ v1.0.8 introduces:
 
 **Escenario A1-6: Gate does NOT fire when pytest not loaded (production safeguard)**
 
+> **SUPERSEDED by "v1.0.8 implementation design pivot" section above (W11 option a → option b switch). As-shipped: production safeguard is "SBTDD_E2E_TEST_RUNNER env var not set", not "pytest not in sys.modules". The behavior contract (gate does NOT fire when production conditions hold) is preserved; only the runtime mechanism changed. Full rewrite deferred to v1.0.9 LOCKED #6 per Loop 2 iter-2 Mel-W2.**
+>
 > **Given** `os.environ["SBTDD_E2E_STUB_DISPATCH"] == "1"` is set
 > (e.g., accidentally leaked into production env) AND `"pytest"
 > NOT in sys.modules` (production process: orchestrator,

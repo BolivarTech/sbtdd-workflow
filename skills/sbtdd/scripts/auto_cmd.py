@@ -1939,10 +1939,22 @@ def _verify_worker_sidecars_present(
     # pids is legitimate test behavior, not a persistence bug. Production
     # processes do NOT set both env vars together so the original
     # LOUD-FAIL contract holds outside tests.
+    #
+    # Loop 2 iter-2 Cas-W4 breadcrumb: emit stderr line when the env-var
+    # skip fires so any production env var leak surfaces in operator
+    # logs (defense-in-depth audit trail — production should NEVER
+    # see this line; if observed, investigate env var leak immediately).
     if (
         os.environ.get("SBTDD_E2E_STUB_DISPATCH") == "1"
         and os.environ.get("SBTDD_E2E_TEST_RUNNER") == "1"
     ):
+        sys.stderr.write(
+            "[sbtdd e2e stub] _verify_worker_sidecars_present skipped "
+            "(SBTDD_E2E_STUB_DISPATCH=1 + SBTDD_E2E_TEST_RUNNER=1). "
+            "Production processes MUST NOT set both env vars; if seen "
+            "in production logs, investigate env var leak.\n"
+        )
+        sys.stderr.flush()
         return
     if missing:
         raise ConcurrentDispatchError(
@@ -2154,8 +2166,36 @@ def _dispatch_tracks_concurrent(
     # for the happy path. The relaxation is scoped narrowly to the
     # "workers failed AND missing sidecars" case where the failures
     # diagnostic is the right error surface.
+    #
+    # Loop 2 iter-2 Cas-W1 breadcrumb: when skipping LOUD-FAIL because
+    # of non-empty failures BUT also detecting missing sidecars among
+    # successful_pids, emit a stderr breadcrumb so the mixed-outcome
+    # case is loggable for v1.0.9 LOCKED #5 audit. Doesn't change
+    # behavior (failures raise still fires below); just surfaces the
+    # latent persistence-bug signal in the worker subset that succeeded.
     if not failures:
         _verify_worker_sidecars_present(project_root, successful_pids)
+    elif successful_pids:
+        sidecar_dir = project_root / ".claude" / "auto-run-workers"
+        if sidecar_dir.exists():
+            observed = [p.name for p in sidecar_dir.glob("*-verify.json")]
+            observed_pids: set[int] = set()
+            for name in observed:
+                try:
+                    observed_pids.add(int(name.split("-")[0]))
+                except ValueError:
+                    pass
+            missing_in_success = [pid for pid in successful_pids if pid not in observed_pids]
+            if missing_in_success:
+                sys.stderr.write(
+                    f"[sbtdd Loop2 iter-2 Cas-W1] mixed-outcome batch: "
+                    f"failures={len(failures)} non-empty so LOUD-FAIL "
+                    f"skipped, but successful pids {missing_in_success} "
+                    f"have no sidecar (potential INV-16 evidence loss "
+                    f"in success subset). v1.0.9 LOCKED #5 audit "
+                    f"target.\n"
+                )
+                sys.stderr.flush()
 
     # v1.0.5 Item I-1: merge per-worker audit sidecars into the canonical
     # ``.claude/auto-run.json``. Performed unconditionally (even when some
@@ -2484,6 +2524,17 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
     # exception). Lazy import to avoid a circular dependency at module
     # load (the close_phase_cmd module imports from auto_cmd's siblings
     # only).
+    #
+    # Loop 2 iter-2 Mel-W1 note: the worker retry branch deliberately
+    # SKIPS the orchestrator-path session-state telemetry update
+    # (_set_progress dispatch_label refresh + _dispatch_with_heartbeat
+    # ticks). Workers under --parallel manage their own progress via
+    # _phase2_task_loop breadcrumbs; the orchestrator's heartbeat is
+    # for OPERATOR visibility during long-running interactive subagent
+    # invocations, not for headless workers. Per-worker sidecar
+    # (close_phase_cmd._persist_worker_verify_evidence) is the worker
+    # diagnostic surface; raised VerificationIrremediableError
+    # references it via per-worker path enrichment.
     if os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1":
         import close_phase_cmd as _close_phase_cmd
 
@@ -2497,14 +2548,20 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
                 raise
             except Exception as exc:
                 if attempt >= retries:
+                    # Loop 2 iter-2 Cas-W3 enrichment: include the
+                    # per-worker sidecar dir path in the diagnostic so
+                    # operators can introspect verify_chain without
+                    # /systematic-debugging dispatch.
+                    sidecar_dir = root / ".claude" / "auto-run-workers"
                     raise VerificationIrremediableError(
                         f"worker-mode verification exhausted retry budget "
                         f"({retries} retries; SBTDD_AUTO_PARALLEL_WORKER=1; "
                         f"/systematic-debugging dispatch skipped in worker "
-                        f"context per Loop 2 iter-1 Mel-W1/Cas-W2 fix): "
-                        f"{exc}"
+                        f"context per Loop 2 iter-1 Mel-W1/Cas-W2 fix; "
+                        f"inspect per-worker sidecars under "
+                        f"{sidecar_dir} for verify_chain diagnostic per "
+                        f"Loop 2 iter-2 Cas-W3 enrichment): {exc}"
                     ) from exc
-        return
     current = get_current_progress()
     for attempt in range(retries + 1):
         try:
