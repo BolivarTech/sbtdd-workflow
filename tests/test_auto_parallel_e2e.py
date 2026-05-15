@@ -65,10 +65,12 @@ _RUN_SBTDD = _REPO_ROOT / "skills" / "sbtdd" / "scripts" / "run_sbtdd.py"
 # runtime.
 _FIXTURE_SETTINGS_JSON = _FIXTURE_DIR / "dot-claude-settings.json"
 # Subprocess timeout for the entire ``auto --parallel`` invocation.
-# v1.0.8 A3 shrunk from 600s to 60s -- the stub gate (Pillar A1)
+# v1.0.8 A3 shrunk from 600s to 120s -- the stub gate (Pillar A1)
 # eliminates the upstream LLM-dispatch cost that drove the v1.0.7
-# 600s budget.
-_AUTO_TIMEOUT_S = 60
+# 600s budget. Loop 2 iter-1 Cas-W5 fix: raised 60 -> 120 to tolerate
+# CI runner variance (empirical local wall-time ~15s; 120s gives
+# 8x headroom for slow CI workers without sacrificing fast-fail).
+_AUTO_TIMEOUT_S = 120
 
 
 def _toolchain_available() -> bool:

@@ -1929,14 +1929,20 @@ def _verify_worker_sidecars_present(
                 f"filename {p.name!r} (expected <pid>-*-verify.json)\n"
             )
     missing = [pid for pid in successful_pids if pid not in observed_pids]
-    # v1.0.8 T4: skip LOUD-FAIL under e2e test mode
-    # (SBTDD_E2E_TEST_RUNNER=1). Under parallel partition + shared
-    # state file, only the first worker to advance state writes sidecars;
-    # siblings cursor-skip (their tasks already done) and exit rc=0
-    # without sidecars. Mixed observed/missing pids is legitimate test
-    # behavior, not a persistence bug. Production callers never set this
-    # env var so the original LOUD-FAIL contract holds outside tests.
-    if os.environ.get("SBTDD_E2E_TEST_RUNNER") == "1":
+    # v1.0.8 T4 + Loop 2 iter-1 Cas-W1 fix: skip LOUD-FAIL under e2e
+    # test mode (BOTH SBTDD_E2E_STUB_DISPATCH=1 AND SBTDD_E2E_TEST_RUNNER=1
+    # — AND-gate for defense-in-depth consistency with the gates in
+    # invoke_skill / spec_review_dispatch / magi_dispatch). Under
+    # parallel partition + shared state file, only the first worker to
+    # advance state writes sidecars; siblings cursor-skip (their tasks
+    # already done) and exit rc=0 without sidecars. Mixed observed/missing
+    # pids is legitimate test behavior, not a persistence bug. Production
+    # processes do NOT set both env vars together so the original
+    # LOUD-FAIL contract holds outside tests.
+    if (
+        os.environ.get("SBTDD_E2E_STUB_DISPATCH") == "1"
+        and os.environ.get("SBTDD_E2E_TEST_RUNNER") == "1"
+    ):
         return
     if missing:
         raise ConcurrentDispatchError(
@@ -2138,13 +2144,16 @@ def _dispatch_tracks_concurrent(
     # close-phase) legitimately have no sidecar; conflating them with
     # persistence bugs masks the real failure surface (already in
     # ``failures`` list).
-    # v1.0.8 T4: skip the LOUD-FAIL when failures is non-empty so the
+    # v1.0.8 T4 + Loop 2 iter-1 Mel-W2/Bal-W2/Cas-W4 fix: skip the
+    # LOUD-FAIL when failures is non-empty so the ConcurrentDispatchError
     # raise below surfaces the real error instead of a misleading
-    # "INV-16 evidence loss" message. Also skip when an observed-sidecar
-    # pid is NOT in successful_pids -- under parallel partition + shared
-    # state, the sidecar-producing worker is sometimes lost to the
-    # orchestrator's threading bookkeeping (race window between
-    # Popen.pid latch and successful_pids.append).
+    # "INV-16 evidence loss" diagnostic. When failures IS empty,
+    # _verify_worker_sidecars_present still enforces the v1.0.7
+    # iter-3 C1 contract (every successful worker MUST have produced
+    # a sidecar) — the original LOUD-FAIL contract intent is preserved
+    # for the happy path. The relaxation is scoped narrowly to the
+    # "workers failed AND missing sidecars" case where the failures
+    # diagnostic is the right error surface.
     if not failures:
         _verify_worker_sidecars_present(project_root, successful_pids)
 
@@ -2462,18 +2471,39 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
     # Checkpoint 2 iter 2 melchior). The label is preserved (started_at
     # refreshed) for the verification call and replaced for systematic-
     # debugging via the same helper.
-    # v1.0.8 T4: when invoked from a worker subprocess
-    # (SBTDD_AUTO_PARALLEL_WORKER=1), route through
+    # v1.0.8 T4 + Loop 2 iter-1 Mel-W1/Cas-W2 fix: when invoked from a
+    # worker subprocess (SBTDD_AUTO_PARALLEL_WORKER=1), route through
     # close_phase_cmd._run_verification so the worker-mode bypass
     # (sec.0.1 4-tool chain + per-worker sidecar) fires instead of
     # the interactive ``/verification-before-completion`` subprocess
     # which would hang waiting for a TTY the worker does not have.
-    # Lazy import to avoid a circular dependency at module load (the
-    # close_phase_cmd module imports from auto_cmd's siblings only).
+    # Preserve the retry budget + ValidationError-wrapping semantics
+    # from the orchestrator path (drop only the systematic-debugging
+    # dispatch since /systematic-debugging is itself a claude -p skill
+    # that hangs without TTY; document the deviation in the worker
+    # exception). Lazy import to avoid a circular dependency at module
+    # load (the close_phase_cmd module imports from auto_cmd's siblings
+    # only).
     if os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1":
         import close_phase_cmd as _close_phase_cmd
 
-        _close_phase_cmd._run_verification(root)
+        for attempt in range(retries + 1):
+            try:
+                _close_phase_cmd._run_verification(root)
+                return
+            except QuotaExhaustedError:
+                # Quota propagation contract from orchestrator path
+                # preserved (sec.S.11.4 telemetry — do not remap).
+                raise
+            except Exception as exc:
+                if attempt >= retries:
+                    raise VerificationIrremediableError(
+                        f"worker-mode verification exhausted retry budget "
+                        f"({retries} retries; SBTDD_AUTO_PARALLEL_WORKER=1; "
+                        f"/systematic-debugging dispatch skipped in worker "
+                        f"context per Loop 2 iter-1 Mel-W1/Cas-W2 fix): "
+                        f"{exc}"
+                    ) from exc
         return
     current = get_current_progress()
     for attempt in range(retries + 1):

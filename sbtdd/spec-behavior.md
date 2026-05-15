@@ -131,6 +131,75 @@ sequential subagent execution.
 
 ---
 
+## v1.0.8 implementation design pivot (post-Checkpoint 2, recorded
+at pre-merge Loop 2 iter 1 — 2026-05-15)
+
+> Per Loop 2 iter-1 Mel-W4/Bal-W1/Cas-W3 findings: spec/impl drift
+> on the W11 runtime safeguard. Recording the as-shipped design here
+> rather than rewriting all sec.4 / sec.2 escenarios that reference
+> the original pytest-sys.modules guard. The spec text below remains
+> as the Checkpoint-2-approved design baseline; this pivot section is
+> authoritative for the as-shipped behavior.
+
+**Design pivot**: the gate's runtime production safeguard switched
+from Caspar W11 option (a) `"pytest" in sys.modules` to Caspar W11
+option (b) AND-gate on a second env var `SBTDD_E2E_TEST_RUNNER`.
+
+**Reason**: T4 implementation diagnostic revealed that the pytest
+sys.modules check fails to fire in the legitimate e2e use case
+where `tests/test_auto_parallel_e2e.py` spawns
+`python run_sbtdd.py auto --parallel` as a subprocess. The
+subprocess inherits env vars via `os.environ.copy()` but does NOT
+import pytest in the subprocess process (auto_cmd has no pytest
+runtime dependency). The original (a) guard correctly classified
+the subprocess as "production-mode" but in this specific case the
+subprocess IS a test-spawned process that needs the gate to fire.
+
+**Defense-in-depth preserved**: option (b) requires BOTH env vars
+set simultaneously. Production accidental leak of a single env var
+(via shared shell profile, devcontainer template, `.env` copy) has
+zero effect. Both vars must leak together for the gate to fire — a
+much lower probability event than single-var leak.
+
+**Approved at Loop 2 iter 1 (within Caspar W11's pre-approved
+design space)**: Caspar explicitly listed option (b) as one of the
+three valid alternatives in iter 1 finding W11. Switching from (a)
+to (b) is within the design space MAGI already approved; no new
+design surface introduced.
+
+**As-shipped gate condition** (per `superpowers_dispatch._e2e_stub_active()`):
+
+```python
+def _e2e_stub_active() -> bool:
+    return (
+        os.environ.get(_E2E_STUB_ENV) == "1"
+        and os.environ.get(_E2E_TEST_RUNNER_ENV) == "1"
+    )
+```
+
+Used by 4 callsites: `superpowers_dispatch.invoke_skill` (T1 + T4
+expansion), `spec_review_dispatch.dispatch_spec_reviewer` (T4
+expansion), `magi_dispatch.invoke_magi` (T4 expansion),
+`auto_cmd._verify_worker_sidecars_present` (T4 expansion +
+Loop 2 iter-1 Cas-W1 fix). Single-sourced predicate per Loop 2
+iter-1 Mel-W3 fix.
+
+**Escenario A1-6 supersession**: the escenario in sec.4.1 still
+describes the pytest sys.modules check as the production safeguard.
+As shipped, replace mentally:
+- "`"pytest" NOT in sys.modules`" → "second env var
+  `SBTDD_E2E_TEST_RUNNER` NOT set to `"1"`"
+- The behavior contract (gate does NOT fire when production
+  conditions hold) remains identical; only the runtime mechanism
+  changed.
+
+A spec-base + spec-behavior rewrite reconciling all escenarios to
+the AND-gate as shipped is **v1.0.9 LOCKED**: "spec/impl drift
+reconciliation post v1.0.8 W11 pivot". Until then, this section is
+the authoritative as-shipped reference.
+
+---
+
 ## 1. Resumen ejecutivo
 
 **Objetivo v1.0.8**: cerrar la brecha empirica de v1.0.7 T3 e2e via

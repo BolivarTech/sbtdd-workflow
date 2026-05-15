@@ -215,7 +215,24 @@ milestones:
    for unintended regression in non-e2e parallel paths; consider
    carving items 4 and 5 into a separate `--variant fix`
    patch if Loop 2 finds the coupling with Pillar A1 obscures
-   responsibility.
+   responsibility. **Loop 2 iter 1 (2026-05-15) status**: items
+   4 (worker retry restoration) + 5 (LOUD-FAIL comment clarity)
+   addressed via mini-cycle fix; v1.0.9 task narrows to
+   field-observation review of the as-shipped semantics.
+6. **spec/spec-base reconciliation post W11 design pivot**
+   (Loop 2 iter-1 Mel-W4+Bal-W1+Cas-W3): rewrite spec sec.2.1
+   + sec.4 escenarios A1-1/A1-2/A1-6 + spec-base sec.2.1 to
+   reflect the as-shipped AND-gate (Caspar W11 option b) instead
+   of the original pytest sys.modules (option a) design. Until
+   v1.0.9 lands the rewrite, the v1.0.8 spec sec. "v1.0.8
+   implementation design pivot" section is authoritative for
+   as-shipped behavior.
+7. **Pre-existing failure tracking** (Loop 2 iter-1 Cas-I3):
+   create tracking issues for `test_hf1_recovery_breadcrumb_wording_aligned`
+   (failing since v1.0.7 ship) + `test_close_phase_cmd.py:706`
+   mypy call-overload error (failing since v1.0.7 ship). Either
+   fix in v1.0.9 OR formally retire the tests + document the
+   removal rationale.
 
 Other v1.0.7 deferred carry-forward (B2 worker subprocess
 auto-message hardening, C2 K-4 escape hatch test coverage, C4
