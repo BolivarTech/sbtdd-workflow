@@ -91,26 +91,26 @@ _SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(
 
 
 #: v1.0.8 Pillar A1: env var name that activates the test-only stub
-#: gate at the top of :func:`invoke_skill`. When set to ``"1"``,
-#: skills in :data:`_E2E_STUBBABLE_SKILLS` short-circuit to a
-#: synthetic :class:`SkillResult` instead of spawning ``claude -p``,
-#: PROVIDED ``"pytest"`` is in :data:`sys.modules` (runtime guard
-#: against accidental production env var leak — see iter-2 carry-
-#: forward W11).
+#: gate at the top of :func:`invoke_skill`. When set to ``"1"`` AND
+#: :data:`_E2E_TEST_RUNNER_ENV` is also set to ``"1"``, skills in
+#: :data:`_E2E_STUBBABLE_SKILLS` short-circuit to a synthetic
+#: :class:`SkillResult` instead of spawning ``claude -p``.
 #:
 #: **Test-only**: production callers MUST NOT set this variable.
-#: Defense-in-depth: even if the env var is accidentally exported in
-#: a production context (shared shell profile, devcontainer template
-#: leak, accidentally-committed `.env`), the runtime guard in
-#: :func:`invoke_skill` checks ``"pytest" in sys.modules`` --
-#: production workers do NOT import pytest at runtime (they invoke
-#: pytest as a separate subprocess via
-#: ``[sys.executable, "-m", "pytest"]`` in
-#: :func:`close_phase_cmd._run_verification` worker-mode bypass),
-#: so the gate cannot fire in production. Test runners load pytest
-#: into sys.modules BEFORE collecting tests, so the gate fires
-#: correctly in test environments.
 _E2E_STUB_ENV: str = "SBTDD_E2E_STUB_DISPATCH"
+
+#: v1.0.8 Pillar A1 (T4 follow-up fix): second env var that AND-gates
+#: with :data:`_E2E_STUB_ENV`. Two env vars required to fire the gate
+#: provides defense-in-depth against accidental production leak —
+#: requires BOTH vars to leak simultaneously (much less likely than
+#: a single env var leak via shared shell profile / .env / devcontainer
+#: template). The original v1.0.8 design used ``"pytest" in sys.modules``
+#: but that breaks the legitimate e2e use case where a test parent
+#: spawns a subprocess that inherits env vars but does NOT import
+#: pytest in the subprocess process (run_sbtdd.py orchestrator).
+#: Per Caspar iter-1 W11 explicit alternative recommendation:
+#: "(b) AND-gate with a second env var".
+_E2E_TEST_RUNNER_ENV: str = "SBTDD_E2E_TEST_RUNNER"
 
 #: v1.0.8 Pillar A1: skills whose ``claude -p`` dispatch is bypassed
 #: when :data:`_E2E_STUB_ENV` is set AND ``"pytest"`` is loaded.
@@ -397,19 +397,24 @@ def invoke_skill(
     # short-circuits ALL downstream dispatch logic (v1.0.4 membership
     # gate + v1.0.6 J-3 headless guard + v1.0.7 A2 worker-context
     # guard). Test-only: production MUST NOT set
-    # SBTDD_E2E_STUB_DISPATCH. Defense-in-depth: the
-    # ``"pytest" in sys.modules`` runtime guard ensures the gate
-    # cannot fire in production processes (orchestrator, workers)
-    # because they do NOT import pytest at runtime; pytest is
-    # spawned as a separate subprocess via [sys.executable, "-m",
-    # "pytest"] in worker-mode close-phase. Test runners load
-    # pytest into sys.modules at process start. Rationale: enables
-    # end-to-end orchestration tests (T3 e2e) without spawning
-    # real claude -p subprocess (which hangs upstream in fixture-
-    # style cwd per CLAUDE.md "Known upstream limitations").
+    # SBTDD_E2E_STUB_DISPATCH nor SBTDD_E2E_TEST_RUNNER.
+    #
+    # T4 follow-up fix: original v1.0.8 design used
+    # ``"pytest" in sys.modules`` as runtime production safeguard
+    # (Caspar W11 option a). That worked for in-process test
+    # invocations but BROKE the legitimate e2e use case where
+    # ``tests/test_auto_parallel_e2e.py`` spawns
+    # ``python run_sbtdd.py auto --parallel`` as subprocess: the
+    # subprocess inherits env vars via os.environ.copy() but does
+    # NOT import pytest (auto_cmd has no pytest dep). Switched to
+    # Caspar W11 option b: AND-gate with a second env var
+    # SBTDD_E2E_TEST_RUNNER. Both vars must be set; production
+    # accidental leak of one (or both) without the other has zero
+    # effect. Test parent sets both before subprocess.run + both
+    # propagate to subprocess via os.environ.copy().
     if (
         os.environ.get(_E2E_STUB_ENV) == "1"
-        and "pytest" in _sys.modules
+        and os.environ.get(_E2E_TEST_RUNNER_ENV) == "1"
         and skill in _E2E_STUBBABLE_SKILLS
     ):
         return SkillResult(

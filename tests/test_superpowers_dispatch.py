@@ -879,25 +879,22 @@ def test_v108_a1_gate_smoke_test_driven_development_with_env_set(monkeypatch):
     """v1.0.8 A1-1 smoke: gate fires for /test-driven-development with env=1.
 
     Pins the minimum contract that T3 (A4 regression suite) expands on:
-    when SBTDD_E2E_STUB_DISPATCH=1 AND "pytest" in sys.modules AND
+    when SBTDD_E2E_STUB_DISPATCH=1 AND SBTDD_E2E_TEST_RUNNER=1 AND
     skill is stubbable, invoke_skill returns synthetic
     SkillResult(rc=0) WITHOUT spawning claude -p.
 
-    Note: ``"pytest" in sys.modules`` is True by construction in this
-    test because pytest is the runner; iter-2 carry-forward W11
-    production safeguard does not interfere with test environments.
+    T4 follow-up fix: the runtime production safeguard switched from
+    ``"pytest" in sys.modules`` (Caspar W11 option a) to AND-gating
+    with a second env var SBTDD_E2E_TEST_RUNNER (Caspar W11 option b),
+    so the gate fires correctly in subprocess-spawned orchestrator
+    processes that inherit env vars but do NOT import pytest
+    (e.g., the v1.0.8 T4 e2e test invocation path).
     """
-    import sys
-
     import superpowers_dispatch
     from superpowers_dispatch import SkillResult
 
-    # Sanity-check the pytest sys.modules runtime guard precondition
-    # holds in this test environment (would fail in production where
-    # pytest is not loaded).
-    assert "pytest" in sys.modules, "test environment must have pytest loaded for the gate to fire"
-
     monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+    monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
 
     def _fail_if_called(*args, **kwargs):
         raise AssertionError(
@@ -980,6 +977,7 @@ class TestE2EStubGate:
         from superpowers_dispatch import SkillResult
 
         monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
         self._fail_if_subprocess_called(monkeypatch)
 
         result = superpowers_dispatch.invoke_skill(
@@ -1017,6 +1015,7 @@ class TestE2EStubGate:
         from superpowers_dispatch import SkillResult
 
         monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
         captured = self._capture_run_with_timeout(monkeypatch)
 
         result = superpowers_dispatch.invoke_skill(
@@ -1033,6 +1032,7 @@ class TestE2EStubGate:
         import superpowers_dispatch
 
         monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
         self._fail_if_subprocess_called(monkeypatch)
 
         result = superpowers_dispatch.invoke_skill(
