@@ -193,6 +193,82 @@ def _diagnostic_message(rc: int, stdout: str, stderr: str) -> str:
     )
 
 
+def _assert_state_done(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2 helper: assert session-state.json reports phase=done."""
+    state = json.loads((project / ".claude" / "session-state.json").read_text(encoding="utf-8"))
+    assert state["current_phase"] == "done", (
+        f"v1.0.8 A3-2 expected current_phase=='done'; got {state['current_phase']!r}.{diagnostic}"
+    )
+
+
+def _assert_plan_fully_flipped(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2 helper: assert all plan checkboxes are [x]."""
+    import re
+
+    plan_text = (project / "planning" / "claude-plan-tdd.md").read_text(encoding="utf-8")
+    assert not re.search(r"^[ \t]*- \[ \]", plan_text, re.MULTILINE), (
+        f"v1.0.8 A3-2 expected all plan checkboxes flipped to [x]; "
+        f"open '- [ ]' line(s) remain.{diagnostic}"
+    )
+
+
+def _assert_sidecars_valid(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2/A3-3 helper: assert sidecars exist with valid verify_chain.
+
+    Per iter-2 carry-forward Cas-W10: ``>=4`` entries (extensible) +
+    presence check for the 4 known sec.0.1 tools (pytest, ruff,
+    mypy). Future sec.0.1 extensions MUST NOT break this assertion.
+    Per iter-2 carry-forward Cas-W5+Mel-W3: tool detection via
+    substring-anywhere match (not positional cmd[2]) for robustness.
+    """
+    workers_dir = project / ".claude" / "auto-run-workers"
+    assert workers_dir.is_dir(), f"v1.0.8 A3-2 missing {workers_dir}.{diagnostic}"
+    sidecars = list(workers_dir.glob("*-verify.json"))
+    assert sidecars, f"v1.0.8 A3-2 expected >=1 sidecar in {workers_dir}.{diagnostic}"
+    # The 4 known sec.0.1 tools that MUST appear in the chain
+    # (ruff appears twice: ruff check + ruff format --check; but
+    # the unique tool module names are {pytest, ruff, mypy}).
+    expected_tools = {"pytest", "ruff", "mypy"}
+    for sc in sidecars:
+        payload = json.loads(sc.read_text(encoding="utf-8"))
+        chain = payload.get("verify_chain")
+        assert isinstance(chain, list) and len(chain) >= 4, (
+            f"v1.0.8 A3-3 expected verify_chain with >=4 entries in {sc.name}.{diagnostic}"
+        )
+        # Substring-anywhere tool detection.
+        tools_in_chain: set[str] = set()
+        for entry in chain:
+            cmd = entry.get("cmd")
+            if not isinstance(cmd, list):
+                continue
+            cmd_str = " ".join(str(p) for p in cmd)
+            for tool in expected_tools:
+                if tool in cmd_str:
+                    tools_in_chain.add(tool)
+        missing = expected_tools - tools_in_chain
+        assert not missing, (
+            f"v1.0.8 A3-3 expected tools {expected_tools} in chain "
+            f"of {sc.name}; missing {missing}; "
+            f"observed {tools_in_chain}.{diagnostic}"
+        )
+        for entry in chain:
+            assert entry.get("rc") == 0, (
+                f"v1.0.8 A3-3 expected all sec.0.1 tools rc=0 in "
+                f"{sc.name}; got {entry.get('rc')}.{diagnostic}"
+            )
+
+
+def _assert_audit_finished_success(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2 helper: assert auto-run.json reports finished + success."""
+    audit = json.loads((project / ".claude" / "auto-run.json").read_text(encoding="utf-8"))
+    assert audit.get("auto_finished_at") is not None, (
+        f"v1.0.8 A3-2 expected auto_finished_at non-null.{diagnostic}"
+    )
+    assert audit.get("status") == "success", (
+        f"v1.0.8 A3-2 expected status=='success'; got {audit.get('status')!r}.{diagnostic}"
+    )
+
+
 @pytest.mark.skipif(
     sys.platform != "win32",
     reason="v1.0.7 A3 mandatory on Windows; POSIX deferred to v1.0.8",
@@ -251,75 +327,11 @@ def test_auto_parallel_e2e_chicken_and_egg_closed(tmp_path: Path) -> None:
         timeout=_AUTO_TIMEOUT_S,
     )
     diagnostic = _diagnostic_message(proc.returncode, proc.stdout, proc.stderr)
-
     assert proc.returncode == 0, f"v1.0.8 A3-1 expected rc=0; got rc={proc.returncode}.{diagnostic}"
-
-    state = json.loads((project / ".claude" / "session-state.json").read_text(encoding="utf-8"))
-    assert state["current_phase"] == "done", (
-        f"v1.0.8 A3-2 expected current_phase=='done'; got {state['current_phase']!r}.{diagnostic}"
-    )
-
-    import re
-
-    plan_text = (project / "planning" / "claude-plan-tdd.md").read_text(encoding="utf-8")
-    assert not re.search(r"^[ \t]*- \[ \]", plan_text, re.MULTILINE), (
-        f"v1.0.8 A3-2 expected all plan checkboxes flipped to [x]; "
-        f"open '- [ ]' line(s) remain.{diagnostic}"
-    )
-
-    workers_dir = project / ".claude" / "auto-run-workers"
-    assert workers_dir.is_dir(), f"v1.0.8 A3-2 missing {workers_dir}.{diagnostic}"
-    sidecars = list(workers_dir.glob("*-verify.json"))
-    assert sidecars, f"v1.0.8 A3-2 expected >=1 sidecar in {workers_dir}.{diagnostic}"
-    # Per iter-2 carry-forward Cas-W10: `>= 4` (not `== 4`) + presence
-    # check for the 4 known sec.0.1 tools. Future sec.0.1 extensions
-    # (5th tool) MUST NOT break the assertion; the 4 known tools MUST
-    # be present.
-    # Per iter-2 carry-forward Cas-W5+Mel-W3: tool detection via
-    # substring-anywhere match on str(cmd), NOT positional cmd[2].
-    # This is robust against future cmd-shape evolution (e.g.,
-    # python -X dev -m pytest, env wrappers, different module paths).
-    expected_tools = {"pytest", "ruff", "mypy"}  # ruff appears twice (check + format)
-    for sc in sidecars:
-        payload = json.loads(sc.read_text(encoding="utf-8"))
-        chain = payload.get("verify_chain")
-        assert isinstance(chain, list) and len(chain) >= 4, (
-            f"v1.0.8 A3-3 expected verify_chain with >=4 entries "
-            f"in {sc.name}; got "
-            f"{len(chain) if isinstance(chain, list) else 'non-list'}."
-            f"{diagnostic}"
-        )
-        # Substring-anywhere tool detection. Convert each cmd list
-        # to a single space-joined string and check the tool name
-        # appears anywhere. Robust against cmd-shape changes.
-        tools_in_chain: set[str] = set()
-        for entry in chain:
-            cmd = entry.get("cmd")
-            if not isinstance(cmd, list):
-                continue
-            cmd_str = " ".join(str(p) for p in cmd)
-            for tool in expected_tools:
-                if tool in cmd_str:
-                    tools_in_chain.add(tool)
-        missing = expected_tools - tools_in_chain
-        assert not missing, (
-            f"v1.0.8 A3-3 expected tools {expected_tools} in verify_chain "
-            f"of {sc.name}; missing {missing}; observed {tools_in_chain}."
-            f"{diagnostic}"
-        )
-        for entry in chain:
-            assert entry.get("rc") == 0, (
-                f"v1.0.8 A3-3 expected all sec.0.1 tools rc=0 in "
-                f"{sc.name}; got entry rc={entry.get('rc')}.{diagnostic}"
-            )
-
-    audit = json.loads((project / ".claude" / "auto-run.json").read_text(encoding="utf-8"))
-    assert audit.get("auto_finished_at") is not None, (
-        f"v1.0.8 A3-2 expected auto_finished_at non-null.{diagnostic}"
-    )
-    assert audit.get("status") == "success", (
-        f"v1.0.8 A3-2 expected status=='success'; got {audit.get('status')!r}.{diagnostic}"
-    )
+    _assert_state_done(project, diagnostic)
+    _assert_plan_fully_flipped(project, diagnostic)
+    _assert_sidecars_valid(project, diagnostic)
+    _assert_audit_finished_success(project, diagnostic)
 
 
 def test_fixture_files_present() -> None:
