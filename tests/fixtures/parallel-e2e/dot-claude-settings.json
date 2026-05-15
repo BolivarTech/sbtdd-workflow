@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Write(scratch/**)",
+      "Edit(scratch/**)",
+      "Write(tests/**)",
+      "Edit(tests/**)",
+      "Write(src/**)",
+      "Edit(src/**)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)"
+    ]
+  }
+}

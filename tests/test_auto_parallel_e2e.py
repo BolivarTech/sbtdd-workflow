@@ -126,6 +126,16 @@ def _stage_fixture(dest: Path) -> str:
         Path(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md",
         claude_dir / "plugin.local.md",
     )
+    # v1.0.8 B1: materialize dot-claude-settings.json as
+    # .claude/settings.json so the staged project has explicit
+    # permissions for the implementer skill's tool calls (writes to
+    # scratch/, tests/, src/ + bash invocations for pytest/ruff/mypy).
+    # Doble defensa: even if the v1.0.8 A1 stub gate is bypassed in a
+    # future test variant, the fixture is "less broken" upstream.
+    shutil.copy(
+        _FIXTURE_DIR / "dot-claude-settings.json",
+        claude_dir / "settings.json",
+    )
     # scratch/ holds the per-task touch targets declared in plan-fixture.md.
     (dest / "scratch").mkdir(exist_ok=True)
     _git_init_with_identity(dest)
