@@ -581,12 +581,12 @@ Expected: `refactor:` commit + cascade into close-task `chore:` commit + T2 chec
 
 **Spec mapping:** Escenario A4-1 (class structure), A4-2 (monkeypatch target invariant), A4-3 (positive case raises on subprocess attempt), A1-2 / A1-3 / A1-4 (behaviors covered by tests).
 
-- [ ] **Step 1: Read existing class patterns to match style**
+- [x] **Step 1: Read existing class patterns to match style**
 
 Run: `grep -n "^class TestInvokeSkill" tests/test_superpowers_dispatch.py`
 Expected: line numbers of existing test classes. Read one (e.g., `TestInvokeSkillMembershipGate`) to mimic structure.
 
-- [ ] **Step 2: Write the failing Red test class (4 stub methods raising NotImplementedError)**
+- [x] **Step 2: Write the failing Red test class (4 stub methods raising NotImplementedError)**
 
 Append to end of `tests/test_superpowers_dispatch.py`:
 
@@ -621,12 +621,12 @@ class TestE2EStubGate:
         raise NotImplementedError("v1.0.8 T3 Red placeholder")
 ```
 
-- [ ] **Step 3: Run the Red tests to verify they fail**
+- [x] **Step 3: Run the Red tests to verify they fail**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestE2EStubGate -v`
 Expected: 4 FAILURES with `NotImplementedError: v1.0.8 T3 Red placeholder`.
 
-- [ ] **Step 4: Close Red phase via raw git commit**
+- [x] **Step 4: Close Red phase via raw git commit**
 
 Per the iter-2 Red-phase commit methodology (plan header): the 4 failing tests are intentional Red phase; close-phase verification would abort on the NotImplementedErrors. Use raw git commit.
 
@@ -637,7 +637,7 @@ git commit -m "test: v1.0.8 T3 Red — TestE2EStubGate scaffolding with 4 placeh
 
 Expected: Commit recorded; `git status` clean; state unchanged.
 
-- [ ] **Step 5: Write the Green — replace each test method with real body**
+- [x] **Step 5: Write the Green — replace each test method with real body**
 
 Replace the four test method bodies in `tests/test_superpowers_dispatch.py::TestE2EStubGate`:
 
@@ -771,7 +771,7 @@ class TestE2EStubGate:
         assert "bypassed (SBTDD_E2E_STUB_DISPATCH=1)" in result.stdout
 ```
 
-- [ ] **Step 6: Run the Green tests to verify all 4 pass**
+- [x] **Step 6: Run the Green tests to verify all 4 pass**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestE2EStubGate -v`
 Expected: 4 PASSED.
@@ -779,13 +779,13 @@ Expected: 4 PASSED.
 Run: `make verify`
 Expected: clean sec.0.1 chain.
 
-- [ ] **Step 7: Close Green phase**
+- [x] **Step 7: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T3 Green: implement 4 TestE2EStubGate regression tests"`
 
 Expected: `feat:` commit.
 
-- [ ] **Step 8: Write the Refactor — extract shared monkeypatch helpers**
+- [x] **Step 8: Write the Refactor — extract shared monkeypatch helpers**
 
 The 4 tests share `_fail`/`_capture` patterns for monkeypatching `run_with_timeout`. Extract shared helper methods to the class to reduce duplication.
 
@@ -917,7 +917,7 @@ Then refactor each of the 4 test methods to call the helpers instead of inlining
         assert "bypassed (SBTDD_E2E_STUB_DISPATCH=1)" in result.stdout
 ```
 
-- [ ] **Step 9: Run sec.0.1 chain after refactor**
+- [x] **Step 9: Run sec.0.1 chain after refactor**
 
 Run: `pytest tests/test_superpowers_dispatch.py::TestE2EStubGate -v`
 Expected: 4 PASSED (behavior unchanged from Green).
@@ -925,7 +925,7 @@ Expected: 4 PASSED (behavior unchanged from Green).
 Run: `make verify`
 Expected: clean.
 
-- [ ] **Step 10: Close Refactor phase + Task**
+- [x] **Step 10: Close Refactor phase + Task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T3 Refactor: extract shared monkeypatch helpers in TestE2EStubGate"`
 
