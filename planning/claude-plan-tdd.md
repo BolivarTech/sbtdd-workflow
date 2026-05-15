@@ -52,14 +52,14 @@ This pattern is well-precedented in CLAUDE.local.md §3 "TDD-Guard bajo ejecucio
 
 **Spec mapping:** Escenario A1-1 (gate fires for stubbable skill with env set), A1-5 (gate position is FIRST in invoke_skill body)
 
-- [ ] **Step 1: Read current `invoke_skill` signature + first guard block to identify exact insertion point**
+- [x] **Step 1: Read current `invoke_skill` signature + first guard block to identify exact insertion point**
 
 Read `skills/sbtdd/scripts/superpowers_dispatch.py` lines 308-370. The current FIRST guard is the v1.0.7 A2 worker-context check (lines ~348-360). The new v1.0.8 A1 gate goes BEFORE that, immediately after the function signature + docstring.
 
 Run: `grep -n "_SUBPROCESS_INCOMPATIBLE_SKILLS\|^def invoke_skill" skills/sbtdd/scripts/superpowers_dispatch.py`
 Expected output: line numbers of the existing constant + function definition, confirming insertion targets.
 
-- [ ] **Step 2: Write the failing Red test**
+- [x] **Step 2: Write the failing Red test**
 
 Append the following test to `tests/test_superpowers_dispatch.py` immediately after the existing test class definitions (around line ~860):
 
@@ -122,13 +122,13 @@ def test_v108_a1_gate_smoke_test_driven_development_with_env_set(monkeypatch):
     assert result.stderr == ""
 ```
 
-- [ ] **Step 3: Run the Red test to verify it fails**
+- [x] **Step 3: Run the Red test to verify it fails**
 
 Run: `pytest tests/test_superpowers_dispatch.py::test_v108_a1_gate_smoke_test_driven_development_with_env_set -v`
 
 Expected: FAIL with `AssertionError: v1.0.8 A1 regression: gate should have fired...` (because the gate doesn't exist yet, so `invoke_skill` falls through to `run_with_timeout` which we patched to raise).
 
-- [ ] **Step 4: Close Red phase via raw git commit**
+- [x] **Step 4: Close Red phase via raw git commit**
 
 Per the iter-2 Red-phase commit methodology (plan header): the Red phase test fails by design (gate doesn't exist yet), so close-phase verification would abort. Use raw git commit instead. State file stays at `current_phase=red`.
 
@@ -139,7 +139,7 @@ git commit -m "test: v1.0.8 T1 Red — smoke test for SBTDD_E2E_STUB_DISPATCH ga
 
 Expected: Commit recorded; `git status` clean; `.claude/session-state.json` `current_phase` unchanged (still `red`).
 
-- [ ] **Step 5: Write the Green implementation — module constants**
+- [x] **Step 5: Write the Green implementation — module constants**
 
 Add the following two module-level constants in `skills/sbtdd/scripts/superpowers_dispatch.py` IMMEDIATELY AFTER the existing `_SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(...)` block (currently ending around line 90):
 
@@ -186,7 +186,7 @@ _E2E_STUBBABLE_SKILLS: frozenset[str] = frozenset(
 )
 ```
 
-- [ ] **Step 6: Write the Green implementation — gate at top of `invoke_skill`**
+- [x] **Step 6: Write the Green implementation — gate at top of `invoke_skill`**
 
 Insert the gate block IMMEDIATELY AFTER the `invoke_skill` function signature + docstring closing `"""`, BEFORE the existing v1.0.7 A2 worker-context check (currently the first guard at line ~348). The new gate must be the very first executable statement.
 
@@ -227,7 +227,7 @@ Locate the docstring end. After the docstring, insert (before any existing code)
 
 Verify `import sys` is already present at the top of `superpowers_dispatch.py` (it is, used by `_sys.stderr.write` calls elsewhere — check via `grep -n "^import sys\|^from sys" skills/sbtdd/scripts/superpowers_dispatch.py`). If somehow missing, add `import sys` to the import block.
 
-- [ ] **Step 7: Run the Green test to verify it passes**
+- [x] **Step 7: Run the Green test to verify it passes**
 
 Run: `pytest tests/test_superpowers_dispatch.py::test_v108_a1_gate_smoke_test_driven_development_with_env_set -v`
 Expected: PASS.
@@ -238,13 +238,13 @@ Expected: all existing tests still pass; new smoke test passes; no regressions.
 Run: `make verify` for full sec.0.1 chain.
 Expected: pytest all pass, ruff check clean, ruff format clean, mypy strict clean.
 
-- [ ] **Step 8: Close Green phase**
+- [x] **Step 8: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T1 Green: add SBTDD_E2E_STUB_DISPATCH env var stub gate to invoke_skill"`
 
 Expected: commit with `feat:` prefix; state advances to `refactor`.
 
-- [ ] **Step 9: Write the Refactor — extend `invoke_skill` docstring**
+- [x] **Step 9: Write the Refactor — extend `invoke_skill` docstring**
 
 Modify the `invoke_skill` docstring in `skills/sbtdd/scripts/superpowers_dispatch.py` to document the new gate including gate precedence rationale (iter-2 carry-forward Mel-I2) + pytest sys.modules guard explanation (iter-2 carry-forward Cas-W11). Locate the docstring section that mentions v1.0.7 A2 (around line ~337-347). After that paragraph and BEFORE the `Args:` or `Returns:` section, add:
 
@@ -281,12 +281,12 @@ Modify the `invoke_skill` docstring in `skills/sbtdd/scripts/superpowers_dispatc
     workers continue to dispatch real LLM via ``claude -p``).
 ```
 
-- [ ] **Step 10: Run sec.0.1 chain after refactor**
+- [x] **Step 10: Run sec.0.1 chain after refactor**
 
 Run: `make verify`
 Expected: all 4 tools clean; coverage >= 88%; no new test failures.
 
-- [ ] **Step 11: Close Refactor phase + Task**
+- [x] **Step 11: Close Refactor phase + Task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T1 Refactor: document SBTDD_E2E_STUB_DISPATCH gate in invoke_skill docstring"`
 
