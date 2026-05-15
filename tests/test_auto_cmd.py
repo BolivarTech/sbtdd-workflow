@@ -15,6 +15,37 @@ import pytest
 import auto_cmd
 
 
+class _CapturingFakeWorkerProc:
+    """v1.0.8 T2 helper: minimal subprocess.Popen stub for env-capture tests.
+
+    Returns (b"", b"") from communicate(); pid=4242; returncode=0.
+    """
+
+    def __init__(self) -> None:
+        self.pid = 4242
+        self.returncode = 0
+
+    def communicate(self, timeout: int):
+        return (b"", b"")
+
+
+def _make_env_capturing_spawn_worker(
+    captured_envs: list[dict[str, str]],
+):
+    """v1.0.8 T2 helper: build a fake _spawn_worker that records env dicts.
+
+    Returns a callable matching the _spawn_worker signature that appends
+    each invocation's env dict to ``captured_envs`` and returns a
+    :class:`_CapturingFakeWorkerProc`.
+    """
+
+    def _fake(argv, env, **popen_kwargs):
+        captured_envs.append(dict(env))
+        return _CapturingFakeWorkerProc()
+
+    return _fake
+
+
 def test_auto_cmd_module_importable() -> None:
     import auto_cmd
 
@@ -3233,20 +3264,11 @@ def test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch(
     monkeypatch.setenv("V108_A2_REGRESSION_MARKER", "propagated")
 
     captured_envs: list[dict[str, str]] = []
-
-    class _FakeProc:
-        def __init__(self) -> None:
-            self.pid = 4242
-            self.returncode = 0
-
-        def communicate(self, timeout: int):
-            return (b"", b"")
-
-    def _fake_spawn_worker(argv, env, **popen_kwargs):
-        captured_envs.append(dict(env))
-        return _FakeProc()
-
-    monkeypatch.setattr(auto_cmd, "_spawn_worker", _fake_spawn_worker)
+    monkeypatch.setattr(
+        auto_cmd,
+        "_spawn_worker",
+        _make_env_capturing_spawn_worker(captured_envs),
+    )
 
     # Stub out post-batch hooks so the test focuses only on env propagation.
     # Per iter-2 carry-forward Mel-W1: also stub close_task_cmd._merge_scratch_plans
