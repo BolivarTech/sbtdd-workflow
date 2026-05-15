@@ -304,12 +304,12 @@ Expected: commit with `refactor:` prefix; cascade into close-task which flips T1
 
 **Spec mapping:** Escenario A2-1 (parent env var propagates via os.environ.copy), A2-2 (env propagation unfiltered, no allowlist)
 
-- [ ] **Step 1: Locate target test insertion point in test_auto_cmd.py**
+- [x] **Step 1: Locate target test insertion point in test_auto_cmd.py**
 
 Run: `grep -n "_dispatch_tracks_concurrent\|test_dispatch" tests/test_auto_cmd.py | head -10`
 Expected: line numbers of existing dispatcher tests. Insert the new test after the cluster of `test_dispatch_tracks_concurrent_*` tests (likely around the same line area).
 
-- [ ] **Step 2: Write the failing Red test**
+- [x] **Step 2: Write the failing Red test**
 
 Append the following test to `tests/test_auto_cmd.py` after the existing `_dispatch_tracks_concurrent` test cluster:
 
@@ -394,7 +394,7 @@ def test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch(
     )
 ```
 
-- [ ] **Step 3: Run the Red test to verify it passes (regression-pin pattern)**
+- [x] **Step 3: Run the Red test to verify it passes (regression-pin pattern)**
 
 Run: `pytest tests/test_auto_cmd.py::test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch -v`
 
@@ -402,7 +402,7 @@ Expected outcome — this test is a REGRESSION PIN: it should pass immediately b
 
 If the test FAILS at scaffold-time (import path issues, missing fixture), fix those test-side issues until it passes against the unchanged production code.
 
-- [ ] **Step 4: Close Red phase via raw git commit**
+- [x] **Step 4: Close Red phase via raw git commit**
 
 Per the iter-2 Red-phase commit methodology (plan header): the Red test passes-by-design (regression pin), but close-phase Red verification would still run sec.0.1 chain which is heavy. Use raw git commit instead for consistency with other Red phases. State stays at `current_phase=red`.
 
@@ -413,7 +413,7 @@ git commit -m "test: v1.0.8 T2 Red — regression pin for worker env propagation
 
 Expected: Commit recorded; `git status` clean; state file unchanged.
 
-- [ ] **Step 5: Write the Green — substantive documentation of env propagation contract**
+- [x] **Step 5: Write the Green — substantive documentation of env propagation contract**
 
 Per iter-2 carry-forward Mel-W2+Cas-W8: the Green phase has TWO substantive doc surfaces. NOT a 1-line throwaway comment.
 
@@ -459,18 +459,18 @@ Per iter-2 carry-forward Mel-W2+Cas-W8: the Green phase has TWO substantive doc 
 
 Together (a) + (b) constitute the substantive Green diff: ~10 lines of docstring + 8 lines of inline comment. Both serve the same goal as the test — pin the env propagation contract for future maintainers.
 
-- [ ] **Step 6: Run sec.0.1 chain after Green diff**
+- [x] **Step 6: Run sec.0.1 chain after Green diff**
 
 Run: `make verify`
 Expected: clean sec.0.1 chain.
 
-- [ ] **Step 7: Close Green phase**
+- [x] **Step 7: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T2 Green: document worker env propagation contract (docstring + inline) — pins SBTDD_E2E_STUB_DISPATCH semantics for v1.0.8 Pillar A1"`
 
 Expected: commit with `feat:` prefix; state advances to `refactor`.
 
-- [ ] **Step 8: Write the Refactor — extract reusable env-capture helper for related tests**
+- [x] **Step 8: Write the Refactor — extract reusable env-capture helper for related tests**
 
 In `tests/test_auto_cmd.py`, the `_FakeProc` + `_fake_spawn_worker` pattern in the new test could be reused by future env-propagation regression tests. Extract them to module-level helpers at the top of the file (after imports, before the first test function):
 
@@ -556,7 +556,7 @@ def test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch(
     )
 ```
 
-- [ ] **Step 9: Run sec.0.1 chain after refactor**
+- [x] **Step 9: Run sec.0.1 chain after refactor**
 
 Run: `pytest tests/test_auto_cmd.py::test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch -v`
 Expected: PASS (behavior unchanged from Green).
@@ -564,7 +564,7 @@ Expected: PASS (behavior unchanged from Green).
 Run: `make verify`
 Expected: clean.
 
-- [ ] **Step 10: Close Refactor phase + Task**
+- [x] **Step 10: Close Refactor phase + Task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T2 Refactor: extract env-capturing fake worker helpers in test_auto_cmd"`
 
