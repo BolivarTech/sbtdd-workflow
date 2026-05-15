@@ -946,12 +946,12 @@ Expected: `refactor:` commit + close-task cascade.
 
 **Dependencies**: T1 (gate exists) + T5 (fixture has `.claude/settings.json`) MUST be completed before T4.
 
-- [ ] **Step 1: Read current test body to plan delta**
+- [x] **Step 1: Read current test body to plan delta**
 
 Run: `sed -n '184,268p' tests/test_auto_parallel_e2e.py`
 Expected: current xfail decorator + test body. Plan: replace lines ~184-197 (xfail decorator + decorator gap) by removing them; replace lines ~244-267 (permissive assertions) with strict assertions; update `_AUTO_TIMEOUT_S` constant.
 
-- [ ] **Step 2: Write the failing Red — strict assertions WITHOUT env var stub yet**
+- [x] **Step 2: Write the failing Red — strict assertions WITHOUT env var stub yet**
 
 Modify `tests/test_auto_parallel_e2e.py`:
 
@@ -1100,7 +1100,7 @@ Modify `tests/test_auto_parallel_e2e.py`:
 _AUTO_TIMEOUT_S = 60
 ```
 
-- [ ] **Step 3: Verify Red state deterministically via static grep (iter-2 carry-forward Cas-W6 resolution)**
+- [x] **Step 3: Verify Red state deterministically via static grep (iter-2 carry-forward Cas-W6 resolution)**
 
 Per iter-2 carry-forward Cas-W6: do NOT run the actual e2e test in Red phase. Running it depends on upstream `claude -p` hang behavior (flaky, slow). Instead, verify Red state DETERMINISTICALLY via static inspection: the test source has the strict assertions in place AND does NOT yet have `env["SBTDD_E2E_STUB_DISPATCH"] = "1"`.
 
@@ -1124,7 +1124,7 @@ Expected: ZERO matches (xfail decorator was deleted in Step 2a).
 
 These three checks deterministically confirm the Red state without depending on upstream behavior. If desired, also run the e2e test with a SHORT timeout (e.g., 5s) to confirm it fails by timeout — but treat that as informational, NOT as the gate.
 
-- [ ] **Step 4: Close Red phase via raw git commit**
+- [x] **Step 4: Close Red phase via raw git commit**
 
 Per the iter-2 Red-phase commit methodology (plan header): the test fails intentionally (timeout or assertion); close-phase verification would abort. Use raw git commit.
 
@@ -1135,7 +1135,7 @@ git commit -m "test: v1.0.8 T4 Red — T3 e2e strict assertions without stub gat
 
 Expected: Commit recorded; `git status` clean; state unchanged.
 
-- [ ] **Step 5: Write the Green — add SBTDD_E2E_STUB_DISPATCH=1 to env**
+- [x] **Step 5: Write the Green — add SBTDD_E2E_STUB_DISPATCH=1 to env**
 
 In `tests/test_auto_parallel_e2e.py`, locate the env block within the test body:
 
@@ -1151,7 +1151,7 @@ Replace with:
     env["SBTDD_E2E_STUB_DISPATCH"] = "1"
 ```
 
-- [ ] **Step 6: Run the Green test to verify it passes**
+- [x] **Step 6: Run the Green test to verify it passes**
 
 Run: `pytest tests/test_auto_parallel_e2e.py::test_auto_parallel_e2e_chicken_and_egg_closed -v`
 Expected: PASSED in <60s.
@@ -1159,13 +1159,13 @@ Expected: PASSED in <60s.
 Run: `make verify`
 Expected: clean sec.0.1 chain.
 
-- [ ] **Step 7: Close Green phase**
+- [x] **Step 7: Close Green phase**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T4 Green: T3 e2e passes with SBTDD_E2E_STUB_DISPATCH=1 in subprocess env"`
 
 Expected: `feat:` commit.
 
-- [ ] **Step 8: Write the Refactor — extract assertion helpers to module level**
+- [x] **Step 8: Write the Refactor — extract assertion helpers to module level**
 
 The new test body has a long sequence of asserts. Extract them into focused module-level helpers in `tests/test_auto_parallel_e2e.py`.
 
@@ -1274,7 +1274,7 @@ Then replace the inline asserts in the test body (everything after `diagnostic =
     _assert_audit_finished_success(project, diagnostic)
 ```
 
-- [ ] **Step 9: Run sec.0.1 chain after refactor**
+- [x] **Step 9: Run sec.0.1 chain after refactor**
 
 Run: `pytest tests/test_auto_parallel_e2e.py::test_auto_parallel_e2e_chicken_and_egg_closed -v`
 Expected: PASSED (behavior unchanged from Green).
@@ -1282,7 +1282,7 @@ Expected: PASSED (behavior unchanged from Green).
 Run: `make verify`
 Expected: clean.
 
-- [ ] **Step 10: Close Refactor phase + Task**
+- [x] **Step 10: Close Refactor phase + Task**
 
 Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T4 Refactor: extract A3 assertion helpers in test_auto_parallel_e2e"`
 
