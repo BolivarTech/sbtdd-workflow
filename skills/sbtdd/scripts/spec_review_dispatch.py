@@ -412,6 +412,26 @@ def dispatch_spec_reviewer(
         ValidationError: Reviewer stdout could not be parsed as the
             expected JSON shape.
     """
+    # v1.0.8 T4 + Loop 2 iter-1 Mel-W3+Bal-W4 fix: e2e stub gate via
+    # shared _e2e_stub_active() helper from superpowers_dispatch. The
+    # reviewer subprocess shells to ``claude -p`` which hangs without
+    # a TTY; in e2e tests with both env vars set we short-circuit to a
+    # synthetic approval so the worker can advance close-task.
+    # Production callers never set both vars simultaneously.
+    # **INV-31 cross-reference**: this stub bypasses INV-31
+    # spec-reviewer enforcement IN TEST CONTEXT ONLY. The INV-31
+    # contract (per spec sec.S.10.6) remains in force for production
+    # /sbtdd auto + /sbtdd close-task runs (env vars unset = stub
+    # inactive = real reviewer dispatched).
+    from superpowers_dispatch import _e2e_stub_active
+
+    if _e2e_stub_active():
+        return SpecReviewResult(
+            approved=True,
+            issues=(),
+            reviewer_iter=1,
+            artifact_path=None,
+        )
     plan_text = plan_path.read_text(encoding="utf-8")
     task_text = _extract_task_text(plan_text, task_id)
     diff_text = _collect_task_diff(repo_root, task_id)

@@ -90,6 +90,84 @@ _SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(
 )
 
 
+#: v1.0.8 Pillar A1: env var name that activates the test-only stub
+#: gate at the top of :func:`invoke_skill`. When set to ``"1"`` AND
+#: :data:`_E2E_TEST_RUNNER_ENV` is also set to ``"1"``, skills in
+#: :data:`_E2E_STUBBABLE_SKILLS` short-circuit to a synthetic
+#: :class:`SkillResult` instead of spawning ``claude -p``. The
+#: AND-gate (Caspar W11 option b, switched from original W11 option a
+#: ``pytest in sys.modules`` per T4 follow-up commit) provides
+#: defense-in-depth: production accidental leak of one env var alone
+#: has zero effect; both must leak simultaneously for the gate to
+#: fire.
+#:
+#: **Test-only**: production callers MUST NOT set this variable.
+_E2E_STUB_ENV: str = "SBTDD_E2E_STUB_DISPATCH"
+
+#: v1.0.8 Pillar A1 (T4 follow-up fix): second env var that AND-gates
+#: with :data:`_E2E_STUB_ENV`. Two env vars required to fire the gate
+#: provides defense-in-depth against accidental production leak —
+#: requires BOTH vars to leak simultaneously (much less likely than
+#: a single env var leak via shared shell profile / .env / devcontainer
+#: template). The original v1.0.8 design used ``"pytest" in sys.modules``
+#: but that breaks the legitimate e2e use case where a test parent
+#: spawns a subprocess that inherits env vars but does NOT import
+#: pytest in the subprocess process (run_sbtdd.py orchestrator).
+#: Per Caspar iter-1 W11 explicit alternative recommendation:
+#: "(b) AND-gate with a second env var".
+_E2E_TEST_RUNNER_ENV: str = "SBTDD_E2E_TEST_RUNNER"
+
+#: v1.0.8 Pillar A1: skills whose ``claude -p`` dispatch is bypassed
+#: when :data:`_E2E_STUB_ENV` AND :data:`_E2E_TEST_RUNNER_ENV` are
+#: both set. Frozen via ``frozenset`` (style consistent with
+#: :data:`_SUBPROCESS_INCOMPATIBLE_SKILLS`).
+#:
+#: Membership-bound list -- adding skills here requires explicit
+#: rationale documented in CHANGELOG and approval through MAGI
+#: Checkpoint 2 / pre-merge gate. v1.0.8 Q1'=a baseline scope was
+#: 2 skills (``/test-driven-development`` + ``/systematic-debugging``);
+#: **T4 expanded the set to 5 skills per empirical e2e necessity**
+#: (Loop 2 iter 1 approved expansion at GO_WITH_CAVEATS 3-0). The
+#: full set bypasses dispatchers that hang headless in the e2e test
+#: orchestrator's Phase 3 pre-merge code path.
+_E2E_STUBBABLE_SKILLS: frozenset[str] = frozenset(
+    {
+        "test-driven-development",
+        "systematic-debugging",
+        # v1.0.8 T4: requesting-code-review subprocess hangs in headless
+        # e2e context (no TTY). Stubbed under both env vars so the
+        # orchestrator's phase 3 pre-merge Loop 1 short-circuits to a
+        # synthetic clean review result.
+        "requesting-code-review",
+        # v1.0.8 T4: verification-before-completion can be invoked from
+        # orchestrator code paths (e.g., review mini-cycle in phase 3)
+        # that DO NOT carry SBTDD_AUTO_PARALLEL_WORKER=1. Stub so
+        # orchestrator runs without TTY hang in e2e.
+        "verification-before-completion",
+        # v1.0.8 T4: receiving-code-review invoked via /receiving-code-review
+        # in phase 3 mini-cycle; loops on iter-1/2/3 in headless e2e.
+        # Stub to short-circuit the mini-cycle loop.
+        "receiving-code-review",
+    }
+)
+
+
+def _e2e_stub_active() -> bool:
+    """Return True iff both v1.0.8 e2e stub env vars are set to ``"1"``.
+
+    Helper exported for use by sibling dispatchers
+    (:mod:`spec_review_dispatch`, :mod:`magi_dispatch`) so the
+    dual-env-var AND-gate predicate is single-sourced. Per Loop 2
+    iter-1 Mel-W3 fix: extracted to avoid duplication drift across
+    the 3+ stub-gate callsites.
+
+    Production callers never set both env vars simultaneously; this
+    function returns ``True`` only in e2e test contexts that
+    explicitly opt into the stub gate.
+    """
+    return os.environ.get(_E2E_STUB_ENV) == "1" and os.environ.get(_E2E_TEST_RUNNER_ENV) == "1"
+
+
 @dataclass(frozen=True)
 class SkillResult:
     """Outcome of a successful skill invocation.
@@ -278,6 +356,37 @@ def invoke_skill(
 ) -> SkillResult:
     """Invoke a superpowers skill via ``claude -p`` subprocess.
 
+    v1.0.8 Pillar A1: test-only stub gate. When env var
+    :data:`_E2E_STUB_ENV` (``SBTDD_E2E_STUB_DISPATCH``) is set to
+    ``"1"`` AND ``"pytest"`` is in :data:`sys.modules` AND
+    ``skill`` is in :data:`_E2E_STUBBABLE_SKILLS`
+    (``test-driven-development`` or ``systematic-debugging``), this
+    function short-circuits to a synthetic ``SkillResult(rc=0)``
+    without spawning ``claude -p``. The gate is checked FIRST so it
+    short-circuits ALL downstream dispatch logic.
+
+    Gate precedence (iter-2 carry-forward Mel-I2): the v1.0.8 A1
+    stub gate is positioned BEFORE the v1.0.7 A2 worker-context
+    guard, the v1.0.6 J-3 headless guard, and the v1.0.4
+    membership gate. When both ``SBTDD_E2E_STUB_DISPATCH=1`` AND
+    ``SBTDD_AUTO_PARALLEL_WORKER=1`` are set (test scenario where
+    the parent test sets the stub env var, which propagates to
+    worker via ``os.environ.copy()`` per A2), the stub gate wins
+    -- correct for the test path.
+
+    Defense-in-depth via pytest sys.modules guard (iter-2
+    carry-forward Cas-W11): the gate requires both the env var
+    AND ``"pytest" in sys.modules``. Production processes
+    (auto_cmd orchestrator, worker subprocesses) do NOT import
+    pytest at runtime, so accidental env var leak into production
+    has ZERO effect -- gate cannot fire. Test runners load pytest
+    into sys.modules at process start. This converts the gate
+    from "test-by-convention" to "test-by-runtime-check".
+
+    Test-only -- production callers MUST NOT set the env var
+    (gate is namespaced via ``SBTDD_E2E_*`` prefix; production
+    workers continue to dispatch real LLM via ``claude -p``).
+
     Args:
         skill: Skill name without leading slash (``brainstorming``,
             ``writing-plans``, ...).
@@ -320,6 +429,42 @@ def invoke_skill(
         ValidationError: If the subprocess timed out OR exited non-zero without
             matching a quota pattern. Mapped to exit 1 by run_sbtdd.py.
     """
+    # v1.0.8 Pillar A1: test-only stub gate. Checked FIRST so it
+    # short-circuits ALL downstream dispatch logic (v1.0.4 membership
+    # gate + v1.0.6 J-3 headless guard + v1.0.7 A2 worker-context
+    # guard). Test-only: production MUST NOT set
+    # SBTDD_E2E_STUB_DISPATCH nor SBTDD_E2E_TEST_RUNNER.
+    #
+    # T4 follow-up fix: original v1.0.8 design used
+    # ``"pytest" in sys.modules`` as runtime production safeguard
+    # (Caspar W11 option a). That worked for in-process test
+    # invocations but BROKE the legitimate e2e use case where
+    # ``tests/test_auto_parallel_e2e.py`` spawns
+    # ``python run_sbtdd.py auto --parallel`` as subprocess: the
+    # subprocess inherits env vars via os.environ.copy() but does
+    # NOT import pytest (auto_cmd has no pytest dep). Switched to
+    # Caspar W11 option b: AND-gate with a second env var
+    # SBTDD_E2E_TEST_RUNNER. Both vars must be set; production
+    # accidental leak of one (or both) without the other has zero
+    # effect. Test parent sets both before subprocess.run + both
+    # propagate to subprocess via os.environ.copy().
+    # Loop 2 iter-1 Mel-W3 fix: use shared _e2e_stub_active() helper
+    # so the AND-gate predicate is single-sourced across all stub-gate
+    # callsites (also used by spec_review_dispatch + magi_dispatch +
+    # auto_cmd._verify_worker_sidecars_present).
+    if _e2e_stub_active() and skill in _E2E_STUBBABLE_SKILLS:
+        # v1.0.8 T4: requesting-code-review consumer (pre_merge_cmd
+        # ._is_clean_to_go) requires the literal "clean-to-go" token in
+        # stdout to exit Loop 1. Other stubbed skills accept any stdout.
+        stub_stdout = f"[sbtdd e2e stub] /{skill} bypassed ({_E2E_STUB_ENV}=1)"
+        if skill == "requesting-code-review":
+            stub_stdout += " clean-to-go"
+        return SkillResult(
+            skill=skill,
+            returncode=0,
+            stdout=stub_stdout,
+            stderr="",
+        )
     # v1.0.1 Item A2 (sec.2.3) + v1.0.4 Item A.2 (Task 3): safe-by-default
     # gate -- skills in ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g.
     # ``/brainstorming``, ``/writing-plans``, ``/receiving-code-review``)

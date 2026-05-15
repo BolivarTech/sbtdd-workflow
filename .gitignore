@@ -37,3 +37,6 @@ CLAUDE.md
 # Session ephemera (MAGI review packets, remember notes)
 .magi_review_input/
 .remember/
+.tmp_repro/
+.magi-checkpoint2/
+.magi-premerge/

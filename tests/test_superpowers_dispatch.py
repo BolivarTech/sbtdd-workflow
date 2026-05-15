@@ -867,3 +867,190 @@ class TestInvokeSkillWorkerGuard:
         monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
         with pytest.raises(PreconditionError, match="Worker subprocess attempted"):
             superpowers_dispatch.invoke_skill(skill, allow_interactive_skill=True)
+
+
+# ---------------------------------------------------------------------------
+# v1.0.8 Pillar A1: SBTDD_E2E_STUB_DISPATCH env var stub gate smoke test.
+# Expanded gate regression suite lives in TestE2EStubGate (added by T3/A4).
+# ---------------------------------------------------------------------------
+
+
+def test_v108_a1_gate_smoke_test_driven_development_with_env_set(monkeypatch):
+    """v1.0.8 A1-1 smoke: gate fires for /test-driven-development with env=1.
+
+    Pins the minimum contract that T3 (A4 regression suite) expands on:
+    when SBTDD_E2E_STUB_DISPATCH=1 AND SBTDD_E2E_TEST_RUNNER=1 AND
+    skill is stubbable, invoke_skill returns synthetic
+    SkillResult(rc=0) WITHOUT spawning claude -p.
+
+    T4 follow-up fix: the runtime production safeguard switched from
+    ``"pytest" in sys.modules`` (Caspar W11 option a) to AND-gating
+    with a second env var SBTDD_E2E_TEST_RUNNER (Caspar W11 option b),
+    so the gate fires correctly in subprocess-spawned orchestrator
+    processes that inherit env vars but do NOT import pytest
+    (e.g., the v1.0.8 T4 e2e test invocation path).
+    """
+    import superpowers_dispatch
+    from superpowers_dispatch import SkillResult
+
+    monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+    monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError(
+            "v1.0.8 A1 regression: gate should have fired before "
+            "subprocess_utils.run_with_timeout was reached"
+        )
+
+    monkeypatch.setattr(
+        superpowers_dispatch.subprocess_utils,
+        "run_with_timeout",
+        _fail_if_called,
+    )
+
+    result = superpowers_dispatch.invoke_skill(
+        "test-driven-development",
+        args=["--phase=red"],
+        allow_interactive_skill=True,
+    )
+
+    assert isinstance(result, SkillResult)
+    assert result.returncode == 0
+    assert result.skill == "test-driven-development"
+    assert "[sbtdd e2e stub]" in result.stdout
+    assert "test-driven-development" in result.stdout
+    assert "SBTDD_E2E_STUB_DISPATCH=1" in result.stdout
+    assert result.stderr == ""
+
+
+class TestE2EStubGate:
+    """v1.0.8 Pillar A4: regression tests for SBTDD_E2E_STUB_DISPATCH gate.
+
+    Each test monkeypatches ``subprocess_utils.run_with_timeout`` at the
+    bottom of the call chain so the gate at the top of
+    :func:`superpowers_dispatch.invoke_skill` is exercised end-to-end
+    (real ``invoke_skill`` execution; only the subprocess call is faked).
+    Monkeypatching ``invoke_skill`` itself would break the gate test
+    semantic (gate would never run).
+
+    See ``sbtdd/spec-behavior.md`` v1.0.8 sec.4.4 escenarios A4-1..A4-3.
+    """
+
+    @staticmethod
+    def _capture_run_with_timeout(monkeypatch):
+        """Return a capture dict + monkeypatch run_with_timeout to record calls.
+
+        Returns the capture dict so individual tests can introspect:
+        ``captured["called"]`` (bool) and ``captured["cmd"]`` (list[str]).
+        """
+        import superpowers_dispatch
+
+        captured: dict = {"called": False, "cmd": None}
+
+        def _capture(cmd, **kwargs):
+            captured["called"] = True
+            captured["cmd"] = cmd
+            return type("_CP", (), {"returncode": 0, "stdout": "real", "stderr": ""})()
+
+        monkeypatch.setattr(superpowers_dispatch.subprocess_utils, "run_with_timeout", _capture)
+        return captured
+
+    @staticmethod
+    def _fail_if_subprocess_called(monkeypatch):
+        """Monkeypatch run_with_timeout to raise AssertionError if invoked.
+
+        Used by tests asserting the gate fires (subprocess must NEVER be
+        reached when env var is set + skill is stubbable).
+        """
+        import superpowers_dispatch
+
+        def _fail(*args, **kwargs):
+            raise AssertionError(
+                "v1.0.8 A4 regression: subprocess attempted but gate should have fired"
+            )
+
+        monkeypatch.setattr(superpowers_dispatch.subprocess_utils, "run_with_timeout", _fail)
+
+    def test_gate_fires_for_stubbable_skill_with_env_set(self, monkeypatch):
+        """v1.0.8 A4-1 (covers A1-1 + A1-4): env=1 + stubbable skill -> stub."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
+        self._fail_if_subprocess_called(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "test-driven-development",
+            args=["--phase=red"],
+            allow_interactive_skill=True,
+        )
+
+        assert isinstance(result, SkillResult)
+        assert result.returncode == 0
+        assert result.skill == "test-driven-development"
+        assert result.stderr == ""
+
+    def test_gate_does_not_fire_when_env_unset(self, monkeypatch):
+        """v1.0.8 A4-2 (covers A1-2): env unset -> real path attempted."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
+
+        monkeypatch.delenv("SBTDD_E2E_STUB_DISPATCH", raising=False)
+        captured = self._capture_run_with_timeout(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "test-driven-development",
+            args=["--phase=red"],
+            allow_interactive_skill=True,
+        )
+
+        assert captured["called"], "v1.0.8 A4-2 regression: gate fired even though env var unset"
+        assert isinstance(result, SkillResult)
+        assert "[sbtdd e2e stub]" not in result.stdout
+
+    def test_gate_does_not_fire_for_skill_outside_stubbable_set(self, monkeypatch):
+        """v1.0.8 A4-3 (covers A1-3): env=1 + non-stubbable -> real path.
+
+        v1.0.8 T4: the stubbable set was expanded with
+        `verification-before-completion`, `requesting-code-review`, and
+        `receiving-code-review` so the e2e dogfood test can drive auto
+        --parallel end-to-end without subprocess hangs. This regression
+        test now uses `using-git-worktrees` (not in stubbable set) to
+        confirm the gate selectively fires.
+        """
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
+        captured = self._capture_run_with_timeout(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "using-git-worktrees",
+            allow_interactive_skill=True,
+        )
+
+        assert captured["called"], "v1.0.8 A4-3 regression: gate fired for non-stubbable skill"
+        assert isinstance(result, SkillResult)
+        assert "[sbtdd e2e stub]" not in result.stdout
+
+    def test_gate_stdout_contains_marker(self, monkeypatch):
+        """v1.0.8 A4-4 (covers A1-4): stub stdout has '[sbtdd e2e stub]' literal."""
+        import superpowers_dispatch
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        monkeypatch.setenv("SBTDD_E2E_TEST_RUNNER", "1")
+        self._fail_if_subprocess_called(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "systematic-debugging",
+            args=[],
+            allow_interactive_skill=True,
+        )
+
+        assert result.stdout.startswith("[sbtdd e2e stub] /"), (
+            f"Expected stdout to start with '[sbtdd e2e stub] /' marker; got: {result.stdout!r}"
+        )
+        assert "systematic-debugging" in result.stdout
+        assert "bypassed (SBTDD_E2E_STUB_DISPATCH=1)" in result.stdout

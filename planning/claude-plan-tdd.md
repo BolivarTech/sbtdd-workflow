@@ -1,2889 +1,1967 @@
-# v1.0.7 `--parallel` Operational Unblock + Polish Implementation Plan
+# v1.0.8 Implementation Plan (pre-MAGI Checkpoint 2 draft)
 
-> Generado 2026-05-09 a partir de sbtdd/spec-behavior.md v1.0.7 via
-> superpowers:writing-plans skill (interactive session, brainstorming
-> Q1'-Q5' resolved). Frontmatter required by spec_lint R5.
->
-> **Iter-3 carry-forward applied 2026-05-09**: MAGI Checkpoint 2 iter 2
-> verdict GO_WITH_CAVEATS (3-0) — Mel APPROVE 82% + Bal APPROVE 82% +
-> Cas CONDITIONAL 74%. 1 CRITICAL (sidecar PID collision, cas) + 9
-> WARNING + 9 INFO. Cas item (5) "T7 commit-level collapse stays"
-> KEEPS T7 in scope. Resolution: apply ALL 7 of Cas's inline fixes +
-> swap T6 → T2 ordering per Bal+Cas WARNING. Pillar C T7 NOT deferred.
-> 8-cycle no-override streak goal preserved; iter 3 expects clean
-> convergence at 0 CRITICAL.
->
-> **Iter-3 carry-forward inlined deltas**:
-> - **Sidecar collision (cas iter-2 CRITICAL)**: T2 implementation
->   uses `<pid>-<monotonic_ns>-<uuid8>-verify.json` filename + parent
->   post-batch merge LOUD-FAILS via `ConcurrentDispatchError` on
->   missing sidecar. New escenarios A2-9 + A2-10.
-> - **T6 → T2 ordering swap (bal+cas iter-2 WARNING)**: execution
->   order changed to T1 → T6 → T2 → T3 → T4 → T5 → T7 → T8. T6 (B3
->   atomic_write_json retry) lands BEFORE T2 (which calls it via
->   `_persist_worker_verify_evidence`). Eliminates documented
->   PermissionError flake risk during T3 dogfood.
-> - **A3 PTY-path assertion (cas iter-2 WARNING)**: NEW escenario
->   A3-3 + integration test assertion: on POSIX, sidecar evidence must
->   include TTY-observation marker; SKIPPED on Windows.
-> - **R9 risk register (cas iter-2 WARNING)**: per-worker artifact
->   collision class added to spec sec.8.
-> - **T7 4-doc Red commit bisect (mel+bal+cas iter-2 WARNING)**:
->   discriminating test class names preserved (`TestC1*`, `TestC5*`,
->   `TestC6*`, `TestC7*`); CHANGELOG Process notes will document the
->   collapse trade-off so it isn't generalized.
->
-> **Iter-2 carry-forward applied 2026-05-09**: MAGI Checkpoint 2 iter 1
-> verdict GO_WITH_CAVEATS (3-0) full no-degraded with 5 CRITICAL + 10
-> WARNING + 5 INFO findings. Triage applied via INV-29 receiving-code-review
-> discipline. Inlined deltas:
->
-> - **C1 (mel)**: T1 prod code adds `_close_pty_master(proc)` lifecycle
->   helper + Popen-failure leak guard.
-> - **C2/C5 (mel+cas)**: Pillar C C1+C5+C6+C7 collapsed into ONE plan
->   task (T7) with real Refactor diff (cross-link K-4 helper docs from
->   C1+C6); C-X-K3-Removal stays separate (T8). 11 tasks → 8 tasks.
-> - **C3 (cas)**: T3 fixture rewritten — each worker invokes real
->   `close-phase` chain via `pyproject.toml`-bearing fixture project
->   so sec.0.1 chain dispatches and trips chicken-and-egg surface.
-> - **C4 (cas)**: T2 worker-mode bypass replaces `["make", "verify"]`
->   with explicit sec.0.1 chain (`pytest` / `ruff check` /
->   `ruff format --check` / `mypy`) + per-worker
->   `<root>/.claude/auto-run-workers/<pid>-verify.json` sidecar
->   capture for INV-16 evidence-before-assertions continuity.
-> - **W1 (mel)**: T2 adds A2-8 regression test pinning orchestrator-mode
->   pass-through.
-> - **W3 (mel)**: spec sec.8 R7 (PTY EIO/SIGHUP race) + R8 (worker
->   guard false-positive) added.
-> - **W7 (cas)**: T1 A1-1 test exercises real `sys.stdin.isatty() == True`
->   assertion via worker-writes-isatty fixture script.
-> - **W8 (cas)**: T1 implementation wraps `subprocess.Popen` in
->   try/except closing slave_fd on Popen failure.
-> - **W10 (cas)**: T8 (= old T11) Green commit prefix `--variant fix`
->   framed as "closes v1.0.7 C5-documented monkeypatch footgun" in
->   task header.
-> - **W2/W9 deferred**: PTY drain under large output → v1.0.8;
->   C5↔C-X-K3-Removal vestigial-comment → kept as transitional
->   archaeology (T7 commit → T8 commit window has educational value).
->
-> v1.0.7 = **`--parallel` operational unblock cycle (NON-POSTPONABLE)** per
-> user mandate 2026-05-09 ("dejar parallel completamente operacional").
-> Three pillars:
-> - Pillar A PRIMARY HARD-LOCKED: A1 POSIX PTY allocation + A2 Windows
->   hybrid Option B-W3 (with Q2'=b promotion of worker-context runtime
->   guard) + A3 F-A2 dogfood empirical validation.
-> - Pillar B LOCKED (v1.0.6 dogfood findings, ordered Q3'=b smallest
->   fix first): B5 drift detector line-anchored regex + B4
->   spec_review_dispatch file-reference + B3 atomic_write_json
->   PermissionError retry.
-> - Pillar C LOCKED (selective polish, Q4'=a all 5; iter-2 collapsed):
->   T7 combined polish (C1+C5+C6+C7) + T8 C-X-K3-Removal.
->
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship v1.0.7 — close v1.0.6-deferred Pillar A LOCKED commitment
-(PTY allocation in worker subprocess spawn unblocking `auto --parallel`
-end-to-end on POSIX + Windows hybrid) + ship 3 Pillar B v1.0.6 dogfood
-findings (B5 drift regex false-positive, B4 spec_review_dispatch
-WinError 206, B3 atomic_write_json Windows PermissionError flake) + 5
-cherry-picked Pillar C polish items (C1+C5+C6+C7+C-X-K3-Removal).
-**8 plan tasks (collapsed from 11 per iter-2 C2/C5 carry-forward); single
-subagent sequential execution per Q1'=a forced by chicken-and-egg until
-Pillar A ships + v1.0.8 own-cycle validates.**
+**Goal:** Cerrar la brecha empirica de v1.0.7 T3 e2e (xfail con 600s timeout) via un env var stub gate test-only en `superpowers_dispatch.invoke_skill`, mas hardening defensivo del fixture, mas archivo del bug upstream de claude -p para reporte futuro.
 
-**Architecture:** Pillar A introduces `subprocess_utils._spawn_worker_with_pty`
-(POSIX-only `pty.openpty()` per worker spawn) + `auto_cmd._spawn_worker`
-cross-platform dispatcher (POSIX → A1 PTY; Windows →
-`subprocess.PIPE` + `SBTDD_AUTO_PARALLEL_WORKER=1` env marker) +
-`close_phase_cmd._run_verification` worker-mode bypass (runs `make verify`
-shell directly, sidestepping interactive `/verification-before-completion`
-skill) + Q2'=b worker-context runtime guard in
-`superpowers_dispatch.invoke_skill` (defense-in-depth: raises if a worker
-ever attempts to dispatch a `_SUBPROCESS_INCOMPATIBLE_SKILLS` member).
-Pillar B fixes 3 v1.0.6-discovered defects: B5 swaps unanchored
-`"- [ ]" in section` substring check for line-anchored multiline regex
-`^[ \t]*- \[ \]` in `drift._plan_all_tasks_complete`; B4 writes the
-spec-reviewer prompt to `<repo_root>/.claude/spec-reviews/.tmp/prompt-<uuid16>.md`
-and passes `@<filepath>` reference in argv (cmdline length bounded by
-filepath, ~32K argv limit no longer triggered by prompt content); B3 wraps
-`state_file.atomic_write_json`'s `os.replace` in 3-attempt
-retry-with-backoff (`100ms × attempt-number`) absorbing AV-scanner /
-concurrent-writer Windows `PermissionError` flakes. Pillar C is doc +
-1-cycle K-3 alias removal. **Single subagent sequential execution per
-Q1'=a chicken-and-egg constraint** — no `--parallel` self-dispatch until
-A3 dogfood validates the fix end-to-end on Windows.
+**Architecture:** Una sola modificacion funcional en produccion (gate al top de `invoke_skill` short-circuiting claude -p dispatch cuando env var `SBTDD_E2E_STUB_DISPATCH=1` AND skill in `_E2E_STUBBABLE_SKILLS={"test-driven-development","systematic-debugging"}`) + 5 adjuntos de tests/docs/fixture/changelog. Test-only por contrato: namespaced env var, frozen membership set, docstring + multiple cross-refs documentando test-only intent.
 
-**Tech Stack:** Python >= 3.9, pytest, pytest-cov, ruff, mypy --strict,
-stdlib-only on hot paths (`pty` is POSIX stdlib; Windows path uses
-`subprocess` only). TDD-Guard active. Brainstorming Q-decisions:
-Q1=B operational unblock NON-POSTPONABLE; Q2=Fix B Option B-W3 hybrid
-(POSIX `pty.openpty()` + Windows `subprocess.PIPE` +
-`SBTDD_AUTO_PARALLEL_WORKER` env + `_run_verification` bypass);
-Q3=a strict no-INV-0 stance; Q1'=a single subagent sequential (forced by
-chicken-and-egg); Q2'=b promote C3 worker env runtime guard INTO Pillar
-A A2 as defense-in-depth; Q3'=b Pillar B order B5 → B4 → B3 (smallest
-fix first unblocks `make verify`); Q4'=a ship all 5 Pillar C items per
-baseline; Q5'=a default G2 ladder.
+**Tech Stack:** Python 3.9+, pytest, ruff, mypy --strict, `subprocess.run`/`subprocess.Popen`, JSON. Plugin runtime: claude CLI, git, tdd-guard, superpowers + magi plugins. SBTDD methodology: TDD strict Red/Green/Refactor per task via `/sbtdd close-phase`, `/sbtdd close-task` automaticos bajo plan-approved contract.
 
-**Plan invariants** (cross-task contracts):
+**Reference docs:**
+- Spec: `sbtdd/spec-behavior.md` v1.0.8 (escenarios A1-1..A1-5, A2-1..A2-2, A3-1..A3-4, A4-1..A4-3, B1-1..B1-3, B2-1..B2-4)
+- Spec-base: `sbtdd/spec-behavior-base.md` v1.0.8 (Q1'-Q5' decisiones + risk register R1-R7)
+- Rules: `~/.claude/CLAUDE.md` (global, absolute precedence — INV-0) + `CLAUDE.local.md` (project, sec.5 commit prefixes + sec.3 TDD enforcement)
 
-- Every commit follows `~/.claude/CLAUDE.md` Git rules: English only, no
-  AI references, no `Co-Authored-By` lines, atomic, prefix from sec.5 of
-  `CLAUDE.local.md` (`test:` / `feat:` / `fix:` / `refactor:` /
-  `chore:`).
-- Every phase close runs `/verification-before-completion` (sec.0.1:
-  `pytest`, `ruff check .`, `ruff format --check .`, `mypy .`) before
-  the commit.
-- Every new `.py` file starts with the 4-line header:
-  `#!/usr/bin/env python3` (executables only), `# Author: Julian Bolivar`,
-  `# Version: 1.0.0`, `# Date: 2026-05-09`.
-- **Phase close protocol (v1.0.4 mandate + v1.0.5 Item D Q3-A HARD-BLOCK
-  enforced)**: subagent MUST invoke
-  `python skills/sbtdd/scripts/run_sbtdd.py close-phase` after each
-  Red/Green/Refactor verify-clean. Manual `git commit` per phase BYPASSES
-  the phase-advance + state-file update + verification gate; **close-task
-  HARD-BLOCKS via `_preflight` when commit chain since last
-  `chore: mark task` lacks the canonical TDD triplet**. Override
-  available via `--skip-preflight` (audit-logged to stderr; emergency
-  only).
-- **Task close protocol**: subagent MUST invoke
-  `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-  after Refactor close-phase. Use `--skip-spec-review` to bypass INV-31
-  spec-reviewer dispatch (~1-2 min/task overhead acceptable but not
-  required for these infrastructure items).
-- **Sequential execution mandate**: Q1'=a forces SINGLE subagent
-  through the full chain. **Order (post iter-3 carry-forward T6 → T2
-  swap)**: T1 → T6 → T2 → T3 → T4 → T5 → T7 → T8. NO
-  `auto --parallel` self-dispatch during v1.0.7 own-cycle
-  (chicken-and-egg until Pillar A ships + A3 dogfood validates).
-  v1.0.7 own-cycle uses `auto` sequential foreground OR manual
-  subagent dispatch via Agent tool.
-- **Within-Pillar-A ordering (HARD)**: T1 (A1) must land BEFORE T2 (A2)
-  because A2's cross-platform dispatcher imports `_spawn_worker_with_pty`
-  + `_close_pty_master` from `subprocess_utils`. T3 (A3) integration
-  test must run AFTER T1+T2 ship.
-- **Within-Pillar-C ordering (HARD, post iter-2 collapse)**: T7
-  (combined C1+C5+C6+C7 polish) must land BEFORE T8 (C-X-K3-Removal
-  alias removal) — T7 adds the C5 warning comment on the alias line;
-  T8 removes both alias AND comment together.
-- INV-37 composite-signature tripwire preserved unchanged.
-- Item C v1.0.2 spec_lint gate (R1-R5) preserved unchanged.
-- v1.0.4 Items A+B membership-based subprocess gate preserved + EXTENDED
-  with v1.0.7 A2 Q2'=b worker-context runtime guard.
-- v1.0.4 Path 3 `--parallel` architecture preserved unchanged. v1.0.7
-  EXTENDS with PTY allocation (POSIX) + Windows hybrid bypass (Windows).
-- v1.0.5 per-worker sidecar (I-1) + scratch (I-2) + flag forwarding (I-3)
-  patterns preserved unchanged.
-- v1.0.6 J-1+J-2+J-3 headless detection helper +
-  `superpowers_dispatch.invoke_skill` headless guard preserved + EXTENDED
-  with v1.0.7 A2 Q2'=b worker-context runtime guard.
+**Execution mode:** Single-track sequential subagent per CLAUDE.local.md §5.1 (chicken-and-egg precedent v1.0.6+v1.0.7). MAGI Checkpoint 2 may revise to 2-3 track parallel; until then assume sequential.
 
-**Commit prefix map per phase** (from `CLAUDE.local.md` §5):
+**Task ordering (strict):**
+- T1 (A1 gate) must complete before T3 (A4 tests) and T4 (A3 e2e) — they depend on the gate existing.
+- T5 (B1 fixture) must complete before T4 (A3 e2e) — e2e test stages the fixture file.
+- T2 (A2 env propagation), T5 (B1), T6 (B2) are disjoint from T1/T3/T4; may parallelize if MAGI approves.
 
-| Phase | Prefix | Closer |
-|-------|--------|--------|
-| Red (failing test) | `test:` | `close-phase` |
-| Green (impl) | `feat:` (new module/feature) or `fix:` (bug fix) | `close-phase` |
-| Refactor | `refactor:` | `close-phase` |
-| Task close | `chore:` (automated) | `close-task --skip-spec-review` |
+**Red-phase commit methodology (iter-2 carry-forward Mel-W3+Cas-W9 resolution):**
+
+Red phases introduce intentionally-failing tests. The standard close-phase invocation runs sec.0.1 verification (pytest + ruff + mypy) BEFORE committing, which aborts on the new failing test. Per iter-2 carry-forward, the v1.0.7 workaround pattern (temporary `@pytest.mark.xfail` marker added in Red, removed in Green) is REPLACED with a cleaner pattern:
+
+- **Red commit**: use raw `git commit -m "test: <message>"` (NOT `/sbtdd close-phase`). Per CLAUDE.local.md §5 "Excepcion bajo plan aprobado" the `test:` prefix is authorized for TDD Red close under the plan-approved auto-commit contract. State file (`current_phase`) is NOT advanced by the Red commit — it stays at `red`.
+- **Green commit**: use `/sbtdd close-phase --variant {feat|fix} --message "..."`. The Green test (now passing because impl exists) is verified by close-phase's sec.0.1 chain, then committed with `feat:` / `fix:` prefix, and state advances to `refactor`.
+- **Refactor commit**: use `/sbtdd close-phase --message "..."`. Refactor verified clean, committed with `refactor:` prefix, cascade into close-task (marks plan checkbox `[x]`, commits `chore:`, advances state to next task `red` or to `done`).
+
+This methodology adjustment applies to ALL tasks T1-T6 wherever a Red phase introduces a failing test. No `@pytest.mark.xfail` temporary markers are used. The advantage: no policy escape hatch hits the v1.0.5 `_preflight` HARD-BLOCK on empty phases, and there is no brittle 6-commit window where a stale marker could survive past Green.
+
+**TDD-Guard toggle during Green write window (iter-2 carry-forward Cas-W4+Cas-W7 resolution):**
+
+The raw-git-commit-for-Red methodology has a known interaction with TDD-Guard: because the Red commit does NOT advance `current_phase` past `red`, any subsequent Green-phase Write/Edit to **non-test production code** (e.g., gate impl in `superpowers_dispatch.py`, docstring extension in `auto_cmd.py`, CLAUDE.md/CHANGELOG edits) WILL trip TDD-Guard's PreToolUse hook (per CLAUDE.local.md §3 "Codigo de produccion BLOCKED" under state=red).
+
+**Required operator action**: BEFORE the first Green-phase Write/Edit to non-test code, the operator MUST issue the prompt `tdd-guard off` to disable TDD-Guard enforcement for the Green window. AFTER `/sbtdd close-phase --variant {feat|fix}` completes (which advances state to `refactor`), the operator MUST issue `tdd-guard on` to restore enforcement. Refactor + close-task phases run under state=`refactor` or beyond, so TDD-Guard's doc-comment-allowed rule kicks in naturally.
+
+**Tasks affected**: T1 (gate impl in `superpowers_dispatch.py`), T2 (docstring + inline comment in `auto_cmd.py`), T5 (new fixture `dot-claude-settings.json`), T6 (CLAUDE.md + CHANGELOG.md edits). T3 (test class only — `tests/test_superpowers_dispatch.py`) and T4 (test redesign only — `tests/test_auto_parallel_e2e.py`) are unaffected because their Green-phase edits are to test files (TDD-Guard allows under state=red).
+
+This pattern is well-precedented in CLAUDE.local.md §3 "TDD-Guard bajo ejecucion multi-agente" (operator toggle for parallel execution windows). The toggle is session-scope via the `UserPromptSubmit` hook; subagents CANNOT toggle it themselves — only the operator (human + main session) can.
 
 ---
 
-## Pillar A PRIMARY HARD-LOCKED — `auto --parallel` operational unblock
+## Task 1: A1 — `SBTDD_E2E_STUB_DISPATCH` env var stub gate
 
-### Task 1: A1 — POSIX PTY allocation + lifecycle helper + leak guard
+**Goal:** Add a test-only short-circuit at the top of `superpowers_dispatch.invoke_skill` so that when env var `SBTDD_E2E_STUB_DISPATCH=1` AND skill is in `_E2E_STUBBABLE_SKILLS`, the function returns synthetic `SkillResult(rc=0)` without spawning `claude -p`. Production semantics MUST NOT change.
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/subprocess_utils.py` (add
-  `_spawn_worker_with_pty(argv, env) -> subprocess.Popen[bytes]` +
-  `_close_pty_master(proc) -> None` module-level helpers; POSIX-only;
-  raises `RuntimeError` on Windows for the spawn helper)
-- Modify: `tests/test_subprocess_utils.py` (extend with
-  `TestSpawnWorkerWithPty` class covering escenarios A1-1 through A1-5)
-- Create: `tests/fixtures/pty/worker_isatty.py` (worker fixture script
-  that writes `isatty=<sys.stdin.isatty()>` to stdout — used by A1-1
-  to validate worker observes a TTY)
+- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py` (add 2 module constants after `_SUBPROCESS_INCOMPATIBLE_SKILLS` at line ~79; add gate as FIRST check in `invoke_skill` body at line ~322; extend docstring of `invoke_skill`)
+- Test: `tests/test_superpowers_dispatch.py` (add 1 smoke test of the gate firing; expanded suite comes in T3)
 
-Covers escenarios A1-1 (W7 isatty assertion), A1-2, A1-3 (C1 lifecycle
-helper drain+close), A1-5 (W8 Popen-failure leak guard) from spec
-sec.4.1.
+**Spec mapping:** Escenario A1-1 (gate fires for stubbable skill with env set), A1-5 (gate position is FIRST in invoke_skill body)
 
-#### Red Phase
+- [x] **Step 1: Read current `invoke_skill` signature + first guard block to identify exact insertion point**
 
-- [x] **Step 1: Write failing tests in `tests/test_subprocess_utils.py`**
+Read `skills/sbtdd/scripts/superpowers_dispatch.py` lines 308-370. The current FIRST guard is the v1.0.7 A2 worker-context check (lines ~348-360). The new v1.0.8 A1 gate goes BEFORE that, immediately after the function signature + docstring.
 
-First, create the worker fixture at
-`tests/fixtures/pty/worker_isatty.py`:
+Run: `grep -n "_SUBPROCESS_INCOMPATIBLE_SKILLS\|^def invoke_skill" skills/sbtdd/scripts/superpowers_dispatch.py`
+Expected output: line numbers of the existing constant + function definition, confirming insertion targets.
+
+- [x] **Step 2: Write the failing Red test**
+
+Append the following test to `tests/test_superpowers_dispatch.py` immediately after the existing test class definitions (around line ~860):
 
 ```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-09
-"""v1.0.7 A1 worker fixture: writes isatty=<bool> to stdout."""
-import sys
-sys.stdout.write("isatty=" + str(sys.stdin.isatty()))
-sys.stdout.flush()
-```
+# ---------------------------------------------------------------------------
+# v1.0.8 Pillar A1: SBTDD_E2E_STUB_DISPATCH env var stub gate smoke test.
+# Expanded gate regression suite lives in TestE2EStubGate (added by T3/A4).
+# ---------------------------------------------------------------------------
 
-Then append to `tests/test_subprocess_utils.py`:
 
-```python
-class TestSpawnWorkerWithPty:
-    """v1.0.7 A1 POSIX PTY allocation + lifecycle per spec sec.4.1."""
+def test_v108_a1_gate_smoke_test_driven_development_with_env_set(monkeypatch):
+    """v1.0.8 A1-1 smoke: gate fires for /test-driven-development with env=1.
 
-    def test_posix_worker_observes_tty_via_isatty(self) -> None:
-        """A1-1 (W7 carry-forward): worker sees real TTY via isatty()."""
-        if sys.platform == "win32":
-            pytest.skip("POSIX-only test")
-        worker_script = (
-            Path(__file__).parent / "fixtures" / "pty" / "worker_isatty.py"
-        )
-        proc = subprocess_utils._spawn_worker_with_pty(
-            [sys.executable, str(worker_script)],
-            env=dict(os.environ),
-        )
-        try:
-            # Read from master fd to capture worker stdout.
-            output = b""
-            proc.wait(timeout=10)
-            try:
-                while True:
-                    chunk = os.read(proc._pty_master_fd, 4096)
-                    if not chunk:
-                        break
-                    output += chunk
-            except OSError:
-                pass  # worker closed slave; drain done
-            assert proc.returncode == 0
-            # CRITICAL: worker must observe TTY (not just parent).
-            assert b"isatty=True" in output, (
-                f"worker did not observe TTY. output={output!r}"
-            )
-        finally:
-            subprocess_utils._close_pty_master(proc)
+    Pins the minimum contract that T3 (A4 regression suite) expands on:
+    when SBTDD_E2E_STUB_DISPATCH=1 AND "pytest" in sys.modules AND
+    skill is stubbable, invoke_skill returns synthetic
+    SkillResult(rc=0) WITHOUT spawning claude -p.
 
-    def test_windows_worker_spawn_raises_runtime_error(self) -> None:
-        """A1-2: Windows worker spawn raises if PTY helper called directly."""
-        if sys.platform != "win32":
-            pytest.skip("Windows-only guard test")
-        with pytest.raises(RuntimeError, match="POSIX-only"):
-            subprocess_utils._spawn_worker_with_pty(
-                [sys.executable, "-c", "pass"],
-                env=dict(os.environ),
-            )
-
-    def test_close_pty_master_drains_then_closes_idempotent(
-        self,
-    ) -> None:
-        """A1-3 (C1 carry-forward): lifecycle helper drains + closes + idempotent."""
-        if sys.platform == "win32":
-            pytest.skip("POSIX-only test")
-        proc = subprocess_utils._spawn_worker_with_pty(
-            [sys.executable, "-c", "import sys; sys.stdout.write('hello'); sys.stdout.flush()"],
-            env=dict(os.environ),
-        )
-        proc.wait(timeout=10)
-        master_fd = proc._pty_master_fd
-        assert isinstance(master_fd, int)
-        # First close: drains + closes + sets attr to None.
-        subprocess_utils._close_pty_master(proc)
-        assert proc._pty_master_fd is None
-        # Verify fd is actually closed (os.close should raise EBADF).
-        with pytest.raises(OSError):
-            os.close(master_fd)
-        # Second close: idempotent no-op.
-        subprocess_utils._close_pty_master(proc)
-        assert proc._pty_master_fd is None
-
-    def test_popen_failure_does_not_leak_fds(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A1-5 (W8 carry-forward): Popen failure closes both master + slave fds."""
-        if sys.platform == "win32":
-            pytest.skip("POSIX-only test")
-        leaked_fds: list[int] = []
-        original_popen = subprocess.Popen
-
-        def boom_popen(*args: object, **kwargs: object) -> object:
-            # Capture the fds passed via stdin= kwarg before raising.
-            slave = kwargs.get("stdin")
-            if isinstance(slave, int):
-                leaked_fds.append(slave)
-            raise OSError("simulated spawn failure")
-
-        monkeypatch.setattr(
-            "subprocess_utils.subprocess.Popen", boom_popen
-        )
-        with pytest.raises(OSError, match="simulated spawn failure"):
-            subprocess_utils._spawn_worker_with_pty(
-                [sys.executable, "-c", "pass"],
-                env=dict(os.environ),
-            )
-        # Both fds the helper opened should be closed; if the slave_fd
-        # we captured is still open, os.close should succeed (=leak).
-        for fd in leaked_fds:
-            with pytest.raises(OSError):
-                os.close(fd)
-```
-
-Add at the top of `tests/test_subprocess_utils.py` if missing:
-
-```python
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-import pytest
-```
-
-Add at the top of `tests/test_subprocess_utils.py` if missing:
-
-```python
-import os
-import sys
-from pathlib import Path
-
-import pytest
-```
-
-- [x] **Step 2: Run tests to verify failure**
-
-Run on Windows dev env: `pytest tests/test_subprocess_utils.py::TestSpawnWorkerWithPty -v`
-Expected: `test_windows_worker_spawn_raises_runtime_error` FAILS with
-`AttributeError: module 'subprocess_utils' has no attribute '_spawn_worker_with_pty'`.
-The two POSIX-only tests SKIP on Windows.
-
-- [x] **Step 3: Run `make verify` (must show only the new test failures)**
-
-Run: `make verify`
-Expected: pytest collects, the 3 new tests fail/skip per platform, all
-other tests pass; ruff + mypy clean.
-
-- [x] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 A1 POSIX PTY allocation tests"`
-
-Expected: commit with prefix `test:` lands; state advances to `green`.
-
-#### Green Phase
-
-- [x] **Step 5: Implement `_spawn_worker_with_pty` + `_close_pty_master` in `subprocess_utils.py`**
-
-Add at the bottom of `skills/sbtdd/scripts/subprocess_utils.py`:
-
-```python
-def _spawn_worker_with_pty(
-    argv: list[str],
-    env: dict[str, str],
-) -> "subprocess.Popen[bytes]":
-    """v1.0.7 A1 POSIX: allocate pseudo-TTY for worker subprocess.
-
-    Workers spawned via this helper inherit the slave end as
-    stdin/stdout/stderr; orchestrator holds master end via
-    ``proc._pty_master_fd``. Skill subprocess chain (close-phase ->
-    /verification-before-completion) inherits TTY from worker ->
-    interactive prompts work -> no chicken-and-egg hang (see v1.0.6
-    empirical findings + spec sec.2.1).
-
-    POSIX-only. Windows callers must use the Option B-W3 hybrid path
-    (``subprocess.PIPE`` + ``SBTDD_AUTO_PARALLEL_WORKER`` env +
-    ``close_phase_cmd._run_verification`` worker-mode bypass per A2).
-
-    v1.0.7 iter-2 carry-forward W8: Popen failure closes BOTH master and
-    slave fds before re-raising, preventing fd leak on spawn failure.
-
-    Args:
-        argv: Subprocess argv (executable + args). ``shell=False``
-            invariant from sec.S.8.6 preserved.
-        env: Environment dict passed to the subprocess. Caller must
-            inject ``SBTDD_AUTO_PARALLEL_WORKER=1`` (done by
-            ``auto_cmd._spawn_worker`` cross-platform dispatcher).
-
-    Returns:
-        ``subprocess.Popen`` instance with ``_pty_master_fd`` integer
-        attribute set for downstream :func:`_close_pty_master` cleanup.
-
-    Raises:
-        RuntimeError: When invoked on Windows. Defensive guard against
-            test-harness misuse; production callers route via
-            ``auto_cmd._spawn_worker`` dispatcher.
-        OSError: Re-raised from underlying ``subprocess.Popen``; both
-            master and slave fds closed before re-raise (no leak).
+    Note: ``"pytest" in sys.modules`` is True by construction in this
+    test because pytest is the runner; iter-2 carry-forward W11
+    production safeguard does not interfere with test environments.
     """
-    # pty is POSIX-only stdlib; local-import keeps the Windows path
-    # of subprocess_utils.py importable without conditional top-level
-    # ImportError handling.
-    import pty
-    import os as _os
+    import sys
+    import superpowers_dispatch
+    from superpowers_dispatch import SkillResult
 
-    if sys.platform == "win32":
-        raise RuntimeError(
-            "_spawn_worker_with_pty is POSIX-only; Windows uses "
-            "Option B-W3 hybrid (see auto_cmd._spawn_worker)"
+    # Sanity-check the pytest sys.modules runtime guard precondition
+    # holds in this test environment (would fail in production where
+    # pytest is not loaded).
+    assert "pytest" in sys.modules, (
+        "test environment must have pytest loaded for the gate to fire"
+    )
+
+    monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError(
+            "v1.0.8 A1 regression: gate should have fired before "
+            "subprocess_utils.run_with_timeout was reached"
         )
-    master_fd, slave_fd = pty.openpty()
-    try:
-        proc = subprocess.Popen(
-            argv,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            env=env,
-            close_fds=True,
-        )
-    except Exception:
-        # v1.0.7 W8 leak guard: close both fds on Popen failure.
-        try:
-            _os.close(master_fd)
-        except OSError:
-            pass
-        try:
-            _os.close(slave_fd)
-        except OSError:
-            pass
-        raise
-    _os.close(slave_fd)  # parent only needs master after success
-    proc._pty_master_fd = master_fd  # type: ignore[attr-defined]
-    return proc
 
+    monkeypatch.setattr(
+        superpowers_dispatch.subprocess_utils,
+        "run_with_timeout",
+        _fail_if_called,
+    )
 
-def _close_pty_master(proc: "subprocess.Popen[bytes]") -> None:
-    """v1.0.7 A1 lifecycle: drain + close master fd. Idempotent.
+    result = superpowers_dispatch.invoke_skill(
+        "test-driven-development",
+        args=["--phase=red"],
+        allow_interactive_skill=True,
+    )
 
-    v1.0.7 iter-2 carry-forward C1 resolution: orchestrator MUST call
-    this helper after ``proc.wait()`` for every worker spawned via
-    :func:`_spawn_worker_with_pty`. Drains buffered output from the
-    master end before close; without drain, subsequent reads raise EIO
-    on POSIX. Idempotent: safe to call multiple times — second
-    invocation observes ``_pty_master_fd is None`` and returns no-op.
-
-    EIO/SIGHUP race tolerance (R7): if the worker closes the slave end
-    OR receives SIGHUP between ``proc.wait()`` and this helper, the
-    drain loop may observe ``OSError(EIO)`` immediately on first read.
-    Catch broadly + treat as drain-complete; worker exit code +
-    per-worker sidecar evidence preserve the actual results.
-
-    Args:
-        proc: ``subprocess.Popen`` returned by
-            :func:`_spawn_worker_with_pty`.
-    """
-    import os as _os
-
-    master_fd = getattr(proc, "_pty_master_fd", None)
-    if master_fd is None:
-        return
-    try:
-        while True:
-            data = _os.read(master_fd, 4096)
-            if not data:
-                break
-    except OSError:
-        # Worker already closed slave end OR SIGHUP race; drain done.
-        pass
-    try:
-        _os.close(master_fd)
-    except OSError:
-        # Already closed (idempotent).
-        pass
-    proc._pty_master_fd = None  # type: ignore[attr-defined]
+    assert isinstance(result, SkillResult)
+    assert result.returncode == 0
+    assert result.skill == "test-driven-development"
+    assert "[sbtdd e2e stub]" in result.stdout
+    assert "test-driven-development" in result.stdout
+    assert "SBTDD_E2E_STUB_DISPATCH=1" in result.stdout
+    assert result.stderr == ""
 ```
 
-- [x] **Step 6: Run the new tests to verify they pass**
+- [x] **Step 3: Run the Red test to verify it fails**
 
-Run: `pytest tests/test_subprocess_utils.py::TestSpawnWorkerWithPty -v`
-Expected: on POSIX, all 3 PASS; on Windows, the guard test PASSES, the
-other 2 SKIP.
+Run: `pytest tests/test_superpowers_dispatch.py::test_v108_a1_gate_smoke_test_driven_development_with_env_set -v`
 
-- [x] **Step 7: Run `make verify`**
+Expected: FAIL with `AssertionError: v1.0.8 A1 regression: gate should have fired...` (because the gate doesn't exist yet, so `invoke_skill` falls through to `run_with_timeout` which we patched to raise).
 
-Expected: pytest all green; ruff + mypy clean.
+- [x] **Step 4: Close Red phase via raw git commit**
+
+Per the iter-2 Red-phase commit methodology (plan header): the Red phase test fails by design (gate doesn't exist yet), so close-phase verification would abort. Use raw git commit instead. State file stays at `current_phase=red`.
+
+```bash
+git add tests/test_superpowers_dispatch.py
+git commit -m "test: v1.0.8 T1 Red — smoke test for SBTDD_E2E_STUB_DISPATCH gate"
+```
+
+Expected: Commit recorded; `git status` clean; `.claude/session-state.json` `current_phase` unchanged (still `red`).
+
+- [x] **Step 5: Write the Green implementation — module constants**
+
+Add the following two module-level constants in `skills/sbtdd/scripts/superpowers_dispatch.py` IMMEDIATELY AFTER the existing `_SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(...)` block (currently ending around line 90):
+
+```python
+#: v1.0.8 Pillar A1: env var name that activates the test-only stub
+#: gate at the top of :func:`invoke_skill`. When set to ``"1"``,
+#: skills in :data:`_E2E_STUBBABLE_SKILLS` short-circuit to a
+#: synthetic :class:`SkillResult` instead of spawning ``claude -p``,
+#: PROVIDED ``"pytest"`` is in :data:`sys.modules` (runtime guard
+#: against accidental production env var leak — see iter-2 carry-
+#: forward W11).
+#:
+#: **Test-only**: production callers MUST NOT set this variable.
+#: Defense-in-depth: even if the env var is accidentally exported in
+#: a production context (shared shell profile, devcontainer template
+#: leak, accidentally-committed `.env`), the runtime guard in
+#: :func:`invoke_skill` checks ``"pytest" in sys.modules`` —
+#: production workers do NOT import pytest at runtime (they invoke
+#: pytest as a separate subprocess via
+#: ``[sys.executable, "-m", "pytest"]`` in
+#: :func:`close_phase_cmd._run_verification` worker-mode bypass),
+#: so the gate cannot fire in production. Test runners load pytest
+#: into sys.modules BEFORE collecting tests, so the gate fires
+#: correctly in test environments.
+_E2E_STUB_ENV: str = "SBTDD_E2E_STUB_DISPATCH"
+
+#: v1.0.8 Pillar A1: skills whose ``claude -p`` dispatch is bypassed
+#: when :data:`_E2E_STUB_ENV` is set AND ``"pytest"`` is loaded.
+#: Frozen via ``frozenset`` (style consistent with
+#: :data:`_SUBPROCESS_INCOMPATIBLE_SKILLS`).
+#:
+#: Membership-bound list — adding skills here requires explicit
+#: rationale documented in CHANGELOG and approval through MAGI
+#: Checkpoint 2 / pre-merge gate. v1.0.8 baseline scope is 2 skills
+#: per Q1'=a decision: ``/test-driven-development`` (root cause of
+#: the v1.0.7 T3 hang) + ``/systematic-debugging`` (used in
+#: ``_run_verification_with_retries`` retry path; would surface the
+#: same upstream bug class on a real verification failure).
+_E2E_STUBBABLE_SKILLS: frozenset[str] = frozenset(
+    {
+        "test-driven-development",
+        "systematic-debugging",
+    }
+)
+```
+
+- [x] **Step 6: Write the Green implementation — gate at top of `invoke_skill`**
+
+Insert the gate block IMMEDIATELY AFTER the `invoke_skill` function signature + docstring closing `"""`, BEFORE the existing v1.0.7 A2 worker-context check (currently the first guard at line ~348). The new gate must be the very first executable statement.
+
+The gate has **three conjunctive conditions** (per iter-2 carry-forward W11+W7 combined fix):
+1. `os.environ.get(_E2E_STUB_ENV) == "1"` — env var set
+2. `"pytest" in sys.modules` — runtime guard against accidental env var leak in production
+3. `skill in _E2E_STUBBABLE_SKILLS` — frozen membership
+
+Locate the docstring end. After the docstring, insert (before any existing code):
+
+```python
+    # v1.0.8 Pillar A1: test-only stub gate. Checked FIRST so it
+    # short-circuits ALL downstream dispatch logic (v1.0.4 membership
+    # gate + v1.0.6 J-3 headless guard + v1.0.7 A2 worker-context
+    # guard). Test-only: production MUST NOT set
+    # SBTDD_E2E_STUB_DISPATCH. Defense-in-depth: the
+    # ``"pytest" in sys.modules`` runtime guard ensures the gate
+    # cannot fire in production processes (orchestrator, workers)
+    # because they do NOT import pytest at runtime; pytest is
+    # spawned as a separate subprocess via [sys.executable, "-m",
+    # "pytest"] in worker-mode close-phase. Test runners load
+    # pytest into sys.modules at process start. Rationale: enables
+    # end-to-end orchestration tests (T3 e2e) without spawning
+    # real claude -p subprocess (which hangs upstream in fixture-
+    # style cwd per CLAUDE.md "Known upstream limitations").
+    if (
+        os.environ.get(_E2E_STUB_ENV) == "1"
+        and "pytest" in sys.modules
+        and skill in _E2E_STUBBABLE_SKILLS
+    ):
+        return SkillResult(
+            skill=skill,
+            returncode=0,
+            stdout=f"[sbtdd e2e stub] /{skill} bypassed ({_E2E_STUB_ENV}=1)",
+            stderr="",
+        )
+```
+
+Verify `import sys` is already present at the top of `superpowers_dispatch.py` (it is, used by `_sys.stderr.write` calls elsewhere — check via `grep -n "^import sys\|^from sys" skills/sbtdd/scripts/superpowers_dispatch.py`). If somehow missing, add `import sys` to the import block.
+
+- [x] **Step 7: Run the Green test to verify it passes**
+
+Run: `pytest tests/test_superpowers_dispatch.py::test_v108_a1_gate_smoke_test_driven_development_with_env_set -v`
+Expected: PASS.
+
+Run: `pytest tests/test_superpowers_dispatch.py -v` (full module)
+Expected: all existing tests still pass; new smoke test passes; no regressions.
+
+Run: `make verify` for full sec.0.1 chain.
+Expected: pytest all pass, ruff check clean, ruff format clean, mypy strict clean.
 
 - [x] **Step 8: Close Green phase**
 
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 A1 POSIX PTY allocation in subprocess_utils"`
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T1 Green: add SBTDD_E2E_STUB_DISPATCH env var stub gate to invoke_skill"`
 
-Expected: commit with prefix `feat:` lands; state advances to `refactor`.
+Expected: commit with `feat:` prefix; state advances to `refactor`.
 
-#### Refactor Phase
+- [x] **Step 9: Write the Refactor — extend `invoke_skill` docstring**
 
-- [x] **Step 9: Tighten `_spawn_worker_with_pty` docstring + sort imports**
+Modify the `invoke_skill` docstring in `skills/sbtdd/scripts/superpowers_dispatch.py` to document the new gate including gate precedence rationale (iter-2 carry-forward Mel-I2) + pytest sys.modules guard explanation (iter-2 carry-forward Cas-W11). Locate the docstring section that mentions v1.0.7 A2 (around line ~337-347). After that paragraph and BEFORE the `Args:` or `Returns:` section, add:
 
-Inspect the helper with fresh eyes; if any line exceeds 100 chars, wrap
-appropriately. Consider hoisting the `import pty` + `import os as _os`
-to module top if other code can reuse them; otherwise keep local-import
-to keep Windows-only code paths from importing POSIX-only `pty` at
-module load time. Document the local-import rationale inline if
-hoisting is rejected.
+```
+    v1.0.8 Pillar A1: test-only stub gate. When env var
+    :data:`_E2E_STUB_ENV` (``SBTDD_E2E_STUB_DISPATCH``) is set to
+    ``"1"`` AND ``"pytest"`` is in :data:`sys.modules` AND
+    ``skill`` is in :data:`_E2E_STUBBABLE_SKILLS`
+    (``test-driven-development`` or ``systematic-debugging``), this
+    function short-circuits to a synthetic ``SkillResult(rc=0)``
+    without spawning ``claude -p``. The gate is checked FIRST so it
+    short-circuits ALL downstream dispatch logic.
 
-The local import is the right call: hoisting `import pty` to module top
-breaks Windows imports of `subprocess_utils.py` (the module is widely
-imported across `auto_cmd`, `close_*_cmd`, etc.). Add a one-line
-comment above the local imports:
+    Gate precedence (iter-2 carry-forward Mel-I2): the v1.0.8 A1
+    stub gate is positioned BEFORE the v1.0.7 A2 worker-context
+    guard, the v1.0.6 J-3 headless guard, and the v1.0.4
+    membership gate. When both ``SBTDD_E2E_STUB_DISPATCH=1`` AND
+    ``SBTDD_AUTO_PARALLEL_WORKER=1`` are set (test scenario where
+    the parent test sets the stub env var, which propagates to
+    worker via ``os.environ.copy()`` per A2), the stub gate wins
+    — correct for the test path.
 
-```python
-    # pty is POSIX-only stdlib; local-import keeps the Windows path
-    # of subprocess_utils.py importable without conditional top-level
-    # ImportError handling.
-    import pty
-    import os as _os
+    Defense-in-depth via pytest sys.modules guard (iter-2
+    carry-forward Cas-W11): the gate requires both the env var
+    AND ``"pytest" in sys.modules``. Production processes
+    (auto_cmd orchestrator, worker subprocesses) do NOT import
+    pytest at runtime, so accidental env var leak into production
+    has ZERO effect — gate cannot fire. Test runners load pytest
+    into sys.modules at process start. This converts the gate
+    from "test-by-convention" to "test-by-runtime-check".
+
+    Test-only — production callers MUST NOT set the env var
+    (gate is namespaced via ``SBTDD_E2E_*`` prefix; production
+    workers continue to dispatch real LLM via ``claude -p``).
 ```
 
-- [x] **Step 10: Run `make verify`**
+- [x] **Step 10: Run sec.0.1 chain after refactor**
 
-Expected: clean.
+Run: `make verify`
+Expected: all 4 tools clean; coverage >= 88%; no new test failures.
 
-- [x] **Step 11: Close Refactor phase + close task**
+- [x] **Step 11: Close Refactor phase + Task**
 
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 A1 PTY helper docstring + import comment"`
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T1 Refactor: document SBTDD_E2E_STUB_DISPATCH gate in invoke_skill docstring"`
 
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` commit + `chore: mark task` commit + state advances
-to next task.
+Expected: commit with `refactor:` prefix; cascade into close-task which flips T1 checkbox `[x]` in `planning/claude-plan-tdd.md` + commits `chore: mark task 1 complete` + state advances to next task `red`.
 
 ---
 
-### Task 2: A2 — Windows hybrid Option B-W3 + Q2'=b worker-context runtime guard
+## Task 2: A2 — Worker env propagation regression test + contract documentation
+
+**Goal:** Pin the contract that `auto_cmd._dispatch_tracks_concurrent`'s `worker_env = os.environ.copy()` propagates ALL parent env vars unfiltered to worker subprocesses, including `SBTDD_E2E_STUB_DISPATCH`. Per iter-2 carry-forward Mel-W2+Cas-W8 resolution: Green phase contains SUBSTANTIVE documentation work — docstring extension on `_dispatch_tracks_concurrent` + inline comment block — NOT a 1-line throwaway comment. The contract is doc-pinned in TWO places (runtime via test + static via doc surfaces).
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add new module-level
-  helper `_spawn_worker(argv, env)` cross-platform dispatcher; wire into
-  `_dispatch_tracks_concurrent` worker spawn site)
-- Modify: `skills/sbtdd/scripts/close_phase_cmd.py:70`
-  (`_run_verification` worker-mode bypass via
-  `SBTDD_AUTO_PARALLEL_WORKER` env check)
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py:336`
-  (Q2'=b promotion: insert worker-context runtime guard BEFORE existing
-  membership gate in `invoke_skill`)
-- Modify: `tests/test_close_phase_cmd.py` (extend with
-  `TestRunVerificationWorkerBypass` class for escenarios A2-2/A2-3/A2-4)
-- Modify: `tests/test_superpowers_dispatch.py` (extend with
-  `TestInvokeSkillWorkerGuard` class for escenarios A2-5/A2-6)
-- Modify: `tests/test_auto_cmd.py` (extend with `TestSpawnWorkerDispatcher`
-  for escenario A2-1)
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` — `_dispatch_tracks_concurrent` docstring + inline comment block at line ~2061
+- Test: `tests/test_auto_cmd.py` (add 1 regression test near existing dispatch tests)
 
-Covers escenarios A2-1 through A2-6 from spec sec.4.2.
+**Spec mapping:** Escenario A2-1 (parent env var propagates via os.environ.copy), A2-2 (env propagation unfiltered, no allowlist)
 
-#### Red Phase
+- [x] **Step 1: Locate target test insertion point in test_auto_cmd.py**
 
-- [x] **Step 1: Write failing tests for `auto_cmd._spawn_worker` dispatcher**
+Run: `grep -n "_dispatch_tracks_concurrent\|test_dispatch" tests/test_auto_cmd.py | head -10`
+Expected: line numbers of existing dispatcher tests. Insert the new test after the cluster of `test_dispatch_tracks_concurrent_*` tests (likely around the same line area).
 
-Append to `tests/test_auto_cmd.py`:
+- [x] **Step 2: Write the failing Red test**
+
+Append the following test to `tests/test_auto_cmd.py` after the existing `_dispatch_tracks_concurrent` test cluster:
 
 ```python
-class TestSpawnWorkerDispatcher:
-    """v1.0.7 A2 cross-platform worker spawn dispatcher per spec sec.4.2."""
-
-    def test_windows_worker_uses_subprocess_pipe_with_env_marker(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A2-1 (Windows path): subprocess.PIPE + SBTDD_AUTO_PARALLEL_WORKER=1."""
-        monkeypatch.setattr(sys, "platform", "win32")
-        captured: dict[str, object] = {}
-
-        class FakeProc:
-            def wait(self, timeout: int | None = None) -> int:
-                return 0
-
-        def fake_popen(
-            argv: list[str],
-            **kwargs: object,
-        ) -> FakeProc:
-            captured["argv"] = argv
-            captured["kwargs"] = kwargs
-            return FakeProc()
-
-        monkeypatch.setattr("auto_cmd.subprocess.Popen", fake_popen)
-        proc = auto_cmd._spawn_worker(
-            ["python", "-c", "pass"], env={"PATH": "/usr/bin"}
-        )
-        kwargs = captured["kwargs"]
-        assert kwargs["stdin"] is subprocess.PIPE
-        assert kwargs["stdout"] is subprocess.PIPE
-        assert kwargs["stderr"] is subprocess.PIPE
-        assert kwargs["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"
-        assert kwargs["env"]["PATH"] == "/usr/bin"
-
-    def test_posix_worker_routes_to_pty_helper(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A2-1 (POSIX path): routes to subprocess_utils._spawn_worker_with_pty."""
-        if sys.platform == "win32":
-            # Force POSIX behavior by monkeypatching sys.platform.
-            monkeypatch.setattr(sys, "platform", "linux")
-        captured: dict[str, object] = {}
-
-        class FakeProc:
-            pass
-
-        def fake_pty_spawn(
-            argv: list[str], env: dict[str, str]
-        ) -> FakeProc:
-            captured["argv"] = argv
-            captured["env"] = env
-            return FakeProc()
-
-        monkeypatch.setattr(
-            "subprocess_utils._spawn_worker_with_pty", fake_pty_spawn
-        )
-        auto_cmd._spawn_worker(
-            ["python", "-c", "pass"], env={"PATH": "/usr/bin"}
-        )
-        assert captured["argv"] == ["python", "-c", "pass"]
-        assert captured["env"]["SBTDD_AUTO_PARALLEL_WORKER"] == "1"
-        assert captured["env"]["PATH"] == "/usr/bin"
-```
-
-Add `import subprocess` and `import sys` at top of file if missing.
-
-- [x] **Step 2: Write failing tests for `close_phase_cmd._run_verification` worker bypass (sec.0.1 chain + INV-16 sidecar)**
-
-Append to `tests/test_close_phase_cmd.py`:
-
-```python
-class TestRunVerificationWorkerBypass:
-    """v1.0.7 A2 worker-mode bypass per spec sec.4.2 + iter-2 C4 carry-forward.
-
-    Replaces `make verify` shell-out with explicit sec.0.1 chain:
-    pytest, ruff check, ruff format --check, mypy. Persists per-worker
-    captured output to <root>/.claude/auto-run-workers/<pid>-verify.json
-    for INV-16 evidence-before-assertions continuity.
-    """
-
-    def test_worker_mode_runs_sec_0_1_chain(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """A2-2 (C4 carry-forward): worker runs sec.0.1 4-tool chain."""
-        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
-        skill_called = []
-
-        def fake_skill(*, cwd: str) -> None:
-            skill_called.append(cwd)
-
-        monkeypatch.setattr(
-            "superpowers_dispatch.verification_before_completion", fake_skill
-        )
-        captured_cmds: list[list[str]] = []
-
-        class FakeResult:
-            returncode = 0
-            stdout = "PASS"
-            stderr = ""
-
-        def fake_run(cmd: list[str], **kwargs: object) -> FakeResult:
-            captured_cmds.append(cmd)
-            return FakeResult()
-
-        monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
-        close_phase_cmd._run_verification(tmp_path)
-        assert skill_called == []  # bypassed
-        assert captured_cmds == [
-            ["pytest"],
-            ["ruff", "check", "."],
-            ["ruff", "format", "--check", "."],
-            ["mypy", "."],
-        ]
-
-    def test_worker_mode_first_tool_failure_aborts_chain_and_persists_evidence(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """A2-3 (C4 carry-forward): pytest failure aborts chain + evidence persisted."""
-        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
-        captured_cmds: list[list[str]] = []
-
-        class FailResult:
-            returncode = 1
-            stdout = "FAILED"
-            stderr = "test foo failed"
-
-        class PassResult:
-            returncode = 0
-            stdout = "PASS"
-            stderr = ""
-
-        def fake_run(cmd: list[str], **kwargs: object) -> object:
-            captured_cmds.append(cmd)
-            return FailResult() if cmd == ["pytest"] else PassResult()
-
-        monkeypatch.setattr("close_phase_cmd.subprocess.run", fake_run)
-        with pytest.raises(ValidationError, match="A2 worker-mode verify failed at 'pytest'"):
-            close_phase_cmd._run_verification(tmp_path)
-        # Only pytest ran; ruff/mypy NOT invoked (early-abort).
-        assert captured_cmds == [["pytest"]]
-        # Evidence sidecar persisted with the partial chain.
-        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
-        sidecars = list(sidecar_dir.glob("*-verify.json"))
-        assert len(sidecars) == 1
-        payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
-        assert payload["verify_chain"] == [
-            {"cmd": ["pytest"], "rc": 1, "stdout": "FAILED", "stderr": "test foo failed"}
-        ]
-
-    def test_worker_mode_full_chain_success_persists_evidence(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """A2-7 (C4 + iter-3 C1 carry-forward): full success + collision-resistant filename."""
-        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
-
-        class PassResult:
-            returncode = 0
-            stdout = "PASS"
-            stderr = ""
-
-        monkeypatch.setattr(
-            "close_phase_cmd.subprocess.run",
-            lambda cmd, **kw: PassResult(),
-        )
-        close_phase_cmd._run_verification(tmp_path)
-        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
-        sidecars = list(sidecar_dir.glob("*-verify.json"))
-        assert len(sidecars) == 1
-        # v1.0.7 iter-3 C1: filename pattern <pid>-<monotonic_ns>-<uuid8>-verify.json
-        stem = sidecars[0].stem
-        # Expected: <pid>-<monotonic_ns>-<uuid8hex>-verify
-        parts = stem.split("-")
-        assert parts[-1] == "verify"
-        assert len(parts) == 4  # pid, monotonic_ns, uuid8, "verify"
-        assert parts[0] == str(os.getpid())
-        assert parts[1].isdigit() and int(parts[1]) > 0  # monotonic_ns
-        assert len(parts[2]) == 8 and all(c in "0123456789abcdef" for c in parts[2])
-        payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
-        assert len(payload["verify_chain"]) == 4
-        assert all(entry["rc"] == 0 for entry in payload["verify_chain"])
-
-    def test_pid_recycle_simulation_does_not_collide(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """A2-9 (iter-3 C1 carry-forward): same-pid re-spawn produces 2 distinct sidecars."""
-        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
-
-        class PassResult:
-            returncode = 0
-            stdout = "PASS"
-            stderr = ""
-
-        monkeypatch.setattr(
-            "close_phase_cmd.subprocess.run",
-            lambda cmd, **kw: PassResult(),
-        )
-        # Call twice from the same process (simulates PID recycle).
-        close_phase_cmd._run_verification(tmp_path)
-        close_phase_cmd._run_verification(tmp_path)
-        sidecar_dir = tmp_path / ".claude" / "auto-run-workers"
-        sidecars = list(sidecar_dir.glob("*-verify.json"))
-        assert len(sidecars) == 2  # NO collision
-        # Both sidecars share pid prefix but differ in monotonic_ns or uuid8.
-        stems = [s.stem for s in sidecars]
-        assert all(stem.startswith(f"{os.getpid()}-") for stem in stems)
-        assert len(set(stems)) == 2
-
-    def test_orchestrator_mode_preserves_skill_dispatch(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """A2-4: no env var -> existing skill path."""
-        monkeypatch.delenv("SBTDD_AUTO_PARALLEL_WORKER", raising=False)
-        skill_called = []
-
-        def fake_skill(*, cwd: str) -> None:
-            skill_called.append(cwd)
-
-        monkeypatch.setattr(
-            "superpowers_dispatch.verification_before_completion", fake_skill
-        )
-        # subprocess.run should NOT be called in orchestrator mode.
-        def boom(cmd: list[str], **kw: object) -> None:
-            raise AssertionError("subprocess.run must not be called in orchestrator mode")
-
-        monkeypatch.setattr("close_phase_cmd.subprocess.run", boom)
-        close_phase_cmd._run_verification(tmp_path)
-        assert skill_called == [str(tmp_path)]
-```
-
-Add `from errors import ValidationError`, `import close_phase_cmd`,
-`import json`, `from pathlib import Path` at top of file if missing.
-
-- [x] **Step 3: Write failing tests for Q2'=b worker-context runtime guard**
-
-Append to `tests/test_superpowers_dispatch.py`:
-
-```python
-class TestInvokeSkillWorkerGuard:
-    """v1.0.7 A2 Q2'=b worker-context runtime guard per spec sec.4.2 A2-5/A2-6."""
-
-    def test_worker_env_with_incompatible_skill_raises_worker_bug_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A2-5: worker env + incompatible skill -> PreconditionError naming bug."""
-        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
-        # Pick any skill that's in the membership set.
-        skill = next(iter(superpowers_dispatch._SUBPROCESS_INCOMPATIBLE_SKILLS))
-        with pytest.raises(PreconditionError, match="Worker subprocess attempted"):
-            superpowers_dispatch.invoke_skill(
-                skill, allow_interactive_skill=True
-            )
-
-    def test_orchestrator_unaffected_by_worker_guard(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A2-6: no env var -> falls through to existing v1.0.4+v1.0.6 gates."""
-        monkeypatch.delenv("SBTDD_AUTO_PARALLEL_WORKER", raising=False)
-        skill = next(iter(superpowers_dispatch._SUBPROCESS_INCOMPATIBLE_SKILLS))
-        # With allow_interactive_skill=True + no headless context, dispatch
-        # would proceed; we monkeypatch run_with_timeout to short-circuit.
-        captured: list[list[str]] = []
-
-        class FakeResult:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-
-        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
-            captured.append(cmd)
-            return FakeResult()
-
-        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
-        # Force non-headless context for this test.
-        monkeypatch.setattr(
-            "subprocess_utils.is_headless_context", lambda: False
-        )
-        result = superpowers_dispatch.invoke_skill(
-            skill, allow_interactive_skill=True
-        )
-        assert result.returncode == 0
-        assert captured  # subprocess WAS dispatched (no worker guard fired)
-
-    def test_orchestrator_with_tty_dispatches_normally_pin_guard_ordering(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A2-8 (W1 carry-forward): pin guard ordering against future regressions.
-
-        Verifies the v1.0.7 A2 worker check fires AFTER membership +
-        BEFORE headless gate AND requires BOTH env var presence AND
-        skill membership. Checking env var alone would trip on operator
-        scripts that set SBTDD_AUTO_PARALLEL_WORKER=1 unrelated to
-        --parallel context. Future refactors that reorder the guards
-        must keep this test green.
-        """
-        monkeypatch.delenv("SBTDD_AUTO_PARALLEL_WORKER", raising=False)
-        skill = next(iter(superpowers_dispatch._SUBPROCESS_INCOMPATIBLE_SKILLS))
-        captured: list[list[str]] = []
-
-        class FakeResult:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-
-        monkeypatch.setattr(
-            "subprocess_utils.run_with_timeout",
-            lambda cmd, **kw: (captured.append(cmd) or FakeResult()),
-        )
-        monkeypatch.setattr(
-            "subprocess_utils.is_headless_context", lambda: False
-        )
-        # Orchestrator dispatch SHOULD proceed: not headless + override allowed.
-        result = superpowers_dispatch.invoke_skill(
-            skill, allow_interactive_skill=True
-        )
-        assert result.returncode == 0
-        assert len(captured) == 1
-        # Now flip the env var to verify the worker guard DOES fire.
-        monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
-        with pytest.raises(PreconditionError, match="Worker subprocess attempted"):
-            superpowers_dispatch.invoke_skill(
-                skill, allow_interactive_skill=True
-            )
-```
-
-Add imports if missing at top of `tests/test_superpowers_dispatch.py`:
-
-```python
-from errors import PreconditionError
-import superpowers_dispatch
-```
-
-- [x] **Step 4: Run tests to verify failure**
-
-Run: `pytest tests/test_auto_cmd.py::TestSpawnWorkerDispatcher tests/test_close_phase_cmd.py::TestRunVerificationWorkerBypass tests/test_superpowers_dispatch.py::TestInvokeSkillWorkerGuard -v`
-
-Expected: all FAIL with `AttributeError`/missing-symbol errors.
-
-- [x] **Step 5: Run `make verify`**
-
-Expected: only the new tests fail; ruff + mypy clean.
-
-- [x] **Step 6: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 A2 Windows hybrid + worker runtime guard tests"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [x] **Step 7: Implement `auto_cmd._spawn_worker` cross-platform dispatcher**
-
-Add to `skills/sbtdd/scripts/auto_cmd.py` near the `_dispatch_tracks_concurrent`
-helper (search for `def _dispatch_tracks_concurrent`):
-
-```python
-def _spawn_worker(
-    argv: list[str],
-    env: dict[str, str],
-) -> "subprocess.Popen[bytes]":
-    """v1.0.7 A2 cross-platform worker spawn dispatcher.
-
-    POSIX -> real PTY allocation via
-    :func:`subprocess_utils._spawn_worker_with_pty` (Item A1). Workers
-    inherit slave fd as stdin/stdout/stderr; close-phase /verification-
-    before-completion subprocess inherits TTY -> no chicken-and-egg hang.
-
-    Windows -> ``subprocess.PIPE`` (Option B-W3 hybrid; Windows lacks
-    POSIX-style PTY). Workers carry ``SBTDD_AUTO_PARALLEL_WORKER=1`` env
-    marker so :func:`close_phase_cmd._run_verification` shells out to
-    ``make verify`` directly instead of dispatching the interactive
-    skill (sidesteps TTY requirement).
-
-    Args:
-        argv: Subprocess argv. ``shell=False`` invariant preserved.
-        env: Environment dict; this helper injects
-            ``SBTDD_AUTO_PARALLEL_WORKER=1`` before spawn.
-
-    Returns:
-        ``subprocess.Popen`` instance ready for orchestrator post-batch
-        merge (per v1.0.5 I-1 sidecar + I-2 scratch patterns).
-    """
-    env_with_marker = {**env, "SBTDD_AUTO_PARALLEL_WORKER": "1"}
-    if sys.platform == "win32":
-        return subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env_with_marker,
-        )
-    return subprocess_utils._spawn_worker_with_pty(argv, env_with_marker)
-```
-
-Then locate the `_dispatch_tracks_concurrent` worker spawn site (around
-line 1801+; search for `subprocess.Popen(` inside that function). Replace
-the direct `subprocess.Popen(...)` call with `_spawn_worker(argv, env)`,
-preserving the existing argv-build path (`_build_worker_argv` per v1.0.5
-I-3) and any os.environ.copy() prep for env. The orchestrator's existing
-post-batch sidecar/scratch merge logic is unchanged.
-
-If the existing call site uses keyword args incompatible with the new
-helper (e.g., `cwd=` or `creationflags=`), keep those args inline by
-passing them through a dispatcher kwarg surface — extend `_spawn_worker`
-to accept `**popen_kwargs` and forward them. For the v1.0.7 minimal
-landing, only `env` and `argv` are required; if other kwargs surface
-during impl, extend the helper signature in the same Green commit and
-update the dispatcher tests accordingly.
-
-- [x] **Step 8: Implement `close_phase_cmd._run_verification` worker-mode bypass with sec.0.1 chain + INV-16 sidecar (C4 carry-forward)**
-
-Edit `skills/sbtdd/scripts/close_phase_cmd.py:70` — replace the body of
-`_run_verification` with:
-
-```python
-def _run_verification(root: Path) -> None:
-    """Invoke /verification-before-completion with ``root`` as the working dir.
-
-    MAGI Loop 2 iter 1 Finding 4: the skill wrapper spawns a subprocess
-    that shells out to the stack's test runner (pytest / cargo / ctest).
-    Without a ``cwd=`` those tools attempt to discover tests relative to
-    wherever ``/sbtdd close-phase`` was invoked from -- typically a
-    subdirectory of the project root, which breaks test discovery and
-    produces a spurious "no tests collected" result. Passing ``cwd=root``
-    makes the working directory match the project root regardless of
-    which subdirectory the user invoked the command from.
-
-    v1.0.7 A2 Option B-W3 hybrid: when ``SBTDD_AUTO_PARALLEL_WORKER=1``
-    is set in the environment (parent-injected by
-    :func:`auto_cmd._spawn_worker` for ``--parallel`` workers), bypass
-    the interactive ``/verification-before-completion`` skill subprocess
-    and run the sec.0.1 4-tool chain directly: pytest, ruff check,
-    ruff format --check, mypy. Rationale: workers spawned via
-    ``subprocess.PIPE`` on Windows have no TTY -> the skill subprocess
-    hangs waiting for an interactive prompt that never arrives
-    (chicken-and-egg, empirically confirmed in v1.0.6 dogfood, spec
-    sec.2.1). v1.0.7 iter-2 carry-forward C4: chain is explicit (no
-    `make` dependency on Windows) + per-worker stdout/stderr captured
-    to ``<root>/.claude/auto-run-workers/<pid>-verify.json`` for INV-16
-    evidence-before-assertions continuity (parent post-batch merge can
-    introspect for actual sec.0.1 results, not just success/fail).
-
-    Args:
-        root: Project root directory (``--project-root``).
-
-    Raises:
-        ValidationError: Skill wrapper raised (timeout / non-zero exit)
-            in orchestrator mode, OR any sec.0.1 tool returned non-zero
-            in worker mode (early-abort semantics: subsequent tools NOT
-            run; partial captured chain still persisted to sidecar).
-        QuotaExhaustedError: Anthropic API cap hit during verification
-            (orchestrator mode only; shell command path is offline).
-    """
-    if os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1":
-        commands = [
-            ["pytest"],
-            ["ruff", "check", "."],
-            ["ruff", "format", "--check", "."],
-            ["mypy", "."],
-        ]
-        captured: list[dict[str, object]] = []
-        for cmd in commands:
-            result = subprocess.run(
-                cmd, cwd=str(root), check=False,
-                capture_output=True, text=True,
-            )
-            captured.append({
-                "cmd": cmd,
-                "rc": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            })
-            if result.returncode != 0:
-                # Persist partial chain BEFORE raising for INV-16 evidence.
-                _persist_worker_verify_evidence(root, captured)
-                raise ValidationError(
-                    f"v1.0.7 A2 worker-mode verify failed at "
-                    f"{cmd[0]!r}: rc={result.returncode}"
-                )
-        _persist_worker_verify_evidence(root, captured)
-        return
-    superpowers_dispatch.verification_before_completion(cwd=str(root))
-
-
-def _persist_worker_verify_evidence(
-    root: Path,
-    captured: list[dict[str, object]],
+def test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """v1.0.7 A2 INV-16 continuity: write per-worker verify capture.
+    """v1.0.8 A2-1: parent env var SBTDD_E2E_STUB_DISPATCH propagates to worker.
 
-    Writes to ``<root>/.claude/auto-run-workers/<pid>-<monotonic_ns>-<uuid8>-verify.json``
-    so parent post-batch merge has evidence of what each worker actually
-    ran + observed. Uses ``state_file.atomic_write_json`` (which gains
-    Windows PermissionError retry per v1.0.7 B3 = T6).
+    Pins the contract that ``_dispatch_tracks_concurrent`` does NOT
+    filter env vars when building ``worker_env = os.environ.copy()``.
+    A future refactor introducing an allowlist would break v1.0.8
+    Pillar A1 (gate would never fire in worker subprocess).
 
-    v1.0.7 iter-3 carry-forward C1 (Cas iter-2 CRITICAL): filename
-    has 3-component disambiguator preventing PID-recycle / re-spawn
-    collision (pid for human cross-reference + monotonic_ns
-    sub-microsecond resolution + uuid8 final tiebreaker). Parent-side
-    LOUD-FAIL contract enforced in `_dispatch_tracks_concurrent`
-    post-batch merge: missing sidecar raises ConcurrentDispatchError.
+    Test monkeypatches ``_spawn_worker`` to capture the env dict; no
+    real subprocess spawned.
     """
-    import time as _time
-    import uuid as _uuid
+    import auto_cmd
 
-    sidecar_dir = root / ".claude" / "auto-run-workers"
-    sidecar_dir.mkdir(parents=True, exist_ok=True)
-    suffix = f"{os.getpid()}-{_time.monotonic_ns()}-{_uuid.uuid4().hex[:8]}"
-    sidecar = sidecar_dir / f"{suffix}-verify.json"
-    state_file.atomic_write_json(sidecar, {"verify_chain": captured})
+    monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+    monkeypatch.setenv("V108_A2_REGRESSION_MARKER", "propagated")
+
+    captured_envs: list[dict[str, str]] = []
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.pid = 4242
+            self.returncode = 0
+
+        def communicate(self, timeout: int):
+            return (b"", b"")
+
+    def _fake_spawn_worker(argv, env, **popen_kwargs):
+        captured_envs.append(dict(env))
+        return _FakeProc()
+
+    monkeypatch.setattr(auto_cmd, "_spawn_worker", _fake_spawn_worker)
+
+    # Stub out post-batch hooks so the test focuses only on env propagation.
+    # Per iter-2 carry-forward Mel-W1: also stub close_task_cmd._merge_scratch_plans
+    # because auto_cmd._dispatch_tracks_concurrent does `getattr(_ctc,
+    # "_merge_scratch_plans", None)` and invokes it if present (auto_cmd.py
+    # line ~2124-2128). Without this stub, the helper may try to read
+    # scratch plans from disk and fail in the test temp dir.
+    monkeypatch.setattr(
+        auto_cmd, "_verify_worker_sidecars_present", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(
+        auto_cmd, "_merge_audit_sidecars", lambda *a, **kw: {"schema_version": 1}
+    )
+    monkeypatch.setattr(
+        auto_cmd, "_atomic_write_json", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(auto_cmd, "_reap_orphans", lambda *a, **kw: None)
+
+    # Stub close_task_cmd._merge_scratch_plans (post-batch hook resolved
+    # via getattr in auto_cmd line ~2126). Use monkeypatch on the close_task_cmd
+    # module attribute so the getattr lookup finds our stub.
+    import close_task_cmd
+    monkeypatch.setattr(
+        close_task_cmd, "_merge_scratch_plans", lambda *a, **kw: None, raising=False
+    )
+
+    (tmp_path / ".claude").mkdir()
+
+    auto_cmd._dispatch_tracks_concurrent(
+        tracks=[["1"]],
+        effective_workers=1,
+        project_root=tmp_path,
+        ns=None,
+    )
+
+    assert len(captured_envs) == 1, "exactly one worker should have been spawned"
+    worker_env = captured_envs[0]
+    assert worker_env.get("SBTDD_E2E_STUB_DISPATCH") == "1", (
+        "v1.0.8 A2 regression: SBTDD_E2E_STUB_DISPATCH must propagate from "
+        "parent to worker unchanged"
+    )
+    assert worker_env.get("V108_A2_REGRESSION_MARKER") == "propagated", (
+        "v1.0.8 A2-2 regression: unrelated custom env vars must also "
+        "propagate (no filtering allowlist)"
+    )
 ```
 
-**Parent-side LOUD-FAIL contract** (v1.0.7 iter-3 carry-forward C1):
-in `auto_cmd._dispatch_tracks_concurrent` post-batch merge, after
-collecting worker exit codes, glob for sidecars matching each
-spawned worker's pid:
+- [x] **Step 3: Run the Red test to verify it passes (regression-pin pattern)**
 
-```python
-# auto_cmd._dispatch_tracks_concurrent post-batch merge addendum
-def _verify_worker_sidecars_present(
-    project_root: Path,
-    worker_pids: list[int],
-) -> None:
-    """v1.0.7 iter-3 carry-forward C1: LOUD-FAIL on missing sidecar.
+Run: `pytest tests/test_auto_cmd.py::test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch -v`
 
-    Each spawned worker MUST produce >= 1 sidecar matching the
-    glob `<pid>-*-verify.json`. Missing sidecar = code-path bug
-    (worker spawned + ran close-phase but failed to persist evidence).
-    LOUD-FAIL via ConcurrentDispatchError surfaces it during
-    test/dogfood instead of silent INV-16 evidence loss.
-    """
-    sidecar_dir = project_root / ".claude" / "auto-run-workers"
-    if not sidecar_dir.exists():
-        # No workers wrote sidecars at all; possible if all workers
-        # failed before reaching close-phase. Log + return; missing
-        # close-phase chain is a separate failure surface caught by
-        # worker exit code aggregation.
-        return
-    observed = list(sidecar_dir.glob("*-verify.json"))
-    observed_pids = {int(p.name.split("-")[0]) for p in observed}
-    missing = [pid for pid in worker_pids if pid not in observed_pids]
-    if missing:
-        raise ConcurrentDispatchError(
-            f"v1.0.7 iter-3 C1: workers {missing} completed but produced "
-            f"no INV-16 sidecar. Observed sidecars: {[p.name for p in observed]}. "
-            f"Expected workers: {worker_pids}. Bug in "
-            f"_persist_worker_verify_evidence OR transient OS error "
-            f"swallowed mid-write; investigate before next dispatch."
-        )
-```
+Expected outcome — this test is a REGRESSION PIN: it should pass immediately because `os.environ.copy()` already propagates env vars without filtering. Per iter-2 carry-forward Mel-W2+Cas-W8: this is NOT classical TDD (no failing-then-passing transition); it's a characterization test. The Green phase below does NOT add minimal-to-pass impl — it adds documentation that pins the contract for static readers, complementing the dynamic pin from the test.
 
-Wire `_verify_worker_sidecars_present(project_root, [proc.pid for
-proc in completed_workers])` into `_dispatch_tracks_concurrent` just
-before the existing per-worker sidecar/scratch merge.
+If the test FAILS at scaffold-time (import path issues, missing fixture), fix those test-side issues until it passes against the unchanged production code.
 
-Add to imports at the top of `close_phase_cmd.py` if missing:
+- [x] **Step 4: Close Red phase via raw git commit**
 
-```python
-import os
-import subprocess
-
-from errors import ValidationError
-import state_file
-```
-
-- [x] **Step 9: Implement Q2'=b runtime guard in `superpowers_dispatch.invoke_skill`**
-
-Edit `skills/sbtdd/scripts/superpowers_dispatch.py` around line 336.
-Locate the existing membership gate:
-
-```python
-    if skill in _SUBPROCESS_INCOMPATIBLE_SKILLS and not allow_interactive_skill:
-        raise PreconditionError(_build_recovery_message(skill))
-```
-
-Insert BEFORE that line:
-
-```python
-    # v1.0.7 A2 Q2'=b promotion: defense-in-depth worker-context runtime
-    # guard. Workers under `auto --parallel` (parent-injected env var
-    # SBTDD_AUTO_PARALLEL_WORKER=1) MUST NOT dispatch interactive skills
-    # via subprocess. The membership gate below + v1.0.6 J-3 headless
-    # detection catch the orchestrator path; this guard catches the
-    # worker path even when a wrapper sets allow_interactive_skill=True.
-    # Closes Cas v1.0.6 iter-2 WARNING: F-A2 worker headless audit was
-    # grep-snapshot, not runtime guard. Fires loud-fast so any drift
-    # (transitive imports adding a skill dispatch to the worker code
-    # path) surfaces during dev/CI rather than producing a silent
-    # subprocess hang in production.
-    if (
-        skill in _SUBPROCESS_INCOMPATIBLE_SKILLS
-        and os.environ.get("SBTDD_AUTO_PARALLEL_WORKER") == "1"
-    ):
-        raise PreconditionError(
-            f"Worker subprocess attempted to dispatch interactive "
-            f"skill {skill!r}; this should never happen in the auto "
-            f"--parallel worker code path. Bug. Either: (a) the worker "
-            f"code path was extended to call the skill -- refactor to "
-            f"use shell command directly per v1.0.7 A2 "
-            f"_run_verification pattern, OR (b) the parent set "
-            f"SBTDD_AUTO_PARALLEL_WORKER=1 incorrectly."
-        )
-```
-
-Add `import os` to the imports at the top of the file if not already present.
-
-- [x] **Step 10: Run tests to verify they pass**
-
-Run: `pytest tests/test_auto_cmd.py::TestSpawnWorkerDispatcher tests/test_close_phase_cmd.py::TestRunVerificationWorkerBypass tests/test_superpowers_dispatch.py::TestInvokeSkillWorkerGuard -v`
-
-Expected: all PASS (POSIX/Windows split per `sys.platform` monkeypatch).
-
-- [x] **Step 11: Run `make verify`**
-
-Expected: clean.
-
-- [x] **Step 12: Close Green phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 A2 Windows hybrid worker spawn + Q2'=b runtime guard"`
-
-Expected: `feat:` commit lands; state advances to `refactor`.
-
-#### Refactor Phase
-
-- [x] **Step 13: Tighten docstrings + audit for remaining direct Popen calls**
-
-Search for any other `subprocess.Popen` calls in `auto_cmd.py` that
-spawn workers; if any bypass `_spawn_worker`, they need to route through
-the dispatcher to preserve the env-var contract. Likely target:
-`_dispatch_tracks_concurrent` may have only one spawn site (the one
-just refactored). Confirm via:
+Per the iter-2 Red-phase commit methodology (plan header): the Red test passes-by-design (regression pin), but close-phase Red verification would still run sec.0.1 chain which is heavy. Use raw git commit instead for consistency with other Red phases. State stays at `current_phase=red`.
 
 ```bash
-grep -n "subprocess.Popen" skills/sbtdd/scripts/auto_cmd.py
+git add tests/test_auto_cmd.py
+git commit -m "test: v1.0.8 T2 Red — regression pin for worker env propagation"
 ```
 
-Document the worker-spawn contract in `_spawn_worker` docstring: "All
-worker subprocess spawns under `auto --parallel` MUST go through this
-helper to preserve the `SBTDD_AUTO_PARALLEL_WORKER=1` env contract that
-`close_phase_cmd._run_verification` and `superpowers_dispatch.invoke_skill`
-depend on."
+Expected: Commit recorded; `git status` clean; state file unchanged.
 
-- [x] **Step 14: Run `make verify`**
+- [x] **Step 5: Write the Green — substantive documentation of env propagation contract**
 
+Per iter-2 carry-forward Mel-W2+Cas-W8: the Green phase has TWO substantive doc surfaces. NOT a 1-line throwaway comment.
+
+**(a)** Modify the docstring of `auto_cmd._dispatch_tracks_concurrent` in `skills/sbtdd/scripts/auto_cmd.py` around line ~1948-1991. Locate the existing docstring's `Args:` section. Add a new paragraph BEFORE `Args:` documenting the env propagation contract:
+
+```
+    **Env var propagation contract** (v1.0.8 Pillar A2): each
+    worker subprocess inherits the parent's environment via
+    ``worker_env = os.environ.copy()`` at line ~2061 — UNFILTERED.
+    All env vars present in the parent process are propagated to
+    workers unchanged. This contract is load-bearing for v1.0.8
+    Pillar A1: the stub gate's env var (``SBTDD_E2E_STUB_DISPATCH``)
+    flows from a parent test process down through the orchestrator
+    to each worker, where the gate fires and bypasses real
+    ``claude -p`` dispatch. A future refactor introducing an
+    env-var allowlist (e.g., to scrub secrets) would break the
+    stub gate semantics and the v1.0.8 e2e test
+    (``test_auto_parallel_e2e``). The regression test
+    ``test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch``
+    in ``tests/test_auto_cmd.py`` pins this contract at runtime.
+```
+
+**(b)** Around line 2061, locate the existing comment block above `worker_env = os.environ.copy()`. Insert a NEW multi-line comment block (not a single line) between the existing v1.0.7 comment block and the assignment:
+
+```python
+                # v1.0.7 A2: route through the cross-platform dispatcher so
+                # the SBTDD_AUTO_PARALLEL_WORKER=1 env contract holds for
+                # every worker (POSIX -> PTY allocation; Windows -> PIPE +
+                # env marker). Direct subprocess.Popen here would bypass
+                # the chicken-and-egg fix.
+                #
+                # v1.0.8 A2: env propagation is UNFILTERED — os.environ.copy()
+                # preserves all parent env vars in the worker context. This
+                # contract is load-bearing for v1.0.8 Pillar A1 (the stub
+                # gate's SBTDD_E2E_STUB_DISPATCH env var flows parent ->
+                # orchestrator -> worker unchanged; gate fires in worker
+                # subprocess + bypasses real claude -p). The regression
+                # test test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch
+                # pins this. Any future allowlist refactor MUST update
+                # both this comment AND the regression test together.
+                worker_env = os.environ.copy()
+```
+
+Together (a) + (b) constitute the substantive Green diff: ~10 lines of docstring + 8 lines of inline comment. Both serve the same goal as the test — pin the env propagation contract for future maintainers.
+
+- [x] **Step 6: Run sec.0.1 chain after Green diff**
+
+Run: `make verify`
+Expected: clean sec.0.1 chain.
+
+- [x] **Step 7: Close Green phase**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T2 Green: document worker env propagation contract (docstring + inline) — pins SBTDD_E2E_STUB_DISPATCH semantics for v1.0.8 Pillar A1"`
+
+Expected: commit with `feat:` prefix; state advances to `refactor`.
+
+- [x] **Step 8: Write the Refactor — extract reusable env-capture helper for related tests**
+
+In `tests/test_auto_cmd.py`, the `_FakeProc` + `_fake_spawn_worker` pattern in the new test could be reused by future env-propagation regression tests. Extract them to module-level helpers at the top of the file (after imports, before the first test function):
+
+```python
+class _CapturingFakeWorkerProc:
+    """v1.0.8 T2 helper: minimal subprocess.Popen stub for env-capture tests.
+
+    Returns (b"", b"") from communicate(); pid=4242; returncode=0.
+    """
+
+    def __init__(self) -> None:
+        self.pid = 4242
+        self.returncode = 0
+
+    def communicate(self, timeout: int):
+        return (b"", b"")
+
+
+def _make_env_capturing_spawn_worker(
+    captured_envs: list[dict[str, str]],
+):
+    """v1.0.8 T2 helper: build a fake _spawn_worker that records env dicts.
+
+    Returns a callable matching the _spawn_worker signature that appends
+    each invocation's env dict to ``captured_envs`` and returns a
+    :class:`_CapturingFakeWorkerProc`.
+    """
+
+    def _fake(argv, env, **popen_kwargs):
+        captured_envs.append(dict(env))
+        return _CapturingFakeWorkerProc()
+
+    return _fake
+```
+
+Then refactor the test body to use these helpers:
+
+```python
+def test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(docstring preserved from Red)"""
+    import auto_cmd
+
+    monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+    monkeypatch.setenv("V108_A2_REGRESSION_MARKER", "propagated")
+
+    captured_envs: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        auto_cmd,
+        "_spawn_worker",
+        _make_env_capturing_spawn_worker(captured_envs),
+    )
+    monkeypatch.setattr(
+        auto_cmd, "_verify_worker_sidecars_present", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(
+        auto_cmd, "_merge_audit_sidecars", lambda *a, **kw: {"schema_version": 1}
+    )
+    monkeypatch.setattr(
+        auto_cmd, "_atomic_write_json", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(auto_cmd, "_reap_orphans", lambda *a, **kw: None)
+
+    (tmp_path / ".claude").mkdir()
+
+    auto_cmd._dispatch_tracks_concurrent(
+        tracks=[["1"]],
+        effective_workers=1,
+        project_root=tmp_path,
+        ns=None,
+    )
+
+    assert len(captured_envs) == 1
+    worker_env = captured_envs[0]
+    assert worker_env.get("SBTDD_E2E_STUB_DISPATCH") == "1", (
+        "v1.0.8 A2 regression: SBTDD_E2E_STUB_DISPATCH must propagate "
+        "from parent to worker unchanged"
+    )
+    assert worker_env.get("V108_A2_REGRESSION_MARKER") == "propagated", (
+        "v1.0.8 A2-2 regression: unrelated custom env vars must also "
+        "propagate (no filtering allowlist)"
+    )
+```
+
+- [x] **Step 9: Run sec.0.1 chain after refactor**
+
+Run: `pytest tests/test_auto_cmd.py::test_v108_a2_worker_env_propagates_sbtdd_e2e_stub_dispatch -v`
+Expected: PASS (behavior unchanged from Green).
+
+Run: `make verify`
 Expected: clean.
 
-- [x] **Step 15: Close Refactor phase + close task**
+- [x] **Step 10: Close Refactor phase + Task**
 
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 A2 dispatcher + worker contract documentation"`
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T2 Refactor: extract env-capturing fake worker helpers in test_auto_cmd"`
 
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` + `chore:` commits land; state advances to next task.
+Expected: `refactor:` commit + cascade into close-task `chore:` commit + T2 checkbox `[x]`.
 
 ---
 
-### Task 3: A3 — F-A2 dogfood empirical e2e (REAL chicken-and-egg fixture per C3 carry-forward)
+## Task 3: A4 — Gate regression test class `TestE2EStubGate`
+
+**Goal:** Add comprehensive regression suite for the v1.0.8 A1 stub gate. 4 tests covering: gate fires, gate does not fire (env unset), gate does not fire (skill outside set), stdout marker semantic.
 
 **Files:**
-- Create: `tests/test_auto_parallel_e2e.py` (new integration test
-  exercising full `auto --parallel` flow on Windows with synthetic
-  2-track + 4 disjoint tasks where each worker invokes REAL
-  `close-phase` chain → sec.0.1 dispatch)
-- Create: `tests/fixtures/parallel-e2e/plan-fixture.md` (synthetic
-  4-task plan; each task's TDD cycle invokes real `close-phase` from
-  worker subprocess)
-- Create: `tests/fixtures/parallel-e2e/spec-fixture.md` (synthetic
-  spec)
-- Create: `tests/fixtures/parallel-e2e/pyproject.toml` (minimal
-  fixture project so worker `pytest` / `ruff` / `mypy` chain can
-  discover something to run)
-- Create: `tests/fixtures/parallel-e2e/src/sample.py` + tests (minimal
-  source + smoke tests that all 4 sec.0.1 tools succeed against)
+- Test: `tests/test_superpowers_dispatch.py` (add new class `TestE2EStubGate` near end of file, after existing classes)
 
-Covers escenarios A3-1 (C3 real chicken-and-egg fixture) and A3-2 from
-spec sec.4.3.
+**Spec mapping:** Escenario A4-1 (class structure), A4-2 (monkeypatch target invariant), A4-3 (positive case raises on subprocess attempt), A1-2 / A1-3 / A1-4 (behaviors covered by tests).
 
-**CRITICAL design constraint (C3 carry-forward)**: trivial "append
-text" worker tasks DO NOT trip the chicken-and-egg failure surface.
-The fixture project MUST be a real Python project with pyproject.toml
-+ source + tests so each worker's `close-phase` invocation actually
-dispatches the sec.0.1 chain (`pytest`, `ruff check`, `ruff format
---check`, `mypy`). WITHOUT v1.0.7 Pillar A, this fixture would hang
-on the first worker close-phase invocation. WITH Pillar A: workers
-either get real PTY (POSIX) or use sec.0.1 chain bypass (Windows) and
-complete.
+- [x] **Step 1: Read existing class patterns to match style**
 
-#### Red Phase
+Run: `grep -n "^class TestInvokeSkill" tests/test_superpowers_dispatch.py`
+Expected: line numbers of existing test classes. Read one (e.g., `TestInvokeSkillMembershipGate`) to mimic structure.
 
-- [x] **Step 1: Create synthetic 2-track + 4-task plan fixture WITH real Python project (C3 carry-forward)**
+- [x] **Step 2: Write the failing Red test class (4 stub methods raising NotImplementedError)**
 
-Create `tests/fixtures/parallel-e2e/spec-fixture.md`:
-
-```markdown
-# Synthetic e2e spec
-
-> v1.0.7 A3 dogfood fixture — exercises real chicken-and-egg surface
-> via worker close-phase chain dispatch.
-
-## 1. Objective
-
-Synthetic 4-task workload to exercise `auto --parallel` end-to-end with
-each worker invoking real close-phase → sec.0.1 chain.
-
-## 4. Escenarios
-
-**Escenario fixture-1**: Given the parallel dispatcher + a real Python
-fixture project; When 4 disjoint tasks dispatched across 2 tracks each
-invoking real close-phase; Then all complete without hang AND
-per-worker verify-evidence sidecars exist.
-```
-
-Create `tests/fixtures/parallel-e2e/pyproject.toml`:
-
-```toml
-[project]
-name = "parallel-e2e-fixture"
-version = "0.0.1"
-requires-python = ">=3.9"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.ruff]
-line-length = 100
-
-[tool.mypy]
-strict = true
-```
-
-Create `tests/fixtures/parallel-e2e/src/sample.py`:
+Append to end of `tests/test_superpowers_dispatch.py`:
 
 ```python
-"""Sample source for fixture project (passes ruff + mypy --strict)."""
+class TestE2EStubGate:
+    """v1.0.8 Pillar A4: regression tests for SBTDD_E2E_STUB_DISPATCH gate.
 
+    Each test monkeypatches ``subprocess_utils.run_with_timeout`` at the
+    bottom of the call chain so the gate at the top of
+    :func:`superpowers_dispatch.invoke_skill` is exercised end-to-end
+    (real ``invoke_skill`` execution; only the subprocess call is faked).
+    Monkeypatching ``invoke_skill`` itself would break the gate test
+    semantic (gate would never run).
 
-def add(x: int, y: int) -> int:
-    """Return x + y."""
-    return x + y
-```
-
-Create `tests/fixtures/parallel-e2e/tests/test_sample.py`:
-
-```python
-"""Sample tests for fixture project (passes pytest)."""
-import sys
-
-from src.sample import add
-
-
-def test_add() -> None:
-    """add returns sum."""
-    assert add(1, 2) == 3
-
-
-def test_isatty_observation() -> None:
-    """v1.0.7 iter-3 A3-3 carry-forward: emit isatty marker for INV-16 evidence.
-
-    On POSIX, the worker subprocess inherits a real TTY via PTY
-    allocation (T1 production code); on Windows it inherits PIPE.
-    This test prints the observation to stdout so the captured
-    sec.0.1 chain output (T2 sidecar) records it for the integration
-    test (T3) to assert.
+    See ``sbtdd/spec-behavior.md`` v1.0.8 sec.4.4 escenarios A4-1..A4-3.
     """
-    print(f"isatty={sys.stdin.isatty()}")
-    assert True  # always passes; the side-effect is the print
+
+    def test_gate_fires_for_stubbable_skill_with_env_set(self, monkeypatch):
+        """v1.0.8 A4-1 (covers A1-1 + A1-4): env=1 + stubbable skill -> stub."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
+
+    def test_gate_does_not_fire_when_env_unset(self, monkeypatch):
+        """v1.0.8 A4-2 (covers A1-2): env unset -> real path attempted."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
+
+    def test_gate_does_not_fire_for_skill_outside_stubbable_set(self, monkeypatch):
+        """v1.0.8 A4-3 (covers A1-3): env=1 + non-stubbable -> real path."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
+
+    def test_gate_stdout_contains_marker(self, monkeypatch):
+        """v1.0.8 A4-4 (covers A1-4): stub stdout has '[sbtdd e2e stub]' literal."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
 ```
 
-Create `tests/fixtures/parallel-e2e/Makefile` (optional fallback for
-operators who want to run `make verify` locally; v1.0.7 worker bypass
-does NOT depend on it):
+- [x] **Step 3: Run the Red tests to verify they fail**
 
-```makefile
-verify:
-	pytest && ruff check . && ruff format --check . && mypy .
+Run: `pytest tests/test_superpowers_dispatch.py::TestE2EStubGate -v`
+Expected: 4 FAILURES with `NotImplementedError: v1.0.8 T3 Red placeholder`.
+
+- [x] **Step 4: Close Red phase via raw git commit**
+
+Per the iter-2 Red-phase commit methodology (plan header): the 4 failing tests are intentional Red phase; close-phase verification would abort on the NotImplementedErrors. Use raw git commit.
+
+```bash
+git add tests/test_superpowers_dispatch.py
+git commit -m "test: v1.0.8 T3 Red — TestE2EStubGate scaffolding with 4 placeholder tests"
 ```
 
-Create `tests/fixtures/parallel-e2e/plan-fixture.md` with 4 tasks
-where each task's Step 2 invokes the REAL `close-phase` chain (which
-in worker mode dispatches the sec.0.1 chain via T2 production code).
-Each task touches a different scratch file for disjoint surfaces:
+Expected: Commit recorded; `git status` clean; state unchanged.
 
-```markdown
-# Synthetic 4-task parallel e2e plan
+- [x] **Step 5: Write the Green — replace each test method with real body**
 
-**Goal:** Exercise auto --parallel end-to-end with 4 disjoint tasks
-each invoking real close-phase chain.
+Replace the four test method bodies in `tests/test_superpowers_dispatch.py::TestE2EStubGate`:
 
-### Task 1: Touch alpha + invoke close-phase chain
+```python
+class TestE2EStubGate:
+    """(docstring preserved from Red phase)"""
 
-**Files:**
-- Modify: `scratch/alpha.txt`
+    def test_gate_fires_for_stubbable_skill_with_env_set(self, monkeypatch):
+        """v1.0.8 A4-1 (covers A1-1 + A1-4): env=1 + stubbable skill -> stub."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
 
-- [ ] Step 1: Append "alpha-red" to scratch/alpha.txt
-- [ ] Step 2: close-phase via run_sbtdd.py (dispatches sec.0.1 chain)
-- [ ] Step 3: Done
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
 
-### Task 2: Touch beta + invoke close-phase chain
+        def _fail(*args, **kwargs):
+            raise AssertionError(
+                "v1.0.8 A4-3 regression: subprocess attempted but gate "
+                "should have fired"
+            )
 
-**Files:**
-- Modify: `scratch/beta.txt`
+        monkeypatch.setattr(
+            superpowers_dispatch.subprocess_utils, "run_with_timeout", _fail
+        )
 
-- [ ] Step 1: Append "beta-red" to scratch/beta.txt
-- [ ] Step 2: close-phase via run_sbtdd.py
-- [ ] Step 3: Done
+        result = superpowers_dispatch.invoke_skill(
+            "test-driven-development",
+            args=["--phase=red"],
+            allow_interactive_skill=True,
+        )
 
-### Task 3: Touch gamma + invoke close-phase chain
+        assert isinstance(result, SkillResult)
+        assert result.returncode == 0
+        assert result.skill == "test-driven-development"
+        assert result.stderr == ""
 
-**Files:**
-- Modify: `scratch/gamma.txt`
+    def test_gate_does_not_fire_when_env_unset(self, monkeypatch):
+        """v1.0.8 A4-2 (covers A1-2): env unset -> real path attempted."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
 
-- [ ] Step 1: Append "gamma-red" to scratch/gamma.txt
-- [ ] Step 2: close-phase via run_sbtdd.py
-- [ ] Step 3: Done
+        monkeypatch.delenv("SBTDD_E2E_STUB_DISPATCH", raising=False)
 
-### Task 4: Touch delta + invoke close-phase chain
+        captured = {"called": False}
 
-**Files:**
-- Modify: `scratch/delta.txt`
+        def _capture(cmd, **kwargs):
+            captured["called"] = True
+            captured["cmd"] = cmd
+            return type(
+                "_CP", (), {"returncode": 0, "stdout": "real", "stderr": ""}
+            )()
 
-- [ ] Step 1: Append "delta-red" to scratch/delta.txt
-- [ ] Step 2: close-phase via run_sbtdd.py
-- [ ] Step 3: Done
+        monkeypatch.setattr(
+            superpowers_dispatch.subprocess_utils, "run_with_timeout", _capture
+        )
+
+        result = superpowers_dispatch.invoke_skill(
+            "test-driven-development",
+            args=["--phase=red"],
+            allow_interactive_skill=True,
+        )
+
+        assert captured["called"], (
+            "v1.0.8 A4-2 regression: gate fired even though env var unset; "
+            "production path was incorrectly bypassed"
+        )
+        assert isinstance(result, SkillResult)
+        assert result.returncode == 0
+        # Real path returns subprocess output, not the stub marker.
+        assert "[sbtdd e2e stub]" not in result.stdout
+
+    def test_gate_does_not_fire_for_skill_outside_stubbable_set(self, monkeypatch):
+        """v1.0.8 A4-3 (covers A1-3): env=1 + non-stubbable -> real path."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+
+        captured = {"called": False}
+
+        def _capture(cmd, **kwargs):
+            captured["called"] = True
+            return type(
+                "_CP", (), {"returncode": 0, "stdout": "real", "stderr": ""}
+            )()
+
+        monkeypatch.setattr(
+            superpowers_dispatch.subprocess_utils, "run_with_timeout", _capture
+        )
+
+        # /verification-before-completion is in _SUBPROCESS_INCOMPATIBLE_SKILLS
+        # but NOT in _E2E_STUBBABLE_SKILLS, so the v1.0.8 A1 gate must skip
+        # it even with env var set. The v1.0.4 membership gate is bypassed
+        # via allow_interactive_skill=True (production wrapper path).
+        result = superpowers_dispatch.invoke_skill(
+            "verification-before-completion",
+            allow_interactive_skill=True,
+        )
+
+        assert captured["called"], (
+            "v1.0.8 A4-3 regression: gate fired for a skill outside "
+            "_E2E_STUBBABLE_SKILLS; production "
+            "/verification-before-completion path was incorrectly bypassed"
+        )
+        assert isinstance(result, SkillResult)
+        assert "[sbtdd e2e stub]" not in result.stdout
+
+    def test_gate_stdout_contains_marker(self, monkeypatch):
+        """v1.0.8 A4-4 (covers A1-4): stub stdout has '[sbtdd e2e stub]' literal."""
+        import superpowers_dispatch
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        monkeypatch.setattr(
+            superpowers_dispatch.subprocess_utils,
+            "run_with_timeout",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("subprocess attempted")
+            ),
+        )
+
+        result = superpowers_dispatch.invoke_skill(
+            "systematic-debugging",
+            args=[],
+            allow_interactive_skill=True,
+        )
+
+        assert result.stdout.startswith("[sbtdd e2e stub] /"), (
+            f"Expected stdout to start with '[sbtdd e2e stub] /' marker; "
+            f"got: {result.stdout!r}"
+        )
+        assert "systematic-debugging" in result.stdout
+        assert "bypassed (SBTDD_E2E_STUB_DISPATCH=1)" in result.stdout
 ```
 
-- [ ] **Step 2: Write failing integration test in `tests/test_auto_parallel_e2e.py`**
+- [x] **Step 6: Run the Green tests to verify all 4 pass**
+
+Run: `pytest tests/test_superpowers_dispatch.py::TestE2EStubGate -v`
+Expected: 4 PASSED.
+
+Run: `make verify`
+Expected: clean sec.0.1 chain.
+
+- [x] **Step 7: Close Green phase**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T3 Green: implement 4 TestE2EStubGate regression tests"`
+
+Expected: `feat:` commit.
+
+- [x] **Step 8: Write the Refactor — extract shared monkeypatch helpers**
+
+The 4 tests share `_fail`/`_capture` patterns for monkeypatching `run_with_timeout`. Extract shared helper methods to the class to reduce duplication.
+
+Add 2 static methods to `TestE2EStubGate` at the top of the class (before the 4 test methods):
+
+```python
+    @staticmethod
+    def _capture_run_with_timeout(monkeypatch) -> dict:
+        """Return a capture dict + monkeypatch run_with_timeout to record calls.
+
+        Returns the capture dict so individual tests can introspect:
+        ``captured["called"]`` (bool) and ``captured["cmd"]`` (list[str]).
+        """
+        import superpowers_dispatch
+
+        captured: dict = {"called": False, "cmd": None}
+
+        def _capture(cmd, **kwargs):
+            captured["called"] = True
+            captured["cmd"] = cmd
+            return type(
+                "_CP", (), {"returncode": 0, "stdout": "real", "stderr": ""}
+            )()
+
+        monkeypatch.setattr(
+            superpowers_dispatch.subprocess_utils, "run_with_timeout", _capture
+        )
+        return captured
+
+    @staticmethod
+    def _fail_if_subprocess_called(monkeypatch) -> None:
+        """Monkeypatch run_with_timeout to raise AssertionError if invoked.
+
+        Used by tests asserting the gate fires (subprocess must NEVER be
+        reached when env var is set + skill is stubbable).
+        """
+        import superpowers_dispatch
+
+        def _fail(*args, **kwargs):
+            raise AssertionError(
+                "v1.0.8 A4 regression: subprocess attempted but gate "
+                "should have fired"
+            )
+
+        monkeypatch.setattr(
+            superpowers_dispatch.subprocess_utils, "run_with_timeout", _fail
+        )
+```
+
+Then refactor each of the 4 test methods to call the helpers instead of inlining the monkeypatch:
+
+```python
+    def test_gate_fires_for_stubbable_skill_with_env_set(self, monkeypatch):
+        """v1.0.8 A4-1 (covers A1-1 + A1-4): env=1 + stubbable skill -> stub."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        self._fail_if_subprocess_called(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "test-driven-development",
+            args=["--phase=red"],
+            allow_interactive_skill=True,
+        )
+
+        assert isinstance(result, SkillResult)
+        assert result.returncode == 0
+        assert result.skill == "test-driven-development"
+        assert result.stderr == ""
+
+    def test_gate_does_not_fire_when_env_unset(self, monkeypatch):
+        """v1.0.8 A4-2 (covers A1-2): env unset -> real path attempted."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
+
+        monkeypatch.delenv("SBTDD_E2E_STUB_DISPATCH", raising=False)
+        captured = self._capture_run_with_timeout(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "test-driven-development",
+            args=["--phase=red"],
+            allow_interactive_skill=True,
+        )
+
+        assert captured["called"], (
+            "v1.0.8 A4-2 regression: gate fired even though env var unset"
+        )
+        assert isinstance(result, SkillResult)
+        assert "[sbtdd e2e stub]" not in result.stdout
+
+    def test_gate_does_not_fire_for_skill_outside_stubbable_set(self, monkeypatch):
+        """v1.0.8 A4-3 (covers A1-3): env=1 + non-stubbable -> real path."""
+        import superpowers_dispatch
+        from superpowers_dispatch import SkillResult
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        captured = self._capture_run_with_timeout(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "verification-before-completion",
+            allow_interactive_skill=True,
+        )
+
+        assert captured["called"], (
+            "v1.0.8 A4-3 regression: gate fired for non-stubbable skill"
+        )
+        assert isinstance(result, SkillResult)
+        assert "[sbtdd e2e stub]" not in result.stdout
+
+    def test_gate_stdout_contains_marker(self, monkeypatch):
+        """v1.0.8 A4-4 (covers A1-4): stub stdout has '[sbtdd e2e stub]' literal."""
+        import superpowers_dispatch
+
+        monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+        self._fail_if_subprocess_called(monkeypatch)
+
+        result = superpowers_dispatch.invoke_skill(
+            "systematic-debugging",
+            args=[],
+            allow_interactive_skill=True,
+        )
+
+        assert result.stdout.startswith("[sbtdd e2e stub] /"), (
+            f"Expected stdout to start with '[sbtdd e2e stub] /' marker; "
+            f"got: {result.stdout!r}"
+        )
+        assert "systematic-debugging" in result.stdout
+        assert "bypassed (SBTDD_E2E_STUB_DISPATCH=1)" in result.stdout
+```
+
+- [x] **Step 9: Run sec.0.1 chain after refactor**
+
+Run: `pytest tests/test_superpowers_dispatch.py::TestE2EStubGate -v`
+Expected: 4 PASSED (behavior unchanged from Green).
+
+Run: `make verify`
+Expected: clean.
+
+- [x] **Step 10: Close Refactor phase + Task**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T3 Refactor: extract shared monkeypatch helpers in TestE2EStubGate"`
+
+Expected: `refactor:` commit + close-task cascade.
+
+---
+
+## Task 4: A3 — T3 e2e test redesign (unxfail + strict assertions)
+
+**Goal:** Remove `@pytest.mark.xfail` from `test_auto_parallel_e2e_chicken_and_egg_closed`, set `SBTDD_E2E_STUB_DISPATCH=1` in subprocess env, shrink timeout 600→60, replace permissive assertions with strict happy-path assertions (rc=0, state=done, plan flipped, sidecars present with verify_chain `>= 4` entries — per iter-2 carry-forward Cas-W10 — + per-tool presence check for pytest+ruff+mypy each rc=0, audit finished status=success).
+
+**Files:**
+- Modify: `tests/test_auto_parallel_e2e.py`
+  - Test function `test_auto_parallel_e2e_chicken_and_egg_closed` (line ~198): remove `@pytest.mark.xfail` decorator, update body + docstring
+  - Module-level constant `_AUTO_TIMEOUT_S` (line ~66): change `600` to `60`
+
+**Spec mapping:** Escenario A3-1 (happy path), A3-2 (post-cycle state assertions), A3-3 (sidecar verify_chain shape), A3-4 (xfail marker removed)
+
+**Dependencies**: T1 (gate exists) + T5 (fixture has `.claude/settings.json`) MUST be completed before T4.
+
+- [x] **Step 1: Read current test body to plan delta**
+
+Run: `sed -n '184,268p' tests/test_auto_parallel_e2e.py`
+Expected: current xfail decorator + test body. Plan: replace lines ~184-197 (xfail decorator + decorator gap) by removing them; replace lines ~244-267 (permissive assertions) with strict assertions; update `_AUTO_TIMEOUT_S` constant.
+
+- [x] **Step 2: Write the failing Red — strict assertions WITHOUT env var stub yet**
+
+Modify `tests/test_auto_parallel_e2e.py`:
+
+(a) **Delete** the `@pytest.mark.xfail(...)` decorator block from `test_auto_parallel_e2e_chicken_and_egg_closed`. The two `@pytest.mark.skipif` decorators above it (POSIX skip + toolchain skip) MUST be preserved.
+
+(b) Replace the function body (from `proc = subprocess.run(...)` to the end of the function) with:
+
+```python
+    # v1.0.8 A3 Red phase: strict assertions intentionally WITHOUT
+    # SBTDD_E2E_STUB_DISPATCH=1 in env. Expected to fail (timeout or
+    # assertion) — proves the stub gate is required. Green adds env var.
+    env = os.environ.copy()
+
+    proc = subprocess.run(
+        [sys.executable, str(_RUN_SBTDD), "auto", "--parallel"],
+        cwd=str(project),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_AUTO_TIMEOUT_S,
+    )
+    diagnostic = _diagnostic_message(proc.returncode, proc.stdout, proc.stderr)
+
+    assert proc.returncode == 0, (
+        f"v1.0.8 A3-1 expected rc=0; got rc={proc.returncode}.{diagnostic}"
+    )
+
+    state = json.loads(
+        (project / ".claude" / "session-state.json").read_text(encoding="utf-8")
+    )
+    assert state["current_phase"] == "done", (
+        f"v1.0.8 A3-2 expected current_phase=='done'; "
+        f"got {state['current_phase']!r}.{diagnostic}"
+    )
+
+    import re
+
+    plan_text = (project / "planning" / "claude-plan-tdd.md").read_text(
+        encoding="utf-8"
+    )
+    assert not re.search(r"^[ \t]*- \[ \]", plan_text, re.MULTILINE), (
+        f"v1.0.8 A3-2 expected all plan checkboxes flipped to [x]; "
+        f"open '- [ ]' line(s) remain.{diagnostic}"
+    )
+
+    workers_dir = project / ".claude" / "auto-run-workers"
+    assert workers_dir.is_dir(), (
+        f"v1.0.8 A3-2 missing {workers_dir}.{diagnostic}"
+    )
+    sidecars = list(workers_dir.glob("*-verify.json"))
+    assert sidecars, (
+        f"v1.0.8 A3-2 expected >=1 sidecar in {workers_dir}.{diagnostic}"
+    )
+    # Per iter-2 carry-forward Cas-W10: `>= 4` (not `== 4`) + presence
+    # check for the 4 known sec.0.1 tools. Future sec.0.1 extensions
+    # (5th tool) MUST NOT break the assertion; the 4 known tools MUST
+    # be present.
+    # Per iter-2 carry-forward Cas-W5+Mel-W3: tool detection via
+    # substring-anywhere match on str(cmd), NOT positional cmd[2].
+    # This is robust against future cmd-shape evolution (e.g.,
+    # python -X dev -m pytest, env wrappers, different module paths).
+    expected_tools = {"pytest", "ruff", "mypy"}  # ruff appears twice (check + format)
+    for sc in sidecars:
+        payload = json.loads(sc.read_text(encoding="utf-8"))
+        chain = payload.get("verify_chain")
+        assert isinstance(chain, list) and len(chain) >= 4, (
+            f"v1.0.8 A3-3 expected verify_chain with >=4 entries "
+            f"in {sc.name}; got "
+            f"{len(chain) if isinstance(chain, list) else 'non-list'}."
+            f"{diagnostic}"
+        )
+        # Substring-anywhere tool detection. Convert each cmd list
+        # to a single space-joined string and check the tool name
+        # appears anywhere. Robust against cmd-shape changes.
+        tools_in_chain: set[str] = set()
+        for entry in chain:
+            cmd = entry.get("cmd")
+            if not isinstance(cmd, list):
+                continue
+            cmd_str = " ".join(str(p) for p in cmd)
+            for tool in expected_tools:
+                if tool in cmd_str:
+                    tools_in_chain.add(tool)
+        missing = expected_tools - tools_in_chain
+        assert not missing, (
+            f"v1.0.8 A3-3 expected tools {expected_tools} in verify_chain "
+            f"of {sc.name}; missing {missing}; observed {tools_in_chain}."
+            f"{diagnostic}"
+        )
+        for entry in chain:
+            assert entry.get("rc") == 0, (
+                f"v1.0.8 A3-3 expected all sec.0.1 tools rc=0 in "
+                f"{sc.name}; got entry rc={entry.get('rc')}.{diagnostic}"
+            )
+
+    audit = json.loads(
+        (project / ".claude" / "auto-run.json").read_text(encoding="utf-8")
+    )
+    assert audit.get("auto_finished_at") is not None, (
+        f"v1.0.8 A3-2 expected auto_finished_at non-null.{diagnostic}"
+    )
+    assert audit.get("status") == "success", (
+        f"v1.0.8 A3-2 expected status=='success'; "
+        f"got {audit.get('status')!r}.{diagnostic}"
+    )
+```
+
+(c) Update the function docstring (replace the existing xfail rationale paragraph) to:
+
+```python
+    """v1.0.8 A3 dogfood: ``auto --parallel`` workers complete in 60s.
+
+    Empirical validation that v1.0.7 A1 POSIX PTY + A2 Windows hybrid
+    Option B-W3 fallback close the chicken-and-egg surface confirmed
+    in v1.0.6 own-cycle (workers spawned via ``subprocess.PIPE`` with
+    no TTY hanging on ``close-phase /verification-before-completion``).
+
+    v1.0.8 closes the empirical gap: the v1.0.7 600s timeout was caused
+    by an upstream ``claude -p /test-driven-development`` hang in the
+    fixture cwd (documented in CLAUDE.md "Known upstream limitations").
+    The subprocess env carries ``SBTDD_E2E_STUB_DISPATCH=1`` so
+    ``superpowers_dispatch.invoke_skill`` short-circuits the
+    ``/test-driven-development`` + ``/systematic-debugging`` dispatches
+    to a synthetic ``SkillResult(rc=0)`` — workers reach the actual
+    chicken-and-egg surface (`_run_verification` worker-mode bypass via
+    sec.0.1 chain) without the upstream LLM-dispatch hang.
+
+    Strict happy-path assertions (per Q4'=a+):
+
+    - subprocess returncode == 0
+    - session-state.json current_phase == "done"
+    - planning/claude-plan-tdd.md has zero ``- [ ]`` line-start checkboxes
+    - .claude/auto-run-workers/ contains >= 1 sidecar with verify_chain
+      of exactly 4 entries each rc=0
+    - .claude/auto-run.json auto_finished_at non-null + status=="success"
+    """
+```
+
+(d) Update the module-level constant at line ~66:
+
+```python
+# Subprocess timeout for the entire ``auto --parallel`` invocation.
+# v1.0.8 A3 shrunk from 600s to 60s — the stub gate (Pillar A1)
+# eliminates the upstream LLM-dispatch cost that drove the v1.0.7
+# 600s budget.
+_AUTO_TIMEOUT_S = 60
+```
+
+- [x] **Step 3: Verify Red state deterministically via static grep (iter-2 carry-forward Cas-W6 resolution)**
+
+Per iter-2 carry-forward Cas-W6: do NOT run the actual e2e test in Red phase. Running it depends on upstream `claude -p` hang behavior (flaky, slow). Instead, verify Red state DETERMINISTICALLY via static inspection: the test source has the strict assertions in place AND does NOT yet have `env["SBTDD_E2E_STUB_DISPATCH"] = "1"`.
+
+Run:
+```bash
+grep -n 'SBTDD_E2E_STUB_DISPATCH' tests/test_auto_parallel_e2e.py
+```
+Expected: ZERO lines printed (env var not yet set in test code — the Red state).
+
+Run:
+```bash
+grep -n 'rc=0' tests/test_auto_parallel_e2e.py | head
+```
+Expected: at least one match (strict assertions are in place per Step 2).
+
+Run:
+```bash
+grep -n '@pytest.mark.xfail' tests/test_auto_parallel_e2e.py
+```
+Expected: ZERO matches (xfail decorator was deleted in Step 2a).
+
+These three checks deterministically confirm the Red state without depending on upstream behavior. If desired, also run the e2e test with a SHORT timeout (e.g., 5s) to confirm it fails by timeout — but treat that as informational, NOT as the gate.
+
+- [x] **Step 4: Close Red phase via raw git commit**
+
+Per the iter-2 Red-phase commit methodology (plan header): the test fails intentionally (timeout or assertion); close-phase verification would abort. Use raw git commit.
+
+```bash
+git add tests/test_auto_parallel_e2e.py
+git commit -m "test: v1.0.8 T4 Red — T3 e2e strict assertions without stub gate env var"
+```
+
+Expected: Commit recorded; `git status` clean; state unchanged.
+
+- [x] **Step 5: Write the Green — add SBTDD_E2E_STUB_DISPATCH=1 to env**
+
+In `tests/test_auto_parallel_e2e.py`, locate the env block within the test body:
+
+```python
+    env = os.environ.copy()
+```
+
+Replace with:
+
+```python
+    # v1.0.8 A3 Green: stub gate env var bypasses upstream claude -p hang.
+    env = os.environ.copy()
+    env["SBTDD_E2E_STUB_DISPATCH"] = "1"
+```
+
+- [x] **Step 6: Run the Green test to verify it passes**
+
+Run: `pytest tests/test_auto_parallel_e2e.py::test_auto_parallel_e2e_chicken_and_egg_closed -v`
+Expected: PASSED in <60s.
+
+Run: `make verify`
+Expected: clean sec.0.1 chain.
+
+- [x] **Step 7: Close Green phase**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T4 Green: T3 e2e passes with SBTDD_E2E_STUB_DISPATCH=1 in subprocess env"`
+
+Expected: `feat:` commit.
+
+- [x] **Step 8: Write the Refactor — extract assertion helpers to module level**
+
+The new test body has a long sequence of asserts. Extract them into focused module-level helpers in `tests/test_auto_parallel_e2e.py`.
+
+Add after the existing `_diagnostic_message` helper (around line ~170):
+
+```python
+def _assert_state_done(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2 helper: assert session-state.json reports phase=done."""
+    state = json.loads(
+        (project / ".claude" / "session-state.json").read_text(encoding="utf-8")
+    )
+    assert state["current_phase"] == "done", (
+        f"v1.0.8 A3-2 expected current_phase=='done'; "
+        f"got {state['current_phase']!r}.{diagnostic}"
+    )
+
+
+def _assert_plan_fully_flipped(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2 helper: assert all plan checkboxes are [x]."""
+    import re
+
+    plan_text = (project / "planning" / "claude-plan-tdd.md").read_text(
+        encoding="utf-8"
+    )
+    assert not re.search(r"^[ \t]*- \[ \]", plan_text, re.MULTILINE), (
+        f"v1.0.8 A3-2 expected all plan checkboxes flipped to [x]; "
+        f"open '- [ ]' line(s) remain.{diagnostic}"
+    )
+
+
+def _assert_sidecars_valid(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2/A3-3 helper: assert sidecars exist with valid verify_chain.
+
+    Per iter-2 carry-forward Cas-W10: `>=4` entries (extensible) +
+    presence check for the 4 known sec.0.1 tools (pytest, ruff,
+    mypy). Future sec.0.1 extensions MUST NOT break this assertion.
+    Per iter-2 carry-forward Cas-W5+Mel-W3: tool detection via
+    substring-anywhere match (not positional cmd[2]) for robustness.
+    """
+    workers_dir = project / ".claude" / "auto-run-workers"
+    assert workers_dir.is_dir(), (
+        f"v1.0.8 A3-2 missing {workers_dir}.{diagnostic}"
+    )
+    sidecars = list(workers_dir.glob("*-verify.json"))
+    assert sidecars, (
+        f"v1.0.8 A3-2 expected >=1 sidecar in {workers_dir}.{diagnostic}"
+    )
+    # The 4 known sec.0.1 tools that MUST appear in the chain
+    # (ruff appears twice: ruff check + ruff format --check; but
+    # the unique tool module names are {pytest, ruff, mypy}).
+    expected_tools = {"pytest", "ruff", "mypy"}
+    for sc in sidecars:
+        payload = json.loads(sc.read_text(encoding="utf-8"))
+        chain = payload.get("verify_chain")
+        assert isinstance(chain, list) and len(chain) >= 4, (
+            f"v1.0.8 A3-3 expected verify_chain with >=4 entries "
+            f"in {sc.name}.{diagnostic}"
+        )
+        # Substring-anywhere tool detection.
+        tools_in_chain: set[str] = set()
+        for entry in chain:
+            cmd = entry.get("cmd")
+            if not isinstance(cmd, list):
+                continue
+            cmd_str = " ".join(str(p) for p in cmd)
+            for tool in expected_tools:
+                if tool in cmd_str:
+                    tools_in_chain.add(tool)
+        missing = expected_tools - tools_in_chain
+        assert not missing, (
+            f"v1.0.8 A3-3 expected tools {expected_tools} in chain "
+            f"of {sc.name}; missing {missing}; "
+            f"observed {tools_in_chain}.{diagnostic}"
+        )
+        for entry in chain:
+            assert entry.get("rc") == 0, (
+                f"v1.0.8 A3-3 expected all sec.0.1 tools rc=0 in "
+                f"{sc.name}; got {entry.get('rc')}.{diagnostic}"
+            )
+
+
+def _assert_audit_finished_success(project: Path, diagnostic: str) -> None:
+    """v1.0.8 A3-2 helper: assert auto-run.json reports finished + success."""
+    audit = json.loads(
+        (project / ".claude" / "auto-run.json").read_text(encoding="utf-8")
+    )
+    assert audit.get("auto_finished_at") is not None, (
+        f"v1.0.8 A3-2 expected auto_finished_at non-null.{diagnostic}"
+    )
+    assert audit.get("status") == "success", (
+        f"v1.0.8 A3-2 expected status=='success'; "
+        f"got {audit.get('status')!r}.{diagnostic}"
+    )
+```
+
+Then replace the inline asserts in the test body (everything after `diagnostic = _diagnostic_message(...)` line) with 4 helper calls:
+
+```python
+    diagnostic = _diagnostic_message(proc.returncode, proc.stdout, proc.stderr)
+    assert proc.returncode == 0, (
+        f"v1.0.8 A3-1 expected rc=0; got rc={proc.returncode}.{diagnostic}"
+    )
+    _assert_state_done(project, diagnostic)
+    _assert_plan_fully_flipped(project, diagnostic)
+    _assert_sidecars_valid(project, diagnostic)
+    _assert_audit_finished_success(project, diagnostic)
+```
+
+- [x] **Step 9: Run sec.0.1 chain after refactor**
+
+Run: `pytest tests/test_auto_parallel_e2e.py::test_auto_parallel_e2e_chicken_and_egg_closed -v`
+Expected: PASSED (behavior unchanged from Green).
+
+Run: `make verify`
+Expected: clean.
+
+- [x] **Step 10: Close Refactor phase + Task**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T4 Refactor: extract A3 assertion helpers in test_auto_parallel_e2e"`
+
+Expected: `refactor:` commit + close-task cascade.
+
+---
+
+## Task 5: B1 — Fixture `.claude/settings.json` hardening
+
+**Goal:** Ship `tests/fixtures/parallel-e2e/dot-claude-settings.json` with explicit permissions allow list. Update `_stage_fixture` helper to materialize it as `.claude/settings.json` in the staged tree (rename-on-copy because `.claude/` is gitignored at repo root). Extend `test_fixture_files_present` to assert presence.
+
+**Files:**
+- Create: `tests/fixtures/parallel-e2e/dot-claude-settings.json`
+- Modify: `tests/test_auto_parallel_e2e.py`
+  - `_stage_fixture` helper (line ~106)
+  - `test_fixture_files_present` test (line ~270)
+
+**Spec mapping:** Escenario B1-1 (fixture ships JSON), B1-2 (helper materializes), B1-3 (presence assertion)
+
+- [x] **Step 1: Write the failing Red — extend test_fixture_files_present with new expected file**
+
+Modify `tests/test_auto_parallel_e2e.py::test_fixture_files_present` (line ~270). Change:
+
+```python
+    expected = (
+        "spec-fixture.md",
+        "pyproject.toml",
+        "src/sample.py",
+        "tests/test_sample.py",
+        "Makefile",
+        "plan-fixture.md",
+    )
+```
+
+To:
+
+```python
+    expected = (
+        "spec-fixture.md",
+        "pyproject.toml",
+        "src/sample.py",
+        "tests/test_sample.py",
+        "Makefile",
+        "plan-fixture.md",
+        "dot-claude-settings.json",
+    )
+```
+
+- [x] **Step 2: Run the Red test to verify it fails**
+
+Run: `pytest tests/test_auto_parallel_e2e.py::test_fixture_files_present -v`
+Expected: FAIL with `AssertionError: missing fixture files: ['dot-claude-settings.json']`.
+
+- [x] **Step 3: Close Red phase via raw git commit**
+
+Per the iter-2 Red-phase commit methodology (plan header): the test fails because the fixture file doesn't exist yet; close-phase verification would abort. Use raw git commit.
+
+```bash
+git add tests/test_auto_parallel_e2e.py
+git commit -m "test: v1.0.8 T5 Red — assert dot-claude-settings.json fixture file present"
+```
+
+Expected: Commit recorded; `git status` clean; state unchanged.
+
+- [x] **Step 4: Write the Green — create the fixture file**
+
+Create new file `tests/fixtures/parallel-e2e/dot-claude-settings.json` with content:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Write(scratch/**)",
+      "Edit(scratch/**)",
+      "Write(tests/**)",
+      "Edit(tests/**)",
+      "Write(src/**)",
+      "Edit(src/**)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)"
+    ]
+  }
+}
+```
+
+- [x] **Step 5: Update `_stage_fixture` helper to materialize the file**
+
+In `tests/test_auto_parallel_e2e.py::_stage_fixture` (around line 106), AFTER the existing `shutil.copy(Path(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md", claude_dir / "plugin.local.md")` line and BEFORE the `(dest / "scratch").mkdir(exist_ok=True)` line, add:
+
+```python
+    # v1.0.8 B1: materialize dot-claude-settings.json as
+    # .claude/settings.json so the staged project has explicit
+    # permissions for the implementer skill's tool calls (writes to
+    # scratch/, tests/, src/ + bash invocations for pytest/ruff/mypy).
+    # Doble defensa: even if the v1.0.8 A1 stub gate is bypassed in a
+    # future test variant, the fixture is "less broken" upstream.
+    shutil.copy(
+        _FIXTURE_DIR / "dot-claude-settings.json",
+        claude_dir / "settings.json",
+    )
+```
+
+- [x] **Step 6: Run the Green test to verify it passes**
+
+Run: `pytest tests/test_auto_parallel_e2e.py::test_fixture_files_present -v`
+Expected: PASSED.
+
+Run: `pytest tests/test_auto_parallel_e2e.py -v` (full module)
+Expected: all module tests pass.
+
+Run: `make verify`
+Expected: clean sec.0.1 chain.
+
+- [x] **Step 7: Close Green phase**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T5 Green: add dot-claude-settings.json fixture + _stage_fixture extension"`
+
+Expected: `feat:` commit.
+
+- [x] **Step 8: Write the Refactor — add module-level helper constant for fixture path**
+
+In `tests/test_auto_parallel_e2e.py`, after the existing `_FIXTURE_DIR`, `_REPO_ROOT`, `_RUN_SBTDD` constants (around line 60), add:
+
+```python
+# v1.0.8 T5: settings.json fixture path resolved at module load to
+# surface missing-fixture errors at collection time instead of test
+# runtime.
+_FIXTURE_SETTINGS_JSON = _FIXTURE_DIR / "dot-claude-settings.json"
+```
+
+Then replace the inline `_FIXTURE_DIR / "dot-claude-settings.json"` reference in `_stage_fixture` (added in Step 5) with the constant:
+
+```python
+    shutil.copy(_FIXTURE_SETTINGS_JSON, claude_dir / "settings.json")
+```
+
+- [x] **Step 9: Run sec.0.1 chain after refactor**
+
+Run: `pytest tests/test_auto_parallel_e2e.py -v`
+Expected: all pass.
+
+Run: `make verify`
+Expected: clean.
+
+- [x] **Step 10: Close Refactor phase + Task**
+
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T5 Refactor: extract _FIXTURE_SETTINGS_JSON module constant"`
+
+Expected: `refactor:` commit + close-task cascade.
+
+---
+
+## Task 6: B2 — Upstream bug archive (CLAUDE.md + memory + CHANGELOG)
+
+**Goal:** Document the empirically-observed `claude -p` cwd-dependent hang in 3 places: project root CLAUDE.md (operator-facing), user memory dir (claude-side context), CHANGELOG `[1.0.8]` Deferred section (upstream report submission DEFERRED to v1.0.9). Add doc-coherence smoke tests pinning the new structure.
+
+**Files:**
+- Create: `tests/test_doc_coherence_v108.py` (new test file with 2 smoke tests)
+- Modify: `CLAUDE.md` (add new top-level section "Known upstream limitations" appended to end of file)
+- Create: `C:\Users\jbolivarg\.claude\projects\D--jbolivarg-PythonProjects-SBTDD\memory\project_v108_claude_p_hang_upstream.md`
+- Modify: `C:\Users\jbolivarg\.claude\projects\D--jbolivarg-PythonProjects-SBTDD\memory\MEMORY.md` (append pointer line)
+- Modify: `CHANGELOG.md` (insert `[1.0.8]` entry between `[Unreleased]` and `[1.0.7]` sections)
+
+**Spec mapping:** Escenario B2-1 (CLAUDE.md section), B2-2 (memory file), B2-3 (MEMORY.md index), B2-4 (CHANGELOG Deferred section)
+
+- [x] **Step 1: Write the failing Red — doc coherence smoke test**
+
+Create new file `tests/test_doc_coherence_v108.py`:
 
 ```python
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
-# Date: 2026-05-09
-"""v1.0.7 A3 F-A2 dogfood empirical end-to-end validation.
+# Date: 2026-05-14
+"""v1.0.8 T6 doc-coherence smoke tests for Pillar B2 upstream bug archive.
 
-Exercises full auto --parallel flow on Windows (mandatory dev env) with
-synthetic 2-track + 4 disjoint tasks. Asserts:
-- All workers complete within 600s timeout (no ConcurrentDispatchError).
-- .claude/auto-run.json contains start_time + per-worker records (I-1).
-- Plan checkboxes all [x] post-merge (I-2).
-- State file current_phase: "done" post-completion.
-- No subprocess hangs > 600s timeout.
+Asserts the cross-artifact wording requirements:
 
-POSIX validation deferred to CI or v1.0.8 if no POSIX dev env.
+- CLAUDE.md has a "Known upstream limitations" section with required keywords.
+- CHANGELOG.md has a ``[1.0.8]`` entry with a Deferred subsection naming the
+  upstream report submission deferral.
 """
 
 from __future__ import annotations
 
-import json
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
-import pytest
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_CLAUDE_MD = _REPO_ROOT / "CLAUDE.md"
+_CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 
 
-@pytest.mark.integration
-@pytest.mark.timeout(700)  # 600s parallel budget + 100s overhead
-def test_auto_parallel_synthetic_2track_4task_e2e(
-    tmp_path: Path,
-) -> None:
-    """A3-1: synthetic 2-track plan completes via auto --parallel."""
-    if sys.platform != "win32":
-        pytest.skip("v1.0.7 A3 mandatory on Windows; POSIX deferred to v1.0.8")
-    fixture_root = Path(__file__).parent / "fixtures" / "parallel-e2e"
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    # Stage fixture into a real git repo + minimal session state.
-    shutil.copytree(fixture_root, project_root, dirs_exist_ok=True)
-    subprocess.run(["git", "init"], cwd=project_root, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"],
-        cwd=project_root,
-        check=True,
+def test_v108_b2_claude_md_has_known_upstream_limitations_section() -> None:
+    """v1.0.8 B2-1: CLAUDE.md has the upstream limitations section."""
+    text = _CLAUDE_MD.read_text(encoding="utf-8")
+    assert "## Known upstream limitations" in text, (
+        "v1.0.8 B2-1: missing '## Known upstream limitations' header"
     )
-    subprocess.run(
-        ["git", "config", "user.name", "test"],
-        cwd=project_root,
-        check=True,
+    assert "### claude -p /test-driven-development hangs" in text, (
+        "v1.0.8 B2-1: missing subsection header"
     )
-    subprocess.run(["git", "add", "."], cwd=project_root, check=True)
-    subprocess.run(
-        ["git", "commit", "-m", "test: e2e fixture baseline"],
-        cwd=project_root,
-        check=True,
-    )
-    # Run auto --parallel against the fixture.
-    run_sbtdd = (
-        Path(__file__).parent.parent
-        / "skills"
-        / "sbtdd"
-        / "scripts"
-        / "run_sbtdd.py"
-    )
-    proc = subprocess.run(
-        [sys.executable, str(run_sbtdd), "auto", "--parallel"],
-        cwd=project_root,
-        timeout=600,
-        capture_output=True,
-        text=True,
-    )
-    # Acceptance assertions per spec sec.4.3 A3-1.
-    assert proc.returncode == 0, (
-        f"auto --parallel failed: stdout={proc.stdout} stderr={proc.stderr}"
-    )
-    audit_path = project_root / ".claude" / "auto-run.json"
-    assert audit_path.exists()
-    audit = json.loads(audit_path.read_text(encoding="utf-8"))
-    assert "start_time" in audit
-    assert "per_worker" in audit  # v1.0.5 I-1 sidecar merge
-    assert len(audit["per_worker"]) == 2  # 2 tracks
-    plan_text = (project_root / "plan-fixture.md").read_text(encoding="utf-8")
-    assert "- [ ]" not in plan_text  # all flipped (v1.0.5 I-2 merge)
-    state = json.loads(
-        (project_root / ".claude" / "session-state.json").read_text(encoding="utf-8")
-    )
-    assert state["current_phase"] == "done"
-    # v1.0.7 iter-2 carry-forward C4: per-worker INV-16 evidence sidecars.
-    workers_dir = project_root / ".claude" / "auto-run-workers"
-    assert workers_dir.exists(), "T2 INV-16 sidecar dir must exist post-cycle"
-    sidecars = list(workers_dir.glob("*-verify.json"))
-    assert len(sidecars) >= 1, "at least one worker must have written verify evidence"
-    # v1.0.7 iter-3 carry-forward C1: collision-resistant filename pattern.
-    for sidecar in sidecars:
-        stem = sidecar.stem
-        parts = stem.split("-")
-        assert parts[-1] == "verify"
-        assert len(parts) == 4, f"sidecar {sidecar.name} not in <pid>-<monotonic_ns>-<uuid8>-verify pattern"
-        assert parts[0].isdigit()  # pid
-        assert parts[1].isdigit() and int(parts[1]) > 0  # monotonic_ns
-        assert len(parts[2]) == 8 and all(c in "0123456789abcdef" for c in parts[2])  # uuid8
-        payload = json.loads(sidecar.read_text(encoding="utf-8"))
-        assert "verify_chain" in payload
-        assert all("rc" in entry and "stdout" in entry for entry in payload["verify_chain"])
-    # v1.0.7 iter-3 carry-forward W (cas A3 fixture realism): on POSIX,
-    # at least one sidecar must contain TTY-observation evidence (PTY
-    # path executed, not Windows hybrid bypass). On Windows this check
-    # is skipped (Windows uses subprocess.PIPE intentionally).
-    if sys.platform != "win32":
-        tty_observed = False
-        for sidecar in sidecars:
-            payload = json.loads(sidecar.read_text(encoding="utf-8"))
-            for entry in payload["verify_chain"]:
-                # pytest under TTY emits "PASSED" with color codes OR
-                # known TTY-only marker; fixture conftest.py asserts
-                # sys.stdin.isatty() in a test that prints the result
-                # to stdout, captured here.
-                if "isatty=True" in entry["stdout"]:
-                    tty_observed = True
-                    break
-            if tty_observed:
-                break
-        assert tty_observed, (
-            "POSIX A3-3 carry-forward: at least one worker must have observed "
-            "a TTY via _spawn_worker_with_pty. Without this assertion, the "
-            "test could pass even if the PTY path silently fell back to "
-            "subprocess.PIPE (regression invisible). Add an isatty=True echo "
-            "to the fixture's conftest.py or a smoke test."
+    for required in (
+        "Manifestation",
+        "Repro context",
+        "Workaround",
+        "Upstream report",
+        "SBTDD_E2E_STUB_DISPATCH",
+    ):
+        assert required in text, (
+            f"v1.0.8 B2-1: missing required text {required!r} in CLAUDE.md"
         )
+
+
+def test_v108_b2_changelog_has_v108_deferred_section() -> None:
+    """v1.0.8 B2-4: CHANGELOG [1.0.8] Deferred section lists upstream report."""
+    text = _CHANGELOG.read_text(encoding="utf-8")
+    assert "## [1.0.8]" in text, "v1.0.8 B2-4: missing [1.0.8] entry"
+    start = text.index("## [1.0.8]")
+    end = text.find("## [1.0.7]", start)
+    section = text[start:end] if end > 0 else text[start:]
+    assert "Deferred" in section, (
+        "v1.0.8 B2-4: [1.0.8] section missing 'Deferred' subsection"
+    )
+    assert "anthropics/claude-code" in section, (
+        "v1.0.8 B2-4: Deferred section missing upstream report reference"
+    )
 ```
 
-- [ ] **Step 3: Run test to verify failure**
+- [x] **Step 2: Run the Red tests to verify they fail**
 
-Run: `pytest tests/test_auto_parallel_e2e.py -v`
-Expected: FAIL on Windows with subprocess hang OR `auto --parallel`
-returncode != 0 (depends on whether T1+T2 already landed; if yes, test
-should PASS — in which case A3 is empirically validated. If not yet
-landed, test FAILS via timeout / non-zero rc).
+Run: `pytest tests/test_doc_coherence_v108.py -v`
+Expected: 2 FAILED — both assertions fire because the docs haven't been updated yet.
 
-NOTE: this is the empirical-validation test; if it PASSES on Windows
-without intervention, that's the strongest signal that A1+A2 closed
-the chicken-and-egg gap end-to-end. If it FAILS, surface the failure
-mode (hang vs error) and route fix to A1/A2 mini-cycle BEFORE proceeding.
+- [x] **Step 3: Close Red phase via raw git commit**
 
-- [ ] **Step 4: Run `make verify`**
-
-Expected: only the new integration test fails (or passes on Windows if
-A1+A2 are complete); ruff + mypy clean.
-
-- [ ] **Step 5: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 A3 auto --parallel e2e integration test fixture + harness"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [ ] **Step 6: Empirical validation — manually run the integration test on Windows**
-
-This task's "implementation" is the empirical run: the test itself
-exercises A1+A2 production code; no new production code is added in
-Green. The Green deliverable is empirical evidence (test PASSES).
-
-Run on Windows: `pytest tests/test_auto_parallel_e2e.py -v --tb=short`
-
-Expected: PASS within ~5-10 minutes (4 noop tasks; each task's
-`make verify` runs the full test suite ~3 min, but with disjoint
-parallelism only ~2 tracks of ~3 min each = ~3-6 min total worst case).
-
-If FAIL: diagnose:
-- Hang -> A2 Windows hybrid bypass not firing OR
-  `SBTDD_AUTO_PARALLEL_WORKER` env var not propagated -> file fix as
-  A1/A2 sub-mini-cycle, then re-run.
-- Non-zero rc -> read worker stderr for actual error; route fix similarly.
-
-- [ ] **Step 7: Run `make verify`**
-
-Expected: full test suite green including the new e2e integration test.
-
-- [ ] **Step 8: Close Green phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 A3 empirical validation -- auto --parallel e2e passes on Windows"`
-
-Expected: `feat:` commit lands; state advances to `refactor`.
-
-#### Refactor Phase
-
-- [ ] **Step 9: Mark integration test idempotent + cleanup-safe**
-
-Audit `tests/test_auto_parallel_e2e.py` for any state pollution
-(temp git repos under `tmp_path` are auto-cleaned by pytest fixture).
-Confirm the test does not leave stray processes (no `subprocess.Popen`
-without `wait()`); the helper `subprocess.run(...)` with timeout
-inherently waits.
-
-If the test produces > 10s of total wall time variance across runs,
-add a comment noting expected runtime range so future engineers don't
-mistake variance for flakiness.
-
-- [ ] **Step 10: Run `make verify`**
-
-Expected: clean.
-
-- [ ] **Step 11: Close Refactor phase + close task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 A3 e2e test cleanup + runtime variance comment"`
-
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` + `chore:` commits land; state advances to next task.
-
----
-
-## Pillar B LOCKED — v1.0.6 dogfood findings (Q3'=b ordering: B5 → B4 → B3)
-
-### Task 4: B5 — Drift detector line-anchored `[ ]` regex
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/drift.py:242` (replace substring check
-  in `_plan_all_tasks_complete` with line-anchored multiline regex
-  `^[ \t]*- \[ \]`)
-- Modify: `tests/test_drift.py` (extend with `TestPlanAllTasksCompleteLineAnchored`
-  class for escenarios B5-1, B5-2, B5-3)
-
-Covers escenarios B5-1, B5-2, B5-3 from spec sec.4.4.
-
-#### Red Phase
-
-- [x] **Step 1: Write failing tests in `tests/test_drift.py`**
-
-Append:
-
-```python
-class TestPlanAllTasksCompleteLineAnchored:
-    """v1.0.7 B5 drift detector line-anchored regex per spec sec.4.4."""
-
-    def test_codeblock_open_checkbox_does_not_false_positive(self) -> None:
-        """B5-1: `- [ ]` inside Python string literal (code block) ignored."""
-        plan = (
-            "### Task 1: A\n"
-            "- [x] Step 1\n"
-            "    Example fixture content:\n"
-            "    ```python\n"
-            '    text = "- [ ] Step 1\\n"\n'
-            "    ```\n"
-            "### Task 2: B\n"
-            "- [x] Step 1\n"
-        )
-        assert drift._plan_all_tasks_complete(plan) == "[x]"
-
-    def test_real_open_checkbox_at_line_start_detected(self) -> None:
-        """B5-2: legit `- [ ]` at line start still flags incomplete."""
-        plan = (
-            "### Task 1: A\n"
-            "- [ ] Step 1\n"
-            "### Task 2: B\n"
-            "- [x] Step 1\n"
-        )
-        assert drift._plan_all_tasks_complete(plan) == "[ ]"
-
-    def test_indented_open_checkbox_detected(self) -> None:
-        """B5 partial: indented `  - [ ]` still flags incomplete."""
-        plan = (
-            "### Task 1: A\n"
-            "  - [ ] indented step\n"
-            "### Task 2: B\n"
-            "- [x] Step 1\n"
-        )
-        assert drift._plan_all_tasks_complete(plan) == "[ ]"
-```
-
-Add `import drift` if missing.
-
-- [x] **Step 2: Run tests to verify failure**
-
-Run: `pytest tests/test_drift.py::TestPlanAllTasksCompleteLineAnchored -v`
-Expected: `test_codeblock_open_checkbox_does_not_false_positive` FAILS
-(returns `"[ ]"` due to current unanchored substring check). The other
-two PASS already (existing implementation handles them correctly).
-
-- [x] **Step 3: Run `make verify`**
-
-Expected: only the one new test fails; ruff + mypy clean.
-
-- [x] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 B5 drift detector code-block fixture regression test"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [x] **Step 5: Replace substring check with line-anchored regex in `drift._plan_all_tasks_complete`**
-
-Edit `skills/sbtdd/scripts/drift.py:242` — locate the `if "- [ ]" in plan_text[start:end]:` line. Replace with line-anchored multiline regex:
-
-```python
-def _plan_all_tasks_complete(plan_text: str) -> str:
-    """Return ``"[x]"`` iff every ``### Task <id>:`` section is fully flipped.
-
-    Walks every task header in the plan and checks that the text between
-    it and the next task header contains NO line-anchored ``- [ ]``
-    markers. Used by :func:`detect_drift` when the state file has
-    ``current_task_id=None`` (terminal ``done`` state) to distinguish
-    between:
-
-    * ``state=done, all chores landed`` -> every section ``[x]`` -> ``"[x]"``
-      -> no drift (terminal).
-    * ``state=done, some task advance skipped`` -> at least one section
-      still has ``- [ ]`` -> ``"[ ]"`` -> drift reported (the
-      ``state-done-plan-open`` branch of ``_evaluate_drift``).
-
-    When the plan has no ``### Task`` headers at all (malformed or
-    empty), return ``"[x]"`` to avoid false-positive drift; the check is
-    conservative in the other direction (phase=done with open-task
-    evidence is real drift, but phase=done with a planless repo is not a
-    useful signal).
-
-    v1.0.7 B5 fix: line-anchored multiline regex ``^[ \\t]*- \\[ \\]``
-    replaces the previous unanchored substring check ``"- [ ]" in section``.
-    The substring check produced false-positives on plans containing
-    Python test fixture string literals like ``"- [ ] Step 1\\n"`` inside
-    code blocks (v1.0.6 dogfood empirical finding). The regex requires
-    the ``- [ ]`` marker to start at line beginning (with optional
-    leading whitespace for indented bullets), excluding code-block
-    fixtures whose ``- [ ]`` substrings sit inside string literal
-    contexts.
-    """
-    headers = list(_ANY_TASK_HEADER.finditer(plan_text))
-    if not headers:
-        return "[x]"
-    for i, match in enumerate(headers):
-        start = match.end()
-        end = headers[i + 1].start() if i + 1 < len(headers) else len(plan_text)
-        if _OPEN_CHECKBOX_LINE_RE.search(plan_text[start:end]):
-            return "[ ]"
-    return "[x]"
-```
-
-Add the module-level regex near the existing `_ANY_TASK_HEADER` definition:
-
-```python
-#: v1.0.7 B5: line-anchored open-checkbox regex. Matches ``- [ ]`` at line
-#: start (with optional leading whitespace for indented bullets) so plan
-#: text containing ``- [ ]`` inside code-block string literals doesn't
-#: false-positive the drift detector.
-_OPEN_CHECKBOX_LINE_RE = re.compile(r"^[ \t]*- \[ \]", re.MULTILINE)
-```
-
-Confirm `re` is already imported at the top of `drift.py`.
-
-- [x] **Step 6: Run tests to verify they pass**
-
-Run: `pytest tests/test_drift.py -v`
-Expected: full module green including the 3 new B5 tests + the
-previously-failing v1.0.6 `test_v104_plan_has_no_h3_task_headers...`
-regression (escenario B5-3 hand-validated).
-
-- [x] **Step 7: Run `make verify`**
-
-Expected: clean.
-
-- [x] **Step 8: Close Green phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 B5 drift detector line-anchored regex eliminates code-block false-positive"`
-
-Expected: `fix:` commit lands; state advances to `refactor`.
-
-#### Refactor Phase
-
-- [x] **Step 9: Audit other drift.py callsites for unanchored substring patterns**
-
-Grep `drift.py` for other `"- [ ]"` substring occurrences:
+Per the iter-2 Red-phase commit methodology (plan header): the 2 doc-coherence tests fail because the docs haven't been updated yet; close-phase verification would abort. Use raw git commit.
 
 ```bash
-grep -n '"- \[' skills/sbtdd/scripts/drift.py
+git add tests/test_doc_coherence_v108.py
+git commit -m "test: v1.0.8 T6 Red — doc-coherence smoke tests for upstream bug archive"
 ```
 
-If `_all_task_steps_complete` (line 205) or any other helper uses the
-same unanchored check on plan content, apply the same line-anchored
-fix consistently. Otherwise leave them alone (e.g.,
-`_all_task_steps_complete` operates on a per-task section that is
-unlikely to contain code-block fixtures referencing `- [ ]`; the v1.0.7
-B5 fix targets `_plan_all_tasks_complete` specifically).
+Expected: Commit recorded; `git status` clean; state unchanged.
 
-- [x] **Step 10: Run `make verify`**
+- [x] **Step 4: Write the Green — append "Known upstream limitations" section to CLAUDE.md**
 
-Expected: clean.
-
-- [x] **Step 11: Close Refactor phase + close task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 B5 audit + docstring rationale"`
-
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` + `chore:` commits land; state advances to next task.
-
----
-
-### Task 5: B4 — `spec_review_dispatch` file-reference pattern
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/spec_review_dispatch.py:413-485` (write
-  prompt to `<repo_root>/.claude/spec-reviews/.tmp/prompt-<uuid16>.md`
-  + pass `@<filepath>` reference in argv + try/finally cleanup)
-- Modify: `tests/test_spec_review_dispatch.py` (extend with
-  `TestSpecReviewerFileReference` class for escenarios B4-1 through B4-4)
-
-Covers escenarios B4-1, B4-2, B4-3, B4-4 from spec sec.4.5.
-
-#### Red Phase
-
-- [x] **Step 1: Write failing tests in `tests/test_spec_review_dispatch.py`**
-
-Append:
-
-```python
-class TestSpecReviewerFileReference:
-    """v1.0.7 B4 spec_review_dispatch file-reference per spec sec.4.5."""
-
-    def test_prompt_written_to_project_relative_tempfile(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """B4-1: prompt written to .claude/spec-reviews/.tmp/prompt-<uuid16>.md."""
-        repo_root = tmp_path / "repo"
-        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
-        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
-        plan_path.parent.mkdir(parents=True)
-        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
-        captured: dict[str, object] = {}
-
-        class FakeResult:
-            returncode = 0
-            stdout = '{"approved": true, "issues": []}'
-            stderr = ""
-
-        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
-            captured["argv"] = list(cmd)
-            # Verify the prompt file existed at dispatch time.
-            for tok in cmd:
-                if tok.startswith("@"):
-                    captured["prompt_file_existed"] = Path(tok[1:]).exists()
-            return FakeResult()
-
-        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
-        spec_review_dispatch.dispatch_spec_reviewer(
-            task_id="1",
-            plan_path=plan_path,
-            repo_root=repo_root,
-            max_iterations=1,
-        )
-        argv = captured["argv"]
-        prompt_token = next(t for t in argv if isinstance(t, str) and t.startswith("@"))
-        prompt_path = Path(prompt_token[1:])
-        # Filename matches prompt-<uuid16>.md pattern.
-        assert prompt_path.parent.name == ".tmp"
-        assert prompt_path.parent.parent.name == "spec-reviews"
-        assert prompt_path.name.startswith("prompt-")
-        assert prompt_path.name.endswith(".md")
-        assert len(prompt_path.stem.removeprefix("prompt-")) == 16
-        # File existed at dispatch time per B4-2.
-        assert captured["prompt_file_existed"] is True
-
-    def test_argv_uses_at_filepath_not_inline_prompt(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """B4-2: argv contains @<filepath> reference; no inline prompt."""
-        repo_root = tmp_path / "repo"
-        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
-        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
-        plan_path.parent.mkdir(parents=True)
-        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
-        captured_argv: list[list[str]] = []
-
-        class FakeResult:
-            returncode = 0
-            stdout = '{"approved": true, "issues": []}'
-            stderr = ""
-
-        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
-            captured_argv.append(list(cmd))
-            return FakeResult()
-
-        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
-        spec_review_dispatch.dispatch_spec_reviewer(
-            task_id="1",
-            plan_path=plan_path,
-            repo_root=repo_root,
-            max_iterations=1,
-        )
-        argv = captured_argv[0]
-        at_tokens = [t for t in argv if isinstance(t, str) and t.startswith("@")]
-        assert len(at_tokens) == 1
-        # No inline prompt content (would be a giant string in argv).
-        assert all(len(t) < 1000 for t in argv if isinstance(t, str))
-
-    def test_tempfile_cleaned_up_after_dispatch(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """B4-3: try/finally cleans tempfile post-dispatch."""
-        repo_root = tmp_path / "repo"
-        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
-        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
-        plan_path.parent.mkdir(parents=True)
-        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
-        prompt_paths: list[Path] = []
-
-        class FakeResult:
-            returncode = 0
-            stdout = '{"approved": true, "issues": []}'
-            stderr = ""
-
-        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
-            for tok in cmd:
-                if isinstance(tok, str) and tok.startswith("@"):
-                    prompt_paths.append(Path(tok[1:]))
-            return FakeResult()
-
-        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
-        spec_review_dispatch.dispatch_spec_reviewer(
-            task_id="1",
-            plan_path=plan_path,
-            repo_root=repo_root,
-            max_iterations=1,
-        )
-        assert prompt_paths
-        for p in prompt_paths:
-            assert not p.exists(), f"tempfile leaked: {p}"
-
-    def test_large_prompt_does_not_blow_argv(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """B4-4: 200KB diff -> argv stays under 32K chars."""
-        repo_root = tmp_path / "repo"
-        (repo_root / ".claude" / "spec-reviews").mkdir(parents=True)
-        plan_path = repo_root / "planning" / "claude-plan-tdd.md"
-        plan_path.parent.mkdir(parents=True)
-        plan_path.write_text("### Task 1: dummy\n- [x] step\n", encoding="utf-8")
-        # Force a giant diff via monkeypatch.
-        monkeypatch.setattr(
-            "spec_review_dispatch._collect_task_diff",
-            lambda repo, tid: "x" * 200_000,
-        )
-        captured_argv: list[list[str]] = []
-
-        class FakeResult:
-            returncode = 0
-            stdout = '{"approved": true, "issues": []}'
-            stderr = ""
-
-        def fake_run(cmd: list[str], **kw: object) -> FakeResult:
-            captured_argv.append(list(cmd))
-            return FakeResult()
-
-        monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
-        spec_review_dispatch.dispatch_spec_reviewer(
-            task_id="1",
-            plan_path=plan_path,
-            repo_root=repo_root,
-            max_iterations=1,
-        )
-        argv_total_len = sum(len(t) for t in captured_argv[0] if isinstance(t, str))
-        assert argv_total_len < 5_000  # well under Windows 32K limit
-```
-
-Add `import spec_review_dispatch` and `from pathlib import Path` if missing.
-
-- [x] **Step 2: Run tests to verify failure**
-
-Run: `pytest tests/test_spec_review_dispatch.py::TestSpecReviewerFileReference -v`
-Expected: all 4 FAIL (current impl puts inline prompt in argv → no
-`@`-prefix tokens, no tempfile created).
-
-- [x] **Step 3: Run `make verify`**
-
-Expected: only the 4 new tests fail; ruff + mypy clean.
-
-- [x] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 B4 spec_review_dispatch file-reference tests"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [x] **Step 5: Refactor `dispatch_spec_reviewer` to use file-reference pattern**
-
-Edit `skills/sbtdd/scripts/spec_review_dispatch.py` around line 413-485.
-Locate the prompt-build + argv-build block (lines ~413-435):
-
-```python
-    plan_text = plan_path.read_text(encoding="utf-8")
-    task_text = _extract_task_text(plan_text, task_id)
-    diff_text = _collect_task_diff(repo_root, task_id)
-    prompt = _build_reviewer_prompt(task_id, task_text, diff_text)
-    # ...
-    cmd: list[str] = ["claude"]
-    if effective_model is not None:
-        cmd.extend(["--model", effective_model])
-    cmd.extend(["-p", _REVIEWER_SKILL_REF, prompt])
-```
-
-Replace with file-reference pattern:
-
-```python
-    plan_text = plan_path.read_text(encoding="utf-8")
-    task_text = _extract_task_text(plan_text, task_id)
-    diff_text = _collect_task_diff(repo_root, task_id)
-    prompt = _build_reviewer_prompt(task_id, task_text, diff_text)
-    # v1.0.7 B4: write prompt to project-relative tempfile + pass
-    # ``@<filepath>`` reference in argv. Closes WinError 206 (Windows
-    # cmdline limit ~32K chars) when prompt + diff exceed argv budget;
-    # filepath is bounded to ~120 chars regardless of prompt size.
-    # Same pattern as v1.0.3 cross-check Item B fix.
-    import uuid
-    prompt_dir = repo_root / ".claude" / "spec-reviews" / ".tmp"
-    prompt_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = prompt_dir / f"prompt-{uuid.uuid4().hex[:16]}.md"
-    prompt_path.write_text(prompt, encoding="utf-8")
-    # v0.3.0 Feature E: apply INV-0 cascade then optionally inject
-    # ``--model <id>`` BEFORE the ``-p`` flag (mirrors superpowers_dispatch
-    # convention). With model=None (default) argv is byte-identical to v0.2.x
-    # except for the prompt token which is now ``@<filepath>``.
-    from superpowers_dispatch import _apply_inv0_model_check
-
-    effective_model = _apply_inv0_model_check(model, skill_field_name)
-    cmd: list[str] = ["claude"]
-    if effective_model is not None:
-        cmd.extend(["--model", effective_model])
-    cmd.extend(["-p", _REVIEWER_SKILL_REF, f"@{prompt_path}"])
-```
-
-Then wrap the for-loop dispatch in `try/finally` to clean the tempfile:
-
-Locate the `for iteration in range(1, max_iterations + 1):` block (line
-~436). Wrap the entire iteration loop in `try/finally`:
-
-```python
-    iter_history: list[dict[str, Any]] = []
-    rwt_kwargs: dict[str, Any] = {"timeout": timeout, "capture": True, "cwd": str(repo_root)}
-    if stream_prefix is not None:
-        rwt_kwargs["stream_prefix"] = stream_prefix
-    try:
-        for iteration in range(1, max_iterations + 1):
-            # ... existing iter loop body unchanged ...
-    finally:
-        # v1.0.7 B4: cleanup tempfile regardless of outcome.
-        prompt_path.unlink(missing_ok=True)
-```
-
-Move the existing iter-loop body (lines ~436-485) into the `try:` block,
-preserving its current logic. The duplicated `iter_history` declaration
-must be hoisted to the outer scope (already is, per the line above the
-new `try:`).
-
-NOTE: the existing function returns `SpecReviewResult` from inside the
-for-loop and raises `SpecReviewError` from inside the for-loop too;
-both flows now hit the `finally:` block as required.
-
-- [x] **Step 6: Run tests to verify they pass**
-
-Run: `pytest tests/test_spec_review_dispatch.py -v`
-Expected: full module green including the 4 new B4 tests.
-
-- [x] **Step 7: Run `make verify`**
-
-Expected: clean.
-
-- [x] **Step 8: Close Green phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 B4 spec_review_dispatch file-reference closes WinError 206"`
-
-Expected: `fix:` commit lands; state advances to `refactor`.
-
-#### Refactor Phase
-
-- [x] **Step 9: Hoist `import uuid` to module top + audit other long-prompt callsites**
-
-Move the local `import uuid` to the module-top imports block of
-`spec_review_dispatch.py`. Confirm no other callsite in the codebase
-passes a >32K prompt inline via argv (grep for `claude.*-p` patterns):
-
-```bash
-grep -rn "claude.*-p" skills/sbtdd/scripts/ | grep -v "claude-p"
-```
-
-If other dispatch helpers exhibit the same pattern (e.g., a future
-cross-check helper), document them in a follow-up backlog entry; do
-NOT broaden the v1.0.7 B4 scope — that's a separate cycle.
-
-- [x] **Step 10: Run `make verify`**
-
-Expected: clean.
-
-- [x] **Step 11: Close Refactor phase + close task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 B4 hoist uuid import + audit other callsites"`
-
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` + `chore:` commits land; state advances to next task.
-
----
-
-### Task 6: B3 — `state_file.atomic_write_json` Windows PermissionError retry
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/state_file.py:143-171` (wrap `os.replace`
-  in 3-attempt retry-with-backoff)
-- Modify: `tests/test_state_file.py` (extend with
-  `TestAtomicWriteJsonRetry` class for escenarios B3-1, B3-2, B3-3)
-
-Covers escenarios B3-1, B3-2, B3-3 from spec sec.4.6.
-
-#### Red Phase
-
-- [x] **Step 1: Write failing tests in `tests/test_state_file.py`**
-
-Append:
-
-```python
-class TestAtomicWriteJsonRetry:
-    """v1.0.7 B3 atomic_write_json retry per spec sec.4.6."""
-
-    def test_permission_error_triggers_retry(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """B3-1: PermissionError on first os.replace -> retry."""
-        path = tmp_path / "audit.json"
-        attempts: list[int] = []
-        original_replace = os.replace
-
-        def flaky_replace(src: str, dst: str) -> None:
-            attempts.append(1)
-            if len(attempts) == 1:
-                raise PermissionError(5, "Access denied", src)
-            original_replace(src, dst)
-
-        sleeps: list[float] = []
-
-        def fake_sleep(s: float) -> None:
-            sleeps.append(s)
-
-        monkeypatch.setattr("state_file.os.replace", flaky_replace)
-        monkeypatch.setattr("state_file.time.sleep", fake_sleep)
-        state_file.atomic_write_json(path, {"key": "value"})
-        assert len(attempts) == 2
-        # First retry slept 100ms (attempt-number 1 * 100ms).
-        assert sleeps == [0.1]
-        assert json.loads(path.read_text(encoding="utf-8")) == {"key": "value"}
-
-    def test_retry_backoff_grows_per_attempt(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """B3-2: backoff = 100ms × attempt-number."""
-        path = tmp_path / "audit.json"
-        original_replace = os.replace
-
-        def flaky_replace(src: str, dst: str) -> None:
-            flaky_replace.calls += 1  # type: ignore[attr-defined]
-            if flaky_replace.calls < 3:  # type: ignore[attr-defined]
-                raise PermissionError(5, "Access denied", src)
-            original_replace(src, dst)
-
-        flaky_replace.calls = 0  # type: ignore[attr-defined]
-        sleeps: list[float] = []
-
-        monkeypatch.setattr("state_file.os.replace", flaky_replace)
-        monkeypatch.setattr("state_file.time.sleep", lambda s: sleeps.append(s))
-        state_file.atomic_write_json(path, {"key": "value"})
-        # 2 retries: attempt 1 sleeps 100ms, attempt 2 sleeps 200ms.
-        assert sleeps == [0.1, 0.2]
-
-    def test_retry_exhaustion_reraises_permission_error(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """B3-3: 3 attempts all fail -> re-raise PermissionError."""
-        path = tmp_path / "audit.json"
-
-        def always_fail(src: str, dst: str) -> None:
-            raise PermissionError(5, "Access denied", src)
-
-        monkeypatch.setattr("state_file.os.replace", always_fail)
-        monkeypatch.setattr("state_file.time.sleep", lambda s: None)
-        with pytest.raises(PermissionError, match="Access denied"):
-            state_file.atomic_write_json(path, {"key": "value"})
-```
-
-Add `import json`, `import os`, `import state_file`, and `from pathlib import Path` if missing at top of file.
-
-- [x] **Step 2: Run tests to verify failure**
-
-Run: `pytest tests/test_state_file.py::TestAtomicWriteJsonRetry -v`
-Expected: all 3 FAIL (current impl raises on first PermissionError;
-no retry; no `time.sleep` call).
-
-- [x] **Step 3: Run `make verify`**
-
-Expected: only the 3 new tests fail; ruff + mypy clean.
-
-- [x] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 B3 atomic_write_json retry-with-backoff tests"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [x] **Step 5: Add retry-with-backoff to `atomic_write_json`**
-
-Edit `skills/sbtdd/scripts/state_file.py:143-171` — replace the body:
-
-```python
-def atomic_write_json(path: Path, data: object) -> None:
-    """Atomic JSON write via ``tempfile.mkstemp`` + ``os.replace``.
-
-    v1.0.5 T3 Refactor (iter-2 WARNING fix): DRY-shared helper used by
-    ``auto_cmd._write_audit`` (per-worker sidecar pattern) and any
-    other module that needs a cross-platform atomic JSON write under
-    concurrent dispatch. ``tempfile.mkstemp`` ensures concurrent
-    writers in the same directory receive unique tmp names so they
-    never collide. ``os.replace`` is atomic on POSIX and Windows; on
-    failure the tmp file is cleaned up before re-raising so nothing
-    leaks.
-
-    v1.0.7 B3: ``os.replace`` is wrapped in a 3-attempt retry-with-backoff
-    (``100ms * attempt-number``) absorbing transient Windows
-    ``PermissionError`` flakes from AV-scanner / concurrent-writer
-    contention. Empirical context: v1.0.6 mid-cycle hit
-    ``PermissionError: [WinError 5] Access is denied:
-    '...auto-run.json.q6wjytm7.tmp' -> '...auto-run.json'`` once;
-    retry absorbs the typical AV-scanner release window (~150ms).
-    Final attempt failure re-raises the original ``PermissionError``
-    so the operator sees the real error if the lock is persistent.
-
-    Args:
-        path: Destination JSON path. Parent directory is created if
-            absent.
-        data: JSON-serialisable payload (dict, list, scalar, etc.).
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_str = tempfile.mkstemp(suffix=".tmp", prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        # v1.0.7 B3: retry-with-backoff for Windows PermissionError flakes.
-        last_exc: PermissionError | None = None
-        for attempt in range(1, 4):  # 3 attempts: 0 backoff, 100ms, 200ms
-            try:
-                os.replace(tmp_str, path)
-                return
-            except PermissionError as exc:
-                last_exc = exc
-                if attempt < 3:
-                    time.sleep(0.1 * attempt)
-        # 3 attempts exhausted; re-raise the last PermissionError.
-        assert last_exc is not None  # mypy: unreachable
-        raise last_exc
-    except Exception:
-        try:
-            os.unlink(tmp_str)
-        except OSError:
-            pass
-        raise
-```
-
-Add `import time` to the top of `state_file.py` if not already present.
-
-NOTE: the inner retry loop's `return` exits early on success; the outer
-`except Exception:` cleanup branch only fires if `json.dump` raised OR
-the final retry re-raised. The `os.replace` success path bypasses the
-cleanup (the tmp file is gone — `os.replace` rename consumed it).
-
-- [x] **Step 6: Run tests to verify they pass**
-
-Run: `pytest tests/test_state_file.py -v`
-Expected: full module green including the 3 new B3 tests.
-
-- [x] **Step 7: Run `make verify`**
-
-Expected: clean.
-
-- [x] **Step 8: Close Green phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 B3 atomic_write_json retry-with-backoff for Windows PermissionError"`
-
-Expected: `fix:` commit lands; state advances to `refactor`.
-
-#### Refactor Phase
-
-- [x] **Step 9: Apply same retry to `atomic_write_text` (DRY)**
-
-Inspect `state_file.atomic_write_text` (line 174+) — it has the same
-`os.replace` pattern. Apply identical retry-with-backoff for symmetry,
-since both helpers share the same concurrent-writer + AV-scanner
-exposure surface.
-
-OR: extract the retry loop into a private `_replace_with_retry(tmp_str, path)`
-helper used by both `atomic_write_json` and `atomic_write_text` to keep
-DRY. Choose whichever surface is cleaner; the helper-extraction path
-is preferred when the function bodies otherwise diverge significantly.
-
-- [x] **Step 10: Run `make verify`**
-
-Expected: clean.
-
-- [x] **Step 11: Close Refactor phase + close task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor v1.0.7 B3 share retry helper between atomic_write_json + atomic_write_text"`
-
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` + `chore:` commits land; state advances to next task.
-
----
-
-## Pillar C LOCKED — Selective polish (Q4'=a all 5 items, iter-2 collapsed per C2/C5 carry-forward)
-
-### Task 7: Combined Pillar C polish (C1+C5+C6+C7) — single TDD cycle
-
-> **v1.0.7 iter-2 carry-forward C2/C5 resolution**: original plan had
-> C1+C5+C6+C7 as 4 separate tasks (T7-T10) each with empty-Refactor
-> commits. v1.0.5 Item D Q3-A `_preflight` HARD-BLOCK rejects empty
-> Refactor diffs (canonical TDD triplet must have real diffs in each
-> phase). Resolution: collapse all 4 into ONE task with single
-> Red/Green/Refactor cycle:
-> - Red: write all 4 doc smoke tests in one commit.
-> - Green: apply all 4 doc edits in one commit.
-> - Refactor: cross-link C1 ↔ C6 in K-4 helper docs (real diff —
->   both C1 inline comment + C6 docstring note touch the same
->   `_validate_forwardable_flags_against_argparse` helper; the Refactor
->   makes them reference each other as a coherent helper-level docs
->   block instead of two disjoint additions).
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py:1447`
-  (`_validate_forwardable_flags_against_argparse` — C1 inline comment
-  + C6 docstring note; Refactor cross-links them)
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py:451` (C5 deprecation
-  marker comment with monkeypatch footgun warning)
-- Modify: `skills/sbtdd/SKILL.md` (C7 ship-time methodology-activity
-  procedure section)
-- Modify: `tests/test_auto_cmd.py` (smoke tests for C1 + C6)
-- Modify: `tests/test_close_task_cmd.py` (smoke test for C5)
-- Create: `tests/test_skill_md_methodology_activity_procedure.py`
-  (smoke test for C7)
-
-Covers escenarios C1, C5, C6, C7 from spec sec.4.7. C-X-K3-Removal
-ships in T8 (separate task; has real code change).
-
-#### Red Phase
-
-- [x] **Step 1: Write 4 failing smoke tests covering C1+C5+C6+C7 with discriminating class names**
-
-> **iter-3 carry-forward (mel+bal+cas WARNING)**: even though all 4
-> doc smoke tests land in a single Red commit (per C2/C5 collapse),
-> the test CLASS NAMES must remain distinct (`TestC1*`, `TestC5*`,
-> `TestC6*`, `TestC7*`) so future bisect can pinpoint which doc
-> surface regressed. Do NOT collapse the test classes themselves into
-> one — only the commit boundary collapses.
-
-Append to `tests/test_auto_cmd.py` (C1 + C6 — both touch K-4 helper):
-
-```python
-class TestC1ForwardableFlagsHelperDocs:
-    """v1.0.7 C1 K-4 helper docs comment per spec sec.4.7."""
-
-    def test_helper_source_documents_single_level_subparser_walk(self) -> None:
-        """C1: helper source contains comment about single-level walk limitation."""
-        import inspect
-        src = inspect.getsource(auto_cmd._validate_forwardable_flags_against_argparse)
-        assert "single-level subparser walk" in src.lower()
-
-
-class TestC6ForwardableFlagsImportlibReloadCaveat:
-    """v1.0.7 C6 K-4 helper docstring caveat per spec sec.4.7."""
-
-    def test_docstring_documents_importlib_reload_interaction(self) -> None:
-        """C6: docstring notes importlib.reload caveat for monkeypatch tests."""
-        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
-        assert "importlib.reload" in doc
-        assert "monkeypatch" in doc.lower()
-
-    def test_docstring_cross_links_c1_inline_comment(self) -> None:
-        """C6 Refactor cross-link (iter-2 carry-forward C2/C5): docstring references C1."""
-        doc = auto_cmd._validate_forwardable_flags_against_argparse.__doc__ or ""
-        # Refactor phase cross-links C1 inline comment + C6 docstring note
-        # so the helper's docs read as a coherent block.
-        assert "single-level subparser" in doc.lower() or "see inline comment" in doc.lower()
-```
-
-Append to `tests/test_close_task_cmd.py` (C5 — touches alias):
-
-```python
-class TestC5DeprecationMarkerMonkeypatchWarning:
-    """v1.0.7 C5 K-3 deprecation marker monkeypatch warning per spec sec.4.7."""
-
-    def test_alias_line_comment_warns_about_monkeypatch_footgun(self) -> None:
-        """C5: comment on alias line mentions monkeypatch warning."""
-        import inspect
-        src = inspect.getsource(close_task_cmd)
-        assert "_preflight_triplet_check = _preflight" in src
-        lines = src.splitlines()
-        for i, line in enumerate(lines):
-            if "_preflight_triplet_check = _preflight" in line:
-                surrounding = "\n".join(lines[max(0, i - 5) : i + 1])
-                assert "monkeypatch" in surrounding.lower()
-                assert "v1.0.7" in surrounding
-                return
-        raise AssertionError("alias line not found")
-```
-
-Create `tests/test_skill_md_methodology_activity_procedure.py` (C7):
-
-```python
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-05-09
-"""v1.0.7 C7 smoke test for SKILL.md methodology-activity procedure."""
-
-from __future__ import annotations
-
-from pathlib import Path
-
-
-def test_skill_md_documents_methodology_activity_ship_time_procedure() -> None:
-    """C7: SKILL.md contains methodology-activity ship-time procedure section."""
-    skill_md = Path(__file__).parent.parent / "skills" / "sbtdd" / "SKILL.md"
-    text = skill_md.read_text(encoding="utf-8")
-    assert "methodology-activity" in text.lower()
-    assert "ship time" in text.lower() or "ship-time" in text.lower()
-    assert "v1.0.X+1 LOCKED" in text or "next-cycle LOCKED" in text.lower()
-```
-
-- [x] **Step 2: Run all 4 new tests to verify failure**
-
-Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning tests/test_skill_md_methodology_activity_procedure.py -v`
-
-Expected: all FAIL (4 doc surfaces missing).
-
-- [x] **Step 3: Run `make verify`**
-
-Expected: only the new doc smoke tests fail; ruff + mypy clean.
-
-- [x] **Step 4: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 Pillar C polish doc smoke tests (C1+C5+C6+C7)"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [x] **Step 5: Apply C1 inline comment in K-4 helper**
-
-Edit `skills/sbtdd/scripts/auto_cmd.py:1447` — locate
-`_validate_forwardable_flags_against_argparse` body and insert just
-above the parser-walk loop:
-
-```python
-    # v1.0.7 C1: single-level subparser walk; deeper nesting not supported.
-    # If the plugin gains deeply nested subparsers (e.g., subcommands of
-    # subcommands), extend this loop with a recursive walk.
-    for action in parser._actions:
-        # ... existing walk logic ...
-```
-
-- [x] **Step 6: Apply C5 deprecation marker comment in close_task_cmd.py**
-
-Edit `skills/sbtdd/scripts/close_task_cmd.py:451`. Replace existing
-deprecation comment block + alias line with:
-
-```python
-# v1.0.6 K-3: alias for backward-compat; legacy callsites monkeypatched
-# this name. SCHEDULED REMOVAL in v1.0.7 C-X-K3-Removal (T8 of v1.0.7).
-# v1.0.7 C5 NOTE: monkeypatch.setattr("close_task_cmd._preflight_triplet_check",
-# fake) does NOT patch the canonical `_preflight` (alias is a module-load-time
-# rebind, not a transparent reference). Tests must monkeypatch the canonical
-# `_preflight` name to actually patch behavior. This footgun is the reason
-# C-X-K3-Removal proceeds (single canonical entry point).
-_preflight_triplet_check = _preflight
-```
-
-- [x] **Step 7: Apply C6 docstring note in K-4 helper**
-
-Continue editing `auto_cmd.py:1447`. In the
-`_validate_forwardable_flags_against_argparse` docstring, insert a
-note paragraph just before the `Raises:` section:
-
-```
-v1.0.7 C6 NOTE: tests that monkeypatch ``_FORWARDABLE_FLAGS`` should
-call this helper directly rather than reloading ``auto_cmd`` via
-``importlib.reload`` to avoid the import-time guard interaction. The
-guard fires at module import; reload re-imports + re-fires, which can
-mask the monkeypatch's effect. Direct helper invocation respects the
-patched dictionary.
-```
-
-- [x] **Step 8: Apply C7 ship-time methodology-activity procedure in SKILL.md**
-
-Append to `skills/sbtdd/SKILL.md` (placement: near existing
-version-notes sections):
+Append the following section to the END of `CLAUDE.md` (after the last existing section, which is the License section):
 
 ```markdown
-### Ship-time methodology-activity procedure (v1.0.7+)
 
-Any methodology-activity finding (F-J9, F-J10, F-A2, F-Resume, P2 — i.e.,
-non-test process observations surfaced during own-cycle dogfood) that
-does NOT trigger a ship abort gets a v1.0.X+1 LOCKED entry at ship
-time, NOT mid-cycle. Process discipline:
+## Known upstream limitations
 
-1. **At ship-time** (post pre-merge Loop 2 convergence + before tag
-   push), enumerate all methodology-activity findings observed during
-   the cycle (own-cycle dogfood, sequential vs --parallel mode
-   decisions, manual fallbacks, etc.).
-2. **Triage each finding** as either:
-   - **Ship-blocker** → fix in current cycle before ship.
-   - **Next-cycle LOCKED** → write a memory file
-     `project_v1_0_X+1_<finding>_locked.md` referenced by
-     `MEMORY.md` index. Include in next-cycle spec-base sec.1
-     "Out of scope vN.M.Z+1 (rolled forward)".
-   - **Discard** → document rationale in current-cycle CHANGELOG
-     "Process notes" section (e.g., "F-J9 observation noted but
-     superseded by v1.0.7 Pillar A").
-3. **Prevents deferral pipeline drift between cycles**: by ship-time
-   triaging methodology findings, next cycle's spec-base inherits a
-   complete LOCKED backlog without mid-cycle scope creep.
+### claude -p /test-driven-development hangs in fixture-style cwd
 
-This procedure is documented for v1.0.7 onwards; precedent established
-by v1.0.6 own-cycle dogfood findings → v1.0.7 LOCKED Pillar B
-(B5+B4+B3) carry-forward.
+**Manifestation**: invoking `claude -p /test-driven-development --phase=red`
+as a subprocess with cwd pointing to a directory that contains
+`sbtdd/spec-behavior.md` + `planning/claude-plan-tdd.md` but lacks
+`.claude/settings.json` + `CLAUDE.md` causes the subprocess to hang
+indefinitely (>180s empirically observed, zero stdout/stderr output)
+before being timeout-killed by the caller.
+
+**Repro context**: empirically verified in v1.0.8 T3 diagnostic 2026-05-14
+via 3 reproducer scripts (in `.tmp_repro/`, gitignored). Same command in
+cwd=empty temp dir returns rc=0 in ~30s with sensible output; same command
+in cwd=SBTDD repo dir returns rc=0 in ~66s with sensible output. The bug
+is cwd-dependent on a specific file-layout combination (fixture-style:
+sbtdd/ + planning/ files without `.claude/settings.json` + `CLAUDE.md`).
+
+**Workaround**: `tests/test_auto_parallel_e2e.py` uses
+`SBTDD_E2E_STUB_DISPATCH=1` to bypass the dispatch entirely (v1.0.8
+Pillar A1 stub gate in `superpowers_dispatch.invoke_skill`). In
+production, properly-initialized SBTDD projects (via `/sbtdd init`)
+ship a complete `.claude/settings.json` granting the permissions the
+implementer skill needs — avoiding the hang. v1.0.8 Pillar B1 also adds
+a minimal `.claude/settings.json` to the e2e fixture as doble defensa.
+
+**Upstream report**: STAGED for future submission to
+`anthropics/claude-code` issue tracker (see memory
+`project_v108_claude_p_hang_upstream.md` for repro instructions +
+diagnostic evidence). v1.0.8 does NOT submit — deferred to user decision
+post-v1.0.8 ship per spec sec.5 scope exclusions.
 ```
 
-- [x] **Step 9: Run all 4 new doc tests + full make verify**
+- [x] **Step 5: Write the Green — create memory archive file (LOCAL-ONLY, not test-asserted)**
 
-Run: `pytest tests/test_auto_cmd.py::TestC1ForwardableFlagsHelperDocs tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat tests/test_close_task_cmd.py::TestC5DeprecationMarkerMonkeypatchWarning tests/test_skill_md_methodology_activity_procedure.py -v`
+Per iter-2 carry-forward Cas-W12 + Bal-I6: the memory file lives OUTSIDE the repo in the developer's per-project Claude memory dir. This is **local-only** — it will not exist on CI machines or fresh clones. The doc-coherence test created in Step 1 asserts CLAUDE.md + CHANGELOG only (which ARE in the repo); the memory file is verified by **human review of the closing commit narrative**, not by an automated assertion.
 
-Expected: 3 of 4 PASS; the C6 cross-link test still FAILS (Refactor
-phase will resolve it). All other tests still green.
+Engineer note: if executing this plan on a non-developer machine (CI, fresh clone, container), skip this step and leave a note in the close-task commit ("memory archive not staged: target machine lacks the per-developer memory dir"). The plan still ships v1.0.8 successfully because the test-asserted artifacts (CLAUDE.md + CHANGELOG) are repo-resident.
 
-Then: `make verify`
-Expected: only the C6 cross-link smoke test fails; ruff + mypy clean
-on production changes.
+Create new file at this exact path on the developer machine:
+`C:\Users\jbolivarg\.claude\projects\D--jbolivarg-PythonProjects-SBTDD\memory\project_v108_claude_p_hang_upstream.md`
 
-- [x] **Step 10: Close Green phase**
+Content:
 
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.7 Pillar C polish (C1+C5+C6+C7) docs land"`
-
-Expected: `feat:` commit lands; state advances to `refactor`. The
-remaining failing C6 cross-link test is the explicit Refactor surface
-(designed-in real Refactor diff per iter-2 C2/C5 carry-forward).
-
-#### Refactor Phase
-
-- [x] **Step 11: Cross-link C1 inline comment + C6 docstring note in K-4 helper**
-
-Edit `skills/sbtdd/scripts/auto_cmd.py:1447` —
-`_validate_forwardable_flags_against_argparse`. The Green-phase additions
-left the C1 inline comment (above the walk loop) and the C6 docstring
-note (in the docstring) as two disjoint additions. Refactor restructures
-them into a coherent helper-level docs block:
-
-In the docstring, change the C6 note paragraph to reference C1 explicitly:
-
-```
-v1.0.7 C6 NOTE: tests that monkeypatch ``_FORWARDABLE_FLAGS`` should
-call this helper directly rather than reloading ``auto_cmd`` via
-``importlib.reload`` to avoid the import-time guard interaction. The
-guard fires at module import; reload re-imports + re-fires, which can
-mask the monkeypatch's effect. Direct helper invocation respects the
-patched dictionary.
-
-Implementation note: the parser walk below is single-level (see
-inline comment above the loop body for limitations + extension path).
-```
-
-This satisfies the C6 cross-link smoke test (`assert "single-level
-subparser" in doc.lower() or "see inline comment" in doc.lower()`).
-
-- [x] **Step 12: Run smoke tests + `make verify`**
-
-Run: `pytest tests/test_auto_cmd.py::TestC6ForwardableFlagsImportlibReloadCaveat -v`
-Expected: PASS (cross-link present).
-
-Then: `make verify`
-Expected: full suite green.
-
-- [x] **Step 13: Close Refactor phase + close task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "refactor v1.0.7 Pillar C polish -- cross-link C1 inline comment + C6 docstring in K-4 helper"`
-
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` + `chore:` commits land; state advances to next
-task. Real Refactor diff (cross-link statement added to docstring +
-test PASSES post-cross-link) satisfies v1.0.5 `_preflight` HARD-BLOCK.
-
+```markdown
+---
+name: project-v108-claude-p-hang-upstream
+description: claude -p /test-driven-development hangs >180s in fixture-style cwd lacking .claude/settings.json — v1.0.8 T3 diagnostic empirical findings + staged upstream report content for anthropics/claude-code
+metadata:
+  type: reference
 ---
 
-### Task 8: C-X-K3-Removal — Remove `_preflight_triplet_check` 1-cycle alias
+# claude -p /test-driven-development hang (upstream bug archive)
 
-**Files:**
-- Modify: `skills/sbtdd/scripts/close_task_cmd.py:451` (delete the
-  alias line + the C5 comment block above it)
-- Modify: `tests/test_close_task_cmd.py` (update any test that
-  monkeypatches `_preflight_triplet_check` to monkeypatch `_preflight`
-  directly; add new test asserting `AttributeError` on legacy name access)
+## Manifestation
 
-Covers escenario C-X-K3-Removal from spec sec.4.7.
+Invoking `claude -p /test-driven-development --phase=red` as a
+subprocess (with `subprocess.run(cmd, capture_output=True, ...)` or
+`subprocess.Popen(cmd, stdout=PIPE, stderr=PIPE, ...)`) with cwd
+pointing to a directory containing `sbtdd/spec-behavior.md` +
+`planning/claude-plan-tdd.md` but LACKING `.claude/settings.json` +
+`CLAUDE.md` causes the subprocess to hang indefinitely (>180s
+empirically observed, zero stdout/stderr output) until timeout-killed
+by the caller.
 
-**Plan invariant**: T8 must run AFTER T7 (T7 collapsed Pillar C polish
-adds the C5 warning comment on the alias line; T8 removes both alias +
-comment together).
+## Empirical observations (v1.0.8 T3 diagnostic 2026-05-14)
 
-**Commit prefix framing (v1.0.7 iter-2 carry-forward W10)**: T8 Green
-commit uses `--variant fix` because the alias removal closes the
-v1.0.7 C5-documented monkeypatch footgun (semantically a fix to the
-test discipline surface — the alias was a footgun that silently
-bypassed canonical-name patches; removing it forces tests onto the
-correct surface). Even though the diff is "code removal", the framing
-as `fix:` is accurate per CLAUDE.local.md sec.5 commit prefix map
-(Green close uses `feat:` for new features OR `fix:` for bug-fix
-behavior change).
+Three reproducer scripts staged in `.tmp_repro/` (gitignored):
 
-#### Red Phase
+| Script | cwd | Outcome | Wall-time | rc |
+|--------|-----|---------|-----------|-----|
+| `repro_t3.py` | fixture temp dir (full v1.0.7 layout) | TIMEOUT, zero output | 60s killed | n/a |
+| `repro_worker.py` | fixture temp dir (single worker direct spawn) | HANG after emitting "[sbtdd] phase 2/5: task loop -- task 1/4 (red)" breadcrumb | 180s killed | n/a |
+| `repro_skill_with_fixture_cwd.py` | fixture temp dir | HANG >180s zero output | 180s killed | n/a |
 
-- [x] **Step 1: Write failing test asserting `AttributeError` on legacy alias**
+Contrast in cwd that DO NOT hang:
 
-Append to `tests/test_close_task_cmd.py`:
+| cwd | Outcome | Wall-time | rc |
+|-----|---------|-----------|-----|
+| empty temp dir | "working directory is empty and not a git repo" output | ~30s | 0 |
+| SBTDD repo dir | "TDD skill loaded... What behavior should the next RED-phase test cover?" interactive prompt output | ~66s | 0 |
 
-```python
-class TestCXK3RemovalAliasGone:
-    """v1.0.7 C-X-K3-Removal: alias removed per spec sec.4.7."""
+## Root cause (best hypothesis)
 
-    def test_legacy_alias_no_longer_attribute_of_module(self) -> None:
-        """C-X-K3-Removal: `_preflight_triplet_check` raises AttributeError."""
-        with pytest.raises(AttributeError, match="_preflight_triplet_check"):
-            close_task_cmd._preflight_triplet_check  # noqa: B018
+The fixture cwd has the file layout that looks like a real SBTDD
+project (sbtdd/, planning/, plugin.local.md) but LACKS the
+`.claude/settings.json` that grants permissions for tool calls. The
+`/test-driven-development` skill tries to take real actions (write
+tests, run pytest, etc.) and gets blocked waiting for permission
+grants that never arrive in `-p` mode (non-interactive subprocess).
 
-    def test_canonical_preflight_still_callable(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """C-X-K3-Removal: canonical `_preflight` still works."""
-        # Sanity check: canonical name exists + is callable.
-        assert callable(close_task_cmd._preflight)
-```
+The hang is observable as zero stdout/stderr output for the entire
+duration — the skill is blocked at the permission-prompt phase before
+any meaningful work output is emitted.
 
-- [x] **Step 2: Run tests to verify failure**
+## Workaround in v1.0.8
 
-Run: `pytest tests/test_close_task_cmd.py::TestCXK3RemovalAliasGone -v`
-Expected: `test_legacy_alias_no_longer_attribute_of_module` FAILS — alias
-still present from T8; the second test PASSES.
+`tests/test_auto_parallel_e2e.py` uses `SBTDD_E2E_STUB_DISPATCH=1` to
+bypass `claude -p` dispatch entirely via the gate at the top of
+`superpowers_dispatch.invoke_skill` (v1.0.8 Pillar A1). This makes
+the e2e test deterministic + fast (<60s).
 
-- [x] **Step 3: Audit existing tests for `_preflight_triplet_check` references**
+In production, properly-initialized SBTDD projects (via `/sbtdd init`)
+ship a complete `.claude/settings.json` from the template — avoiding
+the hang. v1.0.8 Pillar B1 also adds a minimal `.claude/settings.json`
+to the e2e fixture as doble defensa (so even if the stub gate is
+bypassed in a future test variant, the fixture is "less broken").
 
-Run:
+## Staged upstream report content (for future submission)
+
+**Title**: `claude -p <skill>` hangs indefinitely with zero output in
+fixture-style cwd lacking `.claude/settings.json`
+
+**Body**:
+
+When invoking `claude -p /test-driven-development --phase=red` as a
+non-interactive subprocess with cwd containing certain markers
+(SBTDD-style: `sbtdd/`, `planning/`, `.claude/plugin.local.md`) but
+WITHOUT `.claude/settings.json` + `CLAUDE.md`, the subprocess hangs
+indefinitely emitting zero output. Same command in other cwd (empty
+temp dir, repo root with permissions) returns cleanly in 30-66s.
+
+Reproducer (Windows 11, claude CLI vX.Y.Z — fill version at submission):
 
 ```bash
-grep -rn "_preflight_triplet_check" tests/
-grep -rn "_preflight_triplet_check" skills/
+# Create fixture-style cwd
+mkdir -p /tmp/repro/sbtdd /tmp/repro/planning /tmp/repro/.claude
+touch /tmp/repro/sbtdd/spec-behavior.md
+touch /tmp/repro/planning/claude-plan-tdd.md
+cat > /tmp/repro/.claude/plugin.local.md <<'EOF'
+---
+stack: python
+EOF
+cd /tmp/repro
+
+# This hangs indefinitely with zero output:
+timeout 180 claude -p "/test-driven-development --phase=red"
+echo "exit: $?"  # 124 (timeout) after 180s
 ```
 
-For each callsite that monkeypatches or references the alias name,
-note the location. The Green step rewrites them to use `_preflight`.
+Workaround we implemented: env var gate to bypass dispatch in tests
+(`SBTDD_E2E_STUB_DISPATCH=1` short-circuits the dispatcher to a
+synthetic SkillResult without spawning claude -p). Production
+projects don't hit this because they have proper
+`.claude/settings.json` from `/sbtdd init` template.
 
-- [x] **Step 4: Run `make verify`**
+Suspected: skill is waiting on permission prompt that never arrives
+in `-p` (print/non-interactive) mode. Could the CLI emit a clear
+error or hint to operator instead of silent hang?
 
-Expected: only the new alias-removal test fails (and possibly some
-pre-existing tests that monkeypatch the alias — those will need
-update in Green); ruff + mypy clean except for any pre-existing
-test refs that produce import warnings.
+## Links
 
-- [x] **Step 5: Close Red phase**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "add v1.0.7 C-X-K3-Removal alias-removal regression tests"`
-
-Expected: `test:` commit lands; state advances to `green`.
-
-#### Green Phase
-
-- [x] **Step 6: Remove the alias line + C5 comment**
-
-Edit `skills/sbtdd/scripts/close_task_cmd.py:451`. Delete BOTH the
-multi-line C5 comment block and the alias assignment line:
-
-Lines to remove:
-```python
-# v1.0.6 K-3: alias for backward-compat; legacy callsites monkeypatched
-# this name. SCHEDULED REMOVAL in v1.0.7 C-X-K3-Removal.
-# v1.0.7 C5 NOTE: monkeypatch.setattr("close_task_cmd._preflight_triplet_check",
-# fake) does NOT patch the canonical `_preflight` (alias is a module-load-time
-# rebind, not a transparent reference). Tests must monkeypatch the canonical
-# `_preflight` name to actually patch behavior. This footgun is the reason
-# C-X-K3-Removal proceeds (single canonical entry point).
-_preflight_triplet_check = _preflight
+- v1.0.7 ship that introduced the e2e test [[project_v107_shipped]]
+- v1.0.8 PRIORITY LOCKED context [[project_v108_t3_e2e_priority_locked]]
+- v1.0.7 chicken-and-egg empirical context [[project_v107_pty_workers_locked]]
 ```
 
-- [x] **Step 7: Update test callsites that monkeypatched the alias**
+- [x] **Step 6: Update `MEMORY.md` index with pointer**
 
-For each location identified in Red Step 3, rewrite:
+Append the following line to
+`C:\Users\jbolivarg\.claude\projects\D--jbolivarg-PythonProjects-SBTDD\memory\MEMORY.md`:
 
-```python
-monkeypatch.setattr("close_task_cmd._preflight_triplet_check", fake)
+```markdown
+- [v1.0.8 claude -p hang upstream archive](project_v108_claude_p_hang_upstream.md) — `claude -p /test-driven-development` hangs >180s zero output in fixture-style cwd lacking `.claude/settings.json`; workaround = `SBTDD_E2E_STUB_DISPATCH=1` env gate (v1.0.8 Pillar A1); upstream report staged for future submission
 ```
 
-to:
+- [x] **Step 7: Write the Green — add CHANGELOG [1.0.8] entry**
 
-```python
-monkeypatch.setattr("close_task_cmd._preflight", fake)
+Modify `CHANGELOG.md`. Locate the `## [Unreleased]` section (line 11) and the `## [1.0.7]` section that follows (line 15). Insert a new section between them:
+
+```markdown
+## [1.0.8] - 2026-05-14
+
+### Added
+
+- `SBTDD_E2E_STUB_DISPATCH` env var stub gate in
+  `superpowers_dispatch.invoke_skill` (Pillar A1) with
+  **defense-in-depth runtime guard** requiring `"pytest" in
+  sys.modules` to prevent accidental production env var leak from
+  activating the gate (iter-2 carry-forward Cas-W11+Bal-W7
+  combined fix). Test-only; production callers MUST NOT set.
+  When env=1 AND `"pytest"` is loaded AND skill is in
+  `_E2E_STUBBABLE_SKILLS = {"test-driven-development",
+  "systematic-debugging"}`, returns synthetic `SkillResult(rc=0)`
+  without spawning `claude -p`. Closes the v1.0.7 PRIORITY LOCKED
+  T3 e2e empirical chicken-and-egg gap.
+- 4 gate regression tests in `tests/test_superpowers_dispatch.py`
+  class `TestE2EStubGate` (Pillar A4).
+- Worker env propagation regression test in `tests/test_auto_cmd.py`
+  (Pillar A2) pinning the `os.environ.copy()` contract.
+- Fixture `tests/fixtures/parallel-e2e/dot-claude-settings.json`
+  with explicit permissions allow list (`Write/Edit` for scratch/,
+  tests/, src/ + `Bash` for pytest/ruff/mypy) per Pillar B1.
+- Section "Known upstream limitations" in CLAUDE.md documenting
+  the `claude -p /test-driven-development` cwd-dependent hang
+  (Pillar B2).
+- Memory archive `project_v108_claude_p_hang_upstream.md` with
+  full diagnostic context + staged upstream report content
+  (Pillar B2; **local-only**, NOT test-asserted).
+- Doc coherence smoke tests in `tests/test_doc_coherence_v108.py`
+  for Pillar B2 CLAUDE.md + CHANGELOG sections.
+
+### Changed
+
+- `tests/test_auto_parallel_e2e.py` redesigned (Pillar A3): no
+  longer `@pytest.mark.xfail`. Subprocess env carries
+  `SBTDD_E2E_STUB_DISPATCH=1`. Timeout shrunk 600s → 60s. Strict
+  happy-path assertions per Q4'=a+: rc=0, state=done, plan fully
+  flipped, sidecars present with verify_chain of `>= 4` entries
+  (extensible per iter-2 Cas-W10) + per-tool presence check for
+  the 4 known sec.0.1 tools (pytest, ruff, mypy), each rc=0,
+  audit finished + success.
+- `_stage_fixture` helper in `tests/test_auto_parallel_e2e.py`
+  materializes `<dest>/.claude/settings.json` from the fixture
+  (Pillar B1).
+
+### Honest scope caveats (iter-2 carry-forward Bal-W5)
+
+- After v1.0.8 lands, `tests/test_auto_parallel_e2e.py` is an
+  **INFRASTRUCTURE test** — it validates env propagation, worker
+  spawn, sec.0.1 chain bypass, sidecar persistence, and
+  parent-side hooks. It does **NOT** exercise the real
+  `/test-driven-development` LLM dispatch semantics. Production
+  coverage of the dispatch path is preserved via mocked unit
+  tests in `test_auto_cmd.py` + `test_close_phase_cmd.py`. A
+  **CI integration test** for real dispatch (against a fixture
+  with proper `.claude/settings.json`) is rolled to v1.0.9 LOCKED.
+- T3 e2e PASSES on **Windows** (mandatory development env).
+  **POSIX validation deferred** to CI infrastructure per v1.0.7
+  W5 carry-forward (iter-2 Cas-I8).
+
+### Process notes
+
+v1.0.7 PRIORITY LOCKED T3 e2e empirical closure shipped. v1.0.8
+diagnostic 2026-05-14 ruled out 4 of 5 v1.0.7 hypotheses (env
+propagation, pytest recursion, residual A2 bug, Windows PIPE
+buffer fill); root cause confirmed as upstream `claude -p` hang
+in fixture-style cwd. Q1'=a baseline stubbable skills set;
+Q2'=a minimal marker stdout; Q3'=a explicit permissions allow
+list; Q4'=a+ deterministic assertions; Q5'=a G2 ladder
+pre-staged.
+
+**Red-phase commit methodology adjustment** (iter-2
+Mel-W3+Cas-W9): v1.0.8 plan replaced the v1.0.7-precedent
+temporary `@pytest.mark.xfail` workaround with raw
+`git commit -m "test: ..."` for Red commits. State stays at
+`current_phase=red` after Red; advances at Green close-phase.
+No 6-commit window where a stale marker could survive past
+Green.
+
+Production semantics preserved — Pillar A is TEST-ONLY;
+`SBTDD_E2E_STUB_DISPATCH` is namespaced + documented test-only
++ runtime-guarded via `pytest in sys.modules`. Production
+workers continue to do real TDD work via real `claude -p`
+dispatch. G1 cap=3 HARD Checkpoint 2 no-override 9-cycle streak
+preserved (v1.0.0..v1.0.8). Pre-merge Loop 2 3-cycle
+no-override streak preserved (v1.0.5+v1.0.7+v1.0.8).
+
+### Deferred (rolled to v1.0.9 LOCKED)
+
+Per iter-2 carry-forward Bal-W6+Bal-W7+Cas-W13, v1.0.9 LOCKED
+milestones:
+
+1. **Resolve `/sbtdd pre-merge` orchestrator-side hang**
+   (chicken-and-egg). Subcommand-based pre-merge should work
+   end-to-end without manual `run_magi.py` fallback. Closes
+   the 9-cycle methodology debt of manual MAGI fallback.
+2. **CI integration test exercising real `/test-driven-development`
+   dispatch** against a known-good fixture project (with proper
+   `.claude/settings.json`), as the integration safety net
+   post-v1.0.8 stub gate. Backstops the honest scope caveat
+   from this CHANGELOG entry.
+3. **Re-evaluate stub gate runtime-guard strength**: if field
+   observation shows pytest-sys.modules guard has false-negatives
+   (e.g., pytest-in-IDE workflows), consider AND-gating with a
+   second env var like `SBTDD_E2E_STUB_ARMED=1` for explicit
+   opt-in.
+4. **Upstream report submission to `anthropics/claude-code`**
+   (Pillar B2 stages content in memory; user decides post-v1.0.8
+   ship per spec sec.5 scope exclusions).
+
+Other v1.0.7 deferred carry-forward (B2 worker subprocess
+auto-message hardening, C2 K-4 escape hatch test coverage, C4
+NF-B test count rebaseline, C8 F-A2 abort criterion diagnosis
+hint); Pillar D v1.0.5 polish carry-forward; Edge cases E1-E3.
+
+### Deferred (rolled to v1.1.0)
+
+- Stub gate production-promotion decision review (whether to
+  promote `SBTDD_E2E_STUB_DISPATCH` semantics into a production
+  worker-mode bypass for `/test-driven-development`).
+- All v1.0.4 carry-forward inherited items.
+
 ```
 
-Same transformation for any direct attribute references.
+- [x] **Step 8: Run the Green doc-coherence tests + full sec.0.1 chain**
 
-- [x] **Step 8: Run tests to verify they pass**
+Run: `pytest tests/test_doc_coherence_v108.py -v`
+Expected: 2 PASSED.
 
-Run: `pytest tests/test_close_task_cmd.py -v`
-Expected: full module green including the new C-X-K3-Removal tests
-+ all previously-passing tests (after monkeypatch target rewrites).
+Run: `make verify`
+Expected: clean sec.0.1 chain.
 
-- [x] **Step 9: Run `make verify`**
+- [x] **Step 9: Close Green phase**
 
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant feat --message "v1.0.8 T6 Green: add Known upstream limitations section + memory archive + CHANGELOG [1.0.8]"`
+
+Expected: `feat:` commit.
+
+- [x] **Step 10: Write the Refactor — tighten CHANGELOG cross-references**
+
+In `CHANGELOG.md` `[1.0.8]` "Process notes" section, after the line ending `Q5'=a G2 ladder pre-staged.`, append one more sentence:
+
+```
+See `sbtdd/spec-behavior.md` v1.0.8 sec.1 (Resumen ejecutivo Q1'-Q5'
+resolutions) + sec.6 (G1/G2 binding stance) for full decision
+rationale.
+```
+
+- [x] **Step 11: Run sec.0.1 chain after refactor**
+
+Run: `pytest tests/test_doc_coherence_v108.py -v`
+Expected: 2 PASSED.
+
+Run: `make verify`
 Expected: clean.
 
-- [x] **Step 10: Close Green phase**
+- [x] **Step 12: Close Refactor phase + Task**
 
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --variant fix --message "v1.0.7 C-X-K3-Removal remove _preflight_triplet_check alias + update tests"`
+Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "v1.0.8 T6 Refactor: cross-reference Q1'-Q5' decisions to spec sections in CHANGELOG"`
 
-Expected: `fix:` commit lands; state advances to `refactor`.
+Expected: `refactor:` commit + close-task cascade (T6 checkbox `[x]`, state advances to `done` since T6 is the last task).
 
-#### Refactor Phase
+---
 
-- [x] **Step 11: Audit codebase for any remaining alias references**
+## Post-Task: Own-cycle dogfood activities (orchestrator)
 
-Final sweep:
+Per spec sec.2.7 + sec.4.7 + sec.5.3, after all 6 tasks close, the orchestrator runs the dogfood activities.
+
+### Activity D — `make verify` clean pass (NON-NEGOTIABLE)
+
+- [ ] **Step D-1**: Run `make verify` from repo root.
+
+Expected:
+- pytest: 1309-1312 tests + 1 skipped, 0 failed
+- ruff check: 0 warnings
+- ruff format check: clean
+- mypy --strict: 0 errors
+- coverage: >= 88% (no regression below v1.0.7's 89.46%)
+- wall-time: <= 200s soft / <= 220s hard
+
+If any check fails: halt; do not proceed to pre-merge. Diagnose + fix + re-run.
+
+### Activity E — Pre-merge gate end-to-end
+
+- [ ] **Step E-1**: Attempt `python skills/sbtdd/scripts/run_sbtdd.py pre-merge` (orchestrator-side).
+
+Expected:
+- Loop 1 (`/requesting-code-review`) reaches clean-to-go within 10 iter cap.
+- Loop 2 (`/magi:magi`) reaches verdict `>= GO_WITH_CAVEATS` full no-degraded within 5 iter cap.
+- NO INV-0 override.
+
+- [ ] **Step E-2 (fallback)**: If `/sbtdd pre-merge` hangs (same upstream bug class as v1.0.7 dogfood):
+  - Run `python skills/magi/scripts/run_magi.py` manually with the cumulative diff + spec + plan.
+  - Apply Loop 2 findings via mini-cycles per CLAUDE.local.md §6.
+  - Document the fallback usage in CHANGELOG `[1.0.8]` Process notes (post-impl commit).
+
+### Activity F — Production regression check
+
+- [ ] **Step F-1**: Run the v1.0.7 worker-mode bypass tests:
 
 ```bash
-grep -rn "_preflight_triplet_check" .
+pytest tests/test_close_phase_cmd.py -k "run_verification or worker_mode" -v
+pytest tests/test_auto_cmd.py -k "dispatch" -v
+pytest tests/test_parallel_dispatcher.py -v
 ```
 
-Expected: zero matches except in CHANGELOG history references (which
-should be left as-is — they document the alias's lifecycle).
-
-If any test files OR production code still references the alias, fix
-them now (monkeypatch path or direct call). Confirm test count
-preserved.
-
-- [x] **Step 12: Run `make verify`**
-
-Expected: clean.
-
-- [x] **Step 13: Close Refactor phase + close task**
-
-Run: `python skills/sbtdd/scripts/run_sbtdd.py close-phase --message "polish v1.0.7 C-X-K3-Removal final alias sweep"`
-
-Then: `python skills/sbtdd/scripts/run_sbtdd.py close-task --skip-spec-review`
-
-Expected: `refactor:` + `chore:` commits land; state advances to `done`.
+Expected: all 19+ tests still PASS. No regression in production worker bypass semantics.
 
 ---
 
-## Post-cycle: own-cycle dogfood + ship checklist
+## Ship checklist (per CLAUDE.local.md §7)
 
-After T11 closes:
+After Activities D + E + F all green:
 
-1. **Verify state file is `done`**:
-   ```bash
-   cat .claude/session-state.json | grep current_phase
-   ```
-   Expected: `"current_phase": "done"`.
-
-2. **Run `/sbtdd pre-merge`** end-to-end (post Pillar A ship; orchestrator
-   inherits TTY → Loop 1 + Loop 2 dispatch should complete):
-   ```bash
-   python skills/sbtdd/scripts/run_sbtdd.py pre-merge
-   ```
-   Expected: Loop 1 clean-to-go + Loop 2 verdict >= `GO_WITH_CAVEATS`
-   full no-degraded, **WITHOUT INV-0 override** (re-establish streak
-   from 1 cycle per Q3=a strict). If `/sbtdd pre-merge` fails for
-   non-content reasons (regression, transient infra), fall back to
-   manual `python skills/magi/scripts/run_magi.py` per spec sec.6.4 +
-   document in CHANGELOG.
-
-3. **Bump version 1.0.6 → 1.0.7** in `.claude-plugin/plugin.json` +
-   `.claude-plugin/marketplace.json`. Sync values across both files.
-
-4. **Write CHANGELOG `[1.0.7]` entry** with sections per spec sec.7.2:
-   Added (PTY allocation + Windows hybrid + worker runtime guard +
-   spec_review file-reference + atomic_write retry), Changed (drift
-   regex line-anchored + 4 polish items), Removed (K-3 alias),
-   Process notes (Pillar A NON-POSTPONABLE + Q1'=a single sequential
-   forced + Q2'=b promotion + Q3'=b ordering + Q4'=a all 5 + Q5'=a
-   default G2 + A3 dogfood empirical findings), Deferred (B2, C2, C4,
-   C8, Pillar D, Edge cases → v1.0.8; v1.0.4 carry-forward → v1.1.0).
-
-5. **Update README + SKILL.md + CLAUDE.md** per spec sec.7.3:
-   - README: `auto --parallel` operational status post Pillar A;
-     PTY allocation note POSIX vs Windows; `SBTDD_AUTO_PARALLEL_WORKER`
-     operator-facing env var doc.
-   - SKILL.md: `### v1.0.7 notes` section.
-   - CLAUDE.md (gitignored): pointer.
-
-6. **Merge `feature/v1.0.7-bundle` → `main`** with `git merge --no-ff`.
-   Tag `v1.0.7` at the merge commit. Push tag (with explicit user
-   authorization).
+- [ ] All 6 task checkboxes in this plan flipped to `[x]`.
+- [ ] `.claude/session-state.json` reports `current_phase: "done"`.
+- [ ] `make verify` clean (Activity D).
+- [ ] `git status` clean (working tree, no untracked from plan scope).
+- [ ] CHANGELOG `[1.0.8]` entry present (per T6).
+- [ ] Pre-merge MAGI verdict captured (Loop 2 clean GO_WITH_CAVEATS or better, full no-degraded).
+- [ ] Version bump: `plugin.json` 1.0.7 → 1.0.8 + `marketplace.json` 1.0.7 → 1.0.8.
+- [ ] Merge `feature/v1.0.8-bundle` → `main` (with explicit user authorization per memory `feedback_never_commit_without_explicit_request`).
+- [ ] Tag `v1.0.8` + push (with explicit user authorization).
 
 ---
 
-## Self-review checklist (run before handoff)
+## Self-review (writing-plans skill checklist)
 
-1. **Spec coverage** (post iter-2 carry-forward C2/C5 task collapse:
-   11 tasks → 8 tasks):
-   - [x] A1 → T1 (POSIX PTY allocation + lifecycle helper + leak guard
-     in `subprocess_utils`)
-   - [x] A2 → T2 (Windows hybrid + Q2'=b runtime guard + sec.0.1 chain
-     bypass + INV-16 evidence sidecar per C4 carry-forward)
-   - [x] A3 → T3 (F-A2 dogfood empirical e2e with REAL chicken-and-egg
-     fixture per C3 carry-forward)
-   - [x] B5 → T4 (drift regex line-anchored)
-   - [x] B4 → T5 (spec_review_dispatch file-reference)
-   - [x] B3 → T6 (atomic_write_json retry)
-   - [x] C1+C5+C6+C7 → T7 (combined Pillar C polish single TDD cycle
-     with real Refactor cross-link per C2/C5 carry-forward)
-   - [x] C-X-K3-Removal → T8 (alias removal; W10 carry-forward
-     `--variant fix` framing documented)
+**1. Spec coverage** — every spec section mapped to a task:
+- A1 (gate impl) → T1 ✓
+- A2 (env propagation regression) → T2 ✓
+- A3 (T3 redesign) → T4 ✓
+- A4 (gate regression tests) → T3 ✓
+- B1 (fixture hardening) → T5 ✓
+- B2 (docs + memory + CHANGELOG) → T6 ✓
+- Dogfood activities D/E/F → Post-Task section ✓
+- Ship checklist (CLAUDE.local.md §7) → Ship section ✓
 
-2. **Placeholder scan**: zero placeholder markers (no uppercase
-   to-be-determined / to-do / to-be-defined word-boundary tokens)
-   in this plan; every step has concrete code or commands.
+**2. Placeholder scan**: cero matches uppercase placeholder markers (the three INV-27 word-boundary patterns) in this plan. Every step contains actual content (test code, impl code, exact commands with expected outcomes).
 
-3. **Type consistency**:
-   - `_spawn_worker_with_pty(argv: list[str], env: dict[str, str]) -> subprocess.Popen[bytes]` (T1) — referenced consistently in T2's `_spawn_worker(argv, env)` dispatcher.
-   - `_close_pty_master(proc: subprocess.Popen[bytes]) -> None` (T1) — new lifecycle helper per C1 carry-forward.
-   - `_run_verification(root: Path) -> None` (T2) — signature unchanged from existing v1.0.6 baseline; only body modified.
-   - `_persist_worker_verify_evidence(root: Path, captured: list[dict[str, object]]) -> None` (T2) — new helper per C4 carry-forward.
-   - `_OPEN_CHECKBOX_LINE_RE: re.Pattern[str]` (T4) — new module-level constant in `drift.py`.
-   - `_preflight` (post-T8) — canonical name remains; alias removed.
-   - `dispatch_spec_reviewer(...)` (T5) — public signature unchanged; only argv-build internals refactored.
-   - `atomic_write_json(path: Path, data: object) -> None` (T6) — public signature unchanged; only body wrapped with retry loop.
+**3. Type consistency**: identifiers used consistently across tasks:
+- `_E2E_STUB_ENV`, `_E2E_STUBBABLE_SKILLS`, `SBTDD_E2E_STUB_DISPATCH` — same naming in T1 impl + T2/T3/T4 tests.
+- `SkillResult`, `subprocess_utils.run_with_timeout`, `invoke_skill` — same fully-qualified references across tasks.
+- `_stage_fixture`, `_FIXTURE_DIR`, `_FIXTURE_SETTINGS_JSON` (added T5) — consistent.
+- `TestE2EStubGate.test_gate_*` method names — same in T3 Red, Green, Refactor.
 
-4. **Cross-task ordering invariants** (post iter-3 carry-forward T6 → T2 swap):
-   - T1 → T6 → T2 → T3 → T4 → T5 → T7 → T8 (sequential execution
-     order).
-   - T1 → T2 (A2 imports `_spawn_worker_with_pty` + `_close_pty_master`
-     from T1).
-   - T6 → T2 (HARD per iter-3 bal+cas WARNING resolution): T2's
-     `_persist_worker_verify_evidence` calls
-     `state_file.atomic_write_json` which T6 hardens with retry; T6
-     lands BEFORE T2 so the sidecar write benefits from retry from
-     day 1, eliminating documented Windows PermissionError flake risk
-     during T3 dogfood.
-   - T2 → T3 (A3 e2e exercises T1+T2 production code; fixture project
-     depends on T2 worker-mode bypass to avoid hanging).
-   - T7 → T8 (T7 collapsed Pillar C polish adds C5 comment on alias
-     line; T8 removes both alias + comment together).
-   - All other tasks file-disjoint or doc-only.
+**4. Ordering dependency check**: T1 before T3+T4 (gate exists); T5 before T4 (fixture has settings.json); T6 parallel-safe with T1/T2/T3/T5. Documented in plan header `Task ordering` block. Spec sec.5.1 single-track sequential remains default.
 
-5. **Commit prefix discipline**: every Red closes with `test:`, every
-   Green with `feat:` (new features) or `fix:` (bug fixes), every
-   Refactor with `refactor:`, every task close with `chore:` via
-   `close-task --skip-spec-review`.
+---
+
+## Execution handoff
+
+Plan complete. Per project convention (single-track sequential subagent-driven per v1.0.6+v1.0.7 chicken-and-egg precedent), recommended approach:
+
+**Recommended: Subagent-Driven Development (sequential, fresh subagent per task)**
+- Dispatch subagent for T1; await close-task cascade; review diff; dispatch T2; etc.
+- Each subagent fresh context — no contamination across tasks.
+- Two-stage review (subagent self-review + orchestrator review) per CLAUDE.local.md §6 conventions.
+
+Pending MAGI Checkpoint 2 review of this plan + user approval. Once `plan_approved_at` is set in state, the close-phase auto-commit contract takes effect and the 4-category commit authorization unlocks per CLAUDE.local.md §5.
