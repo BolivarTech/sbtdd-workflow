@@ -90,6 +90,48 @@ _SUBPROCESS_INCOMPATIBLE_SKILLS: frozenset[str] = frozenset(
 )
 
 
+#: v1.0.8 Pillar A1: env var name that activates the test-only stub
+#: gate at the top of :func:`invoke_skill`. When set to ``"1"``,
+#: skills in :data:`_E2E_STUBBABLE_SKILLS` short-circuit to a
+#: synthetic :class:`SkillResult` instead of spawning ``claude -p``,
+#: PROVIDED ``"pytest"`` is in :data:`sys.modules` (runtime guard
+#: against accidental production env var leak — see iter-2 carry-
+#: forward W11).
+#:
+#: **Test-only**: production callers MUST NOT set this variable.
+#: Defense-in-depth: even if the env var is accidentally exported in
+#: a production context (shared shell profile, devcontainer template
+#: leak, accidentally-committed `.env`), the runtime guard in
+#: :func:`invoke_skill` checks ``"pytest" in sys.modules`` --
+#: production workers do NOT import pytest at runtime (they invoke
+#: pytest as a separate subprocess via
+#: ``[sys.executable, "-m", "pytest"]`` in
+#: :func:`close_phase_cmd._run_verification` worker-mode bypass),
+#: so the gate cannot fire in production. Test runners load pytest
+#: into sys.modules BEFORE collecting tests, so the gate fires
+#: correctly in test environments.
+_E2E_STUB_ENV: str = "SBTDD_E2E_STUB_DISPATCH"
+
+#: v1.0.8 Pillar A1: skills whose ``claude -p`` dispatch is bypassed
+#: when :data:`_E2E_STUB_ENV` is set AND ``"pytest"`` is loaded.
+#: Frozen via ``frozenset`` (style consistent with
+#: :data:`_SUBPROCESS_INCOMPATIBLE_SKILLS`).
+#:
+#: Membership-bound list -- adding skills here requires explicit
+#: rationale documented in CHANGELOG and approval through MAGI
+#: Checkpoint 2 / pre-merge gate. v1.0.8 baseline scope is 2 skills
+#: per Q1'=a decision: ``/test-driven-development`` (root cause of
+#: the v1.0.7 T3 hang) + ``/systematic-debugging`` (used in
+#: ``_run_verification_with_retries`` retry path; would surface the
+#: same upstream bug class on a real verification failure).
+_E2E_STUBBABLE_SKILLS: frozenset[str] = frozenset(
+    {
+        "test-driven-development",
+        "systematic-debugging",
+    }
+)
+
+
 @dataclass(frozen=True)
 class SkillResult:
     """Outcome of a successful skill invocation.
@@ -320,6 +362,31 @@ def invoke_skill(
         ValidationError: If the subprocess timed out OR exited non-zero without
             matching a quota pattern. Mapped to exit 1 by run_sbtdd.py.
     """
+    # v1.0.8 Pillar A1: test-only stub gate. Checked FIRST so it
+    # short-circuits ALL downstream dispatch logic (v1.0.4 membership
+    # gate + v1.0.6 J-3 headless guard + v1.0.7 A2 worker-context
+    # guard). Test-only: production MUST NOT set
+    # SBTDD_E2E_STUB_DISPATCH. Defense-in-depth: the
+    # ``"pytest" in sys.modules`` runtime guard ensures the gate
+    # cannot fire in production processes (orchestrator, workers)
+    # because they do NOT import pytest at runtime; pytest is
+    # spawned as a separate subprocess via [sys.executable, "-m",
+    # "pytest"] in worker-mode close-phase. Test runners load
+    # pytest into sys.modules at process start. Rationale: enables
+    # end-to-end orchestration tests (T3 e2e) without spawning
+    # real claude -p subprocess (which hangs upstream in fixture-
+    # style cwd per CLAUDE.md "Known upstream limitations").
+    if (
+        os.environ.get(_E2E_STUB_ENV) == "1"
+        and "pytest" in _sys.modules
+        and skill in _E2E_STUBBABLE_SKILLS
+    ):
+        return SkillResult(
+            skill=skill,
+            returncode=0,
+            stdout=f"[sbtdd e2e stub] /{skill} bypassed ({_E2E_STUB_ENV}=1)",
+            stderr="",
+        )
     # v1.0.1 Item A2 (sec.2.3) + v1.0.4 Item A.2 (Task 3): safe-by-default
     # gate -- skills in ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` (e.g.
     # ``/brainstorming``, ``/writing-plans``, ``/receiving-code-review``)

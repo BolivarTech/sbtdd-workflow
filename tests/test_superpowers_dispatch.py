@@ -895,9 +895,7 @@ def test_v108_a1_gate_smoke_test_driven_development_with_env_set(monkeypatch):
     # Sanity-check the pytest sys.modules runtime guard precondition
     # holds in this test environment (would fail in production where
     # pytest is not loaded).
-    assert "pytest" in sys.modules, (
-        "test environment must have pytest loaded for the gate to fire"
-    )
+    assert "pytest" in sys.modules, "test environment must have pytest loaded for the gate to fire"
 
     monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
 
