@@ -924,3 +924,33 @@ def test_v108_a1_gate_smoke_test_driven_development_with_env_set(monkeypatch):
     assert "test-driven-development" in result.stdout
     assert "SBTDD_E2E_STUB_DISPATCH=1" in result.stdout
     assert result.stderr == ""
+
+
+class TestE2EStubGate:
+    """v1.0.8 Pillar A4: regression tests for SBTDD_E2E_STUB_DISPATCH gate.
+
+    Each test monkeypatches ``subprocess_utils.run_with_timeout`` at the
+    bottom of the call chain so the gate at the top of
+    :func:`superpowers_dispatch.invoke_skill` is exercised end-to-end
+    (real ``invoke_skill`` execution; only the subprocess call is faked).
+    Monkeypatching ``invoke_skill`` itself would break the gate test
+    semantic (gate would never run).
+
+    See ``sbtdd/spec-behavior.md`` v1.0.8 sec.4.4 escenarios A4-1..A4-3.
+    """
+
+    def test_gate_fires_for_stubbable_skill_with_env_set(self, monkeypatch):
+        """v1.0.8 A4-1 (covers A1-1 + A1-4): env=1 + stubbable skill -> stub."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
+
+    def test_gate_does_not_fire_when_env_unset(self, monkeypatch):
+        """v1.0.8 A4-2 (covers A1-2): env unset -> real path attempted."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
+
+    def test_gate_does_not_fire_for_skill_outside_stubbable_set(self, monkeypatch):
+        """v1.0.8 A4-3 (covers A1-3): env=1 + non-stubbable -> real path."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
+
+    def test_gate_stdout_contains_marker(self, monkeypatch):
+        """v1.0.8 A4-4 (covers A1-4): stub stdout has '[sbtdd e2e stub]' literal."""
+        raise NotImplementedError("v1.0.8 T3 Red placeholder")
