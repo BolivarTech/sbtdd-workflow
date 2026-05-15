@@ -940,7 +940,7 @@ class TestE2EStubGate:
     """
 
     @staticmethod
-    def _capture_run_with_timeout(monkeypatch) -> dict:
+    def _capture_run_with_timeout(monkeypatch):
         """Return a capture dict + monkeypatch run_with_timeout to record calls.
 
         Returns the capture dict so individual tests can introspect:
@@ -959,7 +959,7 @@ class TestE2EStubGate:
         return captured
 
     @staticmethod
-    def _fail_if_subprocess_called(monkeypatch) -> None:
+    def _fail_if_subprocess_called(monkeypatch):
         """Monkeypatch run_with_timeout to raise AssertionError if invoked.
 
         Used by tests asserting the gate fires (subprocess must NEVER be
