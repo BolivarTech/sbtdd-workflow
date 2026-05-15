@@ -320,6 +320,37 @@ def invoke_skill(
 ) -> SkillResult:
     """Invoke a superpowers skill via ``claude -p`` subprocess.
 
+    v1.0.8 Pillar A1: test-only stub gate. When env var
+    :data:`_E2E_STUB_ENV` (``SBTDD_E2E_STUB_DISPATCH``) is set to
+    ``"1"`` AND ``"pytest"`` is in :data:`sys.modules` AND
+    ``skill`` is in :data:`_E2E_STUBBABLE_SKILLS`
+    (``test-driven-development`` or ``systematic-debugging``), this
+    function short-circuits to a synthetic ``SkillResult(rc=0)``
+    without spawning ``claude -p``. The gate is checked FIRST so it
+    short-circuits ALL downstream dispatch logic.
+
+    Gate precedence (iter-2 carry-forward Mel-I2): the v1.0.8 A1
+    stub gate is positioned BEFORE the v1.0.7 A2 worker-context
+    guard, the v1.0.6 J-3 headless guard, and the v1.0.4
+    membership gate. When both ``SBTDD_E2E_STUB_DISPATCH=1`` AND
+    ``SBTDD_AUTO_PARALLEL_WORKER=1`` are set (test scenario where
+    the parent test sets the stub env var, which propagates to
+    worker via ``os.environ.copy()`` per A2), the stub gate wins
+    -- correct for the test path.
+
+    Defense-in-depth via pytest sys.modules guard (iter-2
+    carry-forward Cas-W11): the gate requires both the env var
+    AND ``"pytest" in sys.modules``. Production processes
+    (auto_cmd orchestrator, worker subprocesses) do NOT import
+    pytest at runtime, so accidental env var leak into production
+    has ZERO effect -- gate cannot fire. Test runners load pytest
+    into sys.modules at process start. This converts the gate
+    from "test-by-convention" to "test-by-runtime-check".
+
+    Test-only -- production callers MUST NOT set the env var
+    (gate is namespaced via ``SBTDD_E2E_*`` prefix; production
+    workers continue to dispatch real LLM via ``claude -p``).
+
     Args:
         skill: Skill name without leading slash (``brainstorming``,
             ``writing-plans``, ...).
