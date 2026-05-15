@@ -1,0 +1,9 @@
+# v1.0.8 T4: gitignore for synthetic parallel-e2e fixture project.
+# Staged as `.gitignore` by `_stage_fixture` (rename-on-copy because
+# `.gitignore` would match the repo's own ignore rules).
+.claude/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

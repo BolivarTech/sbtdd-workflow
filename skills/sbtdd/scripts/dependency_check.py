@@ -12,6 +12,7 @@ never short-circuits. Caller (init, status) decides abort vs report-only.
 
 from __future__ import annotations
 
+import os
 import re as _re
 import shutil
 import subprocess
@@ -237,7 +238,11 @@ def check_tdd_guard_data_dir(project_root: Path) -> DependencyCheck:
     data_dir = project_root / ".claude" / "tdd-guard" / "data"
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
-        probe = data_dir / ".write-probe"
+        # v1.0.8 T4: pid-scoped probe filename so concurrent workers
+        # under `auto --parallel` don't race on a shared `.write-probe`
+        # (one worker's unlink could observe another's overwrite,
+        # surfacing as FileNotFoundError or PermissionError).
+        probe = data_dir / f".write-probe-{os.getpid()}"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
     except OSError as exc:

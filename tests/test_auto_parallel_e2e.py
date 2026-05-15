@@ -138,6 +138,17 @@ def _stage_fixture(dest: Path) -> str:
     # Doble defensa: even if the v1.0.8 A1 stub gate is bypassed in a
     # future test variant, the fixture is "less broken" upstream.
     shutil.copy(_FIXTURE_SETTINGS_JSON, claude_dir / "settings.json")
+    # v1.0.8 T4: pre-create .claude/tdd-guard/data so the auto preflight
+    # dependency_check.check_tdd_guard_data_dir succeeds without a
+    # writable-probe roundtrip race. Required for the stubbed e2e path
+    # to reach the worker chicken-and-egg surface.
+    (claude_dir / "tdd-guard" / "data").mkdir(parents=True, exist_ok=True)
+    # v1.0.8 T4: stage a .gitignore that excludes runtime artifacts
+    # produced by the auto cycle (.claude/, __pycache__/, cache dirs)
+    # so phase 4 checklist's git status clean check passes. Renamed on
+    # copy because shipping a literal .gitignore in the fixture dir
+    # could match this repo's own ignore rules and skip files.
+    shutil.copy(_FIXTURE_DIR / "dot-gitignore", dest / ".gitignore")
     # scratch/ holds the per-task touch targets declared in plan-fixture.md.
     (dest / "scratch").mkdir(exist_ok=True)
     _git_init_with_identity(dest)
@@ -225,10 +236,11 @@ def test_auto_parallel_e2e_chicken_and_egg_closed(tmp_path: Path) -> None:
     seed_sha = _stage_fixture(project)
     _seed_session_state(project, seed_sha)
 
-    # v1.0.8 A3 Red phase: strict assertions intentionally WITHOUT
-    # SBTDD_E2E_STUB_DISPATCH=1 in env. Expected to fail (timeout or
-    # assertion) -- proves the stub gate is required. Green adds env var.
+    # v1.0.8 A3 Green: stub gate requires BOTH env vars per cc30d2a
+    # T1+T3 follow-up fix (AND-gate prevents accidental production leak).
     env = os.environ.copy()
+    env["SBTDD_E2E_STUB_DISPATCH"] = "1"
+    env["SBTDD_E2E_TEST_RUNNER"] = "1"
 
     proc = subprocess.run(
         [sys.executable, str(_RUN_SBTDD), "auto", "--parallel"],

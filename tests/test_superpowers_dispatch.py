@@ -1010,7 +1010,15 @@ class TestE2EStubGate:
         assert "[sbtdd e2e stub]" not in result.stdout
 
     def test_gate_does_not_fire_for_skill_outside_stubbable_set(self, monkeypatch):
-        """v1.0.8 A4-3 (covers A1-3): env=1 + non-stubbable -> real path."""
+        """v1.0.8 A4-3 (covers A1-3): env=1 + non-stubbable -> real path.
+
+        v1.0.8 T4: the stubbable set was expanded with
+        `verification-before-completion`, `requesting-code-review`, and
+        `receiving-code-review` so the e2e dogfood test can drive auto
+        --parallel end-to-end without subprocess hangs. This regression
+        test now uses `using-git-worktrees` (not in stubbable set) to
+        confirm the gate selectively fires.
+        """
         import superpowers_dispatch
         from superpowers_dispatch import SkillResult
 
@@ -1019,7 +1027,7 @@ class TestE2EStubGate:
         captured = self._capture_run_with_timeout(monkeypatch)
 
         result = superpowers_dispatch.invoke_skill(
-            "verification-before-completion",
+            "using-git-worktrees",
             allow_interactive_skill=True,
         )
 

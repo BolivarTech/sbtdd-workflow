@@ -445,6 +445,24 @@ def invoke_magi(
             unknown verdict label (raised by :func:`parse_magi_report`,
             mapped to exit 1).
     """
+    # v1.0.8 T4: e2e stub gate. Mirrors superpowers_dispatch.invoke_skill's
+    # AND-gate on SBTDD_E2E_STUB_DISPATCH=1 AND SBTDD_E2E_TEST_RUNNER=1.
+    # MAGI's claude -p subprocess hangs without a TTY; in e2e tests with
+    # both env vars set we short-circuit to a synthetic STRONG_GO verdict
+    # so phase 3 Loop 2 completes without subprocess hang. Production
+    # callers never set both vars simultaneously.
+    if (
+        os.environ.get("SBTDD_E2E_STUB_DISPATCH") == "1"
+        and os.environ.get("SBTDD_E2E_TEST_RUNNER") == "1"
+    ):
+        return MAGIVerdict(
+            verdict="STRONG_GO",
+            degraded=False,
+            conditions=(),
+            findings=(),
+            raw_output="[sbtdd e2e stub] /magi:magi bypassed",
+            retried_agents=(),
+        )
     # v0.3.0 Feature E: INV-0 cascade then optional --model injection.
     from superpowers_dispatch import _apply_inv0_model_check
 

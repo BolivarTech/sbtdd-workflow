@@ -128,6 +128,20 @@ _E2E_STUBBABLE_SKILLS: frozenset[str] = frozenset(
     {
         "test-driven-development",
         "systematic-debugging",
+        # v1.0.8 T4: requesting-code-review subprocess hangs in headless
+        # e2e context (no TTY). Stubbed under both env vars so the
+        # orchestrator's phase 3 pre-merge Loop 1 short-circuits to a
+        # synthetic clean review result.
+        "requesting-code-review",
+        # v1.0.8 T4: verification-before-completion can be invoked from
+        # orchestrator code paths (e.g., review mini-cycle in phase 3)
+        # that DO NOT carry SBTDD_AUTO_PARALLEL_WORKER=1. Stub so
+        # orchestrator runs without TTY hang in e2e.
+        "verification-before-completion",
+        # v1.0.8 T4: receiving-code-review invoked via /receiving-code-review
+        # in phase 3 mini-cycle; loops on iter-1/2/3 in headless e2e.
+        # Stub to short-circuit the mini-cycle loop.
+        "receiving-code-review",
     }
 )
 
@@ -417,10 +431,16 @@ def invoke_skill(
         and os.environ.get(_E2E_TEST_RUNNER_ENV) == "1"
         and skill in _E2E_STUBBABLE_SKILLS
     ):
+        # v1.0.8 T4: requesting-code-review consumer (pre_merge_cmd
+        # ._is_clean_to_go) requires the literal "clean-to-go" token in
+        # stdout to exit Loop 1. Other stubbed skills accept any stdout.
+        stub_stdout = f"[sbtdd e2e stub] /{skill} bypassed ({_E2E_STUB_ENV}=1)"
+        if skill == "requesting-code-review":
+            stub_stdout += " clean-to-go"
         return SkillResult(
             skill=skill,
             returncode=0,
-            stdout=f"[sbtdd e2e stub] /{skill} bypassed ({_E2E_STUB_ENV}=1)",
+            stdout=stub_stdout,
             stderr="",
         )
     # v1.0.1 Item A2 (sec.2.3) + v1.0.4 Item A.2 (Task 3): safe-by-default
