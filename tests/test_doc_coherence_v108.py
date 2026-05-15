@@ -36,9 +36,7 @@ def test_v108_b2_claude_md_has_known_upstream_limitations_section() -> None:
         "Upstream report",
         "SBTDD_E2E_STUB_DISPATCH",
     ):
-        assert required in text, (
-            f"v1.0.8 B2-1: missing required text {required!r} in CLAUDE.md"
-        )
+        assert required in text, f"v1.0.8 B2-1: missing required text {required!r} in CLAUDE.md"
 
 
 def test_v108_b2_changelog_has_v108_deferred_section() -> None:
@@ -48,9 +46,7 @@ def test_v108_b2_changelog_has_v108_deferred_section() -> None:
     start = text.index("## [1.0.8]")
     end = text.find("## [1.0.7]", start)
     section = text[start:end] if end > 0 else text[start:]
-    assert "Deferred" in section, (
-        "v1.0.8 B2-4: [1.0.8] section missing 'Deferred' subsection"
-    )
+    assert "Deferred" in section, "v1.0.8 B2-4: [1.0.8] section missing 'Deferred' subsection"
     assert "anthropics/claude-code" in section, (
         "v1.0.8 B2-4: Deferred section missing upstream report reference"
     )
