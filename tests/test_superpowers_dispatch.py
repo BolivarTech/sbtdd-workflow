@@ -867,3 +867,62 @@ class TestInvokeSkillWorkerGuard:
         monkeypatch.setenv("SBTDD_AUTO_PARALLEL_WORKER", "1")
         with pytest.raises(PreconditionError, match="Worker subprocess attempted"):
             superpowers_dispatch.invoke_skill(skill, allow_interactive_skill=True)
+
+
+# ---------------------------------------------------------------------------
+# v1.0.8 Pillar A1: SBTDD_E2E_STUB_DISPATCH env var stub gate smoke test.
+# Expanded gate regression suite lives in TestE2EStubGate (added by T3/A4).
+# ---------------------------------------------------------------------------
+
+
+def test_v108_a1_gate_smoke_test_driven_development_with_env_set(monkeypatch):
+    """v1.0.8 A1-1 smoke: gate fires for /test-driven-development with env=1.
+
+    Pins the minimum contract that T3 (A4 regression suite) expands on:
+    when SBTDD_E2E_STUB_DISPATCH=1 AND "pytest" in sys.modules AND
+    skill is stubbable, invoke_skill returns synthetic
+    SkillResult(rc=0) WITHOUT spawning claude -p.
+
+    Note: ``"pytest" in sys.modules`` is True by construction in this
+    test because pytest is the runner; iter-2 carry-forward W11
+    production safeguard does not interfere with test environments.
+    """
+    import sys
+
+    import superpowers_dispatch
+    from superpowers_dispatch import SkillResult
+
+    # Sanity-check the pytest sys.modules runtime guard precondition
+    # holds in this test environment (would fail in production where
+    # pytest is not loaded).
+    assert "pytest" in sys.modules, (
+        "test environment must have pytest loaded for the gate to fire"
+    )
+
+    monkeypatch.setenv("SBTDD_E2E_STUB_DISPATCH", "1")
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError(
+            "v1.0.8 A1 regression: gate should have fired before "
+            "subprocess_utils.run_with_timeout was reached"
+        )
+
+    monkeypatch.setattr(
+        superpowers_dispatch.subprocess_utils,
+        "run_with_timeout",
+        _fail_if_called,
+    )
+
+    result = superpowers_dispatch.invoke_skill(
+        "test-driven-development",
+        args=["--phase=red"],
+        allow_interactive_skill=True,
+    )
+
+    assert isinstance(result, SkillResult)
+    assert result.returncode == 0
+    assert result.skill == "test-driven-development"
+    assert "[sbtdd e2e stub]" in result.stdout
+    assert "test-driven-development" in result.stdout
+    assert "SBTDD_E2E_STUB_DISPATCH=1" in result.stdout
+    assert result.stderr == ""
