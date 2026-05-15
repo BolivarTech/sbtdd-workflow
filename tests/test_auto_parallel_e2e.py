@@ -281,6 +281,7 @@ def test_fixture_files_present() -> None:
         "tests/test_sample.py",
         "Makefile",
         "plan-fixture.md",
+        "dot-claude-settings.json",
     )
     missing = [name for name in expected if not (_FIXTURE_DIR / name).exists()]
     assert not missing, f"missing fixture files: {missing}"
