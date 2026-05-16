@@ -132,6 +132,7 @@ Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase
 
 ### Recent release highlights
 
+- **v1.0.8** — T3 e2e empirical chicken-and-egg closure via test-only stub gate. **`auto --parallel` reliability improvements**: the worker retry path in `auto_cmd._run_verification_with_retries` now correctly routes through `close_phase_cmd._run_verification` worker-mode bypass (sec.0.1 4-tool chain) under `SBTDD_AUTO_PARALLEL_WORKER=1`, preserving `auto_verification_retries` budget while sidestepping the `/verification-before-completion` TTY-dependent hang from the retry path. `_dispatch_tracks_concurrent` skips redundant LOUD-FAIL sidecar diagnostic when worker `failures` list is non-empty (the failures-list `ConcurrentDispatchError` IS the right error surface; happy-path LOUD-FAIL preserved). **New test-only env vars for plugin contributors writing e2e tests**: `SBTDD_E2E_STUB_DISPATCH=1` + `SBTDD_E2E_TEST_RUNNER=1` AND-gate bypasses `claude -p` dispatch for the 5 stubbable skills (`/test-driven-development`, `/systematic-debugging`, `/requesting-code-review`, `/verification-before-completion`, `/receiving-code-review`) returning synthetic `SkillResult(rc=0)`. **Both env vars are TEST-ONLY** — production callers MUST NOT set them; defense-in-depth requires both vars set simultaneously, single-var accidental leak has zero effect. T3 e2e test (`tests/test_auto_parallel_e2e.py::test_auto_parallel_e2e_chicken_and_egg_closed`) is no longer xfail; runs in ~15s with strict happy-path assertions (verify_chain `>= 4` entries + per-tool substring detection). **9-cycle Checkpoint 2 + 3-cycle Loop 2 no-override streaks preserved sin INV-0**. Note: `auto --parallel` POSIX path remains experimental until v1.0.9 CI integration test validates POSIX end-to-end.
 - **v1.0.7** — `--parallel` operational unblock cycle: POSIX PTY allocation in worker subprocess spawn (`subprocess_utils._spawn_worker_with_pty`) + Windows hybrid Option B-W3 fallback (`subprocess.PIPE` + `SBTDD_AUTO_PARALLEL_WORKER=1` env marker → `close_phase_cmd._run_verification` shells out to sec.0.1 4-tool chain via `sys.executable -m`) + worker-context runtime guard in `superpowers_dispatch.invoke_skill` + per-worker INV-16 evidence sidecar with 3-component collision-resistant filename + parent-side LOUD-FAIL contract. Pillar B fixes (drift detector line-anchored regex, spec_review_dispatch file-reference closing WinError 206, atomic_write_json retry-with-backoff for Windows PermissionError flake). Removed v1.0.6 `_preflight_triplet_check` deprecation alias. **OPERATIONAL STATUS**: `auto --parallel` chicken-and-egg subprocess bypass is empirically closed at the close-phase boundary (verified iter-3 Loop 2 with subprocess `stdin=PIPE`, no TTY, `SBTDD_AUTO_PARALLEL_WORKER=1` env — completes in ~1.2s where v1.0.6 hung 28+ minutes). However, **full `auto --parallel` end-to-end empirical validation is INCOMPLETE** — the v1.0.7 dogfood integration test times out at 600s on Windows dev env, root cause is downstream of T1+T2 production code (NOT in close-phase chicken-and-egg surface) and not diagnosed mid-cycle. Operators should prefer **sequential `auto`** (without `--parallel`) on Windows until v1.0.8 closes the downstream empirical gap (v1.0.8 PRIORITY LOCKED). The `--parallel` POSIX path remains experimental until v1.0.8 own-cycle dogfood validates POSIX end-to-end.
 - **v1.0.5** — Production-grade `--parallel` + close-task preflight HARD-BLOCK. Worker subprocess audit-trail, plan checkbox flips, and CLI flag forwarding all closed (Items I-1/I-2/I-3). New `--skip-preflight` emergency override for `close-task` when canonical TDD triplet (`test:` → `feat:|fix:` → `refactor:`) is intentionally bypassed. DRY-consolidated atomic-write helpers into `state_file.py`.
 - **v1.0.4** — `--parallel` track-based dispatch foundation. `auto --parallel` partitions the plan DAG into file-disjoint tracks via union-find on `addBlockedBy` + file-conflict edges; runs each track in a subprocess worker. `--task-ids T1,T3,T4` filter + `--no-recursive` worker guard. Sequential remains the default; opt in with `--parallel`.
@@ -203,8 +204,11 @@ For one-off bumps without editing the plugin config, pass
 #    Shoot-and-forget (sequential):
 /sbtdd auto
 
-#    Shoot-and-forget (parallel, v1.0.5+):
+#    Shoot-and-forget (parallel, v1.0.5+; reliability improvements v1.0.8):
 /sbtdd auto --parallel        # auto-partitions DAG into disjoint tracks; runs them concurrently
+                              # v1.0.8: worker retry path correctly bypasses /verification-before-completion
+                              # TTY-dependent hang via sec.0.1 4-tool chain; mixed-outcome batches surface
+                              # the right error (failures-list raise, not misleading INV-16 sidecar diagnostic)
 
 # 4. Pre-merge gates (Loop 1 code review + Loop 2 MAGI consensus)
 /sbtdd pre-merge
@@ -388,6 +392,40 @@ make coverage    # pytest --cov=skills/sbtdd/scripts --cov-fail-under=88 (v1.0.2
 ```
 
 The coverage target enforces a per-module floor of **88%** since v1.0.2 (`floor(measured_baseline) - 2%` per Q4 brainstorming protocol).
+
+### Test-only env vars for plugin contributors (v1.0.8+)
+
+When writing end-to-end orchestration tests that invoke `auto --parallel` as a subprocess, the real `claude -p` dispatch for the 5 stubbable skills (`/test-driven-development`, `/systematic-debugging`, `/requesting-code-review`, `/verification-before-completion`, `/receiving-code-review`) can be bypassed by setting **BOTH** env vars in the subprocess `env` dict:
+
+```python
+import os, subprocess, sys
+
+env = os.environ.copy()
+env["SBTDD_E2E_STUB_DISPATCH"] = "1"
+env["SBTDD_E2E_TEST_RUNNER"] = "1"
+
+subprocess.run(
+    [sys.executable, "skills/sbtdd/scripts/run_sbtdd.py", "auto", "--parallel"],
+    cwd=fixture_project_root,
+    env=env,
+    timeout=120,  # e2e budget; stub dispatch keeps runtime ~15s
+)
+```
+
+When **both** env vars are set the dispatcher short-circuits each stubbable skill to a synthetic `SkillResult(returncode=0, stdout="[sbtdd e2e stub] /<skill> bypassed", ...)` without spawning `claude -p` — eliminating LLM cost + the headless upstream hang documented in `CLAUDE.md`'s "Known upstream limitations" section.
+
+**⚠️ TEST-ONLY** — production callers MUST NOT set these env vars. Defense-in-depth:
+
+- Single-var accidental leak (e.g., `.env` copy, shared shell profile, devcontainer template) has **zero effect** — both vars must leak simultaneously.
+- `_E2E_STUB_ENV` is namespaced `SBTDD_E2E_*` to signal test-only intent.
+- The frozen `_E2E_STUBBABLE_SKILLS` set (5 skills) is the third AND-gate condition.
+- If both env vars ARE set in production by accident, `_verify_worker_sidecars_present` emits a stderr breadcrumb so the leak surfaces in operator logs.
+
+The `tests/test_auto_parallel_e2e.py::test_auto_parallel_e2e_chicken_and_egg_closed` test demonstrates the pattern; see `tests/fixtures/parallel-e2e/` for the synthetic fixture project layout (4-task plan + `.claude/settings.json` permissions allow list + minimal `pyproject.toml` for sec.0.1 chain runtime).
+
+The `spec_review_dispatch.dispatch_spec_reviewer` + `magi_dispatch.invoke_magi` modules also honor the same AND-gate (returning synthetic approval + synthetic STRONG_GO verdict respectively) so the orchestrator's Phase 3 pre-merge code path can run end-to-end without TTY. **INV-31 (spec-reviewer enforcement) remains in force for production**; the bypass is test-only.
+
+See `sbtdd/spec-behavior.md` sec. "v1.0.8 implementation design pivot" for the design rationale + Caspar W11 option (b) AND-gate justification (Loop 2 approved 2026-05-15).
 
 ---
 

@@ -477,6 +477,119 @@ Q3-A code-side enforcement:
 - **Pillar C deferred to v1.0.6** per iter-2 Checkpoint 2 CRITICAL
   trigger pre-staged response (G2 ladder).
 
+### v1.0.8 notes
+
+v1.0.8 ships the PRIORITY LOCKED T3 e2e empirical chicken-and-egg
+closure via test-only stub gate, plus production semantic
+reliability improvements to `auto --parallel`:
+
+- **Pillar A1 stub gate** in `superpowers_dispatch.invoke_skill`
+  with **dual-env-var AND-gate** (Caspar W11 option b, switched
+  from original option a `"pytest" in sys.modules` post-T4
+  diagnostic). The gate requires THREE conjunctive conditions:
+  `os.environ.get("SBTDD_E2E_STUB_DISPATCH") == "1"` AND
+  `os.environ.get("SBTDD_E2E_TEST_RUNNER") == "1"` AND
+  `skill in _E2E_STUBBABLE_SKILLS`. The 5-skill set
+  (`/test-driven-development`, `/systematic-debugging`,
+  `/requesting-code-review`, `/verification-before-completion`,
+  `/receiving-code-review`) was expanded from the original 2-skill
+  Q1'=a baseline during T4 implementation per empirical e2e
+  necessity (Loop 2 explicitly approved expansion at iter 1+2).
+  Shared `_e2e_stub_active()` helper single-sources the AND-gate
+  predicate across 4 callsites (Loop 2 iter-1 Mel-W3 fix).
+- **Sibling dispatchers**: `spec_review_dispatch.dispatch_spec_reviewer`
+  + `magi_dispatch.invoke_magi` import `_e2e_stub_active()` and
+  short-circuit to synthetic approvals (`SpecReviewResult(approved=True)`
+  + `MAGIVerdict(verdict="STRONG_GO", ...)`) when both env vars
+  set. **INV-31 (spec-reviewer enforcement) remains in force for
+  production** — the bypass is test-only.
+- **Production semantic changes** to `auto_cmd` (T4 scope expansion
+  approved by Loop 2):
+  - `_run_verification_with_retries` routes through
+    `close_phase_cmd._run_verification` worker-mode bypass under
+    `SBTDD_AUTO_PARALLEL_WORKER=1`, preserving `auto_verification_retries`
+    budget while sidestepping the interactive
+    `/verification-before-completion` TTY-dependent hang. Worker
+    retry exhaustion raises `VerificationIrremediableError` enriched
+    with per-worker sidecar dir path (Cas-W3) since
+    `/systematic-debugging` is itself a `claude -p` skill that
+    hangs in worker context.
+  - `_dispatch_tracks_concurrent` skips redundant LOUD-FAIL sidecar
+    diagnostic when worker `failures` list is non-empty (the
+    failures-list `ConcurrentDispatchError` IS the right error
+    surface). Happy-path LOUD-FAIL on missing sidecars preserved.
+    Mixed-outcome stderr breadcrumb when `successful_pids` subset
+    has missing sidecars (Loop 2 iter-2 Cas-W1).
+  - `_verify_worker_sidecars_present` env-var skip is dual-env-var
+    AND-gated for defense-in-depth consistency (Loop 2 iter-1
+    Cas-W1) with stderr breadcrumb when fired (Loop 2 iter-2
+    Cas-W4).
+- **Pillar B1 fixture hardening**: `tests/fixtures/parallel-e2e/`
+  ships `dot-claude-settings.json` (permissions allow list:
+  scratch/, tests/, src/ + pytest/ruff/mypy bash) +
+  `dot-gitignore` (excludes `.claude/`, `__pycache__/`, cache
+  dirs). Doble defensa: even if the stub gate is bypassed in a
+  future test variant, the fixture is "less broken" upstream.
+- **Pillar B2 upstream bug archive**: `CLAUDE.md` "Known upstream
+  limitations" section + memory `project_v108_claude_p_hang_upstream.md`
+  (local-only, not test-asserted) document the empirically-observed
+  `claude -p /test-driven-development` cwd-dependent hang in
+  fixture-style cwd. Staged upstream report content for future
+  submission to `anthropics/claude-code` (v1.0.9 LOCKED #4).
+- **T3 e2e test redesigned**: no longer `@pytest.mark.xfail`,
+  passes in ~15s with strict happy-path assertions (subprocess
+  rc=0 + `current_phase=="done"` + plan fully flipped to `[x]` +
+  `>=1` sidecar with `verify_chain >= 4` entries + `auto-run.json`
+  `auto_finished_at` non-null + `status="success"`).
+  `_AUTO_TIMEOUT_S` raised 60 → 120s for CI variance tolerance
+  (Cas-W5). Substring-anywhere tool detection in `verify_chain`
+  (Cas-W10) extensible to future sec.0.1 additions.
+- **Red-phase commit methodology change**: replaced v1.0.7-precedent
+  `@pytest.mark.xfail` temporary-marker workaround with raw
+  `git commit -m "test: ..."` for Red commits (per CLAUDE.local.md
+  §5 authorized prefix). State stays at `current_phase=red` after
+  Red commit; close-phase advance happens on Green/Refactor.
+  Eliminates brittle xfail-survival risk across phases.
+- **TDD-Guard toggle pattern** documented in plan for Green-phase
+  writes to non-test files (T1/T2/T5/T6 cycles touched
+  `superpowers_dispatch.py`, `auto_cmd.py`, fixture files,
+  CLAUDE.md, CHANGELOG.md — TDD-Guard blocks production-code
+  writes under `current_phase=red`). Operator toggles
+  `tdd-guard off` before Green write window + `tdd-guard on` after
+  close-phase advances state; OR uses state-mutation helper to
+  pre-advance phase. Subagent-driven implementations cannot
+  toggle TDD-Guard themselves (operator-scope only).
+- **Streaks**: **9-cycle Checkpoint 2 no-override streak**
+  preserved (v1.0.0..v1.0.8 consecutive sin INV-0). **3-cycle
+  pre-merge Loop 2 no-override streak** (v1.0.5+v1.0.7+v1.0.8)
+  re-established post-v1.0.4 break. Q3=a strict no-INV-0 stance
+  honored end-to-end.
+- **v1.0.9 LOCKED milestones (7)**: resolve `/sbtdd pre-merge`
+  orchestrator hang (chicken-and-egg unblock for subcommand-based
+  pre-merge); CI integration test exercising real
+  `/test-driven-development` dispatch (e2e safety net); runtime-guard
+  strength re-evaluation; upstream report submission to
+  `anthropics/claude-code`; Loop 2 audit of T4 production
+  semantic changes (worker retry routing + LOUD-FAIL relaxation);
+  spec/spec-base reconciliation post W11 design pivot (full
+  rewrite of escenarios A1-1/A1-2/A1-6); pre-existing failure
+  tracking (`test_hf1_recovery_breadcrumb_wording_aligned` +
+  `test_close_phase_cmd.py:706` mypy error).
+- **Honest scope caveat**: T3 e2e is now an INFRASTRUCTURE test
+  (env propagation + sidecar persistence + sec.0.1 chain bypass +
+  parent-side hooks). It does **NOT** exercise the real
+  `/test-driven-development` dispatch semantics. Production
+  coverage of the dispatch path is preserved via mocked unit
+  tests in `test_auto_cmd.py` + `test_close_phase_cmd.py`. A CI
+  integration test for real dispatch is v1.0.9 LOCKED #2.
+
+For plugin contributors writing e2e tests, see the README "Test-only
+env vars for plugin contributors (v1.0.8+)" section for the
+operational pattern. Spec sec. "v1.0.8 implementation design pivot"
+is the authoritative as-shipped reference for the AND-gate design
+(the original escenarios A1-1/A1-2/A1-6 are marked SUPERSEDED with
+inline admonitions pending v1.0.9 LOCKED #6 full rewrite).
+
 ### Plan archaeology trim methodology (v1.0.6 C.2)
 
 At ship-time of each v1.0.X release, the orchestrator SHOULD apply
