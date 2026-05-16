@@ -98,53 +98,114 @@ claude
 
 The `.claude/` directory is gitignored; each developer creates their own symlink locally. Changes are picked up with `/reload-plugins` without restarting.
 
-> **WARNING -- read before your first `/sbtdd auto` or `/sbtdd close-task`.** Since v0.2.0, the plugin invokes a Superpowers spec-reviewer subagent on every task close (INV-31 hard block). If you do not flip `--skip-spec-review` and your environment is below, your first task close will fail unexpectedly:
->
-> | Your environment | What to do |
-> |------------------|-----------|
-> | Anthropic API quota constrained (low-tier plan, near monthly cap, no-credit) | Pass `--skip-spec-review` on `close-task`; the reviewer adds 1-3 `claude -p` calls per task. |
-> | `superpowers` plugin not installed or not enabled | Pass `--skip-spec-review`; reviewer dispatch needs `superpowers:subagent-driven-development`. |
-> | Running `auto` on >20-task plan with feedback loop disabled | Audit per-run cost via `.claude/spec-reviews/<task-id>-*.json` artifacts; budget `auto_max_spec_review_seconds` (default 3600s) caps cumulative wall-time. |
-> | Standard environment (paid plan + superpowers enabled) | Default behavior is correct -- reviewer catches missing-requirement / over-engineering / misunderstanding defects per task. |
->
-> v0.2.1 ships the auto-feedback loop (`/receiving-code-review` + mini-cycle TDD fix per accepted finding, safety valve 3 iter), so a single reviewer issue mid-`auto` no longer kills the run -- but the per-task cost overhead remains. v1.0.0 will re-evaluate whether the default flips to opt-in based on field data.
+> **WARNING — historical INV-31 hard-block context (v0.2.0+).** In the original v0.2.0 design, `close-task` and `auto` invoked a Superpowers spec-reviewer subagent via `claude -p` on every task close (INV-31 hard block; exit code **12** on findings). **In current operational reality (post-v1.0.8) the spec-reviewer dispatch hangs upstream** — the recommended workflow is to always pass `--skip-spec-review` and verify spec compliance manually as part of the in-session task close (see "Recommended workflow" below). The historical environment matrix (Anthropic quota constrained, superpowers plugin status, etc.) is moot if you can't reach the dispatch in the first place. v1.0.9 LOCKED #1 + LOCKED-pending entries target the upstream resolution; until then the `--skip-spec-review` flag is the documented supported path.
 
 ---
 
 ## Usage
 
-Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase", "run pre-merge review", "sbtdd status").
+Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase", "sbtdd status").
 
-### The nine subcommands
+> **⚠️ HONEST OPERATIONAL STATUS (post-v1.0.8).** Several subcommands dispatch superpowers skills (`/brainstorming`, `/writing-plans`, `/test-driven-development`, `/requesting-code-review`, `/verification-before-completion`, `/receiving-code-review`) via `claude -p` subprocess. **There is an upstream `claude -p` hang in headless subprocess contexts** (no TTY) that has not been resolved across v1.0.0..v1.0.8 cycles. As a result, **most operational subcommands hang at 600s+ when invoked end-to-end** — the supported workflow uses **manual in-session execution** of the underlying skills via Claude Code's Skill tool, plus the documented bypass flags (`--resume-from-magi`, `--skip-spec-review`, `--skip-preflight`). The plugin itself is functionally complete; the limitation lives in `claude -p` upstream (see [`CLAUDE.md`](CLAUDE.md) "Known upstream limitations"). v1.0.9 LOCKED #1 targets resolution for `/sbtdd pre-merge`; v1.0.9 LOCKED #8 (to be added) targets `/sbtdd spec`.
 
-| Subcommand | Purpose | Typical invocation |
-|------------|---------|--------------------|
-| `init` | Bootstrap an SBTDD project (rules, hooks, skeleton spec, .gitignore entries) | `/sbtdd init --stack python --author "Your Name"` |
-| `spec` | Run the spec pipeline: `/brainstorming` -> `/writing-plans` -> MAGI Checkpoint 2 | `/sbtdd spec` |
-| `close-phase` | Close one TDD phase atomically (Red/Green/Refactor): verify + commit + advance state | `/sbtdd close-phase` (or `close-phase --variant fix` for Green-as-fix) |
-| `close-task` | Mark `[x]` in the plan + `chore:` commit + advance to the next `[ ]`. v1.0.5+ HARD-BLOCKS if commit chain since last task close lacks the canonical `test:`/`feat:|fix:`/`refactor:` triplet (override with `--skip-preflight`) | `/sbtdd close-task` (auto-invoked by `close-phase refactor`) |
-| `status` | Read-only structured report of state + git + plan + drift | `/sbtdd status` |
-| `pre-merge` | Run Loop 1 (code review) then Loop 2 (MAGI) sequentially | `/sbtdd pre-merge` |
-| `finalize` | Run sec.M.7 checklist + `/finishing-a-development-branch` | `/sbtdd finalize` |
-| `auto` | Shoot-and-forget full cycle (task loop + pre-merge + checklist), stops before finalize. Parallel dispatch via `--parallel` (v1.0.4+) | `/sbtdd auto`, `/sbtdd auto --parallel`, or `/sbtdd auto --dry-run` |
-| `resume` | Diagnose interrupted runs and delegate recovery | `/sbtdd resume` or `/sbtdd resume --discard-uncommitted` |
-| `review-spec-compliance` | Per-task spec-reviewer dispatch for manual flows (Feature B, new in v0.2). Exit 0 on approve, exit 12 on issues. | `/sbtdd review-spec-compliance <task-id>` |
+### The ten subcommands — operational status
+
+Legend: ✅ works end-to-end | ⚠️ partial (bypass flag required, or only orchestrator-side parts work) | ❌ hangs end-to-end (use manual workflow below)
+
+| Subcommand | Purpose | Status | Notes |
+|------------|---------|--------|-------|
+| `init` | Bootstrap an SBTDD project (rules, hooks, skeleton spec, `.gitignore` entries) | ✅ | Pure file scaffolding; no `claude -p` dispatch. |
+| `status` | Read-only structured report of state + git + plan + drift | ✅ | Pure read-only. |
+| `spec` | `/brainstorming` → `/writing-plans` → MAGI Checkpoint 2 | ❌ | Hangs on `/brainstorming` + `/writing-plans` dispatch. **Use `--resume-from-magi` after producing spec + plan manually in-session**, OR full manual workflow (see below). |
+| `spec --resume-from-magi` | Skip brainstorming + writing-plans dispatch; run only MAGI Checkpoint 2 | ⚠️ | Works IF MAGI dispatch itself doesn't hang (depends on `/magi:magi` plugin status). Falls back to manual `python skills/magi/scripts/run_magi.py`. |
+| `close-phase` | Close one TDD phase atomically: verify + commit + advance state | ❌ | Hangs on `/verification-before-completion` dispatch. **Use manual `git commit -m "<prefix>: ..."` + manual `state_file` edit** (see "Manual workflow" below). |
+| `close-task` | Mark `[x]` in plan + `chore:` commit + advance + INV-31 spec-reviewer | ❌ | Hangs on `spec_review_dispatch` (INV-31). Use `--skip-spec-review` + manual git commit + manual plan edit. |
+| `pre-merge` | Loop 1 (code review) + Loop 2 (MAGI) sequential gate | ❌ | Hangs on both Loop 1 (`/requesting-code-review`) and Loop 2 (`/magi:magi`) dispatches. **Use `python skills/magi/scripts/run_magi.py` manually** with cumulative diff as input (v1.0.0..v1.0.8 precedent). |
+| `finalize` | sec.7 checklist + `/finishing-a-development-branch` | ⚠️ | Checklist runs OK; `/finishing-a-development-branch` dispatch likely hangs. Operator typically does final merge + tag + push by hand. |
+| `auto` | Shoot-and-forget sequential full cycle | ❌ | Combines all hangs above. Use manual workflow per-task. |
+| `auto --parallel` | Track-based parallel dispatch (v1.0.4+; v1.0.5 audit-trail; v1.0.7 PTY; v1.0.8 worker retry routing) | ❌ | Workers themselves hang on per-task `/test-driven-development` dispatch (v1.0.8 only closes the close-phase `/verification-before-completion` chicken-and-egg, not the task-loop `claude -p` dispatch). v1.0.8 production semantic improvements DO help when manual-workflow chains hit retry paths. |
+| `resume` | Diagnostic recovery for interrupted runs | ⚠️ | Diagnostic itself works; the recovery action delegates to `auto` / `pre-merge` / `finalize` which inherit the upstream hangs. Useful as a "what state am I in?" tool. |
+| `review-spec-compliance` | Per-task spec-reviewer dispatch (manual flows) | ❌ | Hangs on `spec_review_dispatch` for same upstream reason. |
+
+### Recommended workflow (manual in-session, post-v1.0.8)
+
+This is the actual end-to-end workflow operators have used across v1.0.0..v1.0.8 ship cycles. **All TDD work runs in your interactive Claude Code session via the Skill tool + Bash; the `/sbtdd` subcommands are used only where they don't dispatch `claude -p`.**
+
+```bash
+# 1. Bootstrap (once per project) — WORKS via /sbtdd
+/sbtdd init --stack python --author "Your Name"
+
+# 2. Spec phase — MANUAL in-session via Skill tool
+#    a. Hand-write sbtdd/spec-behavior-base.md (no uppercase TODO/TBD per INV-27)
+#    b. Invoke /brainstorming via Claude Code Skill tool (NOT /sbtdd spec):
+#       it consumes @sbtdd/spec-behavior-base.md and produces sbtdd/spec-behavior.md
+#    c. Invoke /writing-plans via Skill tool: produces planning/claude-plan-tdd-org.md
+#    d. Invoke MAGI Checkpoint 2 via direct subprocess (NOT /sbtdd spec):
+#         python skills/magi/scripts/run_magi.py design \
+#           <combined-spec-plus-plan-prompt.md> --output-dir .magi-checkpoint2
+#    e. Apply MAGI findings (carry-forward block per CLAUDE.local.md §6 v1.0.0+ format)
+#    f. Iterate to cap=3 HARD per G1 binding; emit planning/claude-plan-tdd.md
+#    g. (Optional) /sbtdd spec --resume-from-magi to fast-forward state file if MAGI dispatch works
+
+# 3. Task implementation — MANUAL per task (TDD Red/Green/Refactor)
+#    For each task in planning/claude-plan-tdd.md:
+#      Red:   write failing test → git commit -m "test: <message>"
+#      Green: write impl → make verify clean → git commit -m "feat: <message>" (or "fix:")
+#      Refactor: cleanup → make verify clean → git commit -m "refactor: <message>"
+#      Close-task: mark [x] in plan → git commit -m "chore: mark task N complete"
+#                  + manually update .claude/session-state.json
+#    (Subagent delegation via Task tool is the supported pattern per
+#     memory `feedback_subagent_delegation`)
+
+# 4. Pre-merge gate — MANUAL run_magi.py
+#    git diff <merge-base>..HEAD -- skills/ tests/ CHANGELOG.md > /tmp/cumulative-diff.md
+#    python skills/magi/scripts/run_magi.py code-review \
+#      <review-prompt-with-diff.md> --output-dir .magi-premerge
+#    Apply mini-cycle fixes per Loop 2 carry-forward; iterate to GO_WITH_CAVEATS full no-degraded
+
+# 5. Ship — MANUAL git workflow
+#    Bump .claude-plugin/plugin.json + marketplace.json
+#    git commit + git merge --no-ff feature/vX.Y.Z-bundle main
+#    git tag vX.Y.Z + git push origin main + git push origin vX.Y.Z
+```
+
+### Common flags (where subcommands DO work, or as bypass)
+
+- `--skip-spec-review` (`close-task`, `auto`): bypass the v0.2 INV-31 spec-reviewer dispatch. **Required for any manual workflow** since spec_review_dispatch hangs upstream.
+- `--skip-preflight` (`close-task`, v1.0.5+): operator emergency override of the close-task TDD-triplet HARD-BLOCK gate; emits a stderr audit breadcrumb (`since SHA <sha>`).
+- `--resume-from-magi` (`spec`, v1.0.1+): skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against operator-produced spec + plan artifacts. **Required for `/sbtdd spec` since brainstorming + writing-plans dispatches hang upstream.**
+- `--override-checkpoint --reason "<text>"` (`spec`, `pre-merge`, `finalize`, v0.2+): INV-0 escape valve when a MAGI safety-valve (cap=3 / cap=5) exhausts. Use sparingly; explicit per-instance authorization required.
+- `--non-interactive` (v0.2+): force the headless policy on TTY (applies `.claude/magi-auto-policy.json`).
+
+### Why the manual workflow is the supported path today
+
+The plugin's architecture is complete: every subcommand has full Python implementation + tests. The limitation is **upstream in `claude -p`**:
+
+- `claude -p /<skill>` invoked as a subprocess in headless contexts (no TTY, or fixture-style cwd lacking `.claude/settings.json`) hangs indefinitely. This affects every subprocess-dispatch path that goes through `superpowers_dispatch.invoke_skill` for any skill in `_SUBPROCESS_INCOMPATIBLE_SKILLS` or for `/test-driven-development`.
+- The v1.0.8 test-only stub gate (`SBTDD_E2E_STUB_DISPATCH` + `SBTDD_E2E_TEST_RUNNER` AND-gate) bypasses this in **test fixtures only**. It is **NOT** a production solution — production callers MUST NOT set those env vars.
+- v1.0.9 LOCKED #1 targets `/sbtdd pre-merge` orchestrator-side resolution. Until then, manual `run_magi.py` fallback is the documented supported path (precedent across v1.0.0..v1.0.8 ships).
+
+See [`CLAUDE.md`](CLAUDE.md) "Known upstream limitations" for the empirical diagnostic + repro evidence + workaround context.
 
 ### Recent release highlights
 
-User-facing summary of the last several releases lives in [`RELEASES.md`](RELEASES.md). Latest: **v1.0.8** ships T3 e2e empirical chicken-and-egg closure via test-only stub gate + `auto --parallel` reliability improvements (worker retry path correctly bypasses `/verification-before-completion` TTY hang; mixed-outcome batches surface the right error). New test-only env vars `SBTDD_E2E_STUB_DISPATCH` + `SBTDD_E2E_TEST_RUNNER` enable plugin contributors to write e2e tests without paying `claude -p` LLM cost — see the [Test-only env vars for plugin contributors (v1.0.8+)](#test-only-env-vars-for-plugin-contributors-v108) section below.
+User-facing summary of the last several releases lives in [`RELEASES.md`](RELEASES.md). **v1.0.8 (latest)** ships test-only stub gate enabling plugin contributors to write e2e tests without `claude -p` LLM cost + `auto --parallel` reliability improvements at the close-phase worker boundary. **It does NOT resolve the `/sbtdd spec`, `/sbtdd close-phase`, `/sbtdd pre-merge` or `/sbtdd auto` operational hangs** — the upstream `claude -p` headless subprocess bug remains, and the manual in-session workflow (see above) stays the supported path.
 
-For full per-commit detail see [`CHANGELOG.md`](CHANGELOG.md). For per-cycle methodology / process notes see the `### v<X.Y.Z> notes` sections in [`skills/sbtdd/SKILL.md`](skills/sbtdd/SKILL.md).
+For full per-commit detail see [`CHANGELOG.md`](CHANGELOG.md). For per-cycle methodology / process notes see the `### v<X.Y.Z> notes` sections in [`skills/sbtdd/SKILL.md`](skills/sbtdd/SKILL.md). For the empirical diagnostic of the upstream bug see [`CLAUDE.md`](CLAUDE.md) "Known upstream limitations" section (CLAUDE.md is gitignored per project policy — see `templates/CLAUDE.md.template` if you want the same content in your destination project).
 
-> **BREAKING — INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts and the operator must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance.
+> **BREAKING — INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts. **In current operational reality the spec-reviewer dispatch itself hangs upstream** — operators MUST pass `--skip-spec-review` and verify compliance manually.
 
 ### Cost optimization (v0.3.0+)
 
 v0.3.0 ships per-skill model selection so long `/sbtdd auto` runs no
 longer inherit the user's session model (typically Opus) for every
-implementer + spec-reviewer + MAGI-dispatch subprocess. Configure four
-optional fields in `.claude/plugin.local.md` (default `null` = inherit
-session, preserves v0.2.x behavior exactly):
+implementer + spec-reviewer + MAGI-dispatch subprocess. **Caveat
+(post-v1.0.8): `/sbtdd auto` hangs upstream so this cost optimization
+matters only when the upstream `claude -p` resolution lands
+(v1.0.9 LOCKED). The fields below also flow into manual `claude -p`
+invocations from your in-session workflow if you choose to use them.**
+Configure four optional fields in `.claude/plugin.local.md` (default
+`null` = inherit session, preserves v0.2.x behavior exactly):
 
 | Skill field | Recommended baseline | Rationale |
 |-------------|----------------------|-----------|
@@ -180,51 +241,13 @@ For one-off bumps without editing the plugin config, pass
 > See `~/.claude/CLAUDE.md` rules section if you want to opt out
 > entirely (remove the pin phrase) or in (add the pin phrase).
 
-### Typical end-to-end flow
+### `/sbtdd status` quick reference
 
-```bash
-# 1. Bootstrap (once per project)
-/sbtdd init --stack python --author "Your Name"
+Read-only structured report of state + git + plan + drift. Use anytime to see where you are without touching anything. Works reliably — no `claude -p` dispatch.
 
-# 2. Spec + plan (drafts sbtdd/spec-behavior.md + planning/claude-plan-tdd.md
-#    via /brainstorming + /writing-plans + MAGI Checkpoint 2)
-/sbtdd spec
+### `/sbtdd resume` quick reference
 
-# 3. Execute the plan — pick one mode:
-#    Manual (one TDD phase at a time):
-/sbtdd close-phase            # after Red, Green, Refactor (auto-closes task on Refactor)
-
-#    Shoot-and-forget (sequential):
-/sbtdd auto
-
-#    Shoot-and-forget (parallel, v1.0.5+; reliability improvements v1.0.8):
-/sbtdd auto --parallel        # auto-partitions DAG into disjoint tracks; runs them concurrently
-                              # v1.0.8: worker retry path correctly bypasses /verification-before-completion
-                              # TTY-dependent hang via sec.0.1 4-tool chain; mixed-outcome batches surface
-                              # the right error (failures-list raise, not misleading INV-16 sidecar diagnostic)
-
-# 4. Pre-merge gates (Loop 1 code review + Loop 2 MAGI consensus)
-/sbtdd pre-merge
-
-# 5. Finalize + ship
-/sbtdd finalize               # runs sec.7 checklist + /finishing-a-development-branch
-```
-
-#### Common flags
-
-- `--skip-spec-review` (`close-task`, `auto`): bypass the v0.2 INV-31 spec-reviewer dispatch (use for infrastructure cycles where compliance is verified by hand).
-- `--skip-preflight` (`close-task`, v1.0.5+): operator emergency override of the close-task TDD-triplet HARD-BLOCK gate; emits an audit breadcrumb to stderr.
-- `--resume-from-magi` (`spec`, v1.0.1+): skip `/brainstorming` + `/writing-plans` dispatch and go directly to MAGI Checkpoint 2 against operator-produced spec + plan artifacts. Use when you produced them by hand in an interactive Claude Code session.
-- `--override-checkpoint --reason "<text>"` (`spec`, `pre-merge`, `finalize`, v0.2+): INV-0 escape valve when a MAGI safety-valve (cap=3 / cap=5) exhausts. Use sparingly; explicit per-instance authorization required.
-- `--non-interactive` (v0.2+): force the headless policy on TTY (applies `.claude/magi-auto-policy.json`).
-
-#### `/sbtdd status`
-
-Read-only structured report of state + git + plan + drift. Use anytime to see where you are without touching anything.
-
-#### `/sbtdd resume`
-
-Diagnostic recovery for interrupted runs (token exhaustion, Ctrl+C, crash, reboot). Reads state + git + runtime artifacts and delegates to `auto` / `pre-merge` / `finalize`. Pass `--discard-uncommitted` to drop in-flight work.
+Diagnostic recovery for interrupted runs (token exhaustion, Ctrl+C, crash, reboot). Reads state + git + runtime artifacts and reports current phase. Delegates to `auto` / `pre-merge` / `finalize` which inherit upstream hangs — useful primarily as a "what state am I in?" tool. Pass `--discard-uncommitted` to drop in-flight work.
 
 ### Direct CLI (bypassing the skill)
 
@@ -465,7 +488,7 @@ uv sync
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contributor guide: branching model, commit discipline, PR checklist, and the non-negotiable invariants.
 
-In brief: SBTDD applies to its own development (dogfooding). Every contribution goes through `/sbtdd spec` -> plan approval -> task-by-task execution -> `/sbtdd pre-merge` -> `/sbtdd finalize`. No shortcuts.
+In brief: SBTDD applies to its own development (dogfooding). Every contribution goes through the full SBTDD cycle: spec → plan approval → task-by-task TDD execution → pre-merge MAGI gate → ship. **In current operational reality (post-v1.0.8) the plugin's own development uses the manual in-session workflow** documented in [Usage > Recommended workflow](#recommended-workflow-manual-in-session-post-v108) (the `/sbtdd <subcommand>` dispatchers hang upstream on `claude -p`). The architecture is functionally complete; the limitation lives upstream. The manual workflow has been used to ship v1.0.0..v1.0.8 successfully (no shortcuts on methodology — Checkpoint 2 + Loop 2 MAGI gates run via `python skills/magi/scripts/run_magi.py` directly).
 
 ---
 
